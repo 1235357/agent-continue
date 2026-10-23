@@ -37,9 +37,9 @@ xvfb-run -a env TEST_HEADED=1 npm test
 | `file-import-tests.mjs` | 16 | 真实 Chromium + 合成 TXT / HTML / DOCX / PDF；本地 Worker 与 CSP |
 | `ui-v2-tests.mjs` | 13 | 真实 Chromium + 扩展 API mock；界面隐私、文件导入、配置、布局与清空竞态 |
 | `mv3-integration-tests.mjs` | 9 | 实际 MV3 扩展 + 完整 Chromium + 独立临时 profile + 合成站点 |
-| `prosemirror-keyboard-tests.mjs` | 4；有窗口为 5 | 官方编辑器 + 实际 MV3；合成按键、按钮对照、自然隐藏标签 |
+| `prosemirror-keyboard-tests.mjs` | 5 | 官方编辑器 + 实际 MV3；合成按键、按钮对照、自然隐藏标签 |
 
-合计 **150** 个无头行为场景；有窗口发布验证增加隐藏 ProseMirror 场景，共 **151** 个。`npm run check` 是额外语法检查，不计入场景总数。旧原型界面测试已由 `ui-v2-tests.mjs` 替代，现行隐私、状态与布局回归由该套件覆盖。
+无头与有窗口模式均执行 **151** 个行为场景；隐藏标签场景不跳过。`npm run check` 是额外语法检查，不计入场景总数。旧原型界面测试已由 `ui-v2-tests.mjs` 替代，现行隐私、状态与布局回归由该套件覆盖。
 
 ## 单独执行
 
@@ -59,7 +59,7 @@ node tests/prosemirror-keyboard-tests.mjs
 
 ### 真实 MV3 集成
 
-MV3 测试使用 `chromium.launchPersistentContext()` 与 `channel: 'chromium'`，通过 `--load-extension` 加载当前源码。它创建自己的临时 profile，结束时删除；不会接管用户已登录浏览器。
+MV3 测试启动独立的本地完整 Chromium，通过 `--load-extension` 加载当前源码，并用 `chromium.connectOverCDP()` 的公开 `noDefaults: true` 选项连接。该选项从一开始就避免 Playwright 的焦点仿真和可见性覆盖；在另一个 CDP session 中发送关闭命令不能替代它。测试创建自己的临时 profile，结束时删除；不会接管用户已登录浏览器。[官方选项说明](https://playwright.dev/docs/api/class-browsertype#browser-type-connect-over-cdp)
 
 测试使用实际 `chrome.runtime`、`chrome.storage`、`chrome.tabs`、`chrome.scripting` 和 `chrome.alarms`，因此能发现只有真正加载扩展才出现的问题，例如完整控制台消息身份校验、隔离世界回传、扩展 CSP 与浏览器重启持久化。
 

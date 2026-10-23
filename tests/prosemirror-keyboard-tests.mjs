@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -28,6 +29,8 @@ for (const name of moduleNames) {
 const editorCss = await fs.readFile(path.join(moduleRoot, 'prosemirror-view/style/prosemirror.css'), 'utf8');
 const prompt = 'PM_SYNTHETIC_FIRST_PARAGRAPH\n\nPM_SYNTHETIC_SECOND_PARAGRAPH';
 let context;
+let browser;
+let browserProcess;
 let worker;
 let control;
 let passed = 0;
@@ -74,12 +77,50 @@ function fixture({ noSend = false, rejectSynthetic = false } = {}) {
 
 async function newPage(url) {
   const page = await context.newPage();
-  const cdp = await context.newCDPSession(page);
-  // Playwright enables this by default and otherwise makes background tests
-  // report a focused, visible page regardless of normal browser tab state.
-  await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: false });
   await page.goto(url);
   return page;
+}
+async function launchBrowser() {
+  // Prevent Playwright's own CDP session from enabling focus emulation. A false
+  // override sent by another session cannot release the original capture handle.
+  browserProcess = spawn(process.env.FULL_CHROMIUM_PATH || playwright.chromium.executablePath(), [
+    '--no-sandbox', '--no-first-run', '--no-default-browser-check',
+    '--disable-background-networking', '--disable-component-extensions-with-background-pages',
+    '--disable-default-apps', '--disable-dev-shm-usage', '--window-size=1200,1000',
+    '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0',
+    `--user-data-dir=${profile}`, `--disable-extensions-except=${root}`, `--load-extension=${root}`,
+    ...headed ? [] : ['--headless=new'], 'about:blank',
+  ], { stdio: ['ignore', 'ignore', 'pipe'] });
+  const endpoint = await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Isolated Chrome startup timed out')), 15000);
+    let stderr = '';
+    browserProcess.stderr.on('data', chunk => {
+      stderr = (stderr + chunk).slice(-8000);
+      const match = stderr.match(/DevTools listening on (ws:\/\/[^\s]+)/);
+      if (match) { clearTimeout(timeout); resolve(match[1]); }
+    });
+    browserProcess.once('error', error => { clearTimeout(timeout); reject(error); });
+    browserProcess.once('exit', code => { clearTimeout(timeout); reject(new Error(`Isolated Chrome exited (${code}) before connecting`)); });
+  });
+  browser = await playwright.chromium.connectOverCDP(endpoint, { noDefaults: true });
+  return browser.contexts()[0];
+}
+async function closeBrowser() {
+  const child = browserProcess;
+  if (!child) return;
+  const exited = new Promise(resolve => {
+    if (child.exitCode !== null || child.signalCode !== null) resolve();
+    else child.once('exit', resolve);
+  });
+  if (browser?.isConnected()) {
+    const session = await browser.newBrowserCDPSession();
+    await session.send('Browser.close').catch(() => {});
+    await browser.close().catch(() => {});
+  }
+  const timeout = setTimeout(() => child.kill('SIGKILL'), 5000);
+  if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+  await exited; clearTimeout(timeout);
+  browser = null; browserProcess = null;
 }
 const call = message => control.evaluate(message => chrome.runtime.sendMessage(message), message);
 async function start(page, config = {}) {
@@ -102,13 +143,7 @@ async function scenario(name, callback) {
 const inspect = page => page.evaluate(() => ({ ...fixture, editorEmpty: !pm.dom.innerText.trim(), visibility: document.visibilityState }));
 
 try {
-  context = await playwright.chromium.launchPersistentContext(profile, {
-    channel: 'chromium', executablePath: process.env.FULL_CHROMIUM_PATH || undefined,
-    headless: !headed,
-    args: ['--no-sandbox', `--disable-extensions-except=${root}`, `--load-extension=${root}`],
-    ignoreDefaultArgs: ['--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'],
-    viewport: { width: 1200, height: 900 },
-  });
+  context = await launchBrowser();
   await context.route('https://**/*', route => {
     const url = new URL(route.request().url());
     if (url.hostname === 'chatgpt.com' && modules.has(url.pathname)) return route.fulfill({ status: 200, contentType: 'text/javascript', body: modules.get(url.pathname) });
@@ -164,8 +199,7 @@ try {
     assert.equal(observed.editorEmpty, false);
     assert.equal(await page.locator('button[aria-label="Send"]').isEnabled(), true);
   });
-  if (headed) {
-    await scenario('An actually hidden ProseMirror tab receives Ctrl+Enter while foreground text, selection and active tab stay unchanged', async page => {
+  await scenario('An actually hidden ProseMirror tab receives Ctrl+Enter while foreground text, selection and active tab stay unchanged', async page => {
       await start(page);
       const foreground = await newPage('https://pm-foreground.invalid/work');
       try {
@@ -174,7 +208,12 @@ try {
         await foreground.locator('#work').evaluate(input => input.setSelectionRange(3, 8));
         const getForeground = () => foreground.evaluate(() => ({ text: document.querySelector('#work').value, start: document.querySelector('#work').selectionStart, end: document.querySelector('#work').selectionEnd, focused: document.activeElement.id, documentFocused: document.hasFocus() }));
         const before = await getForeground();
-        const activeBefore = await worker.evaluate(async () => (await chrome.tabs.query({ active: true, currentWindow: true }))[0].id);
+        const foregroundTab = await worker.evaluate(async () => (await chrome.tabs.query({ active: true, currentWindow: true }))[0]);
+        const activeBefore = foregroundTab.id;
+        const targetTab = await worker.evaluate(async url => (await chrome.tabs.query({})).find(tab => tab.url === url), page.url());
+        assert.equal(targetTab.windowId, foregroundTab.windowId, 'Target and foreground must be tabs of the same browser window');
+        assert.equal(targetTab.active, false);
+        await page.waitForFunction(() => document.visibilityState === 'hidden', null, { polling: 50, timeout: 3000 });
         assert.equal(await page.evaluate(() => document.visibilityState), 'hidden', 'This assertion must not be emulated by redefining visibility properties');
         assert.equal(await page.evaluate(() => document.hasFocus()), false);
         const sent = await call({ type: 'SEND_NOW' });
@@ -185,12 +224,9 @@ try {
         assert.deepEqual(await getForeground(), before);
         assert.equal(await worker.evaluate(async () => (await chrome.tabs.query({ active: true, currentWindow: true }))[0].id), activeBefore);
       } finally { await foreground.close(); }
-    });
-  } else {
-    console.log('SKIP actual hidden-tab scenario: run TEST_HEADED=1 under a real display or Xvfb; headless visibility is not equivalent.');
-  }
+  });
   console.log(`RESULT ${passed}/${passed} official ProseMirror MV3 scenarios passed`);
 } finally {
-  if (context) await context.close();
+  await closeBrowser();
   await fs.rm(profile, { recursive: true, force: true });
 }

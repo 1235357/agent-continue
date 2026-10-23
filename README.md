@@ -170,7 +170,7 @@ python3 scripts/package.py
 
 可选 `python3 scripts/package.py --source` 生成含开发文件的源码包。产物位于 `dist/`，安装 ZIP 根目录为 `AgentContinue/`。打包使用明确的文件范围，不包含用户上传文件、私用预置文件、测试浏览器、`node_modules` 或登录状态。
 
-当前本地验证包括 **150 个无头场景**，有窗口发布验证共 **151 个场景**：后台状态、普通 / dot 页面适配、本地文件解析、界面隐私与真实 MV3 集成。真实 MV3 测试使用独立 Chromium 配置文件、合成网页及官方 ProseMirror，检查隔离世界键盘提交、焦点保护、暂停、PDF Worker CSP 与浏览器重启恢复。发布 CI 另外要求页面实际处于隐藏状态；运行结果以 Actions 为准。**这不等同于真实 Windows / Edge 或私人会话发送实测。** 准确范围、环境和复现命令见 [VALIDATION.md](VALIDATION.md) 与 [tests/README.md](tests/README.md)。
+当前测试集包含 **151 个场景**：后台状态、普通 / dot 页面适配、本地文件解析、界面隐私与真实 MV3 集成。真实 MV3 测试使用独立 Chromium 配置文件、合成网页及官方 ProseMirror，检查隔离世界键盘提交、自然隐藏状态、焦点保护、暂停、PDF Worker CSP 与浏览器重启恢复。本地完成最初的 150 场景全套以及更新后的 14 项集成定向验证；最终发布 CI 在有窗口环境运行全部 151 项，结果以 Actions 为准。**这不等同于真实 Windows / Edge 或私人会话发送实测。** 准确范围、环境和复现命令见 [VALIDATION.md](VALIDATION.md) 与 [tests/README.md](tests/README.md)。
 
 仓库配置了 push / PR / 每周 CI、Dependabot，以及版本标签触发的测试、打包和 Release ZIP / SHA-256 发布流程。自动检查能发现已覆盖的回归，不能自动保证网站改版后仍然兼容，也不代表有人在无人值守地持续修复。实际远程运行结果以 [GitHub Actions](https://github.com/1235357/agent-continue/actions) 为准。维护步骤见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 

@@ -18,7 +18,7 @@
 
 ## 已执行的本地回归
 
-本地完整无头浏览器运行包含语法检查与九个测试套件，共 **150 个场景**。有窗口发布运行再执行一个真实隐藏标签的 ProseMirror 场景，共 **151 个场景**；这一额外场景在无头模式中明确打印 SKIP，不计为通过。
+最初的本地完整无头运行通过 **150 个场景**。修正焦点仿真后，重新执行受影响的真实 MV3 **9/9** 与官方 ProseMirror **5/5**；新增的自然隐藏标签场景也在本地无头完整 Chrome 中通过，不再跳过。最终测试集在无头与有窗口模式下均包含 **151 个场景**；完整有窗口结果以对应提交的 GitHub Actions 为准。
 
 | 套件 | 本地场景 | 验证重点 |
 | --- | ---: | --- |
@@ -30,7 +30,7 @@
 | `file-import-tests.mjs` | 16 | 合成 TXT / Markdown / HTML / DOCX / PDF、编码、原文保存、异常保护、离线 Worker 与无内容日志 |
 | `ui-v2-tests.mjs` | 13 | 发送方式保存与展示、隐藏正文、导入 / 导出、任务快照、队列、模板、权限、取消与响应式布局 |
 | `mv3-integration-tests.mjs` | 9 | 实际扩展加载、隔离世界 Ctrl+Enter、零 Send 点击、前台保护、停止与组件替换、alarm、PDF Worker、暂停及浏览器重启 |
-| `prosemirror-keyboard-tests.mjs` | 4；有窗口为 5 | 官方编辑器与键盘映射、默认 / 按钮对照、无按钮、拒绝合成按键时不误报成功；额外验证自然隐藏状态 |
+| `prosemirror-keyboard-tests.mjs` | 5 | 官方编辑器与键盘映射、默认 / 按钮对照、无按钮、拒绝合成按键时不误报成功，以及自然隐藏状态 |
 
 语法检查覆盖 `background.js`、`adapter.js`、`popup.js`、`config.js` 和 `file-import.js`，不计入上述场景数。最终命令退出状态与远程执行结果应一同查看，不能只看测试数量。
 
@@ -44,17 +44,19 @@
 
 ## 后台测试的修正
 
-旧版测试确实核对了 Chrome 的活动 tab ID、前台文本和选区，但没有验证目标文档自然处于隐藏状态。进一步检查发现 Playwright 默认开启焦点仿真；当前无头 Chromium 即使关闭仿真，仍可能报告页面 `visible`。所以此前“后台隐藏页面已测”的表述过强。
+旧版测试确实核对了 Chrome 的活动 tab ID、前台文本和选区，但没有验证目标文档自然处于隐藏状态。进一步检查发现 Playwright 默认开启焦点仿真，页面会继续报告 `visible`。所以此前“后台隐藏页面已测”的表述过强。
 
-0.2.2 的 MV3 和 ProseMirror 套件主动关闭 `Emulation.setFocusEmulationEnabled`，并移除默认禁用后台计时器节流的参数。在 `TEST_HEADED=1` 模式中，测试使用真正有窗口的浏览器，明确检查 `document.visibilityState === 'hidden'`、目标没有文档焦点、前台文档和活动标签不变。测试不重定义 visibility 属性来伪造通过。
+首次有窗口 CI 进一步发现：在另外一个 CDP session 中调用 `Emulation.setFocusEmulationEnabled(false)`，不能释放 Playwright 原 session 持有的可见性覆盖。因此该运行在发送前的 `hidden` 断言处失败，没有被计为后台发送通过。
 
-本地隔离环境缺少 Xvfb 硬编码调用的 `/usr/bin/xkbcomp`，临时提取组件未能启动显示服务器。因此本地完整结果是 150 个无头场景；真实隐藏状态必须由使用 Xvfb 的 GitHub CI 给出结果。两个工作流均已启用该发布验证，失败会使打包发布门槛不通过。
+修正后的 MV3 和 ProseMirror 套件使用独立的本地测试浏览器及 Playwright 公开的 `connectOverCDP({ noDefaults: true })`，从连接开始就不启用焦点仿真，也不禁用后台计时器节流。在 `TEST_HEADED=1` 模式中，测试使用真正有窗口的浏览器，明确检查 `document.visibilityState === 'hidden'`、目标没有文档焦点、前台文档和活动标签不变。测试不重定义 visibility 属性来伪造通过。[Playwright 官方选项说明](https://playwright.dev/docs/api/class-browsertype#browser-type-connect-over-cdp)
+
+本地隔离环境缺少 Xvfb 硬编码调用的 `/usr/bin/xkbcomp`，临时提取组件未能启动显示服务器。因此本地验证使用无头完整 Chrome；修正后的两个集成套件已实测自然隐藏状态。有窗口的第二层验证由使用 Xvfb 的 GitHub CI 给出结果。两个工作流均已启用该发布验证，失败会使打包发布门槛不通过。
 
 ## 环境与隐私
 
 - Node.js 24.19.0、Playwright 1.62.1；本地浏览器是官方 Chrome for Testing 156.0.8078.47。
 - 普通 DOM / UI 测试使用 headless shell；实际 MV3 使用完整 Chrome，独立临时 profile。
-- 官方 ProseMirror 测试依赖固定版本：view 1.41.3、state 1.4.4、model 1.25.1、schema-basic 1.2.4、keymap 1.2.3。这些只用于开发测试，不打进安装包。
+- 官方 ProseMirror 测试依赖固定版本：view 1.42.7、state 1.4.4、model 1.25.12、schema-basic 1.2.4、keymap 1.2.3。这些只用于开发测试，不打进安装包；升级了旧测试依赖中已修复的粘贴处理漏洞，完整 npm 审计为 0 个已知漏洞。
 - PDF 依赖为离线 `pdfjs-dist@6.4.299`，主模块、Worker 与资源清单一致。
 - 自动化聊天请求全部拦截成合成网页；测试不使用用户登录 profile，不扫描上传目录，不载入私人文件。
 - 用户个人包另通过不输出正文的本机导入检查；它不上传到公开仓库或 Release。

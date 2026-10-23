@@ -14,10 +14,10 @@
     "pdfjs-dist": "6.4.299",
     "playwright": "1.62.1",
     "prosemirror-keymap": "1.2.3",
-    "prosemirror-model": "1.25.1",
+    "prosemirror-model": "1.25.12",
     "prosemirror-schema-basic": "1.2.4",
     "prosemirror-state": "1.4.4",
-    "prosemirror-view": "1.41.3"
+    "prosemirror-view": "1.42.7"
   },
   "engines": {
     "node": ">=22.13.0"
