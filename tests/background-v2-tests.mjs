@@ -142,14 +142,81 @@ async function scenario(name, body) {
 await scenario('Defaults run every 20 minutes without a send limit or immediate first send', async () => {
   assert.equal(DEFAULT_CONFIG.intervalMinutes, 20);
   assert.equal(DEFAULT_CONFIG.maxSends, 0);
+  assert.equal(DEFAULT_CONFIG.waitForIdle, false);
   const h = await harness();
   const before = Date.now();
   const job = await h.start();
   assert.equal(job.enabled, true);
+  assert.equal(job.waitForIdle, false);
+  assert.equal(h.state.injections[0].args[0].waitForIdle, false);
   assert.ok(job.nextAt >= before + 20 * 60_000);
   assert.equal(h.sends().length, 0);
   assert.deepEqual(h.state.local.resumeJob, h.state.session.job);
   assert.ok(h.state.accessLevels.some(value => value.area === 'local' && value.accessLevel === 'TRUSTED_CONTEXTS'));
+  await h.message({ type: 'PAUSE' });
+});
+
+await scenario('Legacy waiting defaults migrate once while task progress and private content stay unchanged', async () => {
+  const legacyConfig = { ...copy(DEFAULT_CONFIG), waitForIdle: true, prompt: 'SYNTHETIC_LEGACY_CONTENT' };
+  delete legacyConfig.deliveryBehaviorVersion;
+  const legacyJob = { ...legacyConfig, id: 'legacy-job', runId: 'legacy-run', enabled: true,
+    tabId: 7, url: originalUrl, phase: 'idle', nextAt: Date.now() + 600_000,
+    sentCount: 4, unknownCount: 2, queueIndex: 0, awaitingReply: false };
+  const h = await harness({ local: { config: legacyConfig, resumeJob: copy(legacyJob) }, session: { job: legacyJob } });
+  assert.equal(h.state.local.config.waitForIdle, false);
+  assert.equal(h.state.local.resumeJob.waitForIdle, false);
+  assert.equal(h.state.session.job.waitForIdle, false);
+  for (const key of ['id', 'enabled', 'prompt', 'nextAt', 'sentCount', 'unknownCount', 'queueIndex', 'awaitingReply']) {
+    assert.equal(h.state.session.job[key], legacyJob[key], `${key} must survive migration`);
+  }
+  assert.equal(h.state.injections.length, 0, 'Migration must not immediately send or interrupt');
+  await h.message({ type: 'PAUSE' });
+});
+
+await scenario('Legacy persisted recovery receives the interrupt default without activating a tab', async () => {
+  const legacy = { ...copy(DEFAULT_CONFIG), waitForIdle: true, prompt: 'SYNTHETIC_RESTORED_CONTENT', id: 'legacy-restored',
+    enabled: false, tabId: 7, url: originalUrl, phase: 'idle', nextAt: null, sentCount: 3, unknownCount: 0, queueIndex: 0 };
+  delete legacy.deliveryBehaviorVersion;
+  const h = await harness({ local: { config: legacy, resumeJob: copy(legacy) } });
+  assert.equal(h.state.session.job.waitForIdle, false);
+  assert.equal(h.state.local.resumeJob.waitForIdle, false);
+  assert.equal(h.state.session.job.enabled, false);
+  assert.equal(h.state.session.job.tabId, null);
+  assert.equal(h.state.session.job.sentCount, 3);
+  assert.equal(h.state.injections.length, 0);
+});
+
+await scenario('Migration repairs a stale legacy session independently of an already updated preference', async () => {
+  const preference = { ...copy(DEFAULT_CONFIG), waitForIdle: true, prompt: 'SYNTHETIC_NEW_PREFERENCE' };
+  const legacyJob = { ...preference, id: 'legacy-partial', enabled: false, tabId: 7, url: originalUrl,
+    phase: 'idle', nextAt: null, sentCount: 2, unknownCount: 0, queueIndex: 0 };
+  delete legacyJob.deliveryBehaviorVersion;
+  const h = await harness({ local: { config: preference, resumeJob: copy(legacyJob) }, session: { job: legacyJob } });
+  assert.equal(h.state.local.config.waitForIdle, true, 'Newly selected waiting must remain selected');
+  assert.equal(h.state.session.job.waitForIdle, false, 'Legacy task migrates independently');
+  assert.equal(h.state.local.resumeJob.waitForIdle, false);
+  assert.equal(h.state.session.job.enabled, false);
+  assert.equal(h.state.injections.length, 0);
+});
+
+await scenario('Explicit waiting chosen after upgrade survives worker restarts and reaches the adapter', async () => {
+  const first = await harness();
+  await first.start({ waitForIdle: true });
+  const h = await harness({ local: copy(first.state.local), session: copy(first.state.session) });
+  assert.equal(h.state.local.config.waitForIdle, true);
+  assert.equal(h.state.session.job.waitForIdle, true);
+  assert.equal(h.state.local.resumeJob.waitForIdle, true);
+  await h.message({ type: 'SEND_NOW' });
+  assert.equal(h.sends()[0].args[0].waitForIdle, true);
+  await h.message({ type: 'PAUSE' });
+});
+
+await scenario('A restored job without a wait flag sends with the interrupt default', async () => {
+  const h = await harness();
+  await h.start();
+  delete h.state.session.job.waitForIdle;
+  await h.message({ type: 'SEND_NOW' });
+  assert.equal(h.sends()[0].args[0].waitForIdle, false);
   await h.message({ type: 'PAUSE' });
 });
 

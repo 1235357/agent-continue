@@ -1,6 +1,10 @@
 export const MAX_PROMPT_CHARS = 100000;
 export const MAX_QUEUE_CHARS = 600000;
+// Stored records from 0.2.0 did not distinguish the old waiting default from a
+// deliberate choice. Versioned records preserve choices made after the change.
+export const DELIVERY_BEHAVIOR_VERSION = 1;
 export const DEFAULT_CONFIG = Object.freeze({
+  deliveryBehaviorVersion: DELIVERY_BEHAVIOR_VERSION,
   intervalMinutes: 20,
   prompt: '',
   promptSource: 'manual',
@@ -8,7 +12,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   stopMarkers: Object.freeze([]),
   preventDiscard: true,
   keepAwake: false,
-  waitForIdle: true,
+  waitForIdle: false,
   startImmediately: false,
   mode: 'repeat',
   scheduleMode: 'interval',
@@ -67,7 +71,7 @@ export function readConfig(value = {}, { allowEmpty = false } = {}) {
   if (!quiet || typeof quiet.enabled !== 'boolean' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(quiet.start) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(quiet.end)) throw new Error('静默时段须为有效的本地时间。');
   if (quiet.enabled && quiet.start === quiet.end) throw new Error('静默时段的开始与结束不能相同。');
   const promptSource = ['manual', 'file', 'private-file', 'template'].includes(value.promptSource) ? value.promptSource : 'manual';
-  return { intervalMinutes, prompt, promptSource, maxSends, stopMarkers, ...booleans, mode, scheduleMode, queue, quietHours: { enabled: quiet.enabled, start: quiet.start, end: quiet.end } };
+  return { deliveryBehaviorVersion: DELIVERY_BEHAVIOR_VERSION, intervalMinutes, prompt, promptSource, maxSends, stopMarkers, ...booleans, mode, scheduleMode, queue, quietHours: { enabled: quiet.enabled, start: quiet.start, end: quiet.end } };
 }
 
 export function currentPrompt(job) {

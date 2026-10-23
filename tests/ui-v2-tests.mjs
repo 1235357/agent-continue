@@ -122,6 +122,15 @@ async function capture(page, name) {
 
 try {
   const { page, context, errors } = await createPage();
+  assert.equal(await page.locator('#waitForIdle').isChecked(), false);
+  await page.locator('#tab-settings').click();
+  assert.match(await page.locator('#panel-settings').innerText(), /默认.*打断/);
+  await page.locator('#waitForIdle').check();
+  await page.waitForFunction(() => __uiMock.config.waitForIdle === true);
+  await page.locator('#waitForIdle').uncheck();
+  await page.waitForFunction(() => __uiMock.config.waitForIdle === false);
+  await page.locator('#tab-task').click();
+  pass('Interrupt is the visible default; optional waiting can be selected and persisted.');
   await assertSealed(page, ['SYNTHETIC-PRIVATE-PROMPT', 'SYNTHETIC-QUEUE-A', 'SYNTHETIC-QUEUE-B']);
   await page.locator('#tab-prompt').click();
   await assertSealed(page, ['SYNTHETIC-PRIVATE-PROMPT', 'SYNTHETIC-QUEUE-A']);

@@ -1,10 +1,11 @@
-import { DEFAULT_CONFIG, normalizeUrl, validateTarget, readConfig, currentPrompt, inQuietHours, MAX_PROMPT_CHARS } from './config.js';
+import { DEFAULT_CONFIG, DELIVERY_BEHAVIOR_VERSION, normalizeUrl, validateTarget, readConfig, currentPrompt, inQuietHours, MAX_PROMPT_CHARS } from './config.js';
 import { pageAction } from './adapter.js';
 import { BUNDLED_PROMPT } from './preset.js';
 
 const ALARM_NAME = 'agent-continue-heartbeat';
 const RETRY_MS = 60_000;
-const EXECUTION_MS = 12_000;
+// Leave room for a Stop -> composer replacement -> Send -> receipt transition.
+const EXECUTION_MS = 20_000;
 const RESULT_STATUSES = new Set(['ready', 'sent', 'busy', 'draft', 'done', 'blocked', 'cancelled', 'unknown', 'error']);
 let stateQueue = Promise.resolve();
 let intentVersion = 0;
@@ -109,7 +110,7 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS) {
 async function probe(tab, config, targetIdentity = null) {
   assertSupportedTab(tab);
   if (tab.discarded || tab.frozen) return { status: 'busy', message: '目标标签页已休眠或冻结，等待页面恢复。' };
-  return executePage({ mode: 'check', expectedUrl: normalizeUrl(tab.url), prompt: '', runId: null, stopMarkers: config.stopMarkers ?? [], waitForIdle: config.waitForIdle ?? true, targetIdentity }, tab.id);
+  return executePage({ mode: 'check', expectedUrl: normalizeUrl(tab.url), prompt: '', runId: null, stopMarkers: config.stopMarkers ?? [], waitForIdle: config.waitForIdle ?? false, targetIdentity }, tab.id);
 }
 async function currentTab(tabId) {
   if (Number.isInteger(tabId)) return chrome.tabs.get(tabId);
@@ -290,7 +291,7 @@ async function runRound(force = false, expectedJobId = null) {
       const changed = result.assistantToken ? result.assistantToken !== snapshot.assistantToken : result.assistantCount > snapshot.assistantCount;
       if (result.status === 'ready') result = changed ? { status: 'reply-complete' } : { status: 'busy', message: '等待新的 Agent 回复完成。' };
     } else {
-      result = await executePage({ mode: 'send', expectedUrl: snapshot.url, prompt: currentPrompt(snapshot), runId: snapshot.runId, runDeadline: snapshot.runDeadline, stopMarkers: snapshot.stopMarkers ?? [], waitForIdle: snapshot.waitForIdle ?? true, targetIdentity: snapshot.targetIdentity }, snapshot.tabId, snapshot.runDeadline);
+      result = await executePage({ mode: 'send', expectedUrl: snapshot.url, prompt: currentPrompt(snapshot), runId: snapshot.runId, runDeadline: snapshot.runDeadline, stopMarkers: snapshot.stopMarkers ?? [], waitForIdle: snapshot.waitForIdle ?? false, targetIdentity: snapshot.targetIdentity }, snapshot.tabId, snapshot.runDeadline);
     }
   } catch { result = snapshot.runKind === 'reply-check' ? { status: 'error', message: '回复检查暂不可用，继续等待新回复。' } : { status: 'unknown', message: '后台页面操作未确认。' }; }
   return finishRound(snapshot, result);
@@ -318,13 +319,25 @@ async function initialize() {
   try { await chrome.storage.local.setAccessLevel?.({ accessLevel: 'TRUSTED_CONTEXTS' }); } catch { /* Old browser. */ }
   await initializePrivatePreset();
   return transact(async () => {
-    let job = await getJob();
+    // Apply the requested interrupt default once to each legacy record. A
+    // record-local version survives partial storage writes and never resets a
+    // waiting preference explicitly selected in this or a later release.
+    const migrateDelivery = value => value && value.deliveryBehaviorVersion !== DELIVERY_BEHAVIOR_VERSION
+      ? { ...value, waitForIdle: false, deliveryBehaviorVersion: DELIVERY_BEHAVIOR_VERSION } : value;
+    const storedConfig = (await chrome.storage.local.get('config')).config;
+    const saved = (await chrome.storage.local.get('resumeJob')).resumeJob;
+    const config = migrateDelivery(storedConfig);
+    const recovery = migrateDelivery(saved);
+    const updates = {};
+    if (config !== storedConfig) updates.config = config;
+    if (recovery !== saved) updates.resumeJob = recovery;
+    if (Object.keys(updates).length) await chrome.storage.local.set(updates);
+    let job = migrateDelivery(await getJob());
     if (!job) {
-      const saved = (await chrome.storage.local.get('resumeJob')).resumeJob;
-      if (saved) {
+      if (recovery) {
         // Rebind only to an exact URL; additionally require the dot conversation
         // identity captured from visible message elements, when available.
-        job = { ...saved, tabId: null, runId: token(), runDeadline: null, autoDiscardableChanged: false, discardProtection: 'pending' };
+        job = { ...recovery, tabId: null, runId: token(), runDeadline: null, autoDiscardableChanged: false, discardProtection: 'pending' };
         await logEvent('browser-restored', '已恢复任务设置；等待唯一匹配的原目标页面。');
       }
     }

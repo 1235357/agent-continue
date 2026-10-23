@@ -78,7 +78,7 @@ try {
 
   await scenario('Busy Agent is skipped without input changes', async ({page,args}) => {
     await page.evaluate(() => { const stop=document.createElement('button'); stop.dataset.testid='stop-button';stop.textContent='Stop'; document.body.append(stop); });
-    const outcome=await page.evaluate(pageAction,args);
+    const outcome=await page.evaluate(pageAction,{...args,waitForIdle:true});
     assert.equal(outcome.status,'busy',JSON.stringify(outcome));
     assert.equal(await page.evaluate(()=>fixture.sendClicks),0);
     assert.equal(await page.evaluate(()=>fixture.inputEvents),0);

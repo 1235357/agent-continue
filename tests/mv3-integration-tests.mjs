@@ -44,6 +44,46 @@ function chatFixture(dot) {
   });
   </script>`;
 }
+// Models the failure boundary that a plain contenteditable fixture misses:
+// the page's submission model changes only through a handled beforeinput event.
+// While busy, Stop occupies Send's place and replaces the composer after stopping.
+function controlledDotFixture(busy) {
+  return `<!doctype html><meta charset="utf-8"><title>Your dot controlled fixture</title>
+  <style>body{padding:20px;font:16px sans-serif}[contenteditable]{min-height:70px;border:1px solid;padding:10px}.message-body,[contenteditable] p{white-space:pre-wrap}</style>
+  <main><div id="history"><article class="message-row self" data-message-id="test-user~test-thread~1"><div class="message-body">Synthetic task.</div></article><article class="message-row" data-message-id="test-user~test-thread~2"><div class="message-body">Synthetic answer.</div></article></div><div id="composerMount"></div><aside><button id="unrelated-stop" aria-label="Stop response">Unrelated stop</button></aside></main>
+  <script>
+  window.fixture={sendClicks:0,stopClicks:0,unrelatedStopClicks:0,beforeInputs:0,sentTexts:[],focusCalls:0,mounts:0,order:[]};
+  window.focus=()=>{fixture.focusCalls++};
+  document.querySelector('#unrelated-stop').addEventListener('click',()=>{fixture.unrelatedStopClicks++});
+  function mount(busy){
+    const form=document.createElement('form');form.dataset.composerRoot='';
+    form.innerHTML='<div data-composer-input><div id="controlled-editor" data-composer-markdown contenteditable="true" role="textbox" aria-label="Message"><p><br></p></div></div>';
+    const editor=form.querySelector('[contenteditable]');
+    const button=document.createElement('button');button.type='button';
+    button.setAttribute('aria-label',busy?'Stop response':'Send');button.textContent=busy?'Stop':'Send';button.disabled=!busy;
+    form.append(button);document.querySelector('#composerMount').replaceChildren(form);fixture.mounts++;
+    if(busy){
+      const typing=document.createElement('span');typing.className='typing-indicator';typing.textContent='Synthetic work in progress';form.append(typing);
+      button.addEventListener('click',()=>{fixture.stopClicks++;fixture.order.push('stop');setTimeout(()=>mount(false),40)});
+      return;
+    }
+    let model='';
+    editor.addEventListener('beforeinput',event=>{
+      event.preventDefault();fixture.beforeInputs++;fixture.order.push('beforeinput');
+      model=event.inputType==='deleteContentBackward'?'':String(event.data||'');
+      const paragraph=document.createElement('p');paragraph.textContent=model;editor.replaceChildren(paragraph);button.disabled=!model.trim();
+    });
+    button.addEventListener('click',()=>{
+      if(!model.trim())return;
+      fixture.sendClicks++;fixture.order.push('send');fixture.sentTexts.push(model);
+      const row=document.createElement('article');row.className='message-row self';row.dataset.messageId='test-user~test-thread~'+(fixture.sendClicks+2);
+      const body=document.createElement('div');body.className='message-body';body.textContent=model;row.append(body);document.querySelector('#history').append(row);
+      model='';editor.replaceChildren(document.createElement('p'));button.disabled=true;
+    });
+  }
+  mount(${JSON.stringify(busy)});
+  </script>`;
+}
 const workFixture = '<!doctype html><title>Unrelated work</title><textarea id="work">Ordinary document, keep my cursor here.</textarea><button id="other">Other</button>';
 function syntheticPdf(text) {
   const stream = `BT /F1 12 Tf 30 80 Td (${text}) Tj ET`;
@@ -64,6 +104,7 @@ async function launch() {
   });
   await launched.route('https://**/*', async route => {
     const url = new URL(route.request().url());
+    if (url.hostname === 'chatgpt.com' && ['/dots/mv3-interrupt', '/dots/mv3-controlled'].includes(url.pathname)) return route.fulfill({ status: 200, contentType: 'text/html', body: controlledDotFixture(url.pathname.endsWith('interrupt')) });
     if (url.hostname === 'chatgpt.com' && /^\/dots\//.test(url.pathname)) return route.fulfill({ status: 200, contentType: 'text/html', body: chatFixture(true) });
     if (url.hostname === 'chatgpt.com' && /^\/c\//.test(url.pathname)) return route.fulfill({ status: 200, contentType: 'text/html', body: chatFixture(false) });
     if (url.hostname === 'unrelated-work.invalid') return route.fulfill({ status: 200, contentType: 'text/html', body: workFixture });
@@ -135,6 +176,41 @@ try {
   assert.equal((await workerTab(worker, dot.url())).autoDiscardable, originalDiscard);
   assert.equal((await call(control, { type: 'SEND_NOW' })).ok, false);
   pass('Pause: actual alarms are removed, original autoDiscardable is restored and Send Now is rejected.');
+
+  for (const busy of [true, false]) {
+    const controlled = await context.newPage();
+    await controlled.goto('https://chatgpt.com/dots/' + (busy ? 'mv3-interrupt' : 'mv3-controlled'));
+    const controlledTab = await workerTab(worker, controlled.url());
+    const controlledPrompt = 'MV3_CONTROLLED_SYNTHETIC\nOne confirmed message only.';
+    // Omit waitForIdle so this exercises the public default through readConfig,
+    // storage, runRound and a real isolated-world chrome.scripting invocation.
+    const controlledStart = await call(control, { type: 'START', tabId: controlledTab.id, config: { prompt: controlledPrompt } });
+    assert.equal(controlledStart.ok, true, controlledStart.error);
+    assert.equal(controlledStart.job.waitForIdle, false);
+    assert.deepEqual(await controlled.evaluate(() => ({ stop: fixture.stopClicks, send: fixture.sendClicks, beforeinput: fixture.beforeInputs })), { stop: 0, send: 0, beforeinput: 0 }, 'Binding remains a read-only self-check');
+    await work.bringToFront(); await work.locator('#work').focus();
+    await work.locator('#work').evaluate(element => element.setSelectionRange(9, 17));
+    const foreground = await worker.evaluate(async () => (await chrome.tabs.query({ active: true, currentWindow: true }))[0].id);
+    const controlledSend = await call(control, { type: 'SEND_NOW' });
+    assert.equal(controlledSend.ok, true, controlledSend.error);
+    assert.equal(controlledSend.job.sentCount, 1, controlledSend.job.statusText);
+    const observed = await controlled.evaluate(() => fixture);
+    assert.equal(observed.stopClicks, busy ? 1 : 0);
+    assert.equal(observed.mounts, busy ? 2 : 1, 'Stop must replace the original composer');
+    assert.equal(observed.unrelatedStopClicks, 0, 'Only the selected composer can be interrupted');
+    assert.equal(observed.beforeInputs, 1, 'The page model must receive one controlled editing transaction');
+    assert.equal(observed.sendClicks, 1);
+    assert.deepEqual(observed.sentTexts, [controlledPrompt]);
+    assert.deepEqual(observed.order, busy ? ['stop', 'beforeinput', 'send'] : ['beforeinput', 'send']);
+    assert.equal(observed.focusCalls, 0);
+    assert.equal(await worker.evaluate(async () => (await chrome.tabs.query({ active: true, currentWindow: true }))[0].id), foreground);
+    assert.deepEqual(await work.evaluate(() => ({ value: document.querySelector('#work').value, start: document.querySelector('#work').selectionStart, end: document.querySelector('#work').selectionEnd, focus: document.activeElement.id })), before);
+    await call(control, { type: 'PAUSE' });
+    await controlled.close();
+    pass(busy
+      ? 'Real default interrupt: scoped Stop remounts the composer, controlled input submits exactly once, and foreground work stays unchanged.'
+      : 'Real isolated-world editing: beforeinput updates the controlled page model and confirms one send without foreground focus changes.');
+  }
 
   await control.bringToFront(); await control.locator('#tab-prompt').click();
   const pdfText = 'MV3_LOCAL_PDF_SYNTHETIC';

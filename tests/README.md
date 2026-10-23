@@ -22,14 +22,14 @@ npm test
 | 脚本 | 场景数 | 运行方式 / 目标 |
 | --- | ---: | --- |
 | `background-state-tests.mjs` | 14 | Chrome API mock；基础计时、暂停、令牌和恢复回归 |
-| `background-v2-tests.mjs` | 25 | Chrome API mock；并发、队列、回复后计时、重启、静默、power 与脱敏 |
+| `background-v2-tests.mjs` | 30 | Chrome API mock；并发、队列、回复后计时、重启、静默、power 与脱敏 |
 | `run-adapter-tests.mjs` | 13 | 真实 Chromium + 普通 ChatGPT 合成 DOM |
-| `dot-adapter-tests.mjs` | 18 | 真实 Chromium + dot 合成 DOM、会话身份与发送作用域 |
+| `dot-adapter-tests.mjs` | 38 | 真实 Chromium + dot 合成 DOM、会话身份与发送作用域 |
 | `file-import-tests.mjs` | 16 | 真实 Chromium + 合成 TXT / HTML / DOCX / PDF；本地 Worker 与 CSP |
-| `ui-v2-tests.mjs` | 11 | 真实 Chromium + 扩展 API mock；界面隐私、文件导入、配置、布局与清空竞态 |
-| `mv3-integration-tests.mjs` | 7 | 实际 MV3 扩展 + 完整 Chromium + 独立临时 profile + 合成站点 |
+| `ui-v2-tests.mjs` | 12 | 真实 Chromium + 扩展 API mock；界面隐私、文件导入、配置、布局与清空竞态 |
+| `mv3-integration-tests.mjs` | 9 | 实际 MV3 扩展 + 完整 Chromium + 独立临时 profile + 合成站点 |
 
-合计 **104** 个行为场景。`npm run check` 是额外语法检查，不计入场景总数。旧原型界面测试已由 `ui-v2-tests.mjs` 替代，现行隐私、状态与布局回归由该套件覆盖。
+合计 **132** 个行为场景。`npm run check` 是额外语法检查，不计入场景总数。旧原型界面测试已由 `ui-v2-tests.mjs` 替代，现行隐私、状态与布局回归由该套件覆盖。
 
 ## 单独执行
 

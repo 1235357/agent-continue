@@ -7,7 +7,7 @@ const request = message => chrome.runtime.sendMessage(message);
 const fallbackConfig = {
   ...DEFAULT_CONFIG, intervalMinutes: DEFAULT_CONFIG.intervalMinutes ?? 20,
   mode: 'repeat', queue: [], scheduleMode: 'interval', keepAwake: false,
-  startImmediately: false, waitForIdle: true,
+  startImmediately: false, waitForIdle: false,
   quietHours: { enabled: false, start: '23:00', end: '07:00' },
 };
 const normalized = value => ({ ...clone(fallbackConfig), ...clone(value || {}),
@@ -277,10 +277,12 @@ function paint(job) {
   }
   $('quietStart').disabled = !canEdit() || !config.quietHours.enabled;
   $('quietEnd').disabled = !canEdit() || !config.quietHours.enabled;
-  $('configHint').textContent = enabled
+  const deliveryHint = config.waitForIdle ? '当前方式：等待 Agent 空闲再发送。' : '当前方式：到点打断并发送。';
+  const cadenceHint = config.scheduleMode === 'after-reply' ? '已选择回复结束后才开始下一间隔。' : '';
+  $('configHint').textContent = deliveryHint + cadenceHint + (enabled
     ? '这里显示正在运行任务的实际配置。暂停后可编辑；“继续原任务”会沿用原配置。'
     : job ? '修改设置后点击“绑定目标并开始”建立新任务。“继续原任务”沿用原提示词、间隔和计数。'
-      : '默认每 20 分钟重复同一条提示词，不设发送次数上限。首次发送从启动时计时。';
+      : '默认每 20 分钟重复同一条提示词，不设发送次数上限。首次发送从启动时计时。');
   renderPromptMeta(config); renderQueue(config); renderTargets(); renderCountdown();
 }
 async function refresh() {

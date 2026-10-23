@@ -23,9 +23,9 @@ body { font: 16px sans-serif; padding: 20px; } [contenteditable] { min-height: 1
 </main>
 <div data-composer-root><div data-composer-body><div data-composer-input><div data-composer-markdown contenteditable="true" role="textbox" aria-label="Message"></div></div><div id="attachment-slot"></div><button type="button" aria-label="Send" disabled>Send</button></div></div>
 <script>
-window.fixture = { checks: 0, sends: 0, inputs: 0, allowed: true, cancelOnInput: false, idPlacement: 'both', acknowledgement: 'new', switchIdentityAtCheck: null, whitespaceAtCheck: null, cancelWithWhitespace: false, modifiedDraft: null, clipboardCalls: 0, focusCalls: 0, sentTexts: [] };
-const editor = document.querySelector('[data-composer-markdown]');
-const send = document.querySelector('button[aria-label="Send"]');
+window.fixture = { checks: 0, sends: 0, stops: 0, inputs: 0, beforeInputs: 0, requiresBeforeInput: false, beforeInputAccepted: false, frameworkReplacements: 0, actions: [], remounts: 0, allowed: true, cancelOnInput: false, cancelOnStop: false, idPlacement: 'both', acknowledgement: 'new', switchIdentityAtCheck: null, whitespaceAtCheck: null, cancelWithWhitespace: false, modifiedDraft: null, clipboardCalls: 0, focusCalls: 0, sentTexts: [] };
+let editor = document.querySelector('[data-composer-markdown]');
+let send = document.querySelector('button[aria-label="Send"]');
 window.setIdentity = prefix => {
   for (const node of document.querySelectorAll('[data-message-id]')) {
     const parts = node.getAttribute('data-message-id').split('~');
@@ -52,20 +52,52 @@ window.chrome = { runtime: { sendMessage: async message => {
   }
   return { ok: true, allowed: fixture.allowed };
 } } };
-editor.addEventListener('input', () => {
+const onInput = () => {
   fixture.inputs++;
   if (fixture.cancelOnInput) fixture.allowed = false;
-  send.disabled = !editor.innerText.trim();
-});
-send.addEventListener('click', () => {
+  if (send) send.disabled = !editor.innerText.trim() || (fixture.requiresBeforeInput && !fixture.beforeInputAccepted);
+};
+const onSend = () => {
   fixture.sends++;
+  fixture.actions.push('send');
   const text = editor.innerText; fixture.sentTexts.push(text); editor.textContent = ''; send.disabled = true;
   if (fixture.acknowledgement === 'new') appendMessage(text, 'acct~dot~Msg~new-' + fixture.sends);
   if (fixture.acknowledgement === 'clone-old') {
     const old = document.querySelector('article.message-row.self');
     const clone = old.cloneNode(true); old.remove(); document.querySelector('#conversation').append(clone);
   }
-});
+};
+window.bindComposer = () => {
+  editor = document.querySelector('[data-composer-markdown]');
+  send = document.querySelector('button[aria-label="Send"]');
+  editor.removeEventListener('input', onInput);
+  editor.addEventListener('input', onInput);
+  if (send) { send.removeEventListener('click', onSend); send.addEventListener('click', onSend); }
+};
+bindComposer();
+// This models an explicit stop-to-send transition. It is a synthetic regression
+// fixture, not a claim that the current Dot UI exposes this particular control.
+window.startWork = ({ replaceSend = true, remount = false, delay = 80 } = {}) => {
+  if (replaceSend) send.hidden = true;
+  const stop = document.createElement('button');
+  stop.type = 'button'; stop.setAttribute('aria-label', 'Stop generating'); stop.textContent = 'Stop';
+  stop.addEventListener('click', () => {
+    fixture.stops++; fixture.actions.push('stop');
+    stop.disabled = true;
+    if (fixture.cancelOnStop) fixture.allowed = false;
+    setTimeout(() => {
+      if (remount) {
+        const old = document.querySelector('[data-composer-root]');
+        const replacement = old.cloneNode(true);
+        replacement.querySelector('button[aria-label="Stop generating"]').remove();
+        replacement.querySelector('button[aria-label="Send"]').hidden = false;
+        old.replaceWith(replacement); fixture.remounts++; bindComposer();
+      } else { stop.remove(); send.hidden = false; }
+      send.disabled = !editor.innerText.trim();
+    }, delay);
+  });
+  document.querySelector('[data-composer-body]').append(stop);
+};
 </script></body></html>`;
 
 let passed = 0;
@@ -75,7 +107,9 @@ async function scenario(name, callback) {
   await context.route('**/*', route => route.fulfill({ status: 200, contentType: 'text/html', body: fixture }));
   const page = await context.newPage();
   await page.goto(expectedUrl);
-  const args = { mode: 'send', expectedUrl, targetIdentity: 'acct~dot', prompt, runId: 'synthetic-dot-run', runDeadline: Date.now() + 12_000, stopMarkers: [], waitForIdle: true };
+  // Omitting waitForIdle exercises the force-by-default contract. Waiting tests
+  // opt in explicitly so a future default change cannot silently weaken them.
+  const args = { mode: 'send', expectedUrl, targetIdentity: 'acct~dot', prompt, runId: 'synthetic-dot-run', runDeadline: Date.now() + 12_000, stopMarkers: [] };
   try { await callback({ context, page, args }); passed++; console.log('PASS ' + name); }
   catch (error) { failed++; console.error('FAIL ' + name + ': ' + error.message); }
   finally { await context.close(); }
@@ -120,13 +154,249 @@ try {
   }
   await scenario('Visible Dot typing indicator waits; hidden indicator and explicit override allow sending', async ({ page, args }) => {
     await page.evaluate(() => { const typing = document.createElement('div'); typing.className = 'typing-indicator'; typing.setAttribute('role', 'status'); typing.textContent = 'Thinking'; document.body.append(typing); });
-    assert.equal((await page.evaluate(pageAction, args)).status, 'busy');
+    assert.equal((await page.evaluate(pageAction, { ...args, waitForIdle: true })).status, 'busy');
     assert.equal(await page.evaluate(() => fixture.inputs), 0);
     await page.evaluate(() => { document.querySelector('.typing-indicator').hidden = true; });
-    assert.equal((await page.evaluate(pageAction, args)).status, 'sent');
+    assert.equal((await page.evaluate(pageAction, { ...args, waitForIdle: true })).status, 'sent');
     await page.evaluate(() => { document.querySelector('.typing-indicator').hidden = false; });
     assert.equal((await page.evaluate(pageAction, { ...args, waitForIdle: false })).status, 'sent');
     assert.equal(await page.evaluate(() => fixture.sends), 2);
+  });
+  await scenario('Default force mode sends while Dot is working and exposes a usable Send action', async ({ page, args }) => {
+    await page.evaluate(() => {
+      const typing = document.createElement('div'); typing.className = 'typing-indicator';
+      typing.textContent = 'Synthetic work in progress'; document.body.append(typing);
+    });
+    const outcome = await page.evaluate(pageAction, args);
+    assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
+    assert.deepEqual(await page.evaluate(() => fixture.actions), ['send']);
+    assert.equal(await page.evaluate(() => fixture.stops), 0);
+  });
+  // Controlled-editor fixtures exercise browser event contracts. They do not
+  // claim knowledge of Dot's private framework implementation.
+  await scenario('A controlled editor receives cancelable beforeinput before native insertion', async ({ page, args }) => {
+    await page.evaluate(() => {
+      fixture.requiresBeforeInput = true;
+      document.querySelector('[data-composer-markdown]').addEventListener('beforeinput', event => {
+        if (event.inputType !== 'insertText') return;
+        fixture.beforeInputs++;
+        fixture.beforeInputAccepted = event.cancelable && typeof event.data === 'string' && event.data.length > 0;
+      });
+    });
+    const outcome = await page.evaluate(pageAction, args);
+    assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
+    assert.equal(await page.evaluate(() => fixture.beforeInputAccepted), true);
+    assert.equal(await page.evaluate(() => fixture.beforeInputs), 1);
+    assert.equal(await page.evaluate(() => fixture.sends), 1);
+  });
+  await scenario('A framework-handled beforeinput replacement is submitted once without a second insertion', async ({ page, args }) => {
+    await page.evaluate(() => {
+      fixture.requiresBeforeInput = true;
+      const input = document.querySelector('[data-composer-markdown]');
+      input.addEventListener('beforeinput', event => {
+        if (event.inputType !== 'insertText') return;
+        fixture.beforeInputs++; event.preventDefault();
+        fixture.beforeInputAccepted = event.cancelable;
+        fixture.frameworkReplacements++;
+        input.textContent = event.data;
+        input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: event.data }));
+      });
+    });
+    const outcome = await page.evaluate(pageAction, args);
+    assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
+    assert.deepEqual(await page.evaluate(() => [fixture.beforeInputs, fixture.frameworkReplacements, fixture.inputs, fixture.sends]), [1, 1, 1, 1]);
+    assert.equal(await page.evaluate(() => fixture.sentTexts[0]), prompt);
+  });
+  await scenario('A rejected beforeinput that restores a different draft is never treated as our insertion', async ({ page, args }) => {
+    const restoredDraft = 'Restored synthetic human draft';
+    await page.evaluate(restoredDraft => {
+      const input = document.querySelector('[data-composer-markdown]');
+      input.addEventListener('beforeinput', event => {
+        if (event.inputType !== 'insertText') return;
+        event.preventDefault(); fixture.beforeInputs++;
+        input.textContent = restoredDraft;
+        input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: restoredDraft }));
+      });
+    }, restoredDraft);
+    const outcome = await page.evaluate(pageAction, args);
+    assert.equal(outcome.status, 'blocked', JSON.stringify(outcome));
+    assert.equal(await page.getByRole('textbox', { name: 'Message' }).innerText(), restoredDraft);
+    assert.equal(await page.evaluate(() => fixture.sends), 0);
+  });
+  await scenario('A cancelled beforeinput may commit asynchronously before the one allowed send', async ({ page, args }) => {
+    await page.evaluate(() => {
+      fixture.requiresBeforeInput = true;
+      const input = document.querySelector('[data-composer-markdown]');
+      input.addEventListener('beforeinput', event => {
+        if (event.inputType !== 'insertText') return;
+        fixture.beforeInputs++; event.preventDefault();
+        const value = event.data;
+        setTimeout(() => {
+          fixture.beforeInputAccepted = true; fixture.frameworkReplacements++;
+          input.textContent = value;
+          input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
+        }, 25);
+      });
+    });
+    const outcome = await page.evaluate(pageAction, args);
+    assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
+    assert.deepEqual(await page.evaluate(() => [fixture.beforeInputs, fixture.frameworkReplacements, fixture.inputs, fixture.sends]), [1, 1, 1, 1]);
+    assert.equal(await page.evaluate(() => fixture.sentTexts[0]), prompt);
+  });
+  await scenario('Force mode clicks an explicit Stop once before submitting when Stop replaces Send', async ({ page, args }) => {
+    await page.evaluate(() => startWork());
+    const outcome = await page.evaluate(pageAction, { ...args, waitForIdle: false });
+    assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
+    assert.deepEqual(await page.evaluate(() => fixture.actions), ['stop', 'send']);
+    assert.equal(await page.evaluate(() => fixture.stops), 1);
+    assert.equal(await page.evaluate(() => fixture.sends), 1);
+  });
+  await scenario('Force mode prioritizes a scoped explicit Stop even when Send is also available', async ({ page, args }) => {
+    await page.evaluate(() => {
+      startWork({ replaceSend: false });
+      document.querySelector('button[aria-label="Send"]').disabled = false;
+      fixture.unrelatedStops = 0;
+      const other = document.createElement('button'); other.setAttribute('aria-label', 'Stop generating'); other.textContent = 'Stop unrelated work';
+      other.addEventListener('click', () => { fixture.unrelatedStops++; }); document.body.append(other);
+    });
+    const outcome = await page.evaluate(pageAction, { ...args, waitForIdle: false });
+    assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
+    assert.deepEqual(await page.evaluate(() => fixture.actions), ['stop', 'send']);
+    assert.equal(await page.evaluate(() => fixture.unrelatedStops), 0);
+  });
+  await scenario('Force mode finds the replacement composer after interrupting', async ({ page, args }) => {
+    await page.evaluate(() => startWork({ remount: true }));
+    const outcome = await page.evaluate(pageAction, { ...args, waitForIdle: false });
+    assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
+    assert.equal(await page.evaluate(() => fixture.remounts), 1);
+    assert.deepEqual(await page.evaluate(() => fixture.actions), ['stop', 'send']);
+    assert.equal(await page.evaluate(() => fixture.sentTexts[0].replace(/\n{2,}/g, '\n').trim()), prompt.trim());
+  });
+  await scenario('A read-only check, explicit wait mode, and a paused run never interrupt', async ({ page, args }) => {
+    await page.evaluate(() => startWork());
+    const check = await page.evaluate(pageAction, { ...args, mode: 'check', runId: null, waitForIdle: false });
+    assert.ok(['ready', 'busy'].includes(check.status), JSON.stringify(check));
+    assert.equal((await page.evaluate(pageAction, { ...args, waitForIdle: true })).status, 'busy');
+    await page.evaluate(() => { fixture.allowed = false; });
+    assert.equal((await page.evaluate(pageAction, { ...args, waitForIdle: false })).status, 'cancelled');
+    assert.deepEqual(await page.evaluate(() => [fixture.stops, fixture.sends, fixture.inputs]), [0, 0, 0]);
+  });
+  await scenario('Pause during interruption prevents the subsequent fill and send', async ({ page, args }) => {
+    await page.evaluate(() => { fixture.cancelOnStop = true; startWork(); });
+    const outcome = await page.evaluate(pageAction, { ...args, waitForIdle: false });
+    assert.equal(outcome.status, 'cancelled', JSON.stringify(outcome));
+    assert.deepEqual(await page.evaluate(() => fixture.actions), ['stop']);
+    assert.equal(await page.evaluate(() => fixture.sends), 0);
+    assert.equal((await page.getByRole('textbox', { name: 'Message' }).innerText()).trim(), '');
+  });
+  await scenario('Missing Send cleans the unchanged inserted draft so a later round can succeed', async ({ page, args }) => {
+    await page.evaluate(() => {
+      window.savedSend = document.querySelector('button[aria-label="Send"]');
+      savedSend.remove();
+    });
+    const first = await page.evaluate(pageAction, args);
+    assert.equal(first.status, 'blocked', JSON.stringify(first));
+    assert.equal((await page.getByRole('textbox', { name: 'Message' }).innerText()).trim(), '', 'An unsubmitted own draft must not lock later rounds');
+    assert.equal(await page.evaluate(() => fixture.sends), 0);
+    await page.evaluate(() => { document.querySelector('[data-composer-body]').append(savedSend); bindComposer(); });
+    const next = await page.evaluate(pageAction, { ...args, runId: 'synthetic-next-round', runDeadline: Date.now() + 12_000 });
+    assert.equal(next.status, 'sent', JSON.stringify(next));
+    assert.equal(await page.evaluate(() => fixture.sends), 1);
+  });
+  await scenario('Force mode submits an exact configured prompt already stuck in the editor', async ({ page, args }) => {
+    const stuckPrompt = 'Recover this exact synthetic continuation';
+    await page.getByRole('textbox', { name: 'Message' }).fill(stuckPrompt);
+    const outcome = await page.evaluate(pageAction, { ...args, prompt: stuckPrompt });
+    assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
+    assert.equal(await page.evaluate(() => fixture.sends), 1);
+    assert.deepEqual(await page.evaluate(() => fixture.sentTexts), [stuckPrompt]);
+  });
+  for (const [name, legacyPrompt] of [
+    ['CRLF', '  First synthetic line\r\nSecond synthetic line\r\n  '],
+    ['blank line', 'First synthetic line\n\nSecond synthetic line'],
+    ['trailing newline', 'First synthetic line\n'],
+  ]) {
+    await scenario('Force recovers a legacy native insertion containing ' + name, async ({ page, args }) => {
+      // This is the old adapter's native insertion path, not a serializer-shaped
+      // fixture. Chromium creates DIV/BR nodes and innerText newline artifacts.
+      const before = await page.evaluate(value => {
+        const input = document.querySelector('[data-composer-markdown]'); input.focus();
+        document.execCommand('insertText', false, value);
+        return input.innerText;
+      }, legacyPrompt);
+      assert.notEqual(before, legacyPrompt, 'The fixture must reproduce the legacy innerText mismatch');
+      const outcome = await page.evaluate(pageAction, { ...args, prompt: legacyPrompt });
+      assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
+      assert.equal(await page.evaluate(() => fixture.sends), 1);
+      assert.equal(await page.getByRole('textbox', { name: 'Message' }).innerText(), '');
+    });
+  }
+  await scenario('Legacy recovery preserves an actual extra human blank line instead of collapsing it', async ({ page, args }) => {
+    const configured = 'First synthetic line\n\nSecond synthetic line';
+    const humanDraft = 'First synthetic line\n\n\nSecond synthetic line';
+    const before = await page.evaluate(value => {
+      const input = document.querySelector('[data-composer-markdown]'); input.focus();
+      document.execCommand('insertText', false, value);
+      return input.innerText;
+    }, humanDraft);
+    const outcome = await page.evaluate(pageAction, { ...args, prompt: configured });
+    assert.equal(outcome.status, 'draft', JSON.stringify(outcome));
+    assert.equal(await page.getByRole('textbox', { name: 'Message' }).innerText(), before);
+    assert.equal(await page.evaluate(() => fixture.sends), 0);
+  });
+  await scenario('Legacy recovery preserves a missing human blank line even when innerText accidentally matches', async ({ page, args }) => {
+    const configured = 'First synthetic line\n\n\nSecond synthetic line';
+    const humanDraft = 'First synthetic line\n\nSecond synthetic line';
+    const before = await page.evaluate(value => {
+      const input = document.querySelector('[data-composer-markdown]'); input.focus();
+      document.execCommand('insertText', false, value);
+      return input.innerText;
+    }, humanDraft);
+    assert.equal(before, configured, 'The fixture must reproduce the innerText false positive');
+    const outcome = await page.evaluate(pageAction, { ...args, prompt: configured });
+    assert.equal(outcome.status, 'draft', JSON.stringify(outcome));
+    assert.equal(await page.getByRole('textbox', { name: 'Message' }).innerText(), before);
+    assert.equal(await page.evaluate(() => fixture.sends), 0);
+  });
+  await scenario('A matching prompt remains a protected draft in explicit wait mode', async ({ page, args }) => {
+    const stuckPrompt = 'Synthetic configured prompt';
+    await page.getByRole('textbox', { name: 'Message' }).fill(stuckPrompt);
+    const outcome = await page.evaluate(pageAction, { ...args, prompt: stuckPrompt, waitForIdle: true });
+    assert.equal(outcome.status, 'draft', JSON.stringify(outcome));
+    assert.equal(await page.getByRole('textbox', { name: 'Message' }).innerText(), stuckPrompt);
+    assert.equal(await page.evaluate(() => fixture.sends), 0);
+  });
+  await scenario('Force recovery never adopts whitespace-changed prompts or prompts with attachments', async ({ page, args }) => {
+    const stuckPrompt = 'Synthetic configured prompt';
+    const input = page.getByRole('textbox', { name: 'Message' });
+    for (const changed of [' ' + stuckPrompt, stuckPrompt + ' ', stuckPrompt + '\n']) {
+      await input.fill(changed);
+      const before = await input.innerText();
+      assert.notEqual(before, stuckPrompt, 'The fixture must retain the human whitespace edit');
+      const outcome = await page.evaluate(pageAction, { ...args, prompt: stuckPrompt, waitForIdle: false });
+      assert.equal(outcome.status, 'draft', JSON.stringify(outcome));
+      assert.equal(await input.innerText(), before);
+    }
+    await input.fill(stuckPrompt);
+    await page.evaluate(() => {
+      const chip = document.createElement('button'); chip.setAttribute('aria-label', 'Remove file synthetic.txt'); chip.textContent = 'Remove';
+      document.querySelector('#attachment-slot').append(chip); startWork();
+    });
+    const attached = await page.evaluate(pageAction, { ...args, prompt: stuckPrompt, waitForIdle: false });
+    assert.equal(attached.status, 'draft', JSON.stringify(attached));
+    assert.deepEqual(await page.evaluate(() => [fixture.stops, fixture.sends]), [0, 0]);
+    assert.equal(await input.innerText(), stuckPrompt);
+  });
+  await scenario('A pre-send failure preserves a human edit made while waiting for Send', async ({ page, args }) => {
+    await page.evaluate(() => {
+      document.querySelector('button[aria-label="Send"]').remove();
+      fixture.whitespaceAtCheck = 2;
+    });
+    const outcome = await page.evaluate(pageAction, args);
+    assert.equal(outcome.status, 'blocked', JSON.stringify(outcome));
+    assert.equal(await page.getByRole('textbox', { name: 'Message' }).innerText(), await page.evaluate(() => fixture.modifiedDraft));
+    assert.ok((await page.getByRole('textbox', { name: 'Message' }).innerText()).trim().length > 0);
+    assert.equal(await page.evaluate(() => fixture.sends), 0);
   });
   await scenario('Dot preserves text drafts and attachment-only drafts', async ({ page, args }) => {
     const editor = page.getByRole('textbox', { name: 'Message' });
