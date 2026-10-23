@@ -131,6 +131,14 @@ try {
   await page.waitForFunction(() => __uiMock.config.waitForIdle === false);
   await page.locator('#tab-task').click();
   pass('Interrupt is the visible default; optional waiting can be selected and persisted.');
+  await page.locator('#tab-settings').click();
+  assert.equal(await page.locator('#sendMethod').inputValue(), 'auto');
+  assert.equal(await page.locator('#sendMethod option').count(), 3);
+  await page.locator('#sendMethod').selectOption('ctrl-enter');
+  await page.waitForFunction(() => __uiMock.config.sendMethod === 'ctrl-enter');
+  await page.locator('#tab-task').click();
+  assert.match(await page.locator('#configHint').innerText(), /Ctrl\+Enter/);
+  pass('Send strategy defaults to auto and a selected Ctrl+Enter method is saved and visible on the task page.');
   await assertSealed(page, ['SYNTHETIC-PRIVATE-PROMPT', 'SYNTHETIC-QUEUE-A', 'SYNTHETIC-QUEUE-B']);
   await page.locator('#tab-prompt').click();
   await assertSealed(page, ['SYNTHETIC-PRIVATE-PROMPT', 'SYNTHETIC-QUEUE-A']);
@@ -184,15 +192,17 @@ try {
   assert.equal(safeExport.includesPrompt, false);
   assert.equal(Object.hasOwn(safeExport.config, 'prompt'), false);
   assert.equal(Object.hasOwn(safeExport.config, 'queue'), false);
+  assert.equal(safeExport.config.sendMethod, 'ctrl-enter');
   assert.ok(!JSON.stringify(safeExport).includes('SYNTHETIC-'));
   await page.locator('#includeSecrets').check();
   await page.locator('#exportConfig').click();
   const explicitExport = await page.evaluate(async () => JSON.parse(await __uiMock.exports.at(-1).text()));
   assert.equal(explicitExport.config.prompt, importedText);
   assert.equal(await page.locator('#includeSecrets').isChecked(), false);
-  await page.locator('#configFile').setInputFiles({ name: 'settings.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ config: { intervalMinutes: 37, mode: 'repeat' } })) });
+  await page.locator('#configFile').setInputFiles({ name: 'settings.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ config: { intervalMinutes: 37, mode: 'repeat', sendMethod: 'button' } })) });
   await page.waitForFunction(() => __uiMock.config.intervalMinutes === 37);
   assert.equal(await page.evaluate(() => __uiMock.config.prompt), importedText);
+  assert.equal(await page.locator('#sendMethod').inputValue(), 'button');
   pass('Backup: default JSON omits prompts/queue; explicit content export is one-shot; settings-only import preserves existing prompt.');
 
   await page.evaluate(() => { __uiMock.grantPower = false; });
@@ -212,16 +222,23 @@ try {
   await page.waitForFunction(() => document.querySelector('#badge').textContent === '运行中');
   assert.equal(await page.evaluate(() => __uiMock.requests.find(request => request.type === 'START').tabId), 42);
   assert.equal(await page.evaluate(() => __uiMock.job.prompt), importedText);
+  assert.equal(await page.evaluate(() => __uiMock.job.sendMethod), 'button');
+  assert.equal(await page.locator('#sendMethod').isEnabled(), false);
   await page.locator('#pause').click();
   await page.waitForFunction(() => document.querySelector('#badge').textContent === '已暂停');
   await page.locator('#interval').fill('45');
+  await page.locator('#tab-settings').click();
+  await page.locator('#sendMethod').selectOption('ctrl-enter');
+  await page.locator('#tab-task').click();
   await page.locator('#resume').click();
   await page.waitForFunction(() => document.querySelector('#badge').textContent === '运行中');
   assert.equal(await page.locator('#interval').inputValue(), '37');
+  assert.equal(await page.locator('#sendMethod').inputValue(), 'button');
   await page.waitForFunction(() => __uiMock.config.intervalMinutes === 45);
   await page.locator('#pause').click();
   await page.waitForFunction(() => document.querySelector('#badge').textContent === '已暂停');
   assert.equal(await page.locator('#interval').inputValue(), '45');
+  assert.equal(await page.locator('#sendMethod').inputValue(), 'ctrl-enter');
   await assertSealed(page, ['SYNTHETIC-IMPORTED-CONTENT']);
   pass('Task control: explicit target is passed; Resume keeps original config while Pause restores the separately edited draft.');
 

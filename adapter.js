@@ -15,6 +15,11 @@ export async function pageAction(args) {
     && getComputedStyle(element).visibility !== 'hidden' && getComputedStyle(element).display !== 'none';
   const visibleMatches = (selector, root = document) => [...root.querySelectorAll(selector)].filter(visible);
   const isDot = new URL(args.expectedUrl).pathname.startsWith('/dots/');
+  // Dot's actual composer submits with Ctrl+Enter. Resolve one strategy before
+  // editing: a missing acknowledgement must never trigger a second strategy.
+  const sendMethod = !args.sendMethod || args.sendMethod === 'auto'
+    ? (isDot ? 'ctrl-enter' : 'button') : args.sendMethod;
+  const useKeyboard = sendMethod === 'ctrl-enter';
   const stopSelector = 'button[data-testid="stop-button"], button[aria-label="Stop streaming"], button[aria-label="Stop generating"], button[aria-label="Stop response"], button[aria-label="停止生成"], button[aria-label="停止输出"], button[aria-label="停止流式传输"]';
   const busySelector = '.typing-indicator, ' + stopSelector;
   const sendSelector = 'button[data-testid="send-button"], button[aria-label="Send prompt"], button[aria-label="Send message"], button[aria-label="发送提示"], button[aria-label="发送消息"], button[aria-label="Send"], button[aria-label="发送"]';
@@ -48,6 +53,7 @@ export async function pageAction(args) {
   };
 
   if (!samePage()) return result('blocked', '目标会话地址已改变，已停止发送。');
+  if (!['ctrl-enter', 'button'].includes(sendMethod)) return result('blocked', '发送方式无效，请重新选择。');
   const editorSelector = isDot
     ? '[data-composer-input] [contenteditable="true"][role="textbox"][aria-label="Message"], [contenteditable="true"][role="textbox"][data-composer-markdown]'
     : '#prompt-textarea, form[data-chatgpt-composer] .ProseMirror[contenteditable="true"]';
@@ -123,7 +129,7 @@ export async function pageAction(args) {
   const previousFocus = document.activeElement;
   let inserted = false;
   let insertedTextSnapshot = null;
-  let clicked = false;
+  let submitted = false;
   let interrupted = false;
 
   const fill = async value => {
@@ -192,7 +198,7 @@ export async function pageAction(args) {
   };
 
   const clearOwnDraft = async () => {
-    if (!clicked && inserted && editor.isConnected && textOf(editor) === insertedTextSnapshot && !hasAttachment()) {
+    if (!submitted && inserted && editor.isConnected && textOf(editor) === insertedTextSnapshot && !hasAttachment()) {
       const focusAtCleanup = document.activeElement;
       try { await fill(''); } catch { /* Leave text for inspection if the editor rejects clearing. */ }
       finally {
@@ -246,11 +252,11 @@ export async function pageAction(args) {
     while (Date.now() < buttonDeadline) {
       if (!await stillAllowed()) {
         await clearOwnDraft();
-        return result('cancelled', '已暂停，本次未点击发送。');
+        return result('cancelled', '已暂停，本次未提交。');
       }
       if (busy()) {
         await clearOwnDraft();
-        return result('busy', '检测到正在运行，本次未点击发送。');
+        return result('busy', '检测到正在运行，本次未提交。');
       }
       if (!editor.isConnected || textOf(editor) !== insertedTextSnapshot || hasAttachment()) return result('blocked', '输入框内容发生变化，已保留当前内容。');
       // A new run can start while the composer is being filled. Stop once, then
@@ -265,6 +271,9 @@ export async function pageAction(args) {
         insertedTextSnapshot = textOf(editor);
         if (!refilled) return result('blocked', '打断后输入框未接受完整填写，稍后重试。');
       }
+      // Keyboard-only composers and changed button labels remain usable. The
+      // editor, identity, run permission and receipt are still required.
+      if (useKeyboard) break;
       const buttons = [...new Set(visibleMatches(sendSelector, composer))];
       if (buttons.length === 1 && enabled(buttons[0])) {
         sendButton = buttons[0];
@@ -272,44 +281,55 @@ export async function pageAction(args) {
       }
       await wait(150);
     }
-    if (!sendButton) return result('blocked', '未找到唯一且可用的发送按钮；本轮未提交，稍后重试。');
+    if (!useKeyboard && !sendButton) return result('blocked', '未找到唯一且可用的发送按钮；本轮未提交，稍后重试。');
     if (!await stillAllowed()) {
       await clearOwnDraft();
-      return result('cancelled', '已暂停，本次未点击发送。');
+      return result('cancelled', '已暂停，本次未提交。');
     }
-    // No await between the final DOM checks and the click. A click already
+    // No await between final checks and the one submission action. An action
     // dispatched before a pause cannot be withdrawn.
     if (!withinDeadline()) {
       await clearOwnDraft();
-      return result('cancelled', '本次发送许可已过期，未点击发送。');
+      return result('cancelled', '本次发送许可已过期，未提交。');
     }
-    if (!samePage() || !editor.isConnected || !sendButton.isConnected) return result('blocked', '提交前页面已变化。');
+    if (!samePage() || !editor.isConnected || (!useKeyboard && !sendButton.isConnected)) return result('blocked', '提交前页面已变化。');
     if (busy()) { await clearOwnDraft(); return result('busy', 'Agent 仍在运行。'); }
     if (textOf(editor) !== insertedTextSnapshot) return result('blocked', '输入框内容发生变化，已保留当前内容。');
     if (hasAttachment()) return result('blocked', '提交前检测到附件，已保留输入框内容。');
     if (forceInterrupt && visibleMatches(stopSelector, composer).length) return result('blocked', '提交前 Agent 状态变化，稍后重新打断并发送。');
-    if (!enabled(sendButton)) return result('blocked', '发送按钮已不可用。');
+    if (!useKeyboard && !enabled(sendButton)) return result('blocked', '发送按钮已不可用。');
+    if (useKeyboard && document.activeElement !== editor) return result('blocked', '输入焦点已移动，本次未发送快捷键。');
     beforeAssistant = assistantState();
-    sendButton.click();
-    clicked = true;
+    // Mark the attempt before dispatch. Page handlers may submit synchronously
+    // or throw after accepting; neither outcome permits a duplicate fallback.
+    submitted = true;
+    if (useKeyboard) {
+      const key = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13,
+        ctrlKey: true, metaKey: false, altKey: false, shiftKey: false,
+        bubbles: true, cancelable: true, composed: true, repeat: false };
+      editor.dispatchEvent(new KeyboardEvent('keydown', key));
+      editor.dispatchEvent(new KeyboardEvent('keyup', key));
+    } else {
+      sendButton.click();
+    }
 
     // A cleared editor alone is not proof of submission. Require a newly
     // rendered user message containing exactly the requested prompt.
     const confirmDeadline = Math.min(Date.now() + 6500, args.runDeadline);
     while (Date.now() < confirmDeadline) {
-      if (!samePage()) return result('unknown', '点击后会话地址变化，无法确认提交结果；请检查后再继续。');
+      if (!samePage()) return result('unknown', '提交后会话地址变化，无法确认结果；请检查后再继续。');
       const messages = [...document.querySelectorAll(userSelector)];
       const last = messages.at(-1);
       if (last && (messageKey(last) ? !beforeKeys.has(messageKey(last)) : !beforeMessages.has(last)) && clean(textOf(last)) === clean(prompt)) {
-        return result('sent', '已在会话中看到新发送的消息。');
+        return result('sent', useKeyboard ? '已通过 Ctrl+Enter 提交，并在会话中确认新消息。' : '已点击发送，并在会话中确认新消息。');
       }
       await wait(180);
     }
-    return result('unknown', '已点击发送，但未确认新消息；本周期不立即重试。');
+    return result('unknown', useKeyboard ? '已发送 Ctrl+Enter，但未确认新消息；本周期不追加点击或重复按键。' : '已点击发送，但未确认新消息；本周期不立即重试。');
   } catch (error) {
-    return result(clicked ? 'unknown' : 'error', '页面操作未完成，未记录页面内容。');
+    return result(submitted ? 'unknown' : 'error', '页面操作未完成，未记录页面内容。');
   } finally {
-    // A failed pre-click attempt must not turn its own text into a permanent
+    // A failed pre-submit attempt must not turn its own text into a permanent
     // human-draft lock. Never clear a submitted draft or a subsequent user edit.
     await clearOwnDraft();
     // Do not call window.focus(), tabs.update({active:true}), or Clipboard APIs.

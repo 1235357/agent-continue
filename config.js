@@ -13,6 +13,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   preventDiscard: true,
   keepAwake: false,
   waitForIdle: false,
+  sendMethod: 'auto',
   startImmediately: false,
   mode: 'repeat',
   scheduleMode: 'interval',
@@ -51,8 +52,10 @@ export function readConfig(value = {}, { allowEmpty = false } = {}) {
   if (prompt.length > MAX_PROMPT_CHARS) throw new Error('单条提示词最多 100000 个字符。');
   const mode = value.mode ?? DEFAULT_CONFIG.mode;
   const scheduleMode = value.scheduleMode ?? DEFAULT_CONFIG.scheduleMode;
+  const sendMethod = value.sendMethod ?? DEFAULT_CONFIG.sendMethod;
   if (!['repeat', 'queue-loop', 'queue-once'].includes(mode)) throw new Error('请选择有效的重复或队列模式。');
   if (!['interval', 'after-reply'].includes(scheduleMode)) throw new Error('请选择有效的计时方式。');
+  if (!['auto', 'ctrl-enter', 'button'].includes(sendMethod)) throw new Error('请选择有效的发送方式。');
   const queueInput = value.queue ?? [];
   if (!Array.isArray(queueInput) || queueInput.length > 50) throw new Error('队列最多包含 50 条提示词。');
   const queue = queueInput.map((item, index) => {
@@ -71,7 +74,7 @@ export function readConfig(value = {}, { allowEmpty = false } = {}) {
   if (!quiet || typeof quiet.enabled !== 'boolean' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(quiet.start) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(quiet.end)) throw new Error('静默时段须为有效的本地时间。');
   if (quiet.enabled && quiet.start === quiet.end) throw new Error('静默时段的开始与结束不能相同。');
   const promptSource = ['manual', 'file', 'private-file', 'template'].includes(value.promptSource) ? value.promptSource : 'manual';
-  return { deliveryBehaviorVersion: DELIVERY_BEHAVIOR_VERSION, intervalMinutes, prompt, promptSource, maxSends, stopMarkers, ...booleans, mode, scheduleMode, queue, quietHours: { enabled: quiet.enabled, start: quiet.start, end: quiet.end } };
+  return { deliveryBehaviorVersion: DELIVERY_BEHAVIOR_VERSION, intervalMinutes, prompt, promptSource, maxSends, stopMarkers, ...booleans, sendMethod, mode, scheduleMode, queue, quietHours: { enabled: quiet.enabled, start: quiet.start, end: quiet.end } };
 }
 
 export function currentPrompt(job) {

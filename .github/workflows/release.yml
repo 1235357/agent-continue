@@ -89,7 +89,7 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run syntax, state-machine, and local browser tests
-        run: npm test
+        run: xvfb-run -a env TEST_HEADED=1 npm test
 
       - name: Package the loadable extension
         run: python3 scripts/package.py

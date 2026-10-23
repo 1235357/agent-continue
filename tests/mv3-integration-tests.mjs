@@ -13,6 +13,7 @@ const playwright = process.env.PLAYWRIGHT_MODULE_PATH
   : await import('playwright');
 const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-continue-mv3-'));
 const chromePath = process.env.FULL_CHROMIUM_PATH || undefined;
+const headed = process.env.TEST_HEADED === '1';
 const sentinel = 'MV3_SYNTHETIC_PROMPT\nContinue the local fixture only.';
 const checks = [];
 let context;
@@ -32,15 +33,23 @@ function chatFixture(dot) {
   const dot=${JSON.stringify(dot)};
   const editor=document.querySelector('[contenteditable]');
   const send=document.querySelector('button[aria-label="Send"]');
-  window.fixture={sendClicks:0,sentTexts:[],focusCalls:0};
+  window.fixture={sendClicks:0,keyboardSends:0,submits:0,keyEvents:[],sentTexts:[],focusCalls:0};
   window.focus=()=>{fixture.focusCalls++};
   editor.addEventListener('input',()=>{send.disabled=!editor.innerText.trim()});
-  send.addEventListener('click',()=>{
-    const text=editor.innerText; fixture.sendClicks++;fixture.sentTexts.push(text);
+  const submit=method=>{
+    const text=editor.innerText;
+    if(method==='button')fixture.sendClicks++;else fixture.keyboardSends++;
+    if(!text.trim())return;
+    fixture.submits++;fixture.sentTexts.push(text);
     const row=document.createElement(dot?'article':'div');
-    if(dot){row.className='message-row self';row.dataset.messageId='test-user~test-thread~'+(fixture.sendClicks+2);const body=document.createElement('div');body.className='message-body';body.textContent=text;row.append(body)}
+    if(dot){row.className='message-row self';row.dataset.messageId='test-user~test-thread~'+(fixture.submits+2);const body=document.createElement('div');body.className='message-body';body.textContent=text;row.append(body)}
     else{row.dataset.messageAuthorRole='user';row.textContent=text}
     document.querySelector('#history').append(row);editor.replaceChildren(document.createElement('p'));send.disabled=true;
+  };
+  send.addEventListener('click',()=>submit('button'));
+  if(dot)for(const type of ['keydown','keyup'])editor.addEventListener(type,event=>{
+    fixture.keyEvents.push({type,key:event.key,code:event.code,keyCode:event.keyCode,ctrlKey:event.ctrlKey,trusted:event.isTrusted});
+    if(type==='keydown'&&event.key==='Enter'&&event.ctrlKey&&!event.altKey&&!event.metaKey&&!event.shiftKey&&!event.repeat){event.preventDefault();submit('keyboard')}
   });
   </script>`;
 }
@@ -98,8 +107,9 @@ function syntheticPdf(text) {
 }
 async function launch() {
   const launched = await playwright.chromium.launchPersistentContext(profile, {
-    channel: 'chromium', executablePath: chromePath, headless: true,
+    channel: 'chromium', executablePath: chromePath, headless: !headed,
     args: ['--no-sandbox', `--disable-extensions-except=${root}`, `--load-extension=${root}`],
+    ignoreDefaultArgs: ['--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'],
     viewport: { width: 1200, height: 900 },
   });
   await launched.route('https://**/*', async route => {
@@ -113,10 +123,18 @@ async function launch() {
   const worker = launched.serviceWorkers().find(item => item.url().endsWith('/background.js'))
     || await launched.waitForEvent('serviceworker', { predicate: item => item.url().endsWith('/background.js'), timeout: 15000 });
   const id = new URL(worker.url()).host;
-  const control = await launched.newPage();
+  const control = await newTestPage(launched);
   await control.goto(`chrome-extension://${id}/popup.html?view=full`);
   await control.waitForFunction(() => !document.querySelector('#check').disabled, null, { timeout: 15000 });
   return { context: launched, worker, id, control };
+}
+// Playwright otherwise makes every page report focused/visible. Disable this
+// testing override before asserting behavior of an inactive browser tab.
+async function newTestPage(browserContext) {
+  const page = await browserContext.newPage();
+  const session = await browserContext.newCDPSession(page);
+  await session.send('Emulation.setFocusEmulationEnabled', { enabled: false });
+  return page;
 }
 const call = (page, message) => page.evaluate(message => chrome.runtime.sendMessage(message), message);
 const state = page => call(page, { type: 'GET_STATE' });
@@ -131,12 +149,12 @@ try {
   assert.equal((await state(control)).ok, true, 'Full extension page must pass sender authorization.');
   pass('Real extension: manifest/service worker load and full-control-page runtime messages are authorized.');
 
-  const dot = await context.newPage(); await dot.goto('https://chatgpt.com/dots/home');
-  const ordinary = await context.newPage(); await ordinary.goto('https://chatgpt.com/c/mv3-fixture');
+  const dot = await newTestPage(context); await dot.goto('https://chatgpt.com/dots/home');
+  const ordinary = await newTestPage(context); await ordinary.goto('https://chatgpt.com/c/mv3-fixture');
   const dotTab = await workerTab(worker, dot.url());
   const originalDiscard = dotTab.autoDiscardable;
   assert.ok(Number.isInteger(dotTab.id));
-  await control.reload(); await control.waitForFunction(() => !document.querySelector('#check').disabled);
+  await control.bringToFront(); await control.reload(); await control.waitForFunction(() => !document.querySelector('#check').disabled);
   await control.locator('#tab-prompt').click();
   await control.locator('#promptFile').setInputFiles({ name: 'synthetic-only.txt', mimeType: 'text/plain', buffer: Buffer.from(sentinel) });
   await control.waitForFunction(async expected => (await chrome.storage.local.get('config')).config?.prompt === expected, sentinel);
@@ -145,7 +163,7 @@ try {
   await control.locator('#targetSelect').selectOption(String(dotTab.id));
   await control.locator('#check').click();
   await control.waitForFunction(() => document.querySelector('#feedback').textContent.includes('已识别'));
-  assert.equal(await dot.evaluate(() => fixture.sendClicks), 0);
+  assert.deepEqual(await dot.evaluate(() => [fixture.sendClicks, fixture.keyboardSends]), [0, 0]);
   await control.locator('#start').click();
   await control.waitForFunction(() => document.querySelector('#badge').textContent === '运行中');
   const started = await state(control);
@@ -155,20 +173,25 @@ try {
   assert.ok((await worker.evaluate(() => chrome.alarms.getAll())).length > 0);
   pass('Actual controls: local TXT import, no-send self-check and Start bind dot, create alarms and prevent discarding.');
 
-  const work = await context.newPage(); await work.goto('https://unrelated-work.invalid/'); await work.bringToFront();
+  const work = await newTestPage(context); await work.goto('https://unrelated-work.invalid/'); await work.bringToFront();
   await work.locator('#work').focus();
   await work.locator('#work').evaluate(element => element.setSelectionRange(9, 17));
   const before = await work.evaluate(() => ({ value: document.querySelector('#work').value, start: document.querySelector('#work').selectionStart, end: document.querySelector('#work').selectionEnd, focus: document.activeElement.id }));
   const activeBefore = await worker.evaluate(async () => (await chrome.tabs.query({ active: true, currentWindow: true }))[0].id);
+  if (headed) assert.equal(await dot.evaluate(() => document.visibilityState), 'hidden', 'The headed target must actually be hidden, with focus emulation disabled');
   const sent = await call(control, { type: 'SEND_NOW' });
   assert.equal(sent.ok, true, sent.error); assert.equal(sent.job.sentCount, 1, sent.job.statusText);
-  assert.equal(await dot.evaluate(() => fixture.sendClicks), 1);
+  assert.deepEqual(await dot.evaluate(() => [fixture.sendClicks, fixture.keyboardSends, fixture.submits]), [0, 1, 1], 'Default Dot submission must use Ctrl+Enter exactly once and never click Send');
+  const keys = await dot.evaluate(() => fixture.keyEvents.filter(event => event.key === 'Enter'));
+  assert.deepEqual(keys.map(event => [event.type, event.code, event.keyCode, event.ctrlKey, event.trusted]), [['keydown', 'Enter', 13, true, false], ['keyup', 'Enter', 13, true, false]]);
   assert.equal(renderedText(await dot.evaluate(() => fixture.sentTexts[0])), renderedText(sentinel));
   assert.equal(await ordinary.evaluate(() => fixture.sendClicks), 0);
   assert.deepEqual(await work.evaluate(() => ({ value: document.querySelector('#work').value, start: document.querySelector('#work').selectionStart, end: document.querySelector('#work').selectionEnd, focus: document.activeElement.id })), before);
   assert.equal(await worker.evaluate(async () => (await chrome.tabs.query({ active: true, currentWindow: true }))[0].id), activeBefore);
   assert.equal(await dot.evaluate(() => fixture.focusCalls), 0);
-  pass('Real background injection: dot message confirmed while foreground tab, textarea text, selection and focus remain unchanged.');
+  pass(headed
+    ? 'Real hidden-tab Ctrl+Enter: one dot message confirmed without any Send click; foreground tab, text, selection and focus remain unchanged.'
+    : 'Real isolated-world Ctrl+Enter: one dot message confirmed without any Send click or foreground changes; headless visibility is not a hidden-tab claim.');
 
   const paused = await call(control, { type: 'PAUSE' });
   assert.equal(paused.ok, true); assert.equal(paused.job.enabled, false);
@@ -178,13 +201,13 @@ try {
   pass('Pause: actual alarms are removed, original autoDiscardable is restored and Send Now is rejected.');
 
   for (const busy of [true, false]) {
-    const controlled = await context.newPage();
+    const controlled = await newTestPage(context);
     await controlled.goto('https://chatgpt.com/dots/' + (busy ? 'mv3-interrupt' : 'mv3-controlled'));
     const controlledTab = await workerTab(worker, controlled.url());
     const controlledPrompt = 'MV3_CONTROLLED_SYNTHETIC\nOne confirmed message only.';
     // Omit waitForIdle so this exercises the public default through readConfig,
     // storage, runRound and a real isolated-world chrome.scripting invocation.
-    const controlledStart = await call(control, { type: 'START', tabId: controlledTab.id, config: { prompt: controlledPrompt } });
+    const controlledStart = await call(control, { type: 'START', tabId: controlledTab.id, config: { prompt: controlledPrompt, sendMethod: 'button' } });
     assert.equal(controlledStart.ok, true, controlledStart.error);
     assert.equal(controlledStart.job.waitForIdle, false);
     assert.deepEqual(await controlled.evaluate(() => ({ stop: fixture.stopClicks, send: fixture.sendClicks, beforeinput: fixture.beforeInputs })), { stop: 0, send: 0, beforeinput: 0 }, 'Binding remains a read-only self-check');
@@ -242,11 +265,11 @@ try {
   assert.equal(restored.job.id, oldJobId); assert.equal(restored.job.enabled, true);
   assert.equal(restored.job.tabId, null, 'Browser restart must not trust a previous session tab ID.');
   assert.equal(restored.job.prompt, sentinel);
-  const wrong = await context.newPage(); await wrong.goto('https://chatgpt.com/c/wrong-target');
+  const wrong = await newTestPage(context); await wrong.goto('https://chatgpt.com/c/wrong-target');
   const waiting = await call(control, { type: 'SEND_NOW' });
   assert.equal(waiting.ok, true); assert.equal(waiting.job.enabled, true);
   assert.equal(await wrong.evaluate(() => fixture.sendClicks), 0);
-  const restoredDot = await context.newPage(); await restoredDot.goto('https://chatgpt.com/dots/home');
+  const restoredDot = await newTestPage(context); await restoredDot.goto('https://chatgpt.com/dots/home');
   const restoredTab = await workerTab(worker, restoredDot.url());
   const resumedSend = await call(control, { type: 'SEND_NOW' });
   assert.equal(resumedSend.ok, true); assert.equal(resumedSend.job.sentCount, 1, resumedSend.job.statusText);

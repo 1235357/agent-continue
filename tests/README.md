@@ -13,6 +13,14 @@ npx playwright install --with-deps chromium
 npm test
 ```
 
+Linux 发布验证还要让 MV3 与真实 ProseMirror 套件运行在有窗口的浏览器中，明确检查目标页面的隐藏状态：
+
+```bash
+xvfb-run -a env TEST_HEADED=1 npm test
+```
+
+`TEST_HEADED=1` 可在已有图形桌面中直接使用；无显示服务器的 Linux 使用 Xvfb。CI 和 Release 工作流使用这条命令。只运行默认 headless 测试不能证明实际隐藏标签的节流行为。
+
 `npm run vendor` 从锁定的 `pdfjs-dist` 开发依赖生成离线 PDF 主模块、Worker、字体和 CMap，校验后才复制。没有这一步，PDF 导入和相关测试不完整。普通扩展安装用户使用 Release ZIP，无需这些开发步骤。
 
 `npx playwright install chromium` 也会安装浏览器；Linux 缺少系统库时使用带 `--with-deps` 的形式。
@@ -22,14 +30,16 @@ npm test
 | 脚本 | 场景数 | 运行方式 / 目标 |
 | --- | ---: | --- |
 | `background-state-tests.mjs` | 14 | Chrome API mock；基础计时、暂停、令牌和恢复回归 |
-| `background-v2-tests.mjs` | 30 | Chrome API mock；并发、队列、回复后计时、重启、静默、power 与脱敏 |
+| `background-v2-tests.mjs` | 31 | Chrome API mock；并发、队列、回复后计时、重启、静默、power 与脱敏 |
 | `run-adapter-tests.mjs` | 13 | 真实 Chromium + 普通 ChatGPT 合成 DOM |
 | `dot-adapter-tests.mjs` | 38 | 真实 Chromium + dot 合成 DOM、会话身份与发送作用域 |
+| `dot-keyboard-tests.mjs` | 12 | 键盘契约；无按钮、取消、未知回执与不追加备用操作 |
 | `file-import-tests.mjs` | 16 | 真实 Chromium + 合成 TXT / HTML / DOCX / PDF；本地 Worker 与 CSP |
-| `ui-v2-tests.mjs` | 12 | 真实 Chromium + 扩展 API mock；界面隐私、文件导入、配置、布局与清空竞态 |
+| `ui-v2-tests.mjs` | 13 | 真实 Chromium + 扩展 API mock；界面隐私、文件导入、配置、布局与清空竞态 |
 | `mv3-integration-tests.mjs` | 9 | 实际 MV3 扩展 + 完整 Chromium + 独立临时 profile + 合成站点 |
+| `prosemirror-keyboard-tests.mjs` | 4；有窗口为 5 | 官方编辑器 + 实际 MV3；合成按键、按钮对照、自然隐藏标签 |
 
-合计 **132** 个行为场景。`npm run check` 是额外语法检查，不计入场景总数。旧原型界面测试已由 `ui-v2-tests.mjs` 替代，现行隐私、状态与布局回归由该套件覆盖。
+合计 **150** 个无头行为场景；有窗口发布验证增加隐藏 ProseMirror 场景，共 **151** 个。`npm run check` 是额外语法检查，不计入场景总数。旧原型界面测试已由 `ui-v2-tests.mjs` 替代，现行隐私、状态与布局回归由该套件覆盖。
 
 ## 单独执行
 
@@ -38,9 +48,11 @@ node tests/background-state-tests.mjs
 node tests/background-v2-tests.mjs
 node tests/run-adapter-tests.mjs
 node tests/dot-adapter-tests.mjs
+node tests/dot-keyboard-tests.mjs
 node tests/file-import-tests.mjs
 node tests/ui-v2-tests.mjs
 node tests/mv3-integration-tests.mjs
+node tests/prosemirror-keyboard-tests.mjs
 ```
 
 状态套件不启动浏览器。其他套件会启动本地测试 Chromium，但不连接真实聊天会话；站点请求被拦截并返回本地样本。
@@ -61,6 +73,7 @@ MV3 测试使用 `chromium.launchPersistentContext()` 与 `channel: 'chromium'`�
 | `PLAYWRIGHT_MODULE_PATH` | 已有 Playwright 模块的绝对路径；未设置时使用本项目依赖 |
 | `TEST_CHROMIUM_PATH` | DOM、文件导入与 UI 测试所用 Chromium / headless shell 可执行文件 |
 | `FULL_CHROMIUM_PATH` | MV3 测试所用完整 Chromium / Chrome for Testing 可执行文件 |
+| `TEST_HEADED` | 设为 `1` 时 MV3 与 ProseMirror 套件使用有窗口的浏览器，并验证目标实际处于隐藏状态；Linux 无桌面时配合 Xvfb |
 | `POPUP_SCREENSHOT_DIR` | 可选 UI 测试截图输出目录；不设置则不写截图 |
 | `POPUP_FONT_PATH` | 可选本地 CJK 字体路径，仅用于截图展示；不从网络下载字体 |
 
@@ -89,6 +102,8 @@ npm test
 - 文件测试在代码中生成文档，检查原文保存、拒绝损坏 / 加密 / 超限输入、无外部请求和脱敏错误。
 - 清空竞态先让合成文件读取挂起，执行清空，再完成读取；正文不得重新落盘。
 - 后台焦点测试核对另一标签的文字、选区、DOM 焦点；MV3 套件还核对浏览器活动 tab ID。
+- 0.2.2 起，发布测试关闭 Playwright 的焦点仿真，并在有窗口环境中断言 `document.visibilityState === 'hidden'`。仅切换测试中的活动标签 ID 不足以证明隐藏状态。
+- 键盘提交验证一次 Ctrl+Enter 和新用户消息；没有回执时不追加按钮点击。真实 ProseMirror 测试使用官方依赖及键盘映射，不将普通 contenteditable 样本称为真实编辑器。
 - 真实重启测试退出整个浏览器，再打开相同临时 profile，验证旧 tab ID 被清空且错误会话不收到消息。
 
 文本配置使用原文断言；网页富文本段落边界可能通过 `innerText` 显示额外换行，消息显示比较对该展示差异规范化。它不能证明真实网站服务端按字节接收原始文件。

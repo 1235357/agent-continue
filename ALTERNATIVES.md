@@ -2,7 +2,7 @@
 
 调研日期：2026-10-23。目标是 Windows 上的 Chrome / Edge：向指定 ChatGPT / dot 入口，按自定义间隔重复发送原文，默认 20 分钟、没有次数终点，支持手动暂停，让用户继续使用其他标签和应用。
 
-**确实有相似产品，也有值得借鉴的开源实现。** 本次扩展到 19 个相关方案，覆盖定时发送、回复后队列、提示词管理、文件导入、多个会话、UI、保活及 Dots 专门适配。功能覆盖应该逐项验收；“市场全部功能都已覆盖”不是本项目的已验证声明。
+**确实有相似产品，也有值得借鉴的开源实现。** 本次扩展到 20 个相关方案，覆盖定时发送、回复后队列、提示词管理、文件导入、多个会话、UI、保活、Dots 专门适配及 Chat2API 的服务端提交设计。功能覆盖应该逐项验收；“市场全部功能都已覆盖”不是本项目的已验证声明。
 
 ## 证据怎么读
 
@@ -112,6 +112,18 @@
 维护需要持续核对实际 dot 路由与账号切换、输入选择器、提交确认、冻结、重启及附件。Cue 仓库同时记录新式 form[data-chatgpt-composer] .ProseMirror 与旧 #prompt-textarea；Agent Tincan 为 Dots 单列编辑器。单个旧选择器不能当永久协议。
 
 本项目独立实现，不因调研而声称吸收全部第三方代码。复用时须核对逐文件许可并保留声明；公开仓库、GitHub 指南与允许复用的源码许可不是一回事。同名 brahimhamichan/prompt-later 是 Codex 钩子项目，不能作为商店 Prompt Later 的源码证据。
+
+## Chat2API 源码复查：2026-10-23
+
+用户报告 dot 仍只填写不提交，并指出实际发送快捷键是 Ctrl+Enter 后，复查了 [lanqian528/chat2api](https://github.com/lanqian528/chat2api)，固定提交为 `a63a90cec90dea3fea3e272d22f8c5799de14e30`（2025-03-28）。这是第 20 个参照项目。
+
+其入口 [api/chat2api.py](https://github.com/lanqian528/chat2api/blob/a63a90cec90dea3fea3e272d22f8c5799de14e30/api/chat2api.py) 创建服务并调用 `send_conversation()`；[ChatService.py](https://github.com/lanqian528/chat2api/blob/a63a90cec90dea3fea3e272d22f8c5799de14e30/chatgpt/ChatService.py) 的 312–393 行构造消息、会话及父消息标识，通过 HTTP POST 提交 `/conversation`，再检查状态码、响应类型及事件流。它不使用浏览器 Send 按钮或键盘来发送。
+
+[chatFormat.py](https://github.com/lanqian528/chat2api/blob/a63a90cec90dea3fea3e272d22f8c5799de14e30/chatgpt/chatFormat.py) 的 111–126 行检查第一段有效响应，之后区分消息进行中和完成。可借鉴的是：准备输入、发起提交、收到接受回执、Agent 完成属于不同阶段；本扩展只在出现本轮新用户消息时增加确认计数，默认无需等待 Agent 完成。
+
+检查 36 个非空 Python、HTML、Markdown、JSON 文件（另有两个空 Python 文件），未找到 dot 路由、`contenteditable` 提交或 Playwright / Selenium 聊天适配。通用网关存在任意路径转发，但这不能证明它支持当前 dot 的任务语义。其旧会话 HTTP 协议不能直接作为 dot 的发送实现。
+
+本扩展没有引入该项目的账号 token 管理、第三方代理、挑战处理或整体盲重试。它们不解决本次键盘适配缺失，并会改变本项目的数据和权限边界。新增 Ctrl+Enter 是根据用户明确的操作路径及真实页面验证独立实现的，没有复制 Chat2API 源码。
 
 ## 来源索引
 

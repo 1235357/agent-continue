@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(process.env.EXTENSION_ROOT || path.dirname(here));
-const { DEFAULT_CONFIG, inQuietHours } = await import(pathToFileURL(path.join(root, 'config.js')));
+const { DEFAULT_CONFIG, inQuietHours, readConfig } = await import(pathToFileURL(path.join(root, 'config.js')));
 const originalUrl = 'https://chatgpt.com/c/synthetic-original';
 const otherUrl = 'https://chatgpt.com/c/synthetic-other';
 const alarmName = 'agent-continue-heartbeat';
@@ -143,16 +143,43 @@ await scenario('Defaults run every 20 minutes without a send limit or immediate 
   assert.equal(DEFAULT_CONFIG.intervalMinutes, 20);
   assert.equal(DEFAULT_CONFIG.maxSends, 0);
   assert.equal(DEFAULT_CONFIG.waitForIdle, false);
+  assert.equal(DEFAULT_CONFIG.sendMethod, 'auto');
   const h = await harness();
   const before = Date.now();
   const job = await h.start();
   assert.equal(job.enabled, true);
   assert.equal(job.waitForIdle, false);
   assert.equal(h.state.injections[0].args[0].waitForIdle, false);
+  assert.equal(job.sendMethod, 'auto');
+  assert.equal(h.state.injections[0].args[0].sendMethod, 'auto');
   assert.ok(job.nextAt >= before + 20 * 60_000);
   assert.equal(h.sends().length, 0);
   assert.deepEqual(h.state.local.resumeJob, h.state.session.job);
   assert.ok(h.state.accessLevels.some(value => value.area === 'local' && value.accessLevel === 'TRUSTED_CONTEXTS'));
+  await h.message({ type: 'PAUSE' });
+});
+
+await scenario('Send method validates three strategies and freezes the selected strategy in the running task', async () => {
+  assert.equal(readConfig({ prompt: 'SYNTHETIC_LEGACY' }).sendMethod, 'auto');
+  for (const sendMethod of ['auto', 'ctrl-enter', 'button']) {
+    assert.equal(readConfig({ prompt: 'SYNTHETIC_METHOD', sendMethod }).sendMethod, sendMethod);
+  }
+  for (const sendMethod of ['enter', 'click', '', 42, {}]) {
+    assert.throws(() => readConfig({ prompt: 'SYNTHETIC_INVALID_METHOD', sendMethod }), /发送方式/);
+  }
+  const first = await harness();
+  const selected = await first.start({ sendMethod: 'ctrl-enter' });
+  assert.equal(selected.sendMethod, 'ctrl-enter');
+  assert.equal(first.state.local.config.sendMethod, 'ctrl-enter');
+  assert.equal(first.state.local.resumeJob.sendMethod, 'ctrl-enter');
+  assert.equal(first.state.injections[0].args[0].sendMethod, 'ctrl-enter');
+  first.state.local.config.sendMethod = 'button';
+  await first.message({ type: 'PAUSE' });
+  await first.message({ type: 'RESUME' });
+  const h = await harness({ local: copy(first.state.local), session: copy(first.state.session) });
+  await h.message({ type: 'SEND_NOW' });
+  assert.equal(h.sends()[0].args[0].sendMethod, 'ctrl-enter', 'Current task must retain its strategy across draft edits and worker restart');
+  assert.equal(h.state.local.config.sendMethod, 'button', 'Separately edited draft must remain unchanged');
   await h.message({ type: 'PAUSE' });
 });
 
@@ -211,12 +238,14 @@ await scenario('Explicit waiting chosen after upgrade survives worker restarts a
   await h.message({ type: 'PAUSE' });
 });
 
-await scenario('A restored job without a wait flag sends with the interrupt default', async () => {
+await scenario('A restored job without delivery flags uses interrupt and automatic send defaults', async () => {
   const h = await harness();
   await h.start();
   delete h.state.session.job.waitForIdle;
+  delete h.state.session.job.sendMethod;
   await h.message({ type: 'SEND_NOW' });
   assert.equal(h.sends()[0].args[0].waitForIdle, false);
+  assert.equal(h.sends()[0].args[0].sendMethod, 'auto');
   await h.message({ type: 'PAUSE' });
 });
 

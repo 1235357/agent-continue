@@ -109,7 +109,9 @@ async function scenario(name, callback) {
   await page.goto(expectedUrl);
   // Omitting waitForIdle exercises the force-by-default contract. Waiting tests
   // opt in explicitly so a future default change cannot silently weaken them.
-  const args = { mode: 'send', expectedUrl, targetIdentity: 'acct~dot', prompt, runId: 'synthetic-dot-run', runDeadline: Date.now() + 12_000, stopMarkers: [] };
+  // These historical regressions exercise the explicit button strategy. Dot's
+  // default Ctrl+Enter path is covered in dot-keyboard-tests and real MV3 tests.
+  const args = { mode: 'send', expectedUrl, targetIdentity: 'acct~dot', prompt, sendMethod: 'button', runId: 'synthetic-dot-run', runDeadline: Date.now() + 12_000, stopMarkers: [] };
   try { await callback({ context, page, args }); passed++; console.log('PASS ' + name); }
   catch (error) { failed++; console.error('FAIL ' + name + ': ' + error.message); }
   finally { await context.close(); }

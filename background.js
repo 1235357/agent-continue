@@ -110,7 +110,7 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS) {
 async function probe(tab, config, targetIdentity = null) {
   assertSupportedTab(tab);
   if (tab.discarded || tab.frozen) return { status: 'busy', message: '目标标签页已休眠或冻结，等待页面恢复。' };
-  return executePage({ mode: 'check', expectedUrl: normalizeUrl(tab.url), prompt: '', runId: null, stopMarkers: config.stopMarkers ?? [], waitForIdle: config.waitForIdle ?? false, targetIdentity }, tab.id);
+  return executePage({ mode: 'check', expectedUrl: normalizeUrl(tab.url), prompt: '', runId: null, stopMarkers: config.stopMarkers ?? [], waitForIdle: config.waitForIdle ?? false, sendMethod: config.sendMethod ?? 'auto', targetIdentity }, tab.id);
 }
 async function currentTab(tabId) {
   if (Number.isInteger(tabId)) return chrome.tabs.get(tabId);
@@ -291,7 +291,7 @@ async function runRound(force = false, expectedJobId = null) {
       const changed = result.assistantToken ? result.assistantToken !== snapshot.assistantToken : result.assistantCount > snapshot.assistantCount;
       if (result.status === 'ready') result = changed ? { status: 'reply-complete' } : { status: 'busy', message: '等待新的 Agent 回复完成。' };
     } else {
-      result = await executePage({ mode: 'send', expectedUrl: snapshot.url, prompt: currentPrompt(snapshot), runId: snapshot.runId, runDeadline: snapshot.runDeadline, stopMarkers: snapshot.stopMarkers ?? [], waitForIdle: snapshot.waitForIdle ?? false, targetIdentity: snapshot.targetIdentity }, snapshot.tabId, snapshot.runDeadline);
+      result = await executePage({ mode: 'send', expectedUrl: snapshot.url, prompt: currentPrompt(snapshot), runId: snapshot.runId, runDeadline: snapshot.runDeadline, stopMarkers: snapshot.stopMarkers ?? [], waitForIdle: snapshot.waitForIdle ?? false, sendMethod: snapshot.sendMethod ?? 'auto', targetIdentity: snapshot.targetIdentity }, snapshot.tabId, snapshot.runDeadline);
     }
   } catch { result = snapshot.runKind === 'reply-check' ? { status: 'error', message: '回复检查暂不可用，继续等待新回复。' } : { status: 'unknown', message: '后台页面操作未确认。' }; }
   return finishRound(snapshot, result);

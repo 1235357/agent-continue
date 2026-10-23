@@ -7,7 +7,7 @@ const request = message => chrome.runtime.sendMessage(message);
 const fallbackConfig = {
   ...DEFAULT_CONFIG, intervalMinutes: DEFAULT_CONFIG.intervalMinutes ?? 20,
   mode: 'repeat', queue: [], scheduleMode: 'interval', keepAwake: false,
-  startImmediately: false, waitForIdle: false,
+  startImmediately: false, waitForIdle: false, sendMethod: 'auto',
   quietHours: { enabled: false, start: '23:00', end: '07:00' },
 };
 const normalized = value => ({ ...clone(fallbackConfig), ...clone(value || {}),
@@ -36,7 +36,7 @@ let targetSignature = '';
 let queueSignature = '';
 let currentSourceIdentity = null;
 const configFields = ['interval', 'maxSends', 'stopMarkers', 'preventDiscard', 'mode',
-  'scheduleMode', 'startImmediately', 'waitForIdle', 'quietEnabled', 'quietStart', 'quietEnd'];
+  'scheduleMode', 'startImmediately', 'waitForIdle', 'sendMethod', 'quietEnabled', 'quietStart', 'quietEnd'];
 const editableButtons = ['importPrompt', 'importQueue', 'addToQueue', 'loadTemplate', 'deleteTemplate',
   'saveTemplate', 'importConfig', 'saveQueueItem'];
 const eventLabels = {
@@ -104,6 +104,7 @@ function gatherConfig() {
     scheduleMode: $('scheduleMode').value,
     startImmediately: $('startImmediately').checked,
     waitForIdle: $('waitForIdle').checked,
+    sendMethod: $('sendMethod').value,
     keepAwake: $('keepAwake').checked,
     quietHours: { enabled: $('quietEnabled').checked, start: $('quietStart').value, end: $('quietEnd').value },
   };
@@ -258,7 +259,7 @@ function paint(job) {
   $('protection').textContent = '标签保护 · ' + (!enabled ? '待启动' : ({ active: '已启用', off: '关闭', unavailable: '不可用' }[job.discardProtection] || '检查中'));
   $('powerStatus').textContent = '电脑防休眠 · ' + (enabled && config.keepAwake ? (job.systemAwake === true ? '已启用' : '不可用') : '关闭');
   for (const [id, value] of Object.entries({ interval: config.intervalMinutes, maxSends: config.maxSends,
-    stopMarkers: (config.stopMarkers || []).join('\n'), mode: config.mode, scheduleMode: config.scheduleMode,
+    stopMarkers: (config.stopMarkers || []).join('\n'), mode: config.mode, scheduleMode: config.scheduleMode, sendMethod: config.sendMethod,
     quietStart: config.quietHours.start, quietEnd: config.quietHours.end })) setField(id, value);
   for (const [id, value] of Object.entries({ preventDiscard: config.preventDiscard, keepAwake: config.keepAwake,
     startImmediately: config.startImmediately, waitForIdle: config.waitForIdle, quietEnabled: config.quietHours.enabled })) $(id).checked = !!value;
@@ -278,8 +279,9 @@ function paint(job) {
   $('quietStart').disabled = !canEdit() || !config.quietHours.enabled;
   $('quietEnd').disabled = !canEdit() || !config.quietHours.enabled;
   const deliveryHint = config.waitForIdle ? '当前方式：等待 Agent 空闲再发送。' : '当前方式：到点打断并发送。';
+  const submitHint = '提交方式：' + ({ auto: '自动（dot 使用 Ctrl+Enter，普通 ChatGPT 点击按钮）', 'ctrl-enter': 'Ctrl+Enter', button: '点击发送按钮' }[config.sendMethod] || '自动') + '。';
   const cadenceHint = config.scheduleMode === 'after-reply' ? '已选择回复结束后才开始下一间隔。' : '';
-  $('configHint').textContent = deliveryHint + cadenceHint + (enabled
+  $('configHint').textContent = deliveryHint + submitHint + cadenceHint + (enabled
     ? '这里显示正在运行任务的实际配置。暂停后可编辑；“继续原任务”会沿用原配置。'
     : job ? '修改设置后点击“绑定目标并开始”建立新任务。“继续原任务”沿用原提示词、间隔和计数。'
       : '默认每 20 分钟重复同一条提示词，不设发送次数上限。首次发送从启动时计时。');
@@ -376,7 +378,7 @@ function downloadJson(filename, value) {
 function exportableConfig(config, includePrompt) {
   const safe = {};
   for (const key of ['intervalMinutes', 'maxSends', 'stopMarkers', 'preventDiscard', 'mode', 'scheduleMode',
-    'keepAwake', 'startImmediately', 'waitForIdle', 'quietHours']) safe[key] = clone(config[key]);
+    'keepAwake', 'startImmediately', 'waitForIdle', 'sendMethod', 'quietHours']) safe[key] = clone(config[key]);
   if (includePrompt) { safe.prompt = config.prompt; safe.queue = clone(config.queue); }
   return safe;
 }
@@ -385,7 +387,7 @@ function checkedImport(value) {
   if (!source || typeof source !== 'object' || Array.isArray(source)) throw new Error('配置文件格式不正确。');
   const next = clone(draftConfig);
   for (const key of ['intervalMinutes', 'maxSends', 'stopMarkers', 'preventDiscard', 'mode', 'scheduleMode',
-    'keepAwake', 'startImmediately', 'waitForIdle', 'quietHours', 'prompt', 'queue']) {
+    'keepAwake', 'startImmediately', 'waitForIdle', 'sendMethod', 'quietHours', 'prompt', 'queue']) {
     if (Object.hasOwn(source, key)) next[key] = source[key];
   }
   if ('prompt' in source && typeof source.prompt !== 'string') throw new Error('提示词必须是文本。');
