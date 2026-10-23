@@ -1,0 +1,18 @@
+node_modules/
+dist/
+test-results/
+playwright-report/
+.env
+.env.*
+*.log
+.DS_Store
+Thumbs.db
+
+# Personal prompt bundles are never source or public release assets.
+private/
+*-personal.zip
+# Recreated from pinned pdfjs-dist by npm run vendor.
+vendor/pdfjs/*.mjs
+vendor/pdfjs/cmaps/*.bcmap
+vendor/pdfjs/standard_fonts/*.pfb
+vendor/pdfjs/standard_fonts/*.ttf

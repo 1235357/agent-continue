@@ -1,0 +1,20 @@
+{
+  "name": "agent-continue",
+  "version": "0.2.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "Private local prompt scheduling for ChatGPT and Your dot in Chrome and Edge",
+  "scripts": {
+    "check": "node --check background.js && node --check adapter.js && node --check popup.js && node --check config.js && node --check file-import.js",
+    "test": "npm run check && node tests/background-state-tests.mjs && node tests/background-v2-tests.mjs && node tests/run-adapter-tests.mjs && node tests/dot-adapter-tests.mjs && node tests/file-import-tests.mjs && node tests/ui-v2-tests.mjs && node tests/mv3-integration-tests.mjs",
+    "vendor": "node scripts/vendor-pdfjs.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1",
+    "pdfjs-dist": "6.4.299"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}

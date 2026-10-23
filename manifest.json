@@ -1,0 +1,52 @@
+{
+  "manifest_version": 3,
+  "name": "Agent Continue · 后台定时续办",
+  "version": "0.2.0",
+  "description": "为 ChatGPT / Your dot 在后台持续发送自定义提示词，默认 20 分钟，可暂停；文档本地导入、队列与重启恢复。",
+  "minimum_chrome_version": "120",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "alarms"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Agent Continue · 开始 / 暂停",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    }
+  },
+  "commands": {
+    "toggle-running": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Y"
+      },
+      "description": "暂停或继续已绑定的任务"
+    }
+  },
+  "host_permissions": [
+    "https://chatgpt.com/*"
+  ],
+  "optional_permissions": [
+    "power"
+  ],
+  "options_ui": {
+    "page": "popup.html?view=full",
+    "open_in_tab": true
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; worker-src 'self'; connect-src 'self'"
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  }
+}

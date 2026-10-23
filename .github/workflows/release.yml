@@ -1,0 +1,144 @@
+name: Release extension
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# Repository contents access is sufficient to create/update release assets.
+# No personal access token or third-party publishing service is needed.
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out the tagged revision
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          package-manager-cache: false
+
+      - name: Validate version and prepare release notes
+        id: version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          tag = os.environ["RELEASE_TAG"]
+          if not re.fullmatch(r"v\d+\.\d+\.\d+", tag):
+              raise SystemExit("Release tags must use vMAJOR.MINOR.PATCH.")
+          version = tag[1:]
+          manifest = json.loads(Path("manifest.json").read_text(encoding="utf-8"))
+          package = json.loads(Path("package.json").read_text(encoding="utf-8"))
+          lock = json.loads(Path("package-lock.json").read_text(encoding="utf-8"))
+          versions = {
+              "manifest.json": manifest["version"],
+              "package.json": package["version"],
+              "package-lock.json": lock["version"],
+              "package-lock.json root package": lock["packages"][""]["version"],
+          }
+          for filename, actual in versions.items():
+              if actual != version:
+                  raise SystemExit(f"{filename}: {actual!r} does not match {tag!r}.")
+
+          changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          heading = re.search(r"^## \[" + re.escape(version) + r"\].*$", changelog, re.M)
+          if not heading:
+              raise SystemExit(f"CHANGELOG.md needs a ## [{version}] section.")
+          notes = changelog[heading.start():].split("\n## ", 1)[0].strip()
+          notes += (
+              "\n\n### 安装\n\n"
+              f"下载本 Release 的 `agent-continue-{version}.zip`，解压后在 Chrome / Edge "
+              "扩展管理页打开开发者模式，加载其中直接包含 `manifest.json` 的 `AgentContinue` 文件夹。"
+              "无需 Node.js 或构建工具。\n\n"
+              "`SHA256SUMS` 提供 ZIP 的 SHA-256 校验值。"
+              "自动化测试只使用本地模拟页面，实际网站界面变化仍可能需要适配更新。\n"
+          )
+          Path(os.environ["RUNNER_TEMP"], "agent-continue-release-notes.md").write_text(notes, encoding="utf-8")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"version={version}\n")
+          PY
+
+      - name: Install locked development dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Build verified offline PDF resources
+        run: npm run vendor
+
+      - name: Install the Chromium test browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run syntax, state-machine, and local browser tests
+        run: npm test
+
+      - name: Package the loadable extension
+        run: python3 scripts/package.py
+
+      - name: Check ZIP integrity and embedded version
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import zipfile
+          from pathlib import Path
+
+          version = os.environ["RELEASE_VERSION"]
+          artifact = Path("dist", f"agent-continue-{version}.zip")
+          with zipfile.ZipFile(artifact) as archive:
+              if archive.testzip() is not None:
+                  raise SystemExit("The extension ZIP failed its integrity check.")
+              manifest = json.loads(archive.read("AgentContinue/manifest.json"))
+              if manifest["version"] != version:
+                  raise SystemExit("The packaged manifest version does not match the tag.")
+          PY
+
+      - name: Generate and verify SHA-256 checksums
+        working-directory: dist
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          sha256sum "agent-continue-${RELEASE_VERSION}.zip" > SHA256SUMS
+          sha256sum --check SHA256SUMS
+
+      - name: Create or update the GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          archive="dist/agent-continue-${RELEASE_VERSION}.zip"
+          notes="${RUNNER_TEMP}/agent-continue-release-notes.md"
+          if is_draft="$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft')"; then
+            # Re-running a tag replaces only these two generated assets.
+            # A partially created draft can be completed by the same workflow.
+            gh release upload "$RELEASE_TAG" "$archive" dist/SHA256SUMS --clobber
+            if [ "$is_draft" = 'true' ]; then
+              gh release edit "$RELEASE_TAG" --draft=false --title "Agent Continue ${RELEASE_TAG}" --notes-file "$notes"
+            fi
+          else
+            gh release create "$RELEASE_TAG" "$archive" dist/SHA256SUMS \
+              --verify-tag --title "Agent Continue ${RELEASE_TAG}" --notes-file "$notes"
+          fi
