@@ -156,23 +156,39 @@ async function newTestPage(browserContext) {
 async function closeBrowser() {
   const child = browserProcess;
   if (!child) return;
+  if (!child.pid) { browserProcess = null; return; }
   const exited = new Promise(resolve => {
     if (child.exitCode !== null || child.signalCode !== null) resolve();
     else child.once('exit', resolve);
   });
+  // Browser.close acknowledges the request before the process has finished
+  // saving its profile. Do not interrupt that normal exit with an immediate
+  // SIGTERM: headed Chromium can then treat the next start as crash recovery.
+  const timeout = setTimeout(() => child.kill('SIGKILL'), 5000);
   if (browser?.isConnected()) {
     const session = await browser.newBrowserCDPSession();
     await session.send('Browser.close').catch(() => {});
     await browser.close().catch(() => {});
-  }
-  const timeout = setTimeout(() => child.kill('SIGKILL'), 5000);
-  if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+  } else if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
   await exited; clearTimeout(timeout);
   browser = null; browserProcess = null;
 }
 const call = (page, message) => page.evaluate(message => chrome.runtime.sendMessage(message), message);
 const state = page => call(page, { type: 'GET_STATE' });
 const workerTab = (worker, url) => worker.evaluate(async url => (await chrome.tabs.query({})).find(tab => tab.url === url), url);
+async function recoveryDiagnostics(worker, control) {
+  const current = await state(control);
+  const { tabId, url, targetIdentity, lastResult, statusText } = current.job || {};
+  const tabs = await worker.evaluate(async () => (await chrome.tabs.query({}))
+    .map(({ id, windowId, url, pendingUrl, status, active }) => ({ id, windowId, url, pendingUrl, status, active })));
+  const pages = await Promise.all(context.pages().filter(page => page.url().startsWith('https://chatgpt.com/')).map(page => page.evaluate(() => {
+    const last = [...document.querySelectorAll('article.message-row')].at(-1);
+    return { url: location.href, readyState: document.readyState, identity: last?.dataset.messageId?.split('~').slice(0, 2).join('~') || null };
+  })));
+  // This profile contains intercepted synthetic fixtures only. Never log a
+  // prompt, editor contents or chat message body even when a test fails.
+  return { browser: browser?.version(), job: { tabId, url, targetIdentity, lastResult, statusText }, tabs, pages };
+}
 
 try {
   let session = await launch(); context = session.context;
@@ -299,24 +315,49 @@ try {
   await closeBrowser(); context = null;
   session = await launch(); context = session.context; worker = session.worker; control = session.control;
   assert.equal(session.id, id);
-  const restored = await state(control);
-  assert.equal(restored.job.id, oldJobId); assert.equal(restored.job.enabled, true);
-  assert.equal(restored.job.tabId, null, 'Browser restart must not trust a previous session tab ID.');
-  assert.equal(restored.job.prompt, sentinel);
-  const wrong = await newTestPage(context); await wrong.goto('https://chatgpt.com/c/wrong-target');
-  const waiting = await call(control, { type: 'SEND_NOW' });
-  assert.equal(waiting.ok, true); assert.equal(waiting.job.enabled, true);
-  assert.equal(await wrong.evaluate(() => fixture.sendClicks), 0);
-  const restoredDot = await newTestPage(context); await restoredDot.goto('https://chatgpt.com/dots/home');
-  const restoredTab = await workerTab(worker, restoredDot.url());
-  const resumedSend = await call(control, { type: 'SEND_NOW' });
-  assert.equal(resumedSend.ok, true); assert.equal(resumedSend.job.sentCount, 1, resumedSend.job.statusText);
-  assert.equal(resumedSend.job.tabId, restoredTab.id);
-  assert.equal(renderedText(await restoredDot.evaluate(() => fixture.sentTexts[0])), renderedText(sentinel));
-  assert.equal(await wrong.evaluate(() => fixture.sendClicks), 0);
-  assert.ok(resumedSend.job.tabId !== oldTabId || restored.job.tabId === null);
-  await call(control, { type: 'PAUSE' });
-  pass('Real browser restart: persisted enabled job ignores stale tab ID, waits for its exact page and resumes without sending to another conversation.');
+  try {
+    const restored = await state(control);
+    assert.equal(restored.job.id, oldJobId); assert.equal(restored.job.enabled, true);
+    assert.equal(restored.job.tabId, null, 'Browser restart must not trust a previous session tab ID.');
+    assert.equal(restored.job.prompt, sentinel);
+    // This scenario deliberately tests recovery while the original page is
+    // closed. Chromium may restore its previous tabs during startup; close only
+    // pages in this disposable test profile before establishing that precondition.
+    const startupTargets = await worker.evaluate(async url => (await chrome.tabs.query({})).filter(tab => tab.url === url || tab.pendingUrl === url)
+      .map(({ id, windowId, url, pendingUrl, status }) => ({ id, windowId, url, pendingUrl, status })), restored.job.url);
+    if (startupTargets.length) console.log('INFO Synthetic tabs restored by Chromium before the closed-target scenario: ' + JSON.stringify(startupTargets));
+    for (const page of context.pages()) if (page !== control) await page.close();
+    assert.equal((await worker.evaluate(async url => (await chrome.tabs.query({})).filter(tab => tab.url === url || tab.pendingUrl === url).length, restored.job.url)), 0,
+      'The original target must be closed before testing the missing-page recovery state');
+    const wrong = await newTestPage(context); await wrong.goto('https://chatgpt.com/c/wrong-target');
+    const waiting = await call(control, { type: 'SEND_NOW' });
+    assert.equal(waiting.ok, true); assert.equal(waiting.job.enabled, true);
+    assert.equal(waiting.job.tabId, null, 'A missing target must remain unbound rather than selecting a restored or unrelated tab');
+    assert.equal(waiting.job.lastResult, 'busy');
+    assert.equal(waiting.job.sentCount, 0);
+    assert.equal(await wrong.evaluate(() => fixture.sendClicks), 0);
+    const restoredDot = await newTestPage(context); await restoredDot.goto('https://chatgpt.com/dots/home');
+    await control.waitForFunction(async url => (await chrome.tabs.query({ url: 'https://chatgpt.com/*' }))
+      .some(tab => tab.url === url && tab.status === 'complete'), restoredDot.url(), { polling: 50, timeout: 5000 });
+    const restoredTab = await workerTab(worker, restoredDot.url());
+    assert.equal(restoredTab.status, 'complete');
+    assert.equal((await worker.evaluate(async url => (await chrome.tabs.query({})).filter(tab => tab.url === url).length, restoredDot.url())), 1,
+      'The reopened target must be unique');
+    assert.equal(await restoredDot.evaluate(() => [...document.querySelectorAll('article.message-row')].at(-1)?.dataset.messageId?.split('~').slice(0, 2).join('~')), restored.job.targetIdentity,
+      'The reopened synthetic conversation must match the saved identity');
+    const resumedSend = await call(control, { type: 'SEND_NOW' });
+    assert.equal(resumedSend.ok, true); assert.equal(resumedSend.job.sentCount, 1, resumedSend.job.statusText);
+    assert.equal(resumedSend.job.tabId, restoredTab.id);
+    assert.equal(renderedText(await restoredDot.evaluate(() => fixture.sentTexts[0])), renderedText(sentinel));
+    assert.equal(await wrong.evaluate(() => fixture.sendClicks), 0);
+    assert.ok(resumedSend.job.tabId !== oldTabId || restored.job.tabId === null);
+    await call(control, { type: 'PAUSE' });
+    pass('Real browser restart: persisted enabled job ignores stale tab ID, waits for its exact page and resumes without sending to another conversation.');
+  } catch (error) {
+    try { console.error('Synthetic restart diagnostics: ' + JSON.stringify(await recoveryDiagnostics(worker, control))); }
+    catch { console.error('Synthetic restart diagnostics were unavailable.'); }
+    throw error;
+  }
   console.log(`\n${checks.length}/${checks.length} MV3 integration scenarios passed.`);
 } finally {
   await closeBrowser();

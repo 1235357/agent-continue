@@ -108,17 +108,18 @@ async function launchBrowser() {
 async function closeBrowser() {
   const child = browserProcess;
   if (!child) return;
+  if (!child.pid) { browserProcess = null; return; }
   const exited = new Promise(resolve => {
     if (child.exitCode !== null || child.signalCode !== null) resolve();
     else child.once('exit', resolve);
   });
+  // Let Browser.close finish saving the profile and exiting normally.
+  const timeout = setTimeout(() => child.kill('SIGKILL'), 5000);
   if (browser?.isConnected()) {
     const session = await browser.newBrowserCDPSession();
     await session.send('Browser.close').catch(() => {});
     await browser.close().catch(() => {});
-  }
-  const timeout = setTimeout(() => child.kill('SIGKILL'), 5000);
-  if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+  } else if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
   await exited; clearTimeout(timeout);
   browser = null; browserProcess = null;
 }
