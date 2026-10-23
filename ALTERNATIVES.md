@@ -113,17 +113,28 @@
 
 本项目独立实现，不因调研而声称吸收全部第三方代码。复用时须核对逐文件许可并保留声明；公开仓库、GitHub 指南与允许复用的源码许可不是一回事。同名 brahimhamichan/prompt-later 是 Codex 钩子项目，不能作为商店 Prompt Later 的源码证据。
 
-## Chat2API 源码复查：2026-10-23
+## 8. Chat2API 源码深度复盘与 0.2.3 状态引擎演进：2026-10-23
 
-用户报告 dot 仍只填写不提交，并指出实际发送快捷键是 Ctrl+Enter 后，复查了 [lanqian528/chat2api](https://github.com/lanqian528/chat2api)，固定提交为 `a63a90cec90dea3fea3e272d22f8c5799de14e30`（2025-03-28）。这是第 20 个参照项目。
+用户在 Windows 实测中再次报告 dot “依旧只能放入对话框，但就是无法模拟、点击发送”，要求深入复查 [lanqian528/chat2api](https://github.com/lanqian528/chat2api)（提交 `a63a90cec90dea3fea3e272d22f8c5799de14e30`）。这是驱动 0.2.3 架构重构的核心参照。
 
-其入口 [api/chat2api.py](https://github.com/lanqian528/chat2api/blob/a63a90cec90dea3fea3e272d22f8c5799de14e30/api/chat2api.py) 创建服务并调用 `send_conversation()`；[ChatService.py](https://github.com/lanqian528/chat2api/blob/a63a90cec90dea3fea3e272d22f8c5799de14e30/chatgpt/ChatService.py) 的 312–393 行构造消息、会话及父消息标识，通过 HTTP POST 提交 `/conversation`，再检查状态码、响应类型及事件流。它不使用浏览器 Send 按钮或键盘来发送。
+### 为什么纯 DOM 盲点模拟在 Windows / dot 上必然失效？
+在 0.2.2 及更早版本中，扩展将逻辑建立在脆弱的“隔离世界 DOM 模拟”假设上：
+1. **隔离世界与 ProseMirror 状态脱节**：Chrome 扩展的 `chrome.scripting.executeScript` 默认运行在 `ISOLATED` 隔离世界。在此世界通过 `document.execCommand('insertText')` 或 DOM 赋值，无法触及页面主世界（`MAIN` world）内存中的 ProseMirror `EditorView` / `EditorState`。虽然文本肉眼可见显示在输入框，但底层 ProseMirror 认为文档为空，React 将 Send 按钮置为 `disabled=true`。
+2. **非可信合成按键被静默丢弃**：0.2.2 将 dot 硬编码为仅尝试 `Ctrl+Enter` 键盘事件，并显式禁止回退到按钮。但在真实 Chromium 浏览器中，由扩展派发的 `new KeyboardEvent(...)` 具有 `isTrusted === false`。ChatGPT / dot 的 ProseMirror Keymap 及 React 事件委托系统对非真实物理击键直接丢弃或不予响应，导致文字彻底卡死在输入框。
+3. **Windows 平台后台标签的致命焦点检查**：原 0.2.2 在提交前执行 `if (document.activeElement !== editor) return result('blocked')`。在 Windows 系统的 Chromium 内核中，当标签处于后台或应用失去前台窗口焦点时，`document.activeElement` 恒为 `document.body`，造成后台发送 100% 被误拦截。
+4. **后台 Rect 尺寸归零**：Chromium 在 Windows 最小化或后台标签中对元素返回空的 ClientRect，导致 `visible()` 校验失败误判为“元素未加载”。
 
-[chatFormat.py](https://github.com/lanqian528/chat2api/blob/a63a90cec90dea3fea3e272d22f8c5799de14e30/chatgpt/chatFormat.py) 的 111–126 行检查第一段有效响应，之后区分消息进行中和完成。可借鉴的是：准备输入、发起提交、收到接受回执、Agent 完成属于不同阶段；本扩展只在出现本轮新用户消息时增加确认计数，默认无需等待 Agent 完成。
+### Chat2API 的核心启示：直连底层状态模型
+Chat2API 的 [ChatService.py](https://github.com/lanqian528/chat2api/blob/a63a90cec90dea3fea3e272d22f8c5799de14e30/chatgpt/ChatService.py) 之 source 之所以能够稳定可靠地完成对话，是因为它**完全绕过了充满变数与防御机制的浏览器前端 DOM 模拟**，直接与底层的数据模型（会话上下文、父节点 ID、事件流）对接。
 
-检查 36 个非空 Python、HTML、Markdown、JSON 文件（另有两个空 Python 文件），未找到 dot 路由、`contenteditable` 提交或 Playwright / Selenium 聊天适配。通用网关存在任意路径转发，但这不能证明它支持当前 dot 的任务语义。其旧会话 HTTP 协议不能直接作为 dot 的发送实现。
+在浏览器插件的运行环境下，用户已经在前台登录了完整会话，无需搭建独立的 HTTP 代理服务；但 Chat2API 揭示的工程本质是共通的：**绝不能依赖脆弱的单纯 DOM 表面赋值，必须直接打通目标应用的状态引擎**。
 
-本扩展没有引入该项目的账号 token 管理、第三方代理、挑战处理或整体盲重试。它们不解决本次键盘适配缺失，并会改变本项目的数据和权限边界。新增 Ctrl+Enter 是根据用户明确的操作路径及真实页面验证独立实现的，没有复制 Chat2API 源码。
+### AgentContinue 0.2.3 的架构解法
+基于以上复盘，0.2.3 彻底废除了 0.2.2 的单纯隔离世界合成按键逻辑，构建了主世界状态直连与多通道容灾管线：
+- **主世界双轨执行（Dual Execution: world: 'MAIN'）**：通过 MV3 的 `world: 'MAIN'` 注入能力直接访问页面主运行时的 ProseMirror 实例（`pmViewDesc.view`）。调用 `pmView.dispatch(tr)` 派发核心事务并构建富文本段落节点，使 ProseMirror 内存状态与 React Fiber 实时同步，瞬间激活 Send 按钮。
+- **智能多通道提交与容灾回退**：在 `auto` 智能模式下，同时派发 ProseMirror 键盘命令、DOM 键盘事件与全套按钮点击序列（PointerEvent + MouseEvent + click + React Props `onClick`）及表单 `requestSubmit()`。若键盘事件被页面过滤，立即自动回退至按钮，彻底消除“卡在输入框发不出去”的死锁。
+- **平台级后台防御解除**：移除了错误的 `document.activeElement` 检查，并将 `visible()` 改造为感知 Windows 后台状态（`document.visibilityState === 'hidden'`）。
+- **Keepalive 防休眠长连接**：引入 `content.js` 建立长连接 Port，有效防御 Windows 系统下的 Chromium 内存冻结机制。
 
 ## 来源索引
 

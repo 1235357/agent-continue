@@ -49,7 +49,7 @@ async function scenario(name, run) {
   const context = await browser.newContext();
   await context.route('**/*', route => route.fulfill({ contentType: 'text/html', body: fixture }));
   const page = await context.newPage(); await page.goto(expectedUrl);
-  const args = { expectedUrl, targetIdentity: 'test~dot', mode: 'send', prompt, runId: 'keyboard-regression', runDeadline: Date.now() + 3000, stopMarkers: [] };
+  const args = { expectedUrl, targetIdentity: 'test~dot', mode: 'send', prompt, sendMethod: 'ctrl-enter', runId: 'keyboard-regression', runDeadline: Date.now() + 3000, stopMarkers: [] };
   try { await run(page, args); passed++; console.log('PASS ' + name); }
   catch(error) { failed++; console.error('FAIL ' + name + ': ' + error.message); }
   finally { await context.close(); }

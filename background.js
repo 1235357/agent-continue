@@ -97,11 +97,33 @@ function assertSupportedTab(tab, expectedUrl = null) {
 async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS) {
   let timer;
   try {
+    const runScript = async (world) => {
+      const res = await chrome.scripting.executeScript({
+        target: { tabId },
+        world,
+        func: pageAction,
+        args: [args]
+      });
+      return res?.find(frame => frame.frameId === 0)?.result ?? res?.[0]?.result;
+    };
+
+    const runner = async () => {
+      // First try world: 'MAIN' for direct access to ProseMirror runtime, React Fiber, and page event listeners.
+      try {
+        const val = await runScript('MAIN');
+        if (val && RESULT_STATUSES.has(val.status) && val.status !== 'error') {
+          return val;
+        }
+      } catch {}
+      // Fallback to 'ISOLATED' world
+      return await runScript('ISOLATED');
+    };
+
     const result = await Promise.race([
-      chrome.scripting.executeScript({ target: { tabId }, func: pageAction, args: [args] }),
+      runner(),
       new Promise((_, reject) => { timer = setTimeout(() => reject(fail('页面操作超时，本周期结果未确认。')), Math.max(1, deadline - Date.now())); }),
     ]);
-    const value = result?.find(frame => frame.frameId === 0)?.result ?? result?.[0]?.result;
+    const value = result;
     if (!value || !RESULT_STATUSES.has(value.status)) return { status: 'unknown', message: '页面未返回可确认的结果。' };
     // These values originate only in our isolated adapter. Never return page text.
     return { status: value.status, message: String(value.message || '').slice(0, 300), identity: typeof value.identity === 'string' ? value.identity.slice(0, 500) : null, assistantToken: typeof value.assistantToken === 'string' ? value.assistantToken.slice(0, 500) : null, assistantCount: Number(value.assistantCount) || 0 };
@@ -284,7 +306,14 @@ async function runRound(force = false, expectedJobId = null) {
     const resolved = await resolveTarget(snapshot);
     if (!resolved.tab) result = resolved;
     else if (!await runStillCurrent(snapshot)) result = { status: 'cancelled' };
-    else if (resolved.tab.frozen || resolved.tab.discarded) result = { status: 'busy', message: '目标标签已冻结或休眠，请设置网站始终保持活动。' };
+    else if (resolved.tab.frozen || resolved.tab.discarded) {
+      try {
+        await chrome.tabs.reload(resolved.tab.id);
+        result = { status: 'busy', message: '目标标签已休眠，正在自动唤醒刷新，一分钟后再检查。' };
+      } catch {
+        result = { status: 'busy', message: '目标标签已冻结或休眠，请设置网站始终保持活动。' };
+      }
+    }
     else if (snapshot.awaitingReply && !force) {
       result = await probe(resolved.tab, { ...snapshot, waitForIdle: true }, snapshot.targetIdentity);
       if (['unknown', 'cancelled'].includes(result.status)) result = { status: 'error', message: '回复检查暂不可用，继续等待新回复。' };
@@ -425,4 +454,10 @@ chrome.commands.onCommand.addListener(command => {
     if (activationWasPending || job?.enabled) await pause();
     else if (job) { pendingActivationVersion = version; await resume(version); }
   })().catch(() => undefined).finally(() => { if (pendingActivationVersion === version) pendingActivationVersion = null; });
+});
+
+chrome.runtime.onConnect?.addListener?.(port => {
+  if (port.name === 'agent-continue-keepalive') {
+    port.onMessage.addListener(() => {});
+  }
 });

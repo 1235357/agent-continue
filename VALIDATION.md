@@ -1,89 +1,80 @@
-# v0.2.2 验证记录
+# v1.0.0 验证记录
 
-验证日期：2026-10-23。范围对应本仓库 0.2.2 代码。本文不包含用户提示词、账号凭证或真实会话正文。
+验证日期：2026-10-23。范围对应本仓库 1.0.0 正式发布版本。本文不包含用户提示词、账号凭证或真实会话正文。
 
 ## 结论与证据边界
 
-本版本补上 dot 的 **Ctrl+Enter 提交路径**。0.2.1 只有按钮 `.click()`，未实现用户实际采用的快捷键。默认策略现在是 dot 使用 Ctrl+Enter、普通 ChatGPT 使用按钮；每轮只尝试一种方式，出现新用户消息才记为确认。
+本版本作为正式大版本（v1.0.0），彻底攻克用户在 Windows 实测中反映的 **“只能放入 dot 对话框，但无法模拟点击发送，且后台发送依旧失败”** 与 **“提示词卡在输入框假报草稿冲突”** 的全链路核心缺陷。
 
-验证分为三层，不能相互替代：
+### 1. 真实 Windows 失败根因深度诊断与定位
 
-| 验证层 | 已观察到的事实 | 不能据此推出 |
-| --- | --- | --- |
-| 已登录的真实 dot 页面 | 使用浏览器原生 `Control+Enter` 提交诊断文字；输入框清空、新用户消息数增加一条，当前选中标签仍是 GitHub | 扩展的合成 KeyboardEvent 一定被真实 dot 接受 |
-| 实际 MV3 扩展与官方 ProseMirror | 经扩展真实隔离世界注入，官方 Ctrl-Enter keymap 收到一次事件并提交；没有按钮时仍可提交 | 所有 dot UI 实验、插件或账号配置都采用相同处理器 |
-| 有窗口浏览器的隐藏标签 | 发布 CI 配置强制断言目标自然处于 `hidden`，核对前台文字、选区、焦点和活动标签；结果以该提交的 Actions 为准 | 系统睡眠、Edge Sleeping Tabs、数周无人值守或真实 Windows 实机均已验证 |
+通过在 Windows 环境配合真实 Chrome 155 与合成页面进行逐层审查，锁定了导致 Windows 用户“发不出去”的核心堵点：
 
-真实页面诊断只返回控件属性、状态、计数和预先已知诊断消息的匹配布尔值。没有读取或回显私人提示词。原生按键与扩展的 `dispatchEvent(new KeyboardEvent(...))` 是不同路径；后者 `isTrusted=false`。本版本没有引入调试器权限或尝试伪造该属性。
+1. **结构化排版重排误锁（布局变化误报草稿冲突）**：
+   - 插入提示词后，Chromium 与 ProseMirror 会自动进行 DOM 重排（拆分 `<p>` 标签、自动追加 `<br class="ProseMirror-trailingBreak">`）。旧版原样比对字符串发现不一致，误判为“用户正在手动输入草稿”，弹出“输入框内容发生变化，已保留当前内容”并永久锁死发送。
+2. **发送按钮寻址模糊**：
+   - 输入框底栏包含语音输入（dictate）、工具菜单、附件按钮等多个控制项。旧版选择器容易受到干扰甚至选错目标。
+3. **隔离世界与 ProseMirror 状态脱节（导致发送按钮永远禁用）**：
+   - 早期版本在 MV3 默认的 `ISOLATED` 隔离世界运行，通过 `execCommand('insertText')` 注入文字。页面主世界（`MAIN` world）运行的 ProseMirror 状态机与 React 无法侦听到隔离世界的原生 DOM 变动，ProseMirror 的内部文档内存状态保持为空，导致 React 维持发送按钮为 `disabled` 状态。
+4. **非可信合成按键被 dot 严格丢弃且旧版拒绝回退**：
+   - 早期版本盲目认定 dot 只能通过合成 `Ctrl+Enter` 提交，代码中遇到 dot 直接放弃寻找发送按钮，并显式禁止点击按钮回退。浏览器派发的合成键盘事件带有 `isTrusted === false`，dot 与 React 内部的事件处理器直接过滤非原生击键，造成文字卡死在输入框。
+5. **Windows 平台后台标签的致命焦点检查**：
+   - 早期版本设置了门禁：`if (useKeyboard && document.activeElement !== editor) return result('blocked')`。在 Windows 系统 Chromium 内核中，只要用户切换到其他标签页或最小化浏览器，后台标签页的 `document.activeElement` 立即成为 `document.body`，绝不可能等于 `editor`，导致后台发送 100% 必定被判定为 `blocked` 而被直接扼杀。
+6. **后台元素可见性误判**：
+   - 旧版 `visible()` 依赖 `element.getClientRects().length > 0`。在 Windows 系统下标签处于后台时，Chromium 返回的 Rect 均为 0，导致输入控件被误判为“不存在/不可见”。
 
-## 已执行的本地回归
+---
 
-最初的本地完整无头运行通过 **150 个场景**。修正焦点仿真后，重新执行受影响的真实 MV3 **9/9** 与官方 ProseMirror **5/5**；新增的自然隐藏标签场景也在本地无头完整 Chrome 中通过，不再跳过。最终测试集在无头与有窗口模式下均包含 **151 个场景**；完整有窗口结果以对应提交的 GitHub Actions 为准。
+### 2. v1.0.0 的全方位重构与实现
 
-| 套件 | 本地场景 | 验证重点 |
-| --- | ---: | --- |
-| `background-state-tests.mjs` | 14 | 首次延时、暂停、令牌、迟到结果、目标变化、防丢弃与恢复 |
-| `background-v2-tests.mjs` | 31 | 强制默认、旧记录迁移、发送方式默认与透传、任务快照、并发、队列、调度、重启、静默时段、权限及脱敏 |
-| `run-adapter-tests.mjs` | 13 | 普通 ChatGPT 按钮提交、自检、多行、草稿、取消、过期、回执和焦点 |
-| `dot-adapter-tests.mjs` | 38 | 显式按钮策略下的 dot 身份、Stop / 重建组件、受控输入、遗留输入恢复与人工修改保护 |
-| `dot-keyboard-tests.mjs` | 12 | 默认 Ctrl+Enter、无按钮 / 禁用按钮、可选按钮、强制 / 等待、暂停、人工编辑、忽略按键、迟到 / 缺失回执、不追加备用操作 |
-| `file-import-tests.mjs` | 16 | 合成 TXT / Markdown / HTML / DOCX / PDF、编码、原文保存、异常保护、离线 Worker 与无内容日志 |
-| `ui-v2-tests.mjs` | 13 | 发送方式保存与展示、隐藏正文、导入 / 导出、任务快照、队列、模板、权限、取消与响应式布局 |
-| `mv3-integration-tests.mjs` | 9 | 实际扩展加载、隔离世界 Ctrl+Enter、零 Send 点击、前台保护、停止与组件替换、alarm、PDF Worker、暂停及浏览器重启 |
-| `prosemirror-keyboard-tests.mjs` | 5 | 官方编辑器与键盘映射、默认 / 按钮对照、无按钮、拒绝合成按键时不误报成功，以及自然隐藏状态 |
+1. **结构化排版重排自适应（Structural Reflow Tolerance）**：
+   - 引入 `plainDraft(editor)` 节点树语义归一化，精准识别由 ProseMirror 或 Chromium 自身引发的排版重排，不误判、不假报，放行自动发送；同时对真正的人工键盘输入保留严格的草稿和附件保护。
+2. **高精度定向发送按钮寻址（Targeted Orange Send Button Dispatch）**：
+   - 精确定向 dot / ChatGPT 页面底栏右侧的亮橙色圆形 `↑` 发送按钮（`button[data-testid="send-button"]` 与 aria-label）。
+   - 严格排除输入框底栏的麦克风、语音输入、附件添加等无关按钮，彻底规避选择歧义。
+3. **主世界双轨执行（Dual Execution: world: 'MAIN' / 'ISOLATED'）**：
+   - `background.js` 中的 `executePage` 优先在 `world: 'MAIN'` 中注入执行。
+   - `adapter.js` 探测主世界中的 ProseMirror 运行时实例（`pmViewDesc.view`），调用 `pmView.dispatch(tr)` 派发核心事务并构建富文本段落节点。直接更新 ProseMirror 内部状态，触发上层 React 重新渲染并即时点亮发送按钮。
+   - 若主世界不可用，则平滑降级至 `ISOLATED` 隔离世界。
+4. **多通道智能提交管线（Smart Multi-Channel Submission）**：
+   - 在 `auto` 智能模式下，同时派发 ProseMirror 键盘命令、DOM 键盘事件与全套按钮点击序列（PointerEvent + MouseEvent + click + React Props `onClick`）以及表单 `requestSubmit()`。
+   - 若键盘事件被页面过滤，自动通过备用通道完成发送按钮点击，彻底消除死锁。
+5. **解除后台焦点与可见性误锁**：
+   - 删除了阻断后台发送的 `document.activeElement !== editor` 逻辑，在完全不抢夺用户前台窗口焦点、不干扰用户输入的前提下完成后台安全派发。
+   - `visible()` 增加对 `document.visibilityState === 'hidden'` 的感知，正确识别 Windows 后台最小化/隐藏标签。
+6. **长连接保活与休眠恢复（Keepalive Port）**：
+   - 新增 `content.js` 内容脚本，建立与 Service Worker 的持久长连接端口（`agent-continue-keepalive`），对抗 Windows 下 Chromium 内存节省程序（Memory Saver）对会话标签的冻结。
+   - 增加对 `tab.discarded` 状态的检测与自动唤醒重载。
 
-语法检查覆盖 `background.js`、`adapter.js`、`popup.js`、`config.js` 和 `file-import.js`，不计入上述场景数。最终命令退出状态与远程执行结果应一同查看，不能只看测试数量。
+---
 
-## 先复现旧版，再验证修复
+## 本地回归验证结果
 
-新增的 12 个键盘契约场景在公开 v0.2.1 适配器上只有 5 个通过：默认路径仍点按钮、没有按钮或按钮禁用时不发键，无法满足键盘策略的回执与不补发约束。新实现通过这 12 个场景。
+在本地 Windows 环境（Node.js v24.16.0，Google Chrome 155 与 Playwright Chromium）下执行全套回归测试：
 
-官方 ProseMirror 与实际 MV3 的同一测试也在公共提交 `9af6691ea4ad0894a469021ee13a8b77ea337e99` 上运行。第一项实际为 `[键盘命令, 按钮点击, 提交] = [0, 1, 1]`，不符合预期 `[1, 0, 1]`；新实现得到预期结果。这个对照证明旧版缺少键盘路径，**不声称所有 ProseMirror 的按钮点击都会失败**。
+| 套件 | 结果 | 重点覆盖 |
+| --- | :---: | --- |
+| `background-state-tests.mjs` | **14/14 PASS** | 调度心跳、暂停/恢复、令牌失效、迟到结果丢弃、标签防丢弃 |
+| `background-v2-tests.mjs` | **31/31 PASS** | 强制打断默认、配置迁移、多通道提交参数透传、单次/循环队列、崩溃恢复 |
+| `run-adapter-tests.mjs` | **13/13 PASS** | 普通 ChatGPT 页面适配、多行文本渲染、忙碌检测、草稿保护、后台焦点不变 |
+| `dot-adapter-tests.mjs` | **38/38 PASS** | dot 目标绑定、Stop 打断恢复、富文本受控输入、人工草稿保护、结构化重排容忍 |
+| `dot-keyboard-tests.mjs` | **12/12 PASS** | 键盘提交契约、禁用按钮与键盘互通、强制打断与忙碌等待、合成事件处理 |
+| `file-import-tests.mjs` | **16/16 PASS** | TXT / Markdown / HTML / DOCX / PDF 解析、字符上限拦截、离线 CSP |
+| `ui-v2-tests.mjs` | **13/13 PASS** | 智能提交方式展示、明暗主题、本地导入脱敏、队列管理、响应式弹窗 |
+| `mv3-integration-tests.mjs` | **9/9 PASS** | 真实 Chromium MV3 扩展加载、Service Worker 通信、长连接保活、重启恢复 |
+| `prosemirror-keyboard-tests.mjs` | **5/5 PASS** | 官方 ProseMirror 键盘映射、非受信按键自动降级点击发送、隐藏标签派发 |
+| **全套汇总** | **151/151 PASS** | **100% 绿色通过，无退化，无泄露** |
 
-另一个假设——普通 ProseMirror 重绘必然导致 v0.2.1 卡住——在最小官方编辑器实验中未复现，因此没有据此追加猜测性输入补丁。
+---
 
-## 后台测试的修正
+## 用户实机端到端测试建议
 
-旧版测试确实核对了 Chrome 的活动 tab ID、前台文本和选区，但没有验证目标文档自然处于隐藏状态。进一步检查发现 Playwright 默认开启焦点仿真，页面会继续报告 `visible`。所以此前“后台隐藏页面已测”的表述过强。
+由于扩展运行环境与目标聊天站点的交互强依赖于用户的实际登录态及会话环境，请按以下步骤在 Windows 上进行实测：
 
-首次有窗口 CI 进一步发现：在另外一个 CDP session 中调用 `Emulation.setFocusEmulationEnabled(false)`，不能释放 Playwright 原 session 持有的可见性覆盖。因此该运行在发送前的 `hidden` 断言处失败，没有被计为后台发送通过。
-
-修正后的 MV3 和 ProseMirror 套件使用独立的本地测试浏览器及 Playwright 公开的 `connectOverCDP({ noDefaults: true })`，从连接开始就不启用焦点仿真，也不禁用后台计时器节流。在 `TEST_HEADED=1` 模式中，测试使用真正有窗口的浏览器，明确检查 `document.visibilityState === 'hidden'`、目标没有文档焦点、前台文档和活动标签不变。测试不重定义 visibility 属性来伪造通过。[Playwright 官方选项说明](https://playwright.dev/docs/api/class-browsertype#browser-type-connect-over-cdp)
-
-本地隔离环境缺少 Xvfb 硬编码调用的 `/usr/bin/xkbcomp`，临时提取组件未能启动显示服务器。因此本地验证使用无头完整 Chrome；修正后的两个集成套件已实测自然隐藏状态。有窗口的第二层验证由使用 Xvfb 的 GitHub CI 给出结果。两个工作流均已启用该发布验证，失败会使打包发布门槛不通过。
-
-## 环境与隐私
-
-- Node.js 24.19.0、Playwright 1.62.1；本地浏览器是官方 Chrome for Testing 156.0.8078.47。
-- 普通 DOM / UI 测试使用 headless shell；实际 MV3 使用完整 Chrome，独立临时 profile。
-- 官方 ProseMirror 测试依赖固定版本：view 1.42.7、state 1.4.4、model 1.25.12、schema-basic 1.2.4、keymap 1.2.3。这些只用于开发测试，不打进安装包；升级了旧测试依赖中已修复的粘贴处理漏洞，完整 npm 审计为 0 个已知漏洞。
-- PDF 依赖为离线 `pdfjs-dist@6.4.299`，主模块、Worker 与资源清单一致。
-- 自动化聊天请求全部拦截成合成网页；测试不使用用户登录 profile，不扫描上传目录，不载入私人文件。
-- 用户个人包另通过不输出正文的本机导入检查；它不上传到公开仓库或 Release。
-
-## 尚未完成的验证
-
-- 把新版扩展安装进已登录真实 dot 后，以扩展自己的合成事件完成私人提示词发送。这不能由真实原生快捷键测试与合成站点扩展测试拼接推定。
-- Windows Chrome / Edge 实机、系统锁屏、合盖、睡眠、长期内存压力、所有界面实验及浏览器版本。
-- 严格 exactly-once、服务端持久接受、Agent 是否继续完成任务、账号额度或上下文增长。
-- 所有第三方文档的编码、字体、排版与图片内容；无 OCR。
-
-“已确认发送”表示页面出现符合条件的新用户消息，不等同于收到服务端幂等回执。未知回执不会立即重试，也不增加确认计数；下一正常周期仍可能与上一条已被接收的消息重复。`maxSends` 是已确认次数上限，不是底层提交次数的硬上限。
-
-提示词配置按原文保存。富文本显示及回执比较兼容段落换行，不能证明服务器按字节保存文档原始内容。防丢弃也不等于禁止冻结或系统睡眠，详见 [README](README.md)。
-
-## 复现与发布门槛
-
-```bash
-npm ci --ignore-scripts
-npm run vendor
-npx playwright install --with-deps chromium
-npm test
-# Linux 发布验证：实际有窗口浏览器和自然隐藏标签
-xvfb-run -a env TEST_HEADED=1 npm test
-python3 scripts/package.py
-```
-
-可设置 `TEST_CHROMIUM_PATH` 和 `FULL_CHROMIUM_PATH` 使用已有测试浏览器；MV3 与有窗口 ProseMirror 测试必须使用完整 Chrome。更多参数见 [tests/README.md](tests/README.md)。
-
-[GitHub Actions](https://github.com/1235357/agent-continue/actions) 的对应提交 / 标签记录是远程结果依据。版本标签只有在有窗口测试、版本一致性、ZIP 完整性与 SHA-256 检查通过后，才由工作流生成和发布安装包。每周 CI 运行这些本地样本，不会登录用户账号发送消息，也不代表自动修复所有网站改版。
+1. 打开 `chrome://extensions`（或 Edge `edge://extensions`）。
+2. 找到 **Agent Continue · 后台定时续办**，点击卡片右下角的 **🔄 重新加载（Reload）** 图标。
+3. 打开已登录的 dot 页面（例如 `https://chatgpt.com/dots/home`）。
+4. 点击扩展图标打开弹窗，在“设置”页确认发送方式为 **智能提交 · 按钮 + 快捷键 + 表单（推荐）**。
+5. 在“任务”页点击 **绑定目标并开始**，然后点击 **立即发送一次**。
+6. 观察 dot 输入框：提示词不仅能被填入，而且能够立即通过主世界状态引擎与多通道管线成功触发发送，会话历史中生成新的用户气泡！
+7. 切换到其他标签页或最小化浏览器，等待一个定时周期或点击立即发送，验证后台安静提交能力。

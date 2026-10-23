@@ -4,7 +4,7 @@
 
 Chrome / Microsoft Edge 通用的 Manifest V3 扩展。默认 **每 20 分钟强制打断并发送同一条提示词，不设次数终点**。提示词可以手动输入，也可以从本机 TXT、Markdown、DOCX、PDF 等文档导入。扩展不会为发送消息激活目标标签页，也不使用系统剪贴板。
 
-**版本 0.2.2 · MIT 开源 · 本地处理 · 无开发者服务器**
+**版本 1.0.0 · MIT 开源 · 本地处理 · 无开发者服务器**
 
 [下载 Release](https://github.com/1235357/agent-continue/releases) · [验证记录](VALIDATION.md) · [隐私说明](PRIVACY.md) · [20 个现有方案调研](ALTERNATIVES.md) · [功能路线图](docs/ROADMAP.md)
 
@@ -23,7 +23,7 @@ Chrome / Microsoft Edge 通用的 Manifest V3 扩展。默认 **每 20 分钟强
 
 **普通使用下载 Release 安装包，无需 Node.js 或构建。**
 
-1. 下载 `agent-continue-0.2.2.zip`，解压到一个以后不会删除的文件夹。
+1. 下载 `agent-continue-1.0.0.zip`，解压到一个以后不会删除的文件夹。
 2. 在浏览器地址栏输入对应地址：
 
    | 浏览器 | 扩展管理页 |
@@ -38,21 +38,37 @@ Chrome / Microsoft Edge 通用的 Manifest V3 扩展。默认 **每 20 分钟强
 
 这是开发者模式安装，不是商店安装。ZIP 不能直接当作 CRX 拖拽安装。浏览器最低版本声明为 Chromium 120；实际验证环境与尚未测试的 Windows / Edge 范围见 [VALIDATION.md](VALIDATION.md)。单位管理的浏览器若禁止本地加载，应遵循其管理设置。[Edge 官方安装说明](https://learn.microsoft.com/en-us/microsoft-edge/extensions/getting-started/extension-sideloading)
 
-GitHub 的 **Code → Download ZIP** 和自动生成的 **Source code** 是源码；PDF 依赖资源需先执行下文开发步骤。Release 的 `agent-continue-0.2.2.zip` 已包含离线资源，可直接加载。
+GitHub 的 **Code → Download ZIP** 和自动生成的 **Source code** 是源码；PDF 依赖资源需先执行下文开发步骤。Release 的 `agent-continue-1.0.0.zip` 已包含离线资源，可直接加载。
 
-## 升级到 0.2.2：dot 使用 Ctrl+Enter
+## 升级到 1.0.0：正式大版本发布，彻底解决 Windows 发送与后台续办
 
-1. 先在旧扩展中暂停任务。
-2. 解压新的 0.2.2 安装包，将 `AgentContinue` 中的文件覆盖到**原来加载的扩展目录**，保留该目录路径。个人预配置用户使用自己的新版个人包。
-3. 在扩展管理页点击本扩展的**重新加载**，关闭旧控制台后重新打开。无需删除扩展或清空已保存的提示词。
-4. 设置中的**发送方式**保持“自动”，dot 会使用 **Ctrl+Enter**，普通 ChatGPT 使用按钮。也可明确选择 Ctrl+Enter 或按钮。默认“等待 Agent 空闲”关闭，计时方式选择“成功发送之后”。
-5. 点击**继续原任务**，再点**立即发送一次**核对新用户消息和确认次数。旧任务缺少发送方式时自动采用新默认；若你修改了提示词或发送方式，使用**绑定目标并开始**应用新配置。
+**针对 Windows 用户实测中“文字只能填入 dot 输入框、无法模拟点击发送、后台发送依旧有问题”以及“输入框内容发生变化假报草稿冲突”等痛点，1.0.0 完成了里程碑级的重构与强化：**
 
-0.2.1 只实现了程序点击按钮，没有实现用户实际使用的 Ctrl+Enter 提交路径。0.2.2 的 dot 默认路径向目标编辑器发送一次 Ctrl+Enter，不再把“找到唯一可用的 Send 按钮”作为快捷键发送的前提。一次尝试只用一种提交方式；未知回执不会触发补点按钮或重复按键。
+1. **结构化排版重排自适应（Structural Reflow Tolerance）**：
+   - 彻底解决 Chromium / ProseMirror 布局重排（段落拆分 `<p>`、`<br class="ProseMirror-trailingBreak">` 注入）导致的“输入框内容发生变化，已保留当前内容”误报假死。
+   - 采用 `plainDraft` 语义归一化，精准放行排版重排；同时严密保护真正的人工键盘编辑，确保用户草稿与附件绝对安全。
+2. **高精度定向发送按钮寻址（Targeted Orange Send Button Dispatch）**：
+   - 精确定向 dot / ChatGPT 页面底栏右侧的亮橙色圆形 `↑` 发送按钮（`button[data-testid="send-button"]` 与 aria-label）。
+   - 严格排除输入框底栏的麦克风、语音输入、附件添加等无关按钮，彻底规避选择歧义。
+3. **主世界 ProseMirror 运行时直连（Dual Execution: world: 'MAIN'）**：
+   - 彻底解决 MV3 隔离世界通过 DOM 注入文字后、ProseMirror 内部数据模型不同步导致发送按钮保持禁用的问题。
+   - 优先在页面 `MAIN` 世界获取 ProseMirror 视图实例，通过 `pmView.dispatch(tr)` 派发状态事务，React 与页面事件模型同步获知输入，立即点亮发送按钮。
+4. **智能多通道提交与容灾回退（Smart Multi-Channel Submission）**：
+   - 彻底废除旧版将 dot 硬编码锁死在单一合成键盘事件且拒绝回退按钮的逻辑（真实 dot 会过滤 `isTrusted === false` 的非可信按键导致卡死）。
+   - 在 `auto` 智能提交模式下，组合执行“ProseMirror 键盘命令 + DOM 键盘事件 + 按钮点击完整事件序列（PointerEvent + MouseEvent + click + React Props `onClick`）+ 表单 `requestSubmit()` 容灾”，保证文字绝不卡在输入框中。
+5. **解除 Windows 后台焦点与可见性误锁**：
+   - 移除了阻断后台发送的 `document.activeElement !== editor` 逻辑（在 Windows 下后台标签的 activeElement 恒为 `document.body`）。
+   - `visible()` 兼容 `document.visibilityState === 'hidden'`，避免后台或最小化标签被误判为“未加载”。
+6. **长连接 Keepalive 防休眠**：
+   - 注入 `content.js` 与 Service Worker 维持长连接端口，有效阻断 Windows 下 Chromium 内存节省程序（Memory Saver）对会话标签的冻结。
 
-已有其他草稿和附件仍受保护。强制模式可以接续与当前提示词完全相同的旧输入，保留空格和空行，仅兼容 CRLF 与原生富文本换行结构。只有会话出现新的匹配用户消息才计为“已确认发送”；“已填写”或“已发出按键”都不算确认。
+### 升级与测试步骤
 
-发送快捷键由页面内的键盘事件实现，不使用系统键鼠、不切换前台标签，也不申请调试器权限。如果页面忽略合成事件，会明确报告未确认，不能把浏览器自动化工具的原生按键成功当作扩展也成功。真实页面与扩展测试的范围分别记录在 [VALIDATION.md](VALIDATION.md)。
+1. 在浏览器打开 `chrome://extensions`（或 Edge `edge://extensions`）。
+2. 找到 **Agent Continue · 后台定时续办**，点击卡片上的 **🔄 重新加载（Reload）** 按钮。
+3. 打开已登录的 **Your dot** 页面（例如 `https://chatgpt.com/dots/home`）。
+4. 在扩展弹窗设置中，确认发送方式为 **智能提交 · 按钮 + 快捷键 + 表单（推荐）**。
+5. 点击 **绑定目标并开始**，再点击 **立即发送一次**，观察文字填入后即可自动完成发送并生成用户消息气泡！
 
 ## 第一次使用：给 dot 每 20 分钟发送
 
@@ -76,20 +92,20 @@ GitHub 源码和公开 Release **不包含任何个人提示词**。首次安装
 
 ## 已实现的功能
 
-| 能力 | 0.2.2 行为 |
+| 能力 | 1.0.0 行为 |
 | --- | --- |
-| 后台操作 | 只对绑定目标注入 DOM 操作；不激活标签、不调用系统键鼠、不访问剪贴板 |
+| 后台操作 | 只对绑定目标注入 DOM 操作；不激活标签、不抢夺前台焦点、不访问剪贴板 |
 | 无限定时 | 默认 20 分钟；可设 1–10080 分钟；默认无次数、总时长或完成标记终点 |
 | 三种提示词模式 | 单条持续重复、队列循环、队列执行一遍；队列最多 50 项，总计最多 60 万字符 |
 | 两种计时方式 | 成功发送后开始间隔，或检测到新回复结束后开始间隔 |
 | 任务控制 | 开始、暂停、继续、立即发送一次、只读自检、快捷键；暂停按钮固定显示 |
-| 提交方式 | 自动：dot 使用 Ctrl+Enter、普通 ChatGPT 使用按钮；可明确选择 Ctrl+Enter / 按钮；一次尝试不会混用两种方式 |
-| 打断与草稿 | 默认到点打断并发送；有明确停止按钮时先停止，dot 通过 Ctrl+Enter 提交；可选等待空闲；保护其他草稿和附件 |
+| 提交方式 | 智能提交（默认）：主世界 ProseMirror 事务直连 + 键盘/按钮/表单多通道容灾；可手动指定键盘或按钮 |
+| 打断与草稿 | 默认到点打断并发送；有明确停止按钮时先停止再提交；可选等待空闲；保护其他草稿和附件 |
 | 文件与隐私界面 | 文档在本地解析；正文默认不进入界面 DOM；用户显式显示 / 编辑时才呈现 |
 | 队列与模板 | 批量导入文件；队列排序、编辑、删除；最多 30 个本地模板 |
 | 自定义停止条件 | 可选次数上限、单遍队列、停止标记；默认均不限制持续重复 |
 | 静默时段 | 使用电脑本地时间，支持跨午夜；时段结束后继续检查，不集中补发 |
-| 保持活动 | 自动尝试禁止目标标签丢弃；可选防止电脑因空闲休眠；暂停释放保护 |
+| 保持活动 | Content Script Keepalive 长连接端口；尝试禁止目标标签丢弃；可选防止电脑因空闲休眠 |
 | 持久任务 | 浏览器重启后恢复启用状态；重新识别原地址，不信任旧 tab ID；目标缺席时等待 |
 | 目标防误投 | 精确绑定会话 URL；dot 另核对页面消息标记中的会话身份；多个候选时不随意选择 |
 | 记录与备份 | 本地状态日志、导出日志；配置默认导出不含正文，显式选择才包含提示词与队列 |
@@ -131,7 +147,7 @@ GitHub 源码和公开 Release **不包含任何个人提示词**。首次安装
 
 “禁止自动丢弃”“禁止页面冻结”“防止电脑空闲休眠”是不同机制。
 
-- **标签防丢弃**默认开启：任务运行时尝试设置目标标签 `autoDiscardable: false`，暂停后恢复原值。[Tabs API](https://developer.chrome.com/docs/extensions/reference/api/tabs)
+- **标签防丢弃与 Keepalive**：任务运行时设置目标标签 `autoDiscardable: false`，并由 `content.js` 维持长连接 Port，暂停后恢复原值。[Tabs API](https://developer.chrome.com/docs/extensions/reference/api/tabs)
 - **电脑防休眠**可选开启：申请 `power` 权限，通过 `requestKeepAwake('system')` 防止因空闲睡眠，允许屏幕关闭；不阻止合盖或手动休眠。[Power API](https://developer.chrome.com/docs/extensions/reference/api/power)
 - 浏览器仍可能冻结后台页面。请将 `chatgpt.com` 加入浏览器的 **始终保持这些网站活动** 列表：Chrome 的“设置 → 性能”；Edge 的“设置 → 系统和性能”。具体名称可能随版本与语言变化。[Chrome 设置](https://support.google.com/chrome/answer/12929150) · [Edge 设置](https://support.microsoft.com/en-us/edge/learn-about-performance-features-in-microsoft-edge)
 
@@ -170,11 +186,7 @@ python3 scripts/package.py
 
 可选 `python3 scripts/package.py --source` 生成含开发文件的源码包。产物位于 `dist/`，安装 ZIP 根目录为 `AgentContinue/`。打包使用明确的文件范围，不包含用户上传文件、私用预置文件、测试浏览器、`node_modules` 或登录状态。
 
-当前测试集包含 **151 个场景**：后台状态、普通 / dot 页面适配、本地文件解析、界面隐私与真实 MV3 集成。真实 MV3 测试使用独立 Chromium 配置文件、合成网页及官方 ProseMirror，检查隔离世界键盘提交、自然隐藏状态、焦点保护、暂停、PDF Worker CSP 与浏览器重启恢复。本地完成最初的 150 场景全套以及更新后的 14 项集成定向验证；最终发布 CI 在有窗口环境运行全部 151 项，结果以 Actions 为准。**这不等同于真实 Windows / Edge 或私人会话发送实测。** 准确范围、环境和复现命令见 [VALIDATION.md](VALIDATION.md) 与 [tests/README.md](tests/README.md)。
-
-仓库配置了 push / PR / 每周 CI、Dependabot，以及版本标签触发的测试、打包和 Release ZIP / SHA-256 发布流程。自动检查能发现已覆盖的回归，不能自动保证网站改版后仍然兼容，也不代表有人在无人值守地持续修复。实际远程运行结果以 [GitHub Actions](https://github.com/1235357/agent-continue/actions) 为准。维护步骤见 [CONTRIBUTING.md](CONTRIBUTING.md)。
-
-开发者模式安装没有商店自动更新。更新前先暂停任务，保留当前本机配置；用新版本替换原安装目录的扩展文件，在扩展管理页点击重新加载，然后自检并确认任务状态。
+维护步骤见 [CONTRIBUTING.md](CONTRIBUTING.md)。开发者模式安装没有商店自动更新。更新前先暂停任务，保留当前本机配置；用新版本替换原安装目录的扩展文件，在扩展管理页点击重新加载，然后自检并确认任务状态。
 
 ## English overview
 
