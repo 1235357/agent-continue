@@ -217,19 +217,25 @@ async function runStillCurrent(snapshot) {
 async function resolveTarget(snapshot) {
   let tab;
   try { tab = await chrome.tabs.get(snapshot.tabId); } catch { /* Re-resolve by exact URL below. */ }
-  if (!tab || normalizeUrl(tab.url) !== snapshot.url) {
-    const matches = (await chrome.tabs.query({ url: 'https://chatgpt.com/*' })).filter(item => normalizeUrl(item.url) === snapshot.url);
+  const isDot = snapshot.url.includes('/dots/');
+  if (!tab || (isDot ? !tab.url?.includes('/dots/') : normalizeUrl(tab.url) !== snapshot.url)) {
+    const allTabs = await chrome.tabs.query({ url: 'https://chatgpt.com/*' });
+    let matches = allTabs.filter(item => normalizeUrl(item.url) === snapshot.url);
+    if (matches.length === 0 && isDot) {
+      matches = allTabs.filter(item => item.url && item.url.includes('/dots/'));
+    }
     if (matches.length !== 1) return { status: 'busy', message: matches.length ? '找到多个相同目标页，等待只保留一个或重新绑定。' : '等待原目标页面重新打开；任务仍保持启用。' };
     tab = matches[0];
   }
-  if (snapshot.tabId !== tab.id) {
+  const nextUrl = normalizeUrl(tab.url);
+  if (snapshot.tabId !== tab.id || (isDot && snapshot.url !== nextUrl)) {
     const changed = await transact(async () => {
       const current = await getJob();
       if (!current?.enabled || current.runId !== snapshot.runId) return false;
       await restoreDiscard(current);
       const protection = await protectFromDiscard(tab, current.preventDiscard);
-      Object.assign(snapshot, protection, { tabId: tab.id });
-      await setJob({ ...current, ...protection, tabId: tab.id });
+      Object.assign(snapshot, protection, { tabId: tab.id, url: nextUrl });
+      await setJob({ ...current, ...protection, tabId: tab.id, url: nextUrl });
       return true;
     });
     if (!changed) return { status: 'cancelled', message: '本次检查已取消。' };
@@ -367,6 +373,10 @@ async function initialize() {
         // Rebind only to an exact URL; additionally require the dot conversation
         // identity captured from visible message elements, when available.
         job = { ...recovery, tabId: null, runId: token(), runDeadline: null, autoDiscardableChanged: false, discardProtection: 'pending' };
+        if (job.enabled && (!job.nextAt || job.nextAt <= Date.now())) {
+          job.nextAt = Date.now() + 3000;
+          job.statusText = '已从重启中恢复；正在连接目标页面并继续推进…';
+        }
         await logEvent('browser-restored', '已恢复任务设置；等待唯一匹配的原目标页面。');
       }
     }
@@ -436,12 +446,28 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
     let tab;
     try { tab = await chrome.tabs.get(tabId); } catch { return; }
     if (normalizeUrl(tab.url) === job.url) return;
+    const isDot = job.url.includes('/dots/');
+    if (isDot && tab.url && tab.url.includes('/dots/')) {
+      const updatedUrl = normalizeUrl(tab.url);
+      await setJob({ ...job, url: updatedUrl });
+      return;
+    }
     await restoreDiscard(job);
     const interrupted = job.phase === 'sending' && job.runKind !== 'reply-check';
     const waiting = { ...job, tabId: null, runId: token(), runDeadline: null, phase: 'idle', runKind: null, awaitingReply: interrupted ? false : job.awaitingReply, unknownCount: (job.unknownCount || 0) + (interrupted ? 1 : 0), nextAt: Math.max(job.nextAt || 0, Date.now() + (interrupted ? job.intervalMinutes * 60_000 : RETRY_MS)), autoDiscardableChanged: false, discardProtection: 'pending', statusText: interrupted ? '发送期间页面改变，结果未确认；完整间隔后检查原地址。' : '原目标页面已离开；等待原地址重新打开，不会给其他会话发送。' };
     if (interrupted) await logEvent('interrupted', '发送期间目标改变，等待下一完整周期。');
     await setJob(waiting); await updateBadge(waiting);
   })).catch(() => undefined);
+});
+chrome.runtime.onStartup?.addListener?.(() => {
+  initialized.then(async () => {
+    const job = await getJob();
+    if (job?.enabled) {
+      await syncAlarm(job);
+      await updateBadge(job);
+      setTimeout(() => runRound(false).catch(() => undefined), 2500);
+    }
+  }).catch(() => undefined);
 });
 chrome.commands.onCommand.addListener(command => {
   if (command !== 'toggle-running') return;

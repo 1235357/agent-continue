@@ -47,16 +47,22 @@ export async function pageAction(args) {
   const stopSelector = 'button[data-testid="stop-button"], button[aria-label="Stop streaming"], button[aria-label="Stop generating"], button[aria-label="Stop response"], button[aria-label="停止生成"], button[aria-label="停止输出"], button[aria-label="停止流式传输"], button[aria-label*="Stop" i], button[aria-label*="停止" i]';
   const busySelector = '.typing-indicator, ' + stopSelector;
   const sendSelector = 'button[data-testid="send-button"], button[data-testid="composer-submit-button"], button[data-testid="fruitjuice-send-button"], button[data-testid*="send" i], button[data-testid*="submit" i], button[aria-label="Send prompt"], button[aria-label="Send message"], button[aria-label="发送提示"], button[aria-label="发送消息"], button[aria-label="Send"], button[aria-label="发送"], button[aria-label*="Send" i], button[aria-label*="发送" i], button[type="submit"]';
-  const userSelector = isDot ? 'article.message-row.self .message-body' : '[data-message-author-role="user"]';
-  const assistantSelector = isDot ? 'article.message-row:not(.self) .message-body' : '[data-message-author-role="assistant"]';
+  const userSelector = isDot
+    ? '[data-message-author-role="user"], article.message-row.self .message-body'
+    : '[data-message-author-role="user"]';
+  const assistantSelector = isDot
+    ? '[data-message-author-role="assistant"], article.message-row:not(.self) .message-body'
+    : '[data-message-author-role="assistant"]';
 
-  const messageKey = element => element?.getAttribute('data-message-id') || element?.closest('[data-message-id]')?.getAttribute('data-message-id') || element?.id || null;
+  const messageKey = element => element?.getAttribute('data-message-id') || element?.closest('[data-message-id]')?.getAttribute('data-message-id') || element?.getAttribute('data-testid') || element?.id || null;
 
   const identity = () => {
     if (!isDot) return null;
-    const row = [...document.querySelectorAll('article.message-row')].at(-1);
-    const parts = messageKey(row?.querySelector('.message-body') || row)?.split('~') || [];
-    return parts.length >= 3 ? parts.slice(0, 2).join('~') : null;
+    const row = [...document.querySelectorAll('article.message-row, [data-message-author-role], article[data-testid^="conversation-turn-"]')].at(-1);
+    const key = messageKey(row?.querySelector('.message-body') || row);
+    if (!key) return null;
+    const parts = key.split('~');
+    return parts.length >= 3 ? parts.slice(0, 2).join('~') : key;
   };
 
   const assistantState = () => {
@@ -66,7 +72,19 @@ export async function pageAction(args) {
 
   let beforeAssistant = null;
   const result = (status, message) => ({ status, message, identity: identity(), ...(status === 'sent' ? beforeAssistant : assistantState()) });
-  const samePage = () => normalizeUrl(location.href) === args.expectedUrl && (!args.targetIdentity || identity() === args.targetIdentity);
+  const samePage = () => {
+    const curUrl = normalizeUrl(location.href);
+    const expUrl = args.expectedUrl;
+    const isCurDot = new URL(location.href).pathname.startsWith('/dots/');
+    const isExpDot = expUrl.includes('/dots/');
+    const urlMatch = curUrl === expUrl || (isExpDot && isCurDot);
+    if (!urlMatch) return false;
+    if (args.targetIdentity) {
+      const currentId = identity();
+      if (currentId && currentId !== args.targetIdentity) return false;
+    }
+    return true;
+  };
   const withinDeadline = () => Number.isFinite(args.runDeadline) && Date.now() < args.runDeadline;
   const forceInterrupt = args.waitForIdle !== true;
   const busy = () => !forceInterrupt && visibleMatches(busySelector).length > 0;
