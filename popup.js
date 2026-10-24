@@ -367,8 +367,15 @@ async function importFiles(files, appendQueue = false) {
   }
 }
 function applyTheme(theme) {
-  if (theme === 'light' || theme === 'dark') document.body.dataset.theme = theme;
-  else delete document.body.dataset.theme;
+  if (theme === 'light' || theme === 'dark') {
+    document.body.dataset.theme = theme;
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
+  } else {
+    delete document.body.dataset.theme;
+    delete document.documentElement.dataset.theme;
+    document.documentElement.style.colorScheme = 'light dark';
+  }
 }
 function downloadJson(filename, value) {
   const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' }));
