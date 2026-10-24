@@ -49,7 +49,10 @@ const eventLabels = {
   quiet: '静默时段', skipped: '本轮跳过', done: '达到停止条件', stopped: '任务已停止',
 };
 
-if (fullView) document.body.classList.add('full');
+if (fullView) {
+  document.body.classList.add('full');
+  document.documentElement.classList.add('full');
+}
 $('promptFile').accept = SUPPORTED_ACCEPT;
 $('queueFiles').accept = SUPPORTED_ACCEPT;
 $('prompt').maxLength = MAX_PROMPT_CHARS || 100000;

@@ -75,21 +75,24 @@ html[data-theme="dark"], body[data-theme="dark"] {
 * { box-sizing: border-box; }
 html {
   background: var(--bg);
+  width: 480px;
+  height: 585px;
   overflow: hidden;
-  height: 100%;
   color-scheme: light dark;
 }
 body {
   margin: 0;
-  width: 520px;
-  max-width: 100vw;
+  width: 480px;
+  min-width: 480px;
   height: 585px;
-  max-height: 590px;
+  min-height: 585px;
+  max-height: 585px;
   display: flex;
   flex-direction: column;
   background: var(--bg);
   color: var(--text);
   overflow: hidden;
+  box-sizing: border-box;
 }
 
 button, input, select, textarea { font: inherit; color: inherit; }
@@ -546,8 +549,14 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.65); backdrop-filter: blur(4px); 
 dialog p { font-size: 11px; color: var(--muted); margin-top: 8px; }
 dialog h2 { font-size: 15px; }
 
+html.full, html:has(body.full) {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+}
 body.full {
   width: 100%;
+  min-width: 0;
   max-width: none;
   height: auto;
   min-height: 100vh;
