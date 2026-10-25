@@ -417,6 +417,15 @@ for (const name of ['task', 'prompt', 'settings', 'logs']) {
     event.preventDefault(); showPanel(names[index], true);
   });
 }
+window.addEventListener('keydown', event => {
+  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target?.tagName)) return;
+  if (event.ctrlKey || event.metaKey || event.altKey) return;
+  const panelMap = { '1': 'task', '2': 'prompt', '3': 'settings', '4': 'logs' };
+  if (panelMap[event.key]) {
+    event.preventDefault();
+    showPanel(panelMap[event.key], true);
+  }
+});
 $('goPrompt').addEventListener('click', () => showPanel('prompt'));
 $('targetSelect').addEventListener('change', () => { selectedTabId = Number($('targetSelect').value) || null; });
 $('start').addEventListener('click', async () => {

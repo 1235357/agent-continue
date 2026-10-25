@@ -19,7 +19,7 @@ const original = { ...structuredClone(DEFAULT_CONFIG), prompt: 'SYNTHETIC-PRIVAT
 const resources = new Set(['popup.html', 'popup.css', 'popup.js', 'config.js', 'file-import.js']);
 
 async function createPage({ full = false, enabled = false } = {}) {
-  const context = await browser.newContext({ viewport: { width: full ? 1200 : 480, height: full ? 900 : 600 }, colorScheme: 'light', acceptDownloads: true });
+  const context = await browser.newContext({ viewport: { width: full ? 1200 : 650, height: full ? 900 : 600 }, colorScheme: 'light', acceptDownloads: true });
   await context.route('**/*', async route => {
     const name = new URL(route.request().url()).pathname.slice(1);
     if (name === '__test-font.otf' && screenshotFont) return route.fulfill({ status: 200, contentType: 'font/otf', body: await fs.readFile(screenshotFont) });
@@ -262,7 +262,7 @@ try {
   const expanded = new URL(await page.evaluate(() => __uiMock.tabs[0].url));
   assert.equal(expanded.searchParams.get('view'), 'full'); assert.equal(expanded.searchParams.get('targetTabId'), '42');
   assert.deepEqual(errors, []);
-  pass('Popup layout: all four panels fit 480 px, fixed task controls stay visible; full-console link preserves target ID.');
+  pass('Popup layout: all four panels fit 650 px, fixed task controls stay visible; full-console link preserves target ID.');
   await context.close();
 
   const full = await createPage({ full: true, enabled: true });
