@@ -15,7 +15,7 @@
     "playwright": "1.62.1",
     "prosemirror-keymap": "1.2.3",
     "prosemirror-model": "1.25.12",
-    "prosemirror-schema-basic": "1.2.4",
+    "prosemirror-schema-basic": "1.2.5",
     "prosemirror-state": "1.4.4",
     "prosemirror-view": "1.42.7"
   },
