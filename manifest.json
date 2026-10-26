@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Agent Continue · 后台定时续办",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "为 ChatGPT / Your dot 在后台持续发送自定义提示词，默认 20 分钟，可暂停；文档本地导入、队列与重启恢复。",
   "minimum_chrome_version": "120",
   "permissions": [

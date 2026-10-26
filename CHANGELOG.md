@@ -2,6 +2,29 @@
 
 记录实际实现与适配边界。发布状态与日期以 GitHub Release 和对应 Actions 运行结果为准。
 
+## [1.1.0] — 2026-10-25
+
+### 视觉大改版：650px 宽幅控制台 · 重启无缝接续 · 极速预设与键盘导航 (v1.1.0 Release)
+
+- **650px 宽幅现代化控制台（Wide Dashboard Console）**：
+  - 弹窗宽度由 480px / 420px 彻底拓宽至 **650px**（宽度增加超 55%），卡片舒展大气，在 1080p、2K 及 4K 高分屏下展现媲美 Linear / Raycast 的专业桌面工作台质感。
+  - 彻底根除 Chromium 弹窗在 `max-width: 100vw` 约束下的视口死锁塌陷 Bug，强制固化 650px 最小几何安全宽度，杜绝弹窗缩成几十像素细条的异常。
+  - 彻底根除 Windows 原生刺眼亮白滚动条，全域声明 `color-scheme: light dark` 并严格限制 body 高度在 Chromium 弹窗安全阈值（585px）内，滚动条统一使用 5px 极细半透明圆角胶囊滑块。
+  - 彻底消除导航栏选项卡中文字符逐字竖排折行问题（`提\n示\n词`），启用 `white-space: nowrap` 与弹性对齐。
+- **电脑与浏览器重启无缝接续（Seamless Reboot & Reconnect）**：
+  - 监听 `chrome.runtime.onStartup`，浏览器重启后 2.5 秒内自动唤醒调度服务并重新绑定会话。
+  - 自动归一化兼容 ChatGPT Dot 会话动态路由（兼容 `/dots/home` 与 `/dots/c/<threadId>` 双向跳转与重定向），会话地址跳转不脱钩、不误判失效。
+  - 任务恢复时自动校准过期倒计时，将停留在 `00:00` 的过期周期平滑重设并重新计时，无缝衔接推进。
+- **ChatGPT Dot 真实消息气泡递送确认（Confirmed Real Delivery）**：
+  - 升级 `adapter.js` 用户消息气泡选择器，兼顾最新版 ChatGPT 与 Dot 的 `article.message-row.self .message-body` 和 `[data-message-author-role="user"]`。
+  - 消除父子容器双重计数偏差，准确匹配真实递送气泡，解决“已成功发送但系统记录未确认、计数不增加”的问题。
+- **6 档常用节奏预设与高光胶囊（6 Quick Cadence Presets）**：
+  - 扩充常用发送节奏：`5 分钟`、`10 分钟`、`15 分钟`、`20 分钟`、`30 分钟`、`1 小时` 6 档常用周期一键直达，选中间隔呈现高亮翠绿微光胶囊。
+- **全局数字键极速导航（Power-User Shortcuts）**：
+  - 弹窗在焦点下支持敲击数字键 `1`（任务）、`2`（提示词）、`3`（设置）、`4`（日志）快速切换主面板，告别频繁鼠标寻址。
+- **实时调度呼吸脉冲指示灯（Active Schedule Pulse Indicator）**：
+  - 运行状态徽标增加翡翠绿呼吸光环动效，一眼即可确认后台调度正在平稳工作。
+
 ## [1.0.0] — 2026-10-23
 
 ### 正式大版本发布：后台全自动定时续办系统 (v1.0.0 Production Release)

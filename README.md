@@ -4,9 +4,9 @@
 
 Chrome / Microsoft Edge 通用的 Manifest V3 扩展。默认 **每 20 分钟强制打断并发送同一条提示词，不设次数终点**。提示词可以手动输入，也可以从本机 TXT、Markdown、DOCX、PDF 等文档导入。扩展不会为发送消息激活目标标签页，也不使用系统剪贴板。
 
-**版本 1.0.0 · MIT 开源 · 本地处理 · 无开发者服务器**
+**版本 1.1.0 · MIT 开源 · 本地处理 · 无开发者服务器**
 
-[下载 Release](https://github.com/1235357/agent-continue/releases) · [验证记录](VALIDATION.md) · [隐私说明](PRIVACY.md) · [20 个现有方案调研](ALTERNATIVES.md) · [功能路线图](docs/ROADMAP.md)
+[下载 Release](https://github.com/1235357/agent-continue/releases) · [更新日志](CHANGELOG.md) · [验证记录](VALIDATION.md) · [隐私说明](PRIVACY.md) · [20 个现有方案调研](ALTERNATIVES.md) · [功能路线图](docs/ROADMAP.md)
 
 ![完整控制台：使用合成测试数据展示运行状态、目标和发送节奏](docs/ui-console.png)
 
@@ -23,7 +23,7 @@ Chrome / Microsoft Edge 通用的 Manifest V3 扩展。默认 **每 20 分钟强
 
 **普通使用下载 Release 安装包，无需 Node.js 或构建。**
 
-1. 下载 `agent-continue-1.0.0.zip`，解压到一个以后不会删除的文件夹。
+1. 下载 `agent-continue-1.1.0.zip`，解压到一个以后不会删除的文件夹。
 2. 在浏览器地址栏输入对应地址：
 
    | 浏览器 | 扩展管理页 |
@@ -38,7 +38,30 @@ Chrome / Microsoft Edge 通用的 Manifest V3 扩展。默认 **每 20 分钟强
 
 这是开发者模式安装，不是商店安装。ZIP 不能直接当作 CRX 拖拽安装。浏览器最低版本声明为 Chromium 120；实际验证环境与尚未测试的 Windows / Edge 范围见 [VALIDATION.md](VALIDATION.md)。单位管理的浏览器若禁止本地加载，应遵循其管理设置。[Edge 官方安装说明](https://learn.microsoft.com/en-us/microsoft-edge/extensions/getting-started/extension-sideloading)
 
-GitHub 的 **Code → Download ZIP** 和自动生成的 **Source code** 是源码；PDF 依赖资源需先执行下文开发步骤。Release 的 `agent-continue-1.0.0.zip` 已包含离线资源，可直接加载。
+GitHub 的 **Code → Download ZIP** 和自动生成的 **Source code** 是源码；PDF 依赖资源需先执行下文开发步骤。Release 的 `agent-continue-1.1.0.zip` 已包含离线资源，可直接加载。
+
+## 升级到 1.1.0：650px 宽幅工作台、电脑重启无缝接续与 Dot 气泡确认
+
+**针对多场景用户实测反馈，1.1.0 带来大幅度体验提升与鲁棒性修复：**
+
+1. **650px 宽幅现代化控制台（Wide Dashboard Console）**：
+   - 弹窗宽度直接由 480px / 420px 拓宽至 **650px**（提升超 55%），消除拥挤感，高分屏下呈现桌面仪表盘质感。
+   - 根除 Chromium 弹窗在 `max-width: 100vw` 约束下的视口死锁塌陷 Bug，强制固化 650px 最小几何安全宽度，绝不缩成几十像素细条。
+   - 根除 Windows 原生刺眼亮白滚动条，全域声明 `color-scheme: light dark` 并限制 body 高度在 Chromium 安全阈值（585px）内。
+   - 消除导航栏选项卡逐字竖排折行问题（`提\n示\n词`），文字整齐横排。
+2. **电脑与浏览器重启无缝接续（Seamless Reboot & Reconnect）**：
+   - 监听 `chrome.runtime.onStartup`，浏览器或电脑重启后 2.5 秒内自动唤醒调度服务并重新绑定会话。
+   - 自动归一化兼容 ChatGPT Dot 会话动态路由（兼容 `/dots/home` 与 `/dots/c/<threadId>` 双向跳转），地址变化不误判失效。
+   - 任务恢复时自动校准过期倒计时，将停留在 `00:00` 的过期周期平滑重设并重新计时，无缝衔接推进。
+3. **ChatGPT Dot 真实消息气泡递送确认（Confirmed Real Delivery）**：
+   - 升级 `adapter.js` 用户消息气泡选择器，兼顾最新版 ChatGPT 与 Dot 的 `article.message-row.self .message-body` 和 `[data-message-author-role="user"]`。
+   - 消除父子容器双重计数偏差，准确匹配真实递送气泡，确保每次成功发送后准确确权、递增计数。
+4. **6 档常用节奏预设与高光胶囊（6 Quick Cadence Presets）**：
+   - 扩充常用发送节奏：`5 分钟`、`10 分钟`、`15 分钟`、`20 分钟`、`30 分钟`、`1 小时` 6 档常用周期一键直达，选中间隔呈现高亮翠绿微光胶囊。
+5. **全局数字键极速导航（Power-User Shortcuts）**：
+   - 弹窗在焦点下支持敲击数字键 `1`（任务）、`2`（提示词）、`3`（设置）、`4`（日志）快速切换主面板，告别频繁鼠标寻址。
+6. **实时调度呼吸脉冲指示灯（Active Schedule Pulse Indicator）**：
+   - 运行状态徽标增加翡翠绿呼吸光环动效，一眼即可确认后台调度正在平稳工作。
 
 ## 升级到 1.0.0：正式大版本发布，彻底解决 Windows 发送与后台续办
 
