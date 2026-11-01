@@ -188,15 +188,15 @@ try {
     const observed = await inspect(page);
     assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [1, 0, 1]);
   });
-  await scenario('A trusted-event-only keymap automatically falls back to an enabled Send button and confirms submission', async page => {
+  await scenario('A trusted-event-only keymap remains unconfirmed without replaying through Send', async page => {
     await start(page);
     const sent = await call({ type: 'SEND_NOW' });
     assert.equal(sent.ok, true, sent.error);
-    assert.equal(sent.job.sentCount, 1);
-    assert.equal(sent.job.lastResult, 'sent');
+    assert.equal(sent.job.sentCount, 0);
+    assert.equal(sent.job.lastResult, 'unknown');
     const observed = await inspect(page);
-    assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [1, 1, 1]);
-    assert.equal(observed.editorEmpty, true);
+    assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [1, 0, 0]);
+    assert.equal(observed.editorEmpty, false);
   });
   await scenario('An actually hidden ProseMirror tab receives Ctrl+Enter while foreground text, selection and active tab stay unchanged', async page => {
       await start(page);

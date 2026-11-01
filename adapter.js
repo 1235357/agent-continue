@@ -1,7 +1,5 @@
 // This function is injected into one explicitly selected tab.
-// Supports both MAIN and ISOLATED execution worlds:
-// - In MAIN world: accesses ProseMirror runtime (pmViewDesc), React Fiber props, and page event listeners.
-// - In ISOLATED world: falls back to DOM/execCommand and synthetic events.
+// Executed in ISOLATED world with authoritative background permission checks.
 export async function pageAction(args) {
   const normalizeUrl = value => {
     try {
@@ -39,7 +37,7 @@ export async function pageAction(args) {
 
   // Dot's actual composer submits with Send button or Ctrl+Enter.
   // When sendMethod is auto (default):
-  // - on dot: tries keyboard first, and immediately falls back to Send button if unhandled
+  // - on dot: one keyboard attempt, with no fallback replay
   // - on normal ChatGPT: prefers Send button
   const sendMethod = args.sendMethod || 'auto';
   const useKeyboardOnly = sendMethod === 'ctrl-enter';
@@ -81,7 +79,7 @@ export async function pageAction(args) {
     if (!urlMatch) return false;
     if (args.targetIdentity) {
       const currentId = identity();
-      if (currentId && currentId !== args.targetIdentity) return false;
+      if (!currentId || currentId !== args.targetIdentity) return false;
     }
     return true;
   };
@@ -98,10 +96,10 @@ export async function pageAction(args) {
         const reply = await chrome.runtime.sendMessage({ type: 'CHECK_RUN', runId: args.runId });
         return reply?.ok === true && reply.allowed === true && samePage() && withinDeadline();
       } catch {
-        // In MAIN world, chrome.runtime.sendMessage is unavailable; rely on runDeadline & samePage.
+        return false;
       }
     }
-    return samePage() && withinDeadline();
+    return false;
   };
 
   if (!samePage()) return result('blocked', '目标会话地址已改变，已停止发送。');
@@ -140,6 +138,7 @@ export async function pageAction(args) {
     if (node.tagName === 'BR') return '\n';
     if (node !== editor && !['DIV', 'P', 'SPAN'].includes(node.tagName)) return null;
     const children = [...node.childNodes];
+    if (node === editor && children.length === 1 && children[0].nodeName === 'BR') return '';
     if (node !== editor && ['DIV', 'P'].includes(node.tagName) && children.length === 1 && children[0].nodeName === 'BR') return '';
     let value = '';
     let previousBlock = false;
@@ -164,7 +163,10 @@ export async function pageAction(args) {
     return normalizeLineEndings(structured ?? textOf(editor)) === expected;
   };
 
-  const draftPresent = () => hasAttachment() || (!!clean(textOf(editor)) && !matchingDraft());
+  const draftPresent = () => {
+    const draft = editor instanceof HTMLTextAreaElement ? textOf(editor) : (plainDraft(editor) ?? textOf(editor));
+    return hasAttachment() || (draft.length > 0 && !matchingDraft());
+  };
   const editable = () => !editor.disabled && !editor.readOnly && (editor.isContentEditable || editor instanceof HTMLTextAreaElement);
 
   if (busy()) return result('busy', 'Agent 仍在运行，稍后再次检查。');
@@ -352,9 +354,13 @@ export async function pageAction(args) {
 
     const accepted = await fill(prompt);
     inserted = accepted;
-    await wait(60);
     insertedTextSnapshot = textOf(editor);
     let insertedDraftSnapshot = plainDraft(editor);
+    await wait(60);
+    if (textOf(editor) !== insertedTextSnapshot || plainDraft(editor) !== insertedDraftSnapshot) {
+      inserted = false;
+      return result('draft', '填写后检测到内容变化，已保留草稿，本轮不提交。');
+    }
     if (!accepted) return result('blocked', '输入框未接受完整填写，未点击发送；稍后重试。');
 
     const findSendButton = (root = composer) => {
@@ -393,6 +399,7 @@ export async function pageAction(args) {
       if (!editor.isConnected || hasAttachment()) return true;
       const currentText = textOf(editor);
       if (currentText === insertedTextSnapshot) return false;
+      if (editor instanceof HTMLTextAreaElement) return true;
       const currentStructured = plainDraft(editor);
       if (currentStructured !== null && insertedDraftSnapshot !== null && currentStructured === insertedDraftSnapshot) {
         return false;
@@ -421,9 +428,13 @@ export async function pageAction(args) {
         if (interruption) return interruption;
         const refilled = await fill(prompt);
         inserted = refilled;
-        await wait(60);
         insertedTextSnapshot = textOf(editor);
         insertedDraftSnapshot = plainDraft(editor);
+        await wait(60);
+        if (textOf(editor) !== insertedTextSnapshot || plainDraft(editor) !== insertedDraftSnapshot) {
+          inserted = false;
+          return result('draft', '重新填写后检测到内容变化，已保留草稿，本轮不提交。');
+        }
         if (!refilled) return result('blocked', '打断后输入框未接受完整填写，稍后重试。');
       }
 
@@ -460,21 +471,13 @@ export async function pageAction(args) {
     const clickButton = btn => {
       if (!btn) return false;
       try {
-        btn.disabled = false;
-        btn.removeAttribute('disabled');
-        btn.removeAttribute('aria-disabled');
+        if (!enabled(btn) || !composer.contains(btn)) return false;
         const opts = { bubbles: true, cancelable: true, composed: true, view: window };
         btn.dispatchEvent(new PointerEvent('pointerdown', opts));
         btn.dispatchEvent(new MouseEvent('mousedown', opts));
         btn.dispatchEvent(new PointerEvent('pointerup', opts));
         btn.dispatchEvent(new MouseEvent('mouseup', opts));
         btn.click();
-        try {
-          const propKey = Object.keys(btn).find(k => k.startsWith('__reactProps$') || k.startsWith('__reactEventHandlers$'));
-          if (propKey && btn[propKey]?.onClick) {
-            btn[propKey].onClick(new MouseEvent('click', opts));
-          }
-        } catch {}
         return true;
       } catch { return false; }
     };
@@ -487,10 +490,6 @@ export async function pageAction(args) {
           bubbles: true, cancelable: true, composed: true, view: window
         };
         const downEvent = new KeyboardEvent('keydown', keyOpts);
-        const pmView = getProseMirrorView(editor);
-        if (pmView) {
-          try { pmView.someProp('handleKeyDown', f => f(pmView, downEvent)); } catch {}
-        }
         editor.dispatchEvent(downEvent);
         editor.dispatchEvent(new KeyboardEvent('keyup', keyOpts));
         return true;
@@ -505,14 +504,6 @@ export async function pageAction(args) {
       // 'auto' mode:
       if (isDot) {
         dispatchKey(true);
-        await wait(100);
-        // If synthetic key was ignored (editor not cleared on real page), click Send button!
-        if (clean(textOf(editor)) === clean(prompt) || clean(textOf(editor)) !== '') {
-          const targetBtn = sendButton || findSendButton(composer) || findSendButton(document);
-          if (targetBtn) {
-            clickButton(targetBtn);
-          }
-        }
       } else {
         const targetBtn = sendButton || findSendButton(composer) || findSendButton(document);
         if (targetBtn) clickButton(targetBtn);
@@ -526,9 +517,6 @@ export async function pageAction(args) {
       const messages = [...document.querySelectorAll(userSelector)];
       const last = messages.at(-1);
       if (last && (messageKey(last) ? !beforeKeys.has(messageKey(last)) : !beforeMessages.has(last)) && clean(textOf(last)) === clean(prompt)) {
-        return result('sent', useKeyboardOnly ? '已通过 Ctrl+Enter 提交，并在会话中确认新消息。' : '已确认发送并在会话中确认新消息。');
-      }
-      if (clean(textOf(editor)) === '' && visibleMatches(busySelector).length > 0) {
         return result('sent', useKeyboardOnly ? '已通过 Ctrl+Enter 提交，并在会话中确认新消息。' : '已确认发送并在会话中确认新消息。');
       }
       await wait(180);

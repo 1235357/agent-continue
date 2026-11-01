@@ -1,13 +1,14 @@
 {
   "name": "agent-continue",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "private": true,
   "license": "MIT",
   "type": "module",
   "description": "Private local prompt scheduling for ChatGPT and Your dot in Chrome and Edge",
   "scripts": {
+    "test:safety": "node tests/background-state-tests.mjs && node tests/background-v2-tests.mjs && node --test tests/release-adapter-tests.mjs && node tests/release-safety-source-tests.mjs",
     "check": "node --check background.js && node --check adapter.js && node --check popup.js && node --check config.js && node --check file-import.js",
-    "test": "npm run check && node tests/background-state-tests.mjs && node tests/background-v2-tests.mjs && node tests/run-adapter-tests.mjs && node tests/dot-adapter-tests.mjs && node tests/dot-keyboard-tests.mjs && node tests/file-import-tests.mjs && node tests/ui-v2-tests.mjs && node tests/mv3-integration-tests.mjs && node tests/prosemirror-keyboard-tests.mjs",
+    "test": "npm run check && npm run test:safety && node tests/run-adapter-tests.mjs && node tests/dot-adapter-tests.mjs && node tests/dot-keyboard-tests.mjs && node tests/file-import-tests.mjs && node tests/ui-v2-tests.mjs && node tests/mv3-integration-tests.mjs && node tests/prosemirror-keyboard-tests.mjs",
     "vendor": "node scripts/vendor-pdfjs.mjs"
   },
   "devDependencies": {

@@ -37,9 +37,12 @@ async function setJob(job) {
     await chrome.storage.local.remove('resumeJob');
   }
 }
-async function logEvent(event, message) {
+async function logEvent(event, message, diagnostic = null) {
   const logs = (await chrome.storage.local.get('logs')).logs || [];
-  await chrome.storage.local.set({ logs: [...logs.slice(-199), { at: Date.now(), event, message }] });
+  const codes = ['adapter-result', 'execution-exception', 'no-valid-result'];
+  const detail = diagnostic && codes.includes(diagnostic.code)
+    ? { diagnostic: { code: diagnostic.code, durationMs: Math.max(0, Math.min(120000, Number(diagnostic.durationMs) || 0)) } } : {};
+  await chrome.storage.local.set({ logs: [...logs.slice(-199), { at: Date.now(), event, message, ...detail }] });
 }
 async function updateBadge(job) {
   try {
@@ -108,14 +111,7 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS) {
     };
 
     const runner = async () => {
-      // First try world: 'MAIN' for direct access to ProseMirror runtime, React Fiber, and page event listeners.
-      try {
-        const val = await runScript('MAIN');
-        if (val && RESULT_STATUSES.has(val.status) && val.status !== 'error') {
-          return val;
-        }
-      } catch {}
-      // Fallback to 'ISOLATED' world
+      // Keep run authorization in the extension context; never replay a send in another world.
       return await runScript('ISOLATED');
     };
 
@@ -124,8 +120,8 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS) {
       new Promise((_, reject) => { timer = setTimeout(() => reject(fail('页面操作超时，本周期结果未确认。')), Math.max(1, deadline - Date.now())); }),
     ]);
     const value = result;
-    if (!value || !RESULT_STATUSES.has(value.status)) return { status: 'unknown', message: '页面未返回可确认的结果。' };
-    // These values originate only in our isolated adapter. Never return page text.
+    if (!value || !RESULT_STATUSES.has(value.status)) return { status: 'unknown', message: '页面未返回可确认的结果。', diagnosticCode: 'no-valid-result' };
+    // Return only bounded adapter status fields.
     return { status: value.status, message: String(value.message || '').slice(0, 300), identity: typeof value.identity === 'string' ? value.identity.slice(0, 500) : null, assistantToken: typeof value.assistantToken === 'string' ? value.assistantToken.slice(0, 500) : null, assistantCount: Number(value.assistantCount) || 0 };
   } finally { clearTimeout(timer); }
 }
@@ -218,12 +214,9 @@ async function resolveTarget(snapshot) {
   let tab;
   try { tab = await chrome.tabs.get(snapshot.tabId); } catch { /* Re-resolve by exact URL below. */ }
   const isDot = snapshot.url.includes('/dots/');
-  if (!tab || (isDot ? !tab.url?.includes('/dots/') : normalizeUrl(tab.url) !== snapshot.url)) {
+  if (!tab || normalizeUrl(tab.url) !== snapshot.url) {
     const allTabs = await chrome.tabs.query({ url: 'https://chatgpt.com/*' });
     let matches = allTabs.filter(item => normalizeUrl(item.url) === snapshot.url);
-    if (matches.length === 0 && isDot) {
-      matches = allTabs.filter(item => item.url && item.url.includes('/dots/'));
-    }
     if (matches.length !== 1) return { status: 'busy', message: matches.length ? '找到多个相同目标页，等待只保留一个或重新绑定。' : '等待原目标页面重新打开；任务仍保持启用。' };
     tab = matches[0];
   }
@@ -281,7 +274,7 @@ async function finishRound(snapshot, result) {
       job.awaitingReply = false;
       job.needsAttention = true;
       job.statusText = '本周期提交结果未确认；本周期不重试，完整间隔后继续。请检查页面记录。';
-      await logEvent('unconfirmed', '本周期结果未知；未立即重试，将在下一正常周期继续。');
+      await logEvent('unconfirmed', '本周期结果未知；未立即重试，将在下一正常周期继续。', { code: result.diagnosticCode || 'adapter-result', durationMs: now - snapshot.lastRunAt });
     }
     job.lastResult = result.status;
     await setJob(job);
@@ -328,7 +321,7 @@ async function runRound(force = false, expectedJobId = null) {
     } else {
       result = await executePage({ mode: 'send', expectedUrl: snapshot.url, prompt: currentPrompt(snapshot), runId: snapshot.runId, runDeadline: snapshot.runDeadline, stopMarkers: snapshot.stopMarkers ?? [], waitForIdle: snapshot.waitForIdle ?? false, sendMethod: snapshot.sendMethod ?? 'auto', targetIdentity: snapshot.targetIdentity }, snapshot.tabId, snapshot.runDeadline);
     }
-  } catch { result = snapshot.runKind === 'reply-check' ? { status: 'error', message: '回复检查暂不可用，继续等待新回复。' } : { status: 'unknown', message: '后台页面操作未确认。' }; }
+  } catch { result = snapshot.runKind === 'reply-check' ? { status: 'error', message: '回复检查暂不可用，继续等待新回复。' } : { status: 'unknown', message: '后台页面操作未确认。', diagnosticCode: 'execution-exception' }; }
   return finishRound(snapshot, result);
 }
 async function initializePrivatePreset() {

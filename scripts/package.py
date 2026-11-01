@@ -6,6 +6,7 @@ uploads are never searched, opened, or copied by this release packager.
 """
 from pathlib import Path, PurePosixPath
 import argparse
+from fnmatch import fnmatchcase
 import hashlib
 import json
 import os
@@ -21,7 +22,7 @@ REVIEWED_PDF_INTEGRITY = "sha512-AVl138zALtfaAPvADulE0PZThbYzCBS79nL4pOSL/6Sm/4A
 REVIEWED_PDF_FILE_COUNT = 188
 
 RUNTIME_FILES = (
-    "manifest.json", "background.js", "adapter.js", "config.js", "preset.js",
+    "manifest.json", "background.js", "content.js", "adapter.js", "config.js", "preset.js",
     "file-import.js", "popup.html", "popup.css", "popup.js", "README.md",
     "LICENSE", "CHANGELOG.md", "PRIVACY.md", "VALIDATION.md", "ALTERNATIVES.md",
     "CONTRIBUTING.md", "docs/FILE_FORMATS.md",
@@ -167,7 +168,45 @@ def verified_vendor_files(root, cache):
     return {metadata_path, *(f"vendor/pdfjs/{name}" for name in names)}
 
 
-def package_release(root, include_source=False):
+def validate_manifest_files(manifest, files):
+    """Check local manifest resources against archive members, not the disk."""
+    references = set(manifest.get("icons", {}).values())
+    background = manifest.get("background", {})
+    references.update(background.get("scripts", []))
+    if background.get("service_worker"):
+        references.add(background["service_worker"])
+    if background.get("page"):
+        references.add(background["page"])
+    for script in manifest.get("content_scripts", []):
+        references.update(script.get("js", []))
+        references.update(script.get("css", []))
+    for key in ("action", "browser_action", "page_action"):
+        action = manifest.get(key, {})
+        if action.get("default_popup"):
+            references.add(action["default_popup"])
+        icons = action.get("default_icon", {})
+        references.update([icons] if isinstance(icons, str) else icons.values())
+    for key in ("options_ui", "side_panel"):
+        page = manifest.get(key, {}).get("page" if key == "options_ui" else "default_path")
+        if page:
+            references.add(page)
+    if manifest.get("options_page"):
+        references.add(manifest["options_page"])
+    if manifest.get("devtools_page"):
+        references.add(manifest["devtools_page"])
+    references.update(manifest.get("sandbox", {}).get("pages", []))
+    references.update(manifest.get("chrome_url_overrides", {}).values())
+    for entry in manifest.get("web_accessible_resources", []):
+        references.update(entry.get("resources", []) if isinstance(entry, dict) else [entry])
+    for reference in sorted(references):
+        path = reference.split("?", 1)[0].split("#", 1)[0]
+        if not any(fnmatchcase(filename, path) for filename in files):
+            raise PackageError(f"Manifest resource missing from public archive: {reference}")
+    if any(part.lower() in BLOCKED_COMPONENTS for name in files for part in PurePosixPath(name).parts):
+        raise PackageError("A blocked path appears in the public archive.")
+
+
+def package_release(root, include_source=False, store=False):
     root = Path(root)
     if root.is_symlink() or not root.is_dir():
         raise PackageError("The project root must be a regular directory, not a symlink.")
@@ -177,7 +216,7 @@ def package_release(root, include_source=False):
     files |= approved_tree(root, "docs", {".md", ".png", ".svg", ".webp", ".jpg", ".jpeg"})
     if include_source:
         files.update(SOURCE_FILES)
-        files |= approved_tree(root, "tests", {".mjs", ".html", ".md"})
+        files |= approved_tree(root, "tests", {".py", ".mjs", ".html", ".md"})
         files |= approved_tree(root, "scripts", {".py", ".mjs"})
         files |= approved_tree(root, ".github", {".yml", ".yaml", ".md"})
 
@@ -185,6 +224,7 @@ def package_release(root, include_source=False):
     # The cached bytes are exactly those whose preset and vendor hashes passed.
     for filename in sorted(files):
         read_public(root, filename, cache)
+    validate_manifest_files(read_json(root, "manifest.json", cache), files)
 
     output_directory = root / "dist"
     if output_directory.is_symlink():
@@ -192,7 +232,7 @@ def package_release(root, include_source=False):
     output_directory.mkdir(exist_ok=True)
     if not stat.S_ISDIR(output_directory.lstat().st_mode):
         raise PackageError("The release output path must be a directory.")
-    suffix = "-source" if include_source else ""
+    suffix = ("-store" if store else "") + ("-source" if include_source else "")
     output = output_directory / f"agent-continue-{version}{suffix}.zip"
     if output.is_symlink() or (output.exists() and not output.is_file()):
         raise PackageError("Refusing to overwrite a non-file release output.")
@@ -203,7 +243,7 @@ def package_release(root, include_source=False):
             temporary = Path(stream.name)
             with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
                 for filename in sorted(files):
-                    member = zipfile.ZipInfo(f"AgentContinue/{filename}", date_time=ZIP_TIMESTAMP)
+                    member = zipfile.ZipInfo(filename if store else f"AgentContinue/{filename}", date_time=ZIP_TIMESTAMP)
                     member.create_system = 3
                     member.external_attr = (stat.S_IFREG | 0o644) << 16
                     member.compress_type = zipfile.ZIP_DEFLATED
@@ -224,9 +264,10 @@ def package_release(root, include_source=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", action="store_true", help="Also include tests, build scripts and repository configuration")
+    parser.add_argument("--store", action="store_true", help="Build a separate Chrome Store ZIP with manifest.json at its root")
     args = parser.parse_args()
     try:
-        output = package_release(ROOT, include_source=args.source)
+        output = package_release(ROOT, include_source=args.source, store=args.store)
     except (PackageError, OSError, UnicodeError) as error:
         parser.exit(1, f"Public packaging failed: {error}\n")
     print(output)

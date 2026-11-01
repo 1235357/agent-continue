@@ -250,6 +250,23 @@ await scenario('An empty browser session clears old alarms instead of reusing ta
   assert.equal(h.state.injections.length,0);
 });
 
+for (const [name, pageResult, code] of [
+  ['adapter uncertainty', async()=>({status:'unknown'}), 'adapter-result'],
+  ['missing adapter result', async()=>null, 'no-valid-result'],
+  ['execution exception', async()=>{throw new Error('PRIVATE_SENTINEL');}, 'execution-exception'],
+]) {
+  await scenario(`Diagnostic classifies ${name} without raw exception or prompt`, async()=>{
+    const h=await harness();await h.start();h.pageResult=pageResult;
+    const result=await h.message({type:'SEND_NOW'});
+    assert.equal(result.job.sentCount,0);
+    const entry=h.state.local.logs.findLast(item=>item.event==='unconfirmed');
+    assert.equal(entry.diagnostic.code,code);
+    assert.ok(Number.isFinite(entry.diagnostic.durationMs));
+    assert.doesNotMatch(JSON.stringify(h.state.local.logs),/PRIVATE_SENTINEL|Continue mock task\./);
+    assert.ok(h.state.injections.every(item=>item.world==='ISOLATED'));
+    await h.message({type:'PAUSE'});
+  });
+}
 const failed=results.filter(x=>x.status==='FAIL').length;
 console.log(`RESULT ${results.length-failed}/${results.length} passed`);
 process.exitCode=failed?1:0;

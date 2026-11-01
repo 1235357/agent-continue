@@ -4,7 +4,7 @@
 
 Chrome / Microsoft Edge 通用的 Manifest V3 扩展。默认 **每 20 分钟强制打断并发送同一条提示词，不设次数终点**。提示词可以手动输入，也可以从本机 TXT、Markdown、DOCX、PDF 等文档导入。扩展不会为发送消息激活目标标签页，也不使用系统剪贴板。
 
-**版本 1.1.0 · MIT 开源 · 本地处理 · 无开发者服务器**
+**版本 2.0.0 候选 · 免费 · MIT 开源 · 本地处理 · 无开发者服务器**
 
 [下载 Release](https://github.com/1235357/agent-continue/releases) · [更新日志](CHANGELOG.md) · [验证记录](VALIDATION.md) · [隐私说明](PRIVACY.md) · [20 个现有方案调研](ALTERNATIVES.md) · [功能路线图](docs/ROADMAP.md)
 
@@ -23,7 +23,7 @@ Chrome / Microsoft Edge 通用的 Manifest V3 扩展。默认 **每 20 分钟强
 
 **普通使用下载 Release 安装包，无需 Node.js 或构建。**
 
-1. 下载 `agent-continue-1.1.0.zip`，解压到一个以后不会删除的文件夹。
+1. 在 GitHub Release 确认实际发布版本后，下载 `agent-continue-2.0.0.zip`，解压到一个以后不会删除的文件夹。
 2. 在浏览器地址栏输入对应地址：
 
    | 浏览器 | 扩展管理页 |
@@ -38,7 +38,13 @@ Chrome / Microsoft Edge 通用的 Manifest V3 扩展。默认 **每 20 分钟强
 
 这是开发者模式安装，不是商店安装。ZIP 不能直接当作 CRX 拖拽安装。浏览器最低版本声明为 Chromium 120；实际验证环境与尚未测试的 Windows / Edge 范围见 [VALIDATION.md](VALIDATION.md)。单位管理的浏览器若禁止本地加载，应遵循其管理设置。[Edge 官方安装说明](https://learn.microsoft.com/en-us/microsoft-edge/extensions/getting-started/extension-sideloading)
 
-GitHub 的 **Code → Download ZIP** 和自动生成的 **Source code** 是源码；PDF 依赖资源需先执行下文开发步骤。Release 的 `agent-continue-1.1.0.zip` 已包含离线资源，可直接加载。
+GitHub 的 **Code → Download ZIP** 和自动生成的 **Source code** 是源码；PDF 依赖资源需先执行下文开发步骤。构建的 `agent-continue-2.0.0.zip` 包含离线资源，可直接加载；本地生成不代表 GitHub 已发布。
+
+## 2.0.0：单次提交与可诊断运行
+
+发送前使用隔离环境中的后台许可检查；一次尝试不自动切换另一提交机制。无法确认新消息时保留未知结果，不把输入框清空当作成功。暂停、目标身份与用户草稿保护优先于继续发送。
+日志在本机保留最多 200 条，可在日志页主动导出；新版增加固定分类和有限耗时，不记录正文或原始异常。
+本地完整测试覆盖合成 ChatGPT/Dot 页面及真实 MV3 扩展，不保证线上页面永久兼容。没有收费、订阅或开发者遥测服务。
 
 ## 升级到 1.1.0：650px 宽幅工作台、电脑重启无缝接续与 Dot 气泡确认
 

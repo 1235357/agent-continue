@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+const source = file => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
+const background = source('background.js');
+const adapter = source('adapter.js');
+assert.doesNotMatch(background, /runScript\('MAIN'\)/);
+assert.doesNotMatch(adapter, /__reactProps\$|__reactEventHandlers\$/);
+assert.doesNotMatch(adapter, /someProp\('handleKeyDown'/);
+assert.doesNotMatch(adapter, /await wait\(100\)/);
+assert.match(adapter, /if \(!currentId \|\| currentId !== args.targetIdentity\) return false/);
+assert.ok(adapter.indexOf('insertedTextSnapshot = textOf(editor)') < adapter.indexOf('await wait(60)'));
+assert.doesNotMatch(background, /matches = allTabs.filter\(item => item.url && item.url.includes\('\/dots\/'\)\)/);
+console.log('PASS: release source guards. These do not replace browser behavioral tests.');

@@ -559,7 +559,7 @@ $('configFile').addEventListener('change', async event => {
 $('refreshLogs').addEventListener('click', refresh);
 $('clearLogs').addEventListener('click', () => act('CLEAR_LOGS'));
 $('exportLogs').addEventListener('click', () => {
-  downloadJson('agent-continue-activity.json', { format: 'agent-continue-activity', logs: logs.map(({ at, event, message }) => ({ at, event, message })) });
+  downloadJson('agent-continue-activity.json', { format: 'agent-continue-activity', version: 2, logs: logs.map(({ at, event, message, diagnostic }) => ({ at, event, message, ...(diagnostic && ['adapter-result', 'execution-exception', 'no-valid-result'].includes(diagnostic.code) ? { diagnostic: { code: diagnostic.code, durationMs: Math.max(0, Math.min(120000, Number(diagnostic.durationMs) || 0)) } } : {}) })) });
   tell('已导出不含提示词的运行日志。');
 });
 $('clearData').addEventListener('click', () => $('clearDialog').showModal());
