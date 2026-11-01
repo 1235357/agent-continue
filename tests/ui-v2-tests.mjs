@@ -117,6 +117,14 @@ async function assertLayout(page, full = false) {
   if (!full) assert.ok(layout.controls.top >= 0 && layout.controls.bottom <= layout.controls.height + 1, JSON.stringify(layout));
 }
 async function capture(page, name) {
+  if (screenshots && process.env.STORE_SCREENSHOTS === '1' && name.startsWith('console-')) {
+    const previous = page.viewportSize();
+    try {
+      await page.setViewportSize({width:1280,height:800});
+      await fs.mkdir(screenshots, {recursive:true});
+      await page.screenshot({path:path.join(screenshots, `store-${name}`),fullPage:false,omitBackground:false});
+    } finally { await page.setViewportSize(previous); }
+  }
   if (screenshots) { await fs.mkdir(screenshots, { recursive: true }); await page.screenshot({ path: path.join(screenshots, name), fullPage: true }); }
 }
 

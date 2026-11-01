@@ -282,7 +282,7 @@ function paint(job) {
   $('quietStart').disabled = !canEdit() || !config.quietHours.enabled;
   $('quietEnd').disabled = !canEdit() || !config.quietHours.enabled;
   const deliveryHint = config.waitForIdle ? '当前方式：等待 Agent 空闲再发送。' : '当前方式：到点打断并发送。';
-  const submitHint = '提交方式：' + ({ auto: '智能提交（按钮+快捷键+表单）', 'ctrl-enter': 'Ctrl+Enter 优先', button: '发送按钮优先' }[config.sendMethod] || '智能提交') + '。';
+  const submitHint = '提交方式：' + ({ auto: '自动选择单次提交', 'ctrl-enter': '仅 Ctrl+Enter', button: '仅发送按钮' }[config.sendMethod] || '自动选择单次提交') + '。';
   const cadenceHint = config.scheduleMode === 'after-reply' ? '已选择回复结束后才开始下一间隔。' : '';
   $('configHint').textContent = deliveryHint + submitHint + cadenceHint + (enabled
     ? '这里显示正在运行任务的实际配置。暂停后可编辑；“继续原任务”会沿用原配置。'
