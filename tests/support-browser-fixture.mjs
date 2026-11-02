@@ -11,18 +11,34 @@ const fixture = String.raw`
     { at: 1793649601000, event: 'unconfirmed', diagnostic: { code: 'execution-exception', durationMs: 123, raw: 'SYNTHETIC-PRIVATE-DO-NOT-EXPORT' } },
   ] };
   const reads = [], writes = [], listeners = [];
+  let failLogRead = false, failLanguageSave = false;
   const render = () => {
     let node = document.getElementById('fixture-receipt');
-    if (!node) { node = document.createElement('pre'); node.id = 'fixture-receipt'; document.body.append(node); }
-    node.textContent = 'ISOLATED PREVIEW: synthetic storage; no live extension or task.\n' + JSON.stringify({ reads, writes }, null, 2);
+    if (!node) {
+      const controls = document.createElement('div');
+      for (const [label, action] of [
+        ['Fail next log read (fixture)', () => { failLogRead = true; state.logs = [{ at: 1793649602000, event: 'error' }]; }],
+        ['Fail next language save (fixture)', () => { failLanguageSave = true; }],
+      ]) {
+        const button = document.createElement('button'); button.textContent = label;
+        button.addEventListener('click', () => { action(); render(); }); controls.append(button);
+      }
+      node = document.createElement('pre'); node.id = 'fixture-receipt'; document.body.append(controls, node);
+    }
+    node.textContent = 'ISOLATED PREVIEW: synthetic storage; no live extension or task.\n' + JSON.stringify({ reads, writes, failLogRead, failLanguageSave }, null, 2);
   };
   globalThis.chrome = {
     runtime: { getManifest: () => ({ version: '2.1.0' }) },
     storage: {
       onChanged: { addListener: value => listeners.push(value) },
       local: {
-        async get(keys) { reads.push([...keys]); render(); return Object.fromEntries(keys.map(key => [key, structuredClone(state[key])])); },
+        async get(keys) {
+          reads.push([...keys]);
+          if (failLogRead && keys.includes('logs')) { failLogRead = false; render(); throw new Error('Synthetic storage failure'); }
+          render(); return Object.fromEntries(keys.map(key => [key, structuredClone(state[key])]));
+        },
         async set(values) {
+          if (failLanguageSave && Object.hasOwn(values, 'uiLanguage')) { failLanguageSave = false; render(); throw new Error('Synthetic preference failure'); }
           writes.push(Object.keys(values)); Object.assign(state, structuredClone(values));
           for (const listener of listeners) listener(Object.fromEntries(Object.entries(values).map(([key, newValue]) => [key, { newValue }])), 'local');
           render();

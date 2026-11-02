@@ -10,7 +10,10 @@
 <body>
   <header class="app-header">
     <a class="brand" href="popup.html?view=full"><img src="icons/icon-48.png" width="32" height="32" alt=""><span>Agent Continue</span></a>
-    <div class="language"><label for="language" data-copy="language">Language</label><select id="language"><option value="en">English</option><option value="zh_CN">简体中文</option></select></div>
+    <div class="language-control">
+      <div class="language"><label for="language" data-copy="language">Language</label><select id="language" aria-describedby="language-status"><option value="en">English</option><option value="zh_CN">简体中文</option></select></div>
+      <p id="language-status" class="language-error" role="status" aria-live="polite" hidden></p>
+    </div>
   </header>
   <main>
     <section class="developer" aria-labelledby="developer-title">

@@ -1,0 +1,32 @@
+name: Suggestion
+description: Suggest a focused improvement without needing a conversation target or diagnostic logs.
+title: "[Suggestion]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Developer: Zhentong Ye. Email: [zhentongye2028@u.northwestern.edu](mailto:zhentongye2028@u.northwestern.edu).
+        Project: [1235357/agent-continue](https://github.com/1235357/agent-continue). Author's [LinkedIn](https://www.linkedin.com/in/tony-zhentong-ye/).
+
+        **This suggestion and its attachments will be public.** Do not include private prompts, real conversation content or URLs, documents, credentials, cookies, or identifying data. Use synthetic examples only. No logs are required.
+  - type: textarea
+    id: need
+    attributes:
+      label: What would you like to improve?
+      description: Describe the user need or limitation, without private content.
+    validations:
+      required: true
+  - type: textarea
+    id: proposed_change
+    attributes:
+      label: Proposed change or example
+      description: Explain the expected behavior using a synthetic example, or describe an alternative you have considered.
+    validations:
+      required: false
+  - type: checkboxes
+    id: public_report_review
+    attributes:
+      label: Public suggestion review
+      options:
+        - label: I have reviewed this suggestion and its attachments, removed private or identifying data, and understand that they will be public.
+          required: true

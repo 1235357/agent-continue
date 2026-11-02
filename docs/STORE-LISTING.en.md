@@ -1,6 +1,8 @@
 # Chrome Web Store Listing - English
 
-Release copy for v2.1.0. This document is not evidence of store approval or publication.
+English listing copy for the next update. The submitted v2.1.0 package and its locked listing are unchanged. This document is not evidence of store approval, publication, or a saved listing edit.
+
+When the listing becomes editable, copy the entire **Description** section, including the developer/support block, into the store's Description field. The copy uses plain-text URLs rather than relying on Markdown rendering. Do not withdraw an existing review merely to apply this copy.
 
 ## Name
 
@@ -28,17 +30,19 @@ No separate extension account, API key, developer backend, analytics telemetry, 
 
 Free and open source under the MIT license.
 
-## Developer and Support
+Developer and support
 
-- Developer: Zhentong Ye
-- Email: [zhentongye2028@u.northwestern.edu](mailto:zhentongye2028@u.northwestern.edu)
-- Project: [1235357/agent-continue](https://github.com/1235357/agent-continue)
-- Bug reports: [Open a GitHub issue](https://github.com/1235357/agent-continue/issues/new/choose)
-- Author's LinkedIn: [Zhentong Ye](https://www.linkedin.com/in/tony-zhentong-ye/)
+Developer: Zhentong Ye
+Email: zhentongye2028@u.northwestern.edu
+Open-source project: https://github.com/1235357/agent-continue
+Bug reports and suggestions: https://github.com/1235357/agent-continue/issues/new/choose
+Author's LinkedIn: https://www.linkedin.com/in/tony-zhentong-ye/
 
 For a bug report, manually provide your extension version, browser version, operating system, ordinary ChatGPT or Your dot target, steps to reproduce with synthetic prompts, and expected and actual behavior. Activity logs can be exported manually as JSON. Review the file before optionally attaching a sanitized copy to the issue; exporting does not upload it or contact support automatically.
 
-**GitHub issues and their attachments are public.** Remove identifying data, private prompts, conversation URLs, credentials, cookies, and documents from report text and attachments. Task timing and status may remain identifying, so exported logs are not guaranteed to be anonymous. Support links do not introduce external telemetry.
+GitHub issues and their attachments are public. Remove identifying data, private prompts, conversation URLs, credentials, cookies, and documents from report text and attachments. Task timing and status may remain identifying, so exported logs are not guaranteed to be anonymous. Support links do not introduce external telemetry.
+
+This is an independent personal project, not an official OpenAI product. A university email address does not imply university endorsement or technical support.
 
 ## Single Purpose
 

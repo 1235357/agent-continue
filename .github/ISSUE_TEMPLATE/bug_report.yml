@@ -40,10 +40,11 @@ body:
     id: target
     attributes:
       label: Conversation type
-      description: Select the target where the problem occurred. Do not include a conversation URL.
+      description: Select the target, or Not applicable for an extension interface, settings, or import problem. Do not include a conversation URL.
       options:
         - Ordinary ChatGPT
         - Your dot
+        - Not applicable / extension interface
     validations:
       required: true
   - type: textarea

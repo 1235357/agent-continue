@@ -26,13 +26,23 @@ const copy = {
 const $ = id => document.getElementById(id);
 let statusKey = 'local';
 let exporting = false;
+let languageSaveFailed = false;
+let languageSaving = false;
 function render() {
   const language = getLanguage();
   document.documentElement.lang = language === 'zh_CN' ? 'zh-CN' : 'en';
   document.title = 'Agent Continue - ' + copy[language].title;
   for (const node of document.querySelectorAll('[data-copy]')) node.textContent = copy[language][node.dataset.copy];
   $('export-status').textContent = copy[language][statusKey];
+  $('language-status').textContent = languageSaveFailed ? copy[language].languageFailed : '';
+  $('language-status').hidden = !languageSaveFailed;
   $('language').value = language;
+  $('language').disabled = languageSaving;
+}
+function clearPreview() {
+  $('export-preview').hidden = true;
+  $('export-preview').open = false;
+  $('diagnostic-preview').textContent = '';
 }
 $('developer-email').href = DEVELOPER_CONTACT.emailUrl;
 $('developer-email').textContent = DEVELOPER_CONTACT.email;
@@ -43,12 +53,18 @@ let extensionVersion = 'unknown';
 try { extensionVersion = chrome.runtime.getManifest().version; } catch { /* Preview contexts have no extension manifest. */ }
 $('version').textContent = extensionVersion === 'unknown' ? '' : 'v' + extensionVersion;
 $('language').addEventListener('change', async event => {
-  try { await setLanguage(event.target.value); } catch { statusKey = 'languageFailed'; render(); }
+  if (languageSaving) return;
+  languageSaving = true;
+  $('language').disabled = true;
+  try { await setLanguage(event.target.value); languageSaveFailed = false; }
+  catch { languageSaveFailed = true; }
+  finally { languageSaving = false; render(); }
 });
 $('export-diagnostics').addEventListener('click', async () => {
   if (exporting) return;
   exporting = true;
   $('export-diagnostics').disabled = true;
+  clearPreview();
   try {
     const { logs } = await chrome.storage.local.get(['logs']);
     const report = buildActivityExport({ logs, extensionVersion, includeTimestamps: $('include-timestamps').checked });
@@ -63,7 +79,7 @@ $('export-diagnostics').addEventListener('click', async () => {
     document.body.append(link);
     try { link.click(); } finally { link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
     statusKey = 'saved';
-  } catch { statusKey = 'failed'; }
+  } catch { clearPreview(); statusKey = 'failed'; }
   finally { exporting = false; $('export-diagnostics').disabled = false; render(); }
 });
 subscribeLanguage(render);

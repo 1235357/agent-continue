@@ -6,6 +6,9 @@
 - Add a manual schema 3 diagnostic export shared by both entry points. Include the installed extension version, validate event/diagnostic metadata, omit free-text messages and unknown fields, and cap exports at 200 entries. Relative millisecond timings are the default; exact timestamps require a separate opt-in on the support page. Review exports before sharing them publicly.
 - Handle malformed persisted log containers/rows and invalid diagnostic durations without changing scheduling, permission or submission behavior.
 - Add an English GitHub bug form and matching developer/support documentation. These source changes do not alter the already submitted v2.1.0 package or establish new store approval.
+- Clear an earlier diagnostic preview when a new export fails, so it cannot be mistaken for the current report.
+- Keep language-save errors separate from diagnostic status and clear them after a successful retry. Disable the language selector while its preference is saving to prevent overlapping status updates.
+- Accept interface-only bug reports and provide a dedicated suggestion form without requiring a conversation target or logs.
 
 ## [2.1.0] - 2026-11-02
 

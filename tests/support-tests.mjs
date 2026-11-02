@@ -170,3 +170,130 @@ test('GitHub support discovery uses an explicit support document and web contact
   assert.ok(urls.every(url => url.startsWith('https://')), 'GitHub contact cards must use web URLs');
   assert.match(config, /name:.*zhentongye2028@u\.northwestern\.edu/);
 });
+
+async function supportPage() {
+  const nodes = new Map();
+  const handlers = new Map();
+  const state = { logs: [{ at: now, event: 'sent' }], failRead: false, failWrite: false, failDownload: false,
+    downloads: 0, languageWrites: [], languageBarrier: null };
+  const node = id => {
+    if (!nodes.has(id)) nodes.set(id, {
+      textContent: '', value: '', checked: false, hidden: id === 'export-preview' || id === 'language-status', open: false,
+      addEventListener(name, handler) { handlers.set(id + ':' + name, handler); },
+      click() { if (state.failDownload) throw new Error('Synthetic download failure'); state.downloads += 1; },
+      remove() {},
+    });
+    return nodes.get(id);
+  };
+  let language = 'en';
+  const subscribers = [];
+  const source = fs.readFileSync(new URL('../support.js', import.meta.url), 'utf8')
+    .replace(/^import .+ from '.+';\r?$/gm, '');
+  const { DEVELOPER_CONTACT } = await module('support-info.js');
+  const { buildActivityExport } = await module('activity-export.js');
+  await vm.runInNewContext('(async () => {\n' + source + '\n})()', {
+    DEVELOPER_CONTACT, buildActivityExport,
+    getLanguage: () => language,
+    subscribeLanguage: callback => subscribers.push(callback),
+    initializeLanguage: async () => language,
+    setLanguage: async value => {
+      state.languageWrites.push(value);
+      if (state.languageBarrier) await state.languageBarrier;
+      if (state.failWrite) throw new Error('Synthetic preference failure');
+      language = value;
+      for (const callback of subscribers) callback();
+    },
+    document: { getElementById: node, querySelectorAll: () => [], documentElement: {},
+      createElement: () => node('download'), body: { append() {} } },
+    chrome: { runtime: { getManifest: () => ({ version: '2.1.0' }) }, storage: { local: {
+      get: async () => { if (state.failRead) throw new Error('Synthetic storage failure'); return { logs: state.logs }; },
+    } } },
+    URL: { createObjectURL: () => 'blob:synthetic', revokeObjectURL() {} }, Blob,
+    setTimeout: callback => callback(),
+  });
+  return { state, node, emit: (id, name, event = {}) => handlers.get(id + ':' + name)(event) };
+}
+
+test('failed re-export hides and clears the previous diagnostic preview', async () => {
+  const page = await supportPage();
+  await page.emit('export-diagnostics', 'click');
+  assert.equal(page.node('export-preview').hidden, false);
+  assert.equal(JSON.parse(page.node('diagnostic-preview').textContent).logs[0].event, 'sent');
+  page.state.logs = [{ at: now + 1000, event: 'error' }];
+  page.state.failRead = true;
+  await page.emit('export-diagnostics', 'click');
+  assert.equal(page.state.downloads, 1);
+  assert.equal(page.node('export-preview').hidden, true);
+  assert.equal(page.node('export-preview').open, false);
+  assert.equal(page.node('diagnostic-preview').textContent, '');
+  assert.match(page.node('export-status').textContent, /could not be exported/);
+  assert.equal(page.node('export-diagnostics').disabled, false);
+});
+
+test('a download exception does not leave a preview presented as the current exported file', async () => {
+  const page = await supportPage();
+  page.state.failDownload = true;
+  await page.emit('export-diagnostics', 'click');
+  assert.equal(page.state.downloads, 0);
+  assert.equal(page.node('export-preview').hidden, true);
+  assert.equal(page.node('diagnostic-preview').textContent, '');
+  assert.match(page.node('export-status').textContent, /could not be exported/);
+});
+
+test('language-save failure and recovery do not replace diagnostic status', async () => {
+  const page = await supportPage();
+  await page.emit('export-diagnostics', 'click');
+  const exportStatus = page.node('export-status').textContent;
+  page.state.failWrite = true;
+  await page.emit('language', 'change', { target: { value: 'zh_CN' } });
+  assert.equal(page.node('language-status').hidden, false);
+  assert.match(page.node('language-status').textContent, /could not be saved/);
+  assert.equal(page.node('export-status').textContent, exportStatus);
+  page.state.failWrite = false;
+  await page.emit('language', 'change', { target: { value: 'zh_CN' } });
+  assert.equal(page.node('language-status').hidden, true);
+  assert.equal(page.node('language-status').textContent, '');
+  assert.match(page.node('export-status').textContent, /已请求下载诊断文件/);
+});
+
+test('issue forms accept interface-only bugs and suggestions without fabricated conversation data', () => {
+  const bug = fs.readFileSync(new URL('../.github/ISSUE_TEMPLATE/bug_report.yml', import.meta.url), 'utf8');
+  assert.match(bug, /Not applicable \/ extension interface/);
+  const suggestionPath = new URL('../.github/ISSUE_TEMPLATE/suggestion.yml', import.meta.url);
+  assert.ok(fs.existsSync(suggestionPath), 'Suggestion form missing');
+  const suggestion = fs.readFileSync(suggestionPath, 'utf8');
+  assert.match(suggestion, /name: Suggestion/);
+  assert.match(suggestion, /public/i);
+  assert.match(suggestion, /private prompts/);
+  assert.doesNotMatch(suggestion, /id: (?:reproduction|browser|operating_system|target)/);
+});
+
+test('language saves cannot overlap or be re-enabled by a concurrent export render', async () => {
+  const page = await supportPage();
+  let release;
+  page.state.languageBarrier = new Promise(resolve => { release = resolve; });
+  const saving = page.emit('language', 'change', { target: { value: 'zh_CN' } });
+  assert.equal(page.node('language').disabled, true);
+  await page.emit('export-diagnostics', 'click');
+  assert.equal(page.node('language').disabled, true);
+  await page.emit('language', 'change', { target: { value: 'en' } });
+  assert.deepEqual(page.state.languageWrites, ['zh_CN']);
+  release();
+  await saving;
+  assert.equal(page.node('language').disabled, false);
+  assert.equal(page.node('language').value, 'zh_CN');
+  assert.equal(page.node('language-status').hidden, true);
+});
+
+test('store Description includes the approved plain-text support contacts', () => {
+  const text = fs.readFileSync(new URL('../docs/STORE-LISTING.en.md', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  const description = text.split('## Description\n')[1]?.split('\n## Single Purpose')[0];
+  assert.ok(description, 'Store description section missing');
+  for (const contact of [
+    'Email: zhentongye2028@u.northwestern.edu',
+    'Open-source project: https://github.com/1235357/agent-continue',
+    'Bug reports and suggestions: https://github.com/1235357/agent-continue/issues/new/choose',
+    "Author's LinkedIn: https://www.linkedin.com/in/tony-zhentong-ye/",
+  ]) assert.ok(description.includes(contact), `Missing plain-text description contact: ${contact}`);
+  assert.match(text, /submitted v2\.1\.0 package and its locked listing are unchanged/);
+});
