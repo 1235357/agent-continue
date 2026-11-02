@@ -4,11 +4,11 @@ English | [简体中文](README.zh-CN.md)
 
 Schedule your own prompts in one existing ChatGPT or Your dot conversation, with local controls to start, pause, resume, and inspect activity.
 
-**v2.1.0 release documentation · Manifest V3 · Free and MIT-licensed**
+**v2.2.0 release documentation · Manifest V3 · Free and MIT-licensed**
 
 [Chrome Web Store](https://chromewebstore.google.com/detail/jpioilmpbolfokedaefmbfbjeaahfdkl) · [GitHub Releases](https://github.com/1235357/agent-continue/releases) · [Source](https://github.com/1235357/agent-continue) · [Changelog](CHANGELOG.md) · [Privacy](PRIVACY.md)
 
-Store availability and downloadable versions are determined by their respective listings, not by this README. This document describes the v2.1.0 localization work and the existing single-submit behavior introduced in v2.0.x.
+This document describes v2.2.0 developer support, schema 3 diagnostics, and support-page error recovery, alongside the existing single-submit behavior introduced in v2.0.x. GitHub releases may ship ahead of Chrome Web Store review. Store availability and downloadable versions are determined by their respective listings; neither this README nor a GitHub release establishes store approval or the version installed in your browser.
 
 ## Developer and Support
 
@@ -18,15 +18,15 @@ Store availability and downloadable versions are determined by their respective 
 - **Bug reports:** [Open a GitHub issue](https://github.com/1235357/agent-continue/issues/new/choose) or [check existing issues](https://github.com/1235357/agent-continue/issues)
 - **Author's LinkedIn:** [Zhentong Ye](https://www.linkedin.com/in/tony-zhentong-ye/)
 
-For a bug report, provide the extension version, browser version, operating system, whether you use ordinary ChatGPT or Your dot, and steps to reproduce with synthetic prompts. Describe the expected and actual behavior.
+Open **Developer & support** from the support link in Settings or Activity to view these contacts and the installed extension version. The page defaults to English and offers Simplified Chinese. For a bug report, manually provide the extension version, browser version, operating system, and steps to reproduce with synthetic prompts. Describe the expected and actual behavior, and select ordinary ChatGPT, Your dot, or **Not applicable / extension interface** for an interface, settings, or import problem. The separate **Suggestion** form does not require a conversation target or logs.
 
-If diagnostics would help, manually export the activity logs from the extension and review the JSON file before sharing it. You may attach a sanitized copy in the GitHub issue's optional diagnostics field. **GitHub issues and their attachments are public.** Remove identifying data, private prompts, conversation URLs, credentials, cookies, and documents from all report text and attachments. Logs can reveal task timing and status; an export is not guaranteed to be anonymous. Exporting logs does not upload them or contact support automatically.
+If diagnostics would help, manually export them from Activity or the support page and review the JSON file before sharing it. Both use schema 3, include the installed extension version, and omit stored free-text messages and unknown fields. You may attach a sanitized copy in the GitHub issue's optional diagnostics field. **GitHub issues and their attachments are public.** Remove identifying data, private prompts, conversation URLs, credentials, cookies, and documents from all report text and attachments. Do not attach configuration backups. Logs can reveal task timing and status; an export is not guaranteed to be anonymous. Exporting logs does not upload them or contact support automatically.
 
-**Planned next candidate, not released v2.1.0:** Popup and support-page diagnostics will share schema 3, with relative millisecond timings by default and an **Include exact timestamps** opt-in. Relative timings can also identify activity patterns; review exports before public sharing. See [planned-export details and privacy limits](PRIVACY.md#planned-next-candidate-log-export).
+Logs are timestamped locally, but diagnostic exports use relative millisecond timings by default, without exact timestamps or the export time. Only the support page offers **Include exact timestamps**, off by default; the Activity export has no exact-timestamp option. Relative timings can also identify activity patterns. See [diagnostic export details and privacy limits](PRIVACY.md#diagnostic-log-export).
 
 ![English control console with synthetic demonstration data](docs/store-2.1.0-en-console.png)
 
-The screenshot uses synthetic content, not a private conversation.
+The screenshot shows the v2.1.0 console with synthetic content, not a private conversation or evidence of a v2.2.0 installation.
 
 ## Install
 
@@ -59,7 +59,8 @@ Resume retains the original task's prompt, target, interval, and counters. To ap
 | Page handling | Target identity checks, draft and detected-attachment checks, optional wait-for-idle behavior |
 | Background operation | Does not activate the target tab or use the system clipboard |
 | Local interface | English and Simplified Chinese; system, light, and dark themes; prompt text hidden until explicitly shown |
-| Records | Up to 200 local activity entries and user-initiated JSON exports |
+| Records | Up to 200 locally timestamped activity entries; diagnostic JSON exports default to relative timings and omit stored free-text messages |
+| Support | Developer contacts, installed version, and schema 3 diagnostics; exact-timestamp export requires support-page opt-in |
 | Recovery | Saved task recovery when the original target is uniquely identified; no automatic opening of a missing target |
 
 ### One Submission Mechanism per Attempt
@@ -92,6 +93,8 @@ No extension account, API key, developer backend, analytics telemetry, or cloud 
 | `storage` | Store configuration, prompts, queues, templates, language, theme, logs, and recovery state locally |
 | `alarms` | Wake the scheduler for due checks |
 | Optional `power` | Prevent system idle sleep when explicitly enabled |
+
+Stable v2.2.0 does not request `nativeMessaging` and does not include the unshipped device-control, setup/onboarding, or native-messaging candidates.
 
 Local storage is not encrypted. Hiding prompt text reduces accidental on-screen exposure but is not a security boundary. Configuration exports omit prompt and queue bodies unless explicitly included. Clearing local data does not remove original files, exported files, or messages already sent to ChatGPT. See [PRIVACY.md](PRIVACY.md) for storage, deletion, and disclosure details.
 

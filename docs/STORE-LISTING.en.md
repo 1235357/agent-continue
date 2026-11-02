@@ -1,6 +1,6 @@
 # Chrome Web Store Listing - English
 
-English listing copy for the next update. The submitted v2.1.0 package and its locked listing are unchanged. This document is not evidence of store approval, publication, or a saved listing edit.
+English listing copy for v2.2.0. This documentation edit does not update the store: the submitted v2.1.0 package and its locked listing are unchanged by this edit. GitHub releases may ship ahead of Chrome Web Store review. This document is not evidence of store approval, publication, a saved listing edit, or an installed v2.2.0 package.
 
 When the listing becomes editable, copy the entire **Description** section, including the developer/support block, into the store's Description field. The copy uses plain-text URLs rather than relying on Markdown rendering. Do not withdraw an existing review merely to apply this copy.
 
@@ -20,7 +20,7 @@ Repeat one prompt, loop a queue, or run a queue once. Set an interval from 1 to 
 
 Type your prompt or import local text, Markdown, structured text, HTML, DOCX, or text-based PDF. Document parsing takes place locally with bundled resources. Text extraction does not preserve every layout, and scanned PDFs require OCR elsewhere. Prompt text is hidden until explicitly revealed. Local templates and up to 200 activity entries help manage repeated work.
 
-The interface defaults to English and offers a Simplified Chinese language switch. Your language preference is stored locally; your prompts and custom content are not translated.
+The interface defaults to English and offers a Simplified Chinese language switch. Your language preference is stored locally; your prompts and custom content are not translated. The Developer & support page shows the developer contacts and installed extension version and offers the same language choices.
 
 Each attempt uses one submission mechanism. A matching new user-message marker is required for confirmation; clearing the composer alone is not success. An unknown result does not trigger an immediate retry, but another attempt may occur after the full normal interval. Delivery is not guaranteed or exactly once. Pause and inspect the conversation if a result is uncertain. Send once now submits a real message, and pause cannot retract an action already dispatched.
 
@@ -38,7 +38,9 @@ Open-source project: https://github.com/1235357/agent-continue
 Bug reports and suggestions: https://github.com/1235357/agent-continue/issues/new/choose
 Author's LinkedIn: https://www.linkedin.com/in/tony-zhentong-ye/
 
-For a bug report, manually provide your extension version, browser version, operating system, ordinary ChatGPT or Your dot target, steps to reproduce with synthetic prompts, and expected and actual behavior. Activity logs can be exported manually as JSON. Review the file before optionally attaching a sanitized copy to the issue; exporting does not upload it or contact support automatically.
+For a bug report, manually provide your extension version, browser version, operating system, steps to reproduce with synthetic prompts, and expected and actual behavior. Select ordinary ChatGPT, Your dot, or Not applicable / extension interface for an interface, settings, or import problem. Browser and OS details are not auto-detected or collected through fingerprinting. The separate Suggestion form does not require a conversation target or logs.
+
+Activity and support-page exports share schema 3 JSON diagnostics. Reports include the installed extension version, allowlisted event/diagnostic categories, and bounded diagnostic durations, but omit stored free-text messages and unknown fields. Logs are timestamped locally; exports default to relative millisecond timings without exact timestamps or the export time. Include exact timestamps is off by default and available only on the support page, not in the Activity export. Review the complete JSON before optionally attaching a sanitized copy to the issue; exporting does not upload it, create an issue, or contact support automatically. Do not attach configuration backups.
 
 GitHub issues and their attachments are public. Remove identifying data, private prompts, conversation URLs, credentials, cookies, and documents from report text and attachments. Task timing and status may remain identifying, so exported logs are not guaranteed to be anonymous. Support links do not introduce external telemetry.
 
@@ -61,7 +63,9 @@ Schedule and control user-authored prompt submissions to one user-selected ChatG
 
 ## Data Handling and Remote Code
 
-Prompt and imported-document text is processed locally and stored for the user's task. Target URLs, titles, and conversation identity markers are used locally for binding and recovery. Page state is inspected for safe interaction and confirmation. Authorized prompts are submitted to ChatGPT; no content is transmitted to a developer service, advertising network, or analytics service. Activity logs exclude prompt bodies, imported filenames, conversation bodies, full target URLs, and raw exceptions.
+Prompt and imported-document text is processed locally and stored for the user's task. Target URLs, titles, and conversation identity markers are used locally for binding and recovery. Page state is inspected for safe interaction and confirmation. Authorized prompts are submitted to ChatGPT; no content is transmitted to a developer service, advertising network, or analytics service. The extension's activity logger excludes prompt bodies, imported filenames, conversation bodies, full target URLs, and raw exceptions.
+
+Local activity logs retain exact event timestamps and status messages, with up to 200 entries. Schema 3 diagnostic exports omit stored free-text messages, validate event/timestamp/duration fields, and include the installed extension version as extensionVersion. By default, timestampMode is relative-ms, event elapsedMs values are relative to the first retained valid event, and logs[].at and exportedAt are absent. Only explicit support-page opt-in through Include exact timestamps changes timestampMode to unix-ms, includes absolute Unix-millisecond logs[].at values, and adds the ISO 8601 UTC exportedAt value. Relative timings can still identify activity patterns; exports are not guaranteed to be anonymous.
 
 Language choice is saved as `uiLanguage` in local storage. The current clear-local-data command removes tasks, configuration, templates, theme, and logs but retains that preference. Clearing local data does not remove imported originals, exported files, or website messages.
 
@@ -74,10 +78,10 @@ Executable extension code and PDF parsing resources are bundled; no remote execu
 - Release downloads: https://github.com/1235357/agent-continue/releases
 - Privacy policy source: https://github.com/1235357/agent-continue/blob/main/PRIVACY.md
 
-These are listing-copy links, not a claim that v2.1.0 has been uploaded or accepted.
+These are listing-copy links, not evidence of a v2.2.0 upload, approval, publication, or installation.
 
-## Next-Candidate Notes (Not Store Copy)
+## v2.2.0 Release Scope (Not Store Copy)
 
-The following is a next-candidate plan, not part of released v2.1.0 or public store copy. It does not establish runtime acceptance or a live store update.
+Stable v2.2.0 includes developer support, schema 3 diagnostics, and support-page error recovery. It excludes unshipped device-control, setup/onboarding, and native-messaging candidates and does not request nativeMessaging. The permission table above describes the stable release, not candidate changes in a development worktree.
 
-The planned popup export and support page will share a schema 3 builder that omits stored free-text messages, validates event/timestamp/duration fields, and includes the installed `extensionVersion`. Relative millisecond timings will be the default. Explicit opt-in through **Include exact timestamps** will include absolute Unix-millisecond timestamps and the export time. Browser and OS details will be entered manually in the bug form, without browser fingerprinting or browser/OS autodetection. Relative timings can also identify activity patterns; review and sanitize exports before any public attachment. No anonymity is guaranteed, and exporting will not upload diagnostics automatically.
+GitHub release availability is independent of Chrome Web Store review. Publishing a GitHub release does not establish store approval, a saved store-listing update, or the version installed in a user's browser. Existing single-submit behavior and scheduling limits remain in effect; this documentation makes no defect-free or live-site compatibility guarantee.

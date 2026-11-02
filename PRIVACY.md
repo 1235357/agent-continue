@@ -1,6 +1,6 @@
 # Privacy and Data Handling
 
-Scope: Agent Continue v2.1.0 release documentation. Updated: 2026-11-02.
+Scope: Agent Continue v2.2.0 stable release documentation. Updated: 2026-11-02.
 
 Agent Continue processes configuration and imported documents locally. It has no developer backend, external analytics telemetry, cloud synchronization, or online document conversion. No separate extension account or API key is required. Sending a prompt submits it to your selected ChatGPT or Your dot conversation on `chatgpt.com`; that service then processes it under its own policies. Local processing does not mean that sent prompts stay on your computer.
 
@@ -23,12 +23,12 @@ Importing a file does not itself send a message or start a task. A normal first 
 | Interface language | `chrome.storage.local` as `uiLanguage`; English is the default, with Simplified Chinese selectable locally |
 | Current task, internal execution tokens, and run state | `chrome.storage.session`, to survive service-worker suspension; tokens are internal run identifiers, not account credentials |
 | Recovery task copy | `chrome.storage.local`, including target URL, title, Dot identity markers, configuration, and counters for restart recovery |
-| Activity logs | `chrome.storage.local`, limited to 200 timestamped event/status entries |
-| Diagnostics | Fixed categories and elapsed times bounded to 0–120000 ms, stored in logs and user-requested JSON exports |
+| Activity logs | `chrome.storage.local`, limited to 200 locally timestamped event/status entries, including status `message` text; diagnostic exports omit stored `message` fields |
+| Diagnostics | Fixed categories and diagnostic durations bounded to 0–120000 ms in local logs; schema 3 exports validate these fields and default to relative event timings |
 | Parsing buffers and displayed prompt text | Extension memory; explicitly revealed text also appears in the interface DOM |
 | Exported JSON files | Your selected download location, under your control after export |
 
-Activity logs do not include prompt bodies, imported filenames, conversation bodies, raw exceptions, or full target URLs. Recovery state does contain target metadata, and prompts must remain readable to the extension for sending. Logs still reveal task timing and status. The language preference is not sent to a telemetry service, and changing it does not translate your content.
+The extension's activity logger does not record prompt bodies, imported filenames, conversation bodies, raw exceptions, or full target URLs. Local logs retain exact event timestamps and status messages; diagnostic exports use the reduced schema described below. Recovery state does contain target metadata, and prompts must remain readable to the extension for sending. Logs still reveal task timing and status. The language preference is not sent to a telemetry service, and changing it does not translate your content.
 
 ## Hidden Text Is Not Encryption
 
@@ -40,9 +40,21 @@ Local storage and extension memory are not encrypted vaults. Someone with browse
 
 - Files are parsed locally. Imported filenames are not written to activity logs; imported queue items use generic names unless you rename them.
 - Default configuration JSON exports omit prompt bodies, queue bodies, and target conversation URLs. Explicitly opting to include prompt and queue text exports that content in plaintext; the opt-in resets after export.
-- Log exports contain timestamped events, status information, and bounded diagnostics, not prompt or conversation bodies.
+- Diagnostic log exports use schema 3, with relative event timings by default and no stored free-text messages. Exact timestamps require an explicit support-page opt-in; see [Diagnostic Log Export](#diagnostic-log-export).
 - PDF.js modules, worker, fonts, and character maps are bundled. Runtime parsing does not load a CDN. Installing development dependencies or preparing resources from source can contact package registries separately.
 - A private preconfigured package may include a plaintext original file. Do not share it as a public installation package. Public packaging is intended to exclude personal files; review any package before sharing it.
+
+## Diagnostic Log Export
+
+The Activity export in the popup or full console and the **Developer & support** page use the same schema 3 builder. The support page is available through the extension's support links and shows the installed extension version. Exporting requests a local JSON download; it does not upload diagnostics, create an issue, or contact support automatically.
+
+- The report identifies its schema with `version: 3` and includes the installed extension version as `extensionVersion`, or `unknown` if that value is unavailable or invalid.
+- The builder processes the latest 200 stored rows. It omits invalid rows, stored free-text `message` fields, and unknown fields, and copies only allowlisted event and diagnostic categories. Finite diagnostic durations are rounded and bounded to 0–120000 ms. The exported `excludedEntries` count reports rows not included.
+- By default, `timestampMode` is `relative-ms` and each event uses `elapsedMs` relative to the first retained valid event. These exports contain neither `logs[].at` nor `exportedAt`. Relative event timings are distinct from the bounded diagnostic durations.
+- **Include exact timestamps** is off by default and available only on the support page. Selecting it changes `timestampMode` to `unix-ms`, includes `logs[].at` as absolute Unix-millisecond timestamps, and adds `exportedAt` as an ISO 8601 UTC string. The popup and full-console Activity export have no exact-timestamp option.
+- Diagnostics do not auto-detect browser or operating-system details or fingerprint the browser. Enter browser and OS details manually in the bug form.
+
+Relative timings and status information can also identify activity patterns. Omitting messages, validating fields, and using relative timings do not guarantee anonymity. Review and sanitize the complete JSON file before any public attachment. Exporting does not alter the original locally timestamped logs, and uploading remains a separate, manual action.
 
 ## Permissions
 
@@ -55,7 +67,7 @@ Local storage and extension memory are not encrypted vaults. Someone with browse
 | `alarms` | Wake the background scheduler to check due tasks |
 | Optional `power` | Request system idle-sleep prevention only when you enable it |
 
-The manifest does not request all-site access, Cookie, clipboard, debugger, or native-messaging permissions. The extension does not send files or prompts to project maintainers, sell user data, or use external telemetry endpoints. Sending through ChatGPT is the intended website interaction, not developer telemetry.
+The stable v2.2.0 release manifest does not request all-site access, Cookie, clipboard, debugger, or `nativeMessaging` permissions. Unshipped device-control, setup/onboarding, and native-messaging candidates are excluded from this release. The extension does not send files or prompts to project maintainers, sell user data, or use external telemetry endpoints. Sending through ChatGPT is the intended website interaction, not developer telemetry.
 
 ## Pause and Deletion
 
@@ -75,19 +87,10 @@ Clearing the extension does not delete original imported files, exported JSON, s
 
 Support diagnostics are shared manually. Exporting activity logs creates a local JSON file; it does not upload the file, open an issue, or contact the developer automatically. You choose whether to attach a reviewed, sanitized copy to a GitHub issue. This voluntary sharing is separate from the extension's operation and is subject to the service you use.
 
-**GitHub issues and their attachments are public.** Review the entire report and every attachment before posting. Remove identifying data, private prompts, conversation URLs, credentials, cookies, real conversation content, documents, and private preconfigured packages. Use synthetic prompts and provide only the diagnostic details needed to reproduce the problem. Log exports omit prompt and conversation bodies, but their timestamps and status information can still reveal activity; neither export nor manual sanitization guarantees anonymity.
-
-### Planned Next-Candidate Log Export
-
-The following describes a next-candidate plan, not the behavior of released v2.1.0. The release data-handling description above remains unchanged.
-
-- Popup export and the planned `support.html` page will use the same schema 3 diagnostics builder.
-- The builder will omit the stored free-text `message` field, validate event, timestamp, and duration fields, and include the installed extension's version as `extensionVersion`.
-- The default export will use relative millisecond timings, without exact timestamps or the export time. Only explicit opt-in through **Include exact timestamps** will include `logs[].at` as absolute Unix-millisecond timestamps and `exportedAt` as an ISO 8601 UTC string.
-- Browser and operating-system details will not be auto-detected. No browser fingerprinting is planned; users will enter browser and OS details manually in the bug form.
-
-Relative timings can also identify activity patterns. Omitting free-text messages, validating fields, and using relative timings do not guarantee anonymity. Review and sanitize the complete JSON file before any public issue attachment. Export and upload will remain separate, manual actions; the plan does not introduce automatic support uploads or external telemetry.
+**GitHub issues and their attachments are public.** Review the entire report and every attachment before posting. Remove identifying data, private prompts, conversation URLs, credentials, cookies, real conversation content, documents, and private preconfigured packages. Do not attach configuration backups. Use synthetic prompts and provide only the diagnostic details needed to reproduce the problem. Log exports omit prompt and conversation bodies, but relative timings and status information can still reveal activity; opting into exact timestamps adds wall-clock detail. Neither export nor manual sanitization guarantees anonymity.
 
 The support links do not add background telemetry or automatic support uploads. Contacting the developer does not authorize access to your browser, account, conversations, or local files.
 
-Implementation references: [background.js](background.js), [adapter.js](adapter.js), [file-import.js](file-import.js), [popup.js](popup.js), and [i18n.js](i18n.js). Validation scope: [VALIDATION.md](VALIDATION.md).
+This policy describes the stable v2.2.0 data flow, not Chrome Web Store approval or an installed-version readback. GitHub releases may ship before store review completes; consult the corresponding listing and your browser's extension details for their versions.
+
+Implementation references: [background.js](background.js), [adapter.js](adapter.js), [file-import.js](file-import.js), [popup.js](popup.js), [activity-export.js](activity-export.js), [support.js](support.js), and [i18n.js](i18n.js). Validation scope: [VALIDATION.md](VALIDATION.md).

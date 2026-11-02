@@ -4,7 +4,7 @@
   "default_locale": "en",
   "author": "Zhentong Ye",
   "homepage_url": "https://github.com/1235357/agent-continue",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "__MSG_extensionDescription__",
   "minimum_chrome_version": "120",
   "permissions": [
