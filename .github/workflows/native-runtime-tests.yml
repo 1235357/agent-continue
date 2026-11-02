@@ -1,0 +1,36 @@
+name: Experimental native runtime checks
+
+on:
+  push:
+    paths:
+      - 'native/**'
+      - '.github/workflows/native-runtime-tests.yml'
+  pull_request:
+    paths:
+      - 'native/**'
+      - '.github/workflows/native-runtime-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  core:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: native/desktop-commander
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm test

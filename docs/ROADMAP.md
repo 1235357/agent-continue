@@ -1,60 +1,59 @@
-# 功能覆盖与路线图
+# Capabilities and Roadmap
 
-更新日期：2026-10-23。当前版本：0.2.2。
+Updated: 2026-11-02. Baseline: committed v2.2.0 source.
 
-目标是把已有定时发送、队列、提示词管理与保持活动方案中的有用能力组合成可验证的浏览器工作流，同时保留明确的边界：后台操作不抢前台，用户随时能暂停，个人提示词不进入开发者服务。
+This page describes source capabilities, not store approval, publication, or the version installed in a browser. Device-control, setup/onboarding, and native-messaging candidates remain unshipped and outside this baseline; stable v2.2.0 does not request `nativeMessaging`.
 
-本轮调研覆盖 **20 个相关方案**。商店宣传、开源代码与实际测试的证据等级不同，详见 [ALTERNATIVES.md](../ALTERNATIVES.md)。以下“已实现”表示当前源码具备该能力并有相应测试，不代表所有竞品能力已经包含，也不表示真实 Windows / Edge 的全部场景均已实测。
+## Current Capabilities
 
-## 当前覆盖
-
-| 领域 | 0.2.2 已实现 | 当前限制 |
+| Area | v2.2.0 behavior | Limits |
 | --- | --- | --- |
-| 无限续办 | 自定义间隔，默认 20 分钟；单条重复直到人工暂停；无隐藏总时长 | 电脑 / 浏览器需运行，网页可执行；不是服务器端计划任务 |
-| 调度 | 发送后间隔、回复结束后间隔、可选立即首发、本地静默时段 | 没有 cron、指定时区、指定日期、星期规则或随机间隔 |
-| 提示词队列 | 循环 / 单遍、批量文件导入、排序、编辑、删除、进度 | 一个运行任务，队列最多 50 项 / 60 万字符；没有图像或附件队列 |
-| 私人内容 | 手输、本地常见格式导入、正文默认不进 DOM、无正文日志 | 本机存储未加密；正文发送给绑定的聊天服务 |
-| 目标 | 普通 ChatGPT、自定义 GPT 会话和 Your dot；精确 URL 与 dot 身份检查 | 不支持其他聊天网站、未保存新会话、共享只读页或跨 iframe 编辑器 |
-| 不打扰 | 不激活标签、不使用系统剪贴板；前台输入焦点 / 选区回归通过 | 目标页内部 DOM 输入框仍需接受填写；未做真实 Windows 系统焦点长期测试 |
-| 恢复 | 浏览器重启保存启用状态；不信旧 tab ID；等待唯一原页面 | 不自动创建或激活缺失的目标页；账户、页面或身份变化可能阻止发送 |
-| 保护 | 默认打断并发送、可选等待；其他草稿与附件保护；暂停撤销令牌 | 页面未知状态不能一概识别；已提交消息无法撤回 |
-| 活动状态 | 自动防丢弃、可选电脑空闲防休眠 | 无法保证阻止浏览器所有冻结；网站活动例外仍由用户设置 |
-| 管理界面 | 弹窗 / 完整控制台、主题、倒计时、模板、状态日志、设置备份 | 当前中文为主，没有跨设备同步或多用户协作 |
-| 维护 | 150 个本地无头场景、有窗口发布增加 1 项、官方 ProseMirror 与真实 MV3 集成、每周 CI、Dependabot、标签发布 | CI 不主动向真实账号发消息，线上适配更新需要维护者判断 |
+| Targets and prompts | One existing ChatGPT or Your dot conversation; repeat a prompt, loop a queue, or run it once; local templates | One task at a time; at most 50 queue items and 600,000 queue characters; no attachment queue |
+| Scheduling | 1-10080 minutes, default 20; interval or reply-aware timing, optional immediate first send and local-time quiet hours | No calendar, cron, weekday, named-timezone, or random schedules |
+| Sending and controls | Start, pause, resume, send once, read-only checks, stop markers and confirmed-send limits; draft and detected-attachment checks | One submission mechanism per attempt; unknown results have no immediate retry but may be retried after the normal interval; pause cannot retract a dispatched submission |
+| Local import | Text, Markdown, structured text, HTML, DOCX and text-based PDF; bundled local parsing | Text extraction is not layout preservation; no OCR or online conversion; see [File Formats](FILE_FORMATS.md) |
+| Interface and language | English by default, optional Simplified Chinese; popup and full console, themes, countdown, templates and settings backups | Language changes do not translate user content; no cloud sync or multi-user collaboration |
+| Developer support | Developer email, GitHub bug/suggestion forms, LinkedIn and installed version on the support page | Users enter browser/OS details and manually review any public report or attachment; see [Support](../.github/SUPPORT.md) |
+| Diagnostics | Up to 200 local activity entries; schema 3 exports use allowlisted metadata, omit free-text messages and default to relative timings | Exact timestamps require support-page opt-in; exports do not upload automatically and are not guaranteed anonymous |
+| Background operation | Does not activate the target tab or use the system clipboard; discard protection and optional idle-sleep prevention | Computer, browser and target must remain running and executable; no exact-timing, universal focus, freeze-prevention or uptime guarantee |
+| Recovery | Saved task recovery only when the original target is uniquely identified; old tab IDs are not trusted | Missing targets are not opened automatically; account, page or identity changes may block sending |
+| Privacy | Prompt text hidden until explicitly revealed; no developer backend or analytics telemetry | Local storage is not encrypted; authorized prompts are sent to ChatGPT under that service's policies |
 
-## 优先补充的验证
+## Validation Priorities
 
-这些是运行可靠性的验证工作，不用额外功能替代。
+These are validation needs, not claims of completed acceptance. Existing results remain version-specific in [Validation](../VALIDATION.md).
 
-| 优先项 | 验收标准 |
+| Priority area | Required evidence |
 | --- | --- |
-| Windows Chrome / Edge 实机 | 独立测试会话中验证安装、暂停快捷键、前台不同应用输入、最小化、站点例外和可选 power 权限；记录具体版本 |
-| 长时间运行 | 可控的合成或明确获准测试目标连续运行 24 / 72 小时；记录成功、未知、延迟与恢复，不将异常周期掩盖为成功 |
-| 生命周期 | 覆盖 worker 休眠、扩展重新加载、浏览器崩溃恢复、电脑休眠恢复与标签冻结；确认不集中补发或误投 |
-| 文档兼容 | 增补有明确授权的合成多栏 PDF、嵌入字体、DOCX 表格及边界样本；提取失败不得静默截断正文 |
-| 无障碍 | 在实际 Windows 键盘及屏幕阅读器中验证页签、状态、弹窗高度和隐私正文默认隐藏 |
+| Windows Chrome / Edge | Separate test profile; installation, pause shortcut, another app's foreground input, minimization and optional power permission; record exact versions |
+| Long runs | Controlled synthetic or explicitly authorized 24/72-hour runs; retain successes, unknown outcomes, delays and recovery failures |
+| Lifecycle | Worker suspension, extension reload, browser crash, system sleep and tab freezing; no burst catch-up or wrong-target sending |
+| Document compatibility | Synthetic multi-column PDFs, embedded fonts and DOCX tables; reject failed or oversized extraction rather than silently truncate |
+| Accessibility | Native keyboard and screen-reader checks, reachable pause controls, readable layouts and private text hidden by default |
 
-## 后续功能候选
+## Future Candidates
 
-以下均**尚未实现**。优先级表示建议顺序，不是已承诺的版本或日期。
+These capabilities are not included in the v2.2.0 baseline. Priorities are proposals, not release or delivery commitments.
 
-| 优先级 | 能力 | 参考需求 / 来源方向 | 完成时必须满足 |
-| --- | --- | --- | --- |
-| P1 | 多个并行目标任务 | 多标签队列、Prompt Later 类多计划 | 每目标独立队列与计时；全局暂停；不复用错误 tab ID；并发与重启不重复提交 |
-| P1 | 更多网站适配器 | Claude、Gemini、Grok 等队列工具 | 用户按站点授权；适配器契约、只读自检、精确目标与草稿保护；不得扩大到全部网站默认访问 |
-| P1 | 日历 / cron / 时区调度 | Prompt Later、AI Message Sender 等 | 明确夏令时、时区变化、错过计划、设备睡眠和未知回执策略；不能用“准时”掩盖浏览器限制 |
-| P1 | 可审查的适配诊断 | 选择器配置、自检工具 | 只输出结构和受控状态；不用会话正文；自定义选择器不能轻易命中错误区域 |
-| P2 | 模板变量与链式输入 | Prompt Stacker 等链与变量方案 | 默认保持原文；只有用户开启后替换；清晰预览变量来源、缺失值和上一轮回复的使用范围 |
-| P2 | 上下文摘要与会话迁移 | ChatSequel 类续聊 | 新目标需明确记录和核对；不丢失原任务约束；不把未确认摘要当作原始事实；恢复与暂停仍有效 |
-| P2 | 图片 / 附件批处理 | 队列与图像自动化工具 | 明确附件生命周期、大小、隐私和发送状态；不覆盖用户草稿；输出与失败可追溯 |
-| P2 | 回复 / 文件结果导出 | Auto Flow、Auto Chat、批处理工具 | 用户明确选择导出范围与本地目的地；与“无正文诊断日志”分开；不默认抓取整段会话 |
-| P2 | 用户控制的本地加密 | 本地 AES-GCM 类方案 | 密钥与恢复策略清楚；说明无人值守发送对解密能力的要求；不把同处存储的密钥夸大为安全保险箱 |
-| P3 | 多语言、侧栏与布局增强 | 现有多语言 / 紧凑浮层工具 | 快捷键与键盘操作一致，暂停始终可达，隐私正文不因预览或翻译意外显示 |
+| Priority | Candidate | Acceptance condition |
+| --- | --- | --- |
+| P1 | Multiple concurrent targets | Independent queues and timing, global pause, correct target recovery and no duplicate dispatch from concurrency or restart races |
+| P1 | Additional website adapters | Per-site consent, read-only checks, target identity and draft protection; no default all-site access |
+| P1 | Calendar, cron and timezone scheduling | Explicit daylight-saving, missed-schedule, sleep and unknown-result policies; no unconditional timing promises |
+| P1 | User-configurable selectors and adapter self-diagnostics | Extend existing bounded diagnostics without conversation content or ambiguous target selection |
+| P2 | Template variables and chained inputs | Opt-in substitution, visible provenance and missing-value handling; preserve literal text by default |
+| P2 | Context summaries and conversation migration | Explicit new-target selection, preserved constraints and recoverable pause; summaries are not original evidence |
+| P2 | Image and attachment batches | Explicit attachment lifecycle, privacy and result states; never overwrite user drafts |
+| P2 | Reply and result-file export | User-selected scope and local destination, separate from content-free diagnostics; no default conversation capture |
+| P2 | User-controlled local encryption | Clear key and recovery model; disclose unattended decryption limits |
+| P3 | Additional languages, sidebar and layout improvements | Build on existing English/Simplified Chinese support; preserve keyboard access, pause availability and private-content visibility controls |
 
-## 不以后台发送为由绕开的边界
+## Historical Scope
 
-无法在电脑关机或浏览器关闭时运行的浏览器任务，不会被描述为永久在线服务。防丢弃不会被描述为关闭所有冻结策略。界面隐藏不会被描述为密码学加密。消息在页面出现不会被描述为服务端 exactly-once 确认。
+The 2026-10-23 roadmap described v0.2.2, a Chinese-first interface and 150 local headless scenarios plus one headed-release scenario. Those are historical statements, not v2.2.0 status or a current test total. The original 20-project comparison remains in [Alternatives](../ALTERNATIVES.md); competitor claims, source inspection and runtime evidence are distinct.
 
-如果后续功能需要新的站点权限、远程服务或主动打开新会话，应在功能界面和隐私文档中说明，让用户决定是否启用；不能借“集成更多能力”默默改变数据去向。
+## Non-Negotiable Boundaries
 
-路线图会随实际验证和用户需求调整。提出需求时请说明目标行为、如何判断成功，以及是否影响“不抢焦点、可立即暂停、个人正文留在本机”的核心约束。
+Background sending is not a permanent online service. UI hiding is not encryption; a visible user-message marker is not server-side exactly-once delivery, model completion or task success. Site changes can break compatibility.
+
+New site permissions, remote services or automatic conversation creation require explicit disclosure and user control. Keep unshipped native/device work separate from stable browser capabilities and release claims.

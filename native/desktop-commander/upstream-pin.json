@@ -1,0 +1,9 @@
+{
+  "name": "@wonderwhy-er/desktop-commander",
+  "version": "0.3.1",
+  "registry": "https://registry.npmjs.org/",
+  "integrity": "sha512-cx7KTscLF951adHmDLVCDIVTqJ/Bg1LtdRILZoo5wa/UMeyOfMAuOJOEBulNMKBKb5Xd3nHDQnB9aXroN9Fw5A==",
+  "treeAlgorithm": "sha256-json-sorted-path-size-sha256",
+  "files": 274,
+  "treeSha256": "42ddd815986983feebb147416b55e977b1861e1ceac608ccc38b9b4e3efa925b"
+}

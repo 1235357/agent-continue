@@ -1,0 +1,15 @@
+{
+  "name": "agent-continue-desktop-commander-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test runtime.test.mjs windows-child.test.mjs boundary.test.mjs stdio.test.mjs"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "dependencies": {
+    "@wonderwhy-er/desktop-commander": "0.3.1"
+  }
+}
