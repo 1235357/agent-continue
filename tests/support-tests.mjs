@@ -156,3 +156,17 @@ test('console rendering tolerates malformed and inherited event keys without sta
   assert.deepEqual(titles, ['Sent', ...Array(6).fill('运行状态')]);
   assert.equal(nodes.get('logCount').textContent, '7 条记录');
 });
+
+test('GitHub support discovery uses an explicit support document and web contact cards', () => {
+  const document = new URL('../.github/SUPPORT.md', import.meta.url);
+  assert.ok(fs.existsSync(document), 'Explicit GitHub support document missing');
+  const text = fs.readFileSync(document, 'utf8');
+  assert.match(text, /zhentongye2028@u\.northwestern\.edu/);
+  assert.match(text, /https:\/\/github\.com\/1235357\/agent-continue\/issues\/new\/choose/);
+  assert.match(text, /https:\/\/www\.linkedin\.com\/in\/tony-zhentong-ye\//);
+  const config = fs.readFileSync(new URL('../.github/ISSUE_TEMPLATE/config.yml', import.meta.url), 'utf8');
+  const urls = [...config.matchAll(/^\s+url:\s+(.+)$/gm)].map(match => match[1]);
+  assert.equal(urls.length, 3);
+  assert.ok(urls.every(url => url.startsWith('https://')), 'GitHub contact cards must use web URLs');
+  assert.match(config, /name:.*zhentongye2028@u\.northwestern\.edu/);
+});

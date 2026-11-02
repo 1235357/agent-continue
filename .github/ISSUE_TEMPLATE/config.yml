@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Developer email - Zhentong Ye
-    url: mailto:zhentongye2028@u.northwestern.edu
-    about: Contact the developer directly. Do not send private prompts, conversation URLs, credentials, cookies, or documents.
+  - name: Developer email - zhentongye2028@u.northwestern.edu
+    url: https://github.com/1235357/agent-continue/blob/main/.github/SUPPORT.md
+    about: View the developer's email and support guidance. Do not send private prompts, conversation URLs, credentials, cookies, or documents.
   - name: Project source and documentation
     url: https://github.com/1235357/agent-continue
     about: Read the documentation and privacy policy before sharing diagnostic information.
