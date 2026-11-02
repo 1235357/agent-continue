@@ -17,7 +17,7 @@ const pass = name => { checks.push(name); console.log('PASS ' + name); };
 const original = { ...structuredClone(DEFAULT_CONFIG), prompt: 'SYNTHETIC-PRIVATE-PROMPT\n  Preserve these spaces.\n', intervalMinutes: 20,
   queue: [{ name: '合成队列 A', text: 'SYNTHETIC-QUEUE-A' }, { name: '合成队列 B', text: 'SYNTHETIC-QUEUE-B' }] };
 const resources = new Set(['popup.html', 'popup.css', 'popup.js', 'config.js', 'file-import.js',
-  'static-locale.js', 'i18n.js', 'i18n-html.js', 'i18n-popup.js', 'i18n-runtime.js']);
+  'static-locale.js', 'i18n.js', 'i18n-html.js', 'i18n-popup.js', 'i18n-runtime.js', 'activity-export.js']);
 
 async function createPage({ full = false, enabled = false, uiLanguage, fixture = original, title = 'Your dot', statusText = '合成测试任务。' } = {}) {
   const context = await browser.newContext({ viewport: { width: full ? 1200 : 650, height: full ? 900 : 600 }, locale: 'zh-CN', colorScheme: 'light', acceptDownloads: true });

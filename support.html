@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Agent Continue - Developer &amp; Support</title>
+  <link rel="stylesheet" href="support.css">
+</head>
+<body>
+  <header class="app-header">
+    <a class="brand" href="popup.html?view=full"><img src="icons/icon-48.png" width="32" height="32" alt=""><span>Agent Continue</span></a>
+    <div class="language"><label for="language" data-copy="language">Language</label><select id="language"><option value="en">English</option><option value="zh_CN">简体中文</option></select></div>
+  </header>
+  <main>
+    <section class="developer" aria-labelledby="developer-title">
+      <p class="eyebrow" data-copy="project">FREE &amp; OPEN SOURCE</p>
+      <h1 id="developer-title" data-copy="title">Developer &amp; support</h1>
+      <p class="author">Zhentong Ye</p>
+      <a id="developer-email" class="email" href="mailto:zhentongye2028@u.northwestern.edu">zhentongye2028@u.northwestern.edu</a>
+      <nav class="links" aria-label="Project and author">
+        <a id="project-link" href="https://github.com/1235357/agent-continue" target="_blank" rel="noopener noreferrer" data-copy="repository">GitHub repository</a>
+        <a id="issue-link" href="https://github.com/1235357/agent-continue/issues/new/choose" target="_blank" rel="noopener noreferrer" data-copy="issue">Report an issue</a>
+        <a id="linkedin-link" href="https://www.linkedin.com/in/tony-zhentong-ye/" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+      </nav>
+    </section>
+    <section class="diagnostics" aria-labelledby="diagnostics-title">
+      <div class="section-heading"><h2 id="diagnostics-title" data-copy="diagnostics">Activity diagnostics</h2><span id="version" class="version"></span></div>
+      <p data-copy="report">Bug reports and suggestions are welcome on GitHub. Include the extension version, browser and OS, steps to reproduce, and an exported diagnostic file when useful.</p>
+      <p class="privacy" data-copy="privacy">GitHub Issues are public. Review the JSON before attaching it. Never include credentials, cookies, private prompts, conversation URLs, screenshots of private chats, or documents.</p>
+      <label class="timestamp-option"><input id="include-timestamps" type="checkbox"><span data-copy="timestamps">Include exact timestamps (off by default)</span></label>
+      <button id="export-diagnostics" type="button" data-copy="export">Export diagnostics</button>
+      <p id="export-status" class="status" role="status" aria-live="polite" data-copy="local">Nothing is uploaded automatically. Exported files stay on this device until you share them.</p>
+      <details id="export-preview" hidden><summary data-copy="preview">Review exported JSON</summary><pre id="diagnostic-preview" tabindex="0"></pre></details>
+    </section>
+    <p class="independent" data-copy="independent">An independent personal project. A university email address does not imply university endorsement or support.</p>
+  </main>
+  <script type="module" src="support.js"></script>
+</body>
+</html>

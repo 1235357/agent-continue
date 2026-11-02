@@ -131,6 +131,8 @@ export default {
   "配置已导入，正文已隐藏。未开始发送；请检查设置后绑定。": "Settings imported. Prompt hidden. Sending has not started; check settings before binding.",
   "配置导入失败。": "Settings import failed.",
   "已导出不含提示词的运行日志。": "Activity logs exported without prompts.",
+  "已请求下载诊断日志。分享前请检查文件。": "Diagnostic download requested. Review the file before sharing.",
+  "未能导出诊断日志。没有上传文件。": "Diagnostics could not be exported. No file was uploaded.",
   "部分本机偏好未能载入。": "Some local preferences could not be loaded.",
   "循环发送": "Loop",
   "执行一遍": "Run once",

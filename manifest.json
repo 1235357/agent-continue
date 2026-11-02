@@ -2,6 +2,8 @@
   "manifest_version": 3,
   "name": "__MSG_extensionName__",
   "default_locale": "en",
+  "author": "Zhentong Ye",
+  "homepage_url": "https://github.com/1235357/agent-continue",
   "version": "2.1.0",
   "description": "__MSG_extensionDescription__",
   "minimum_chrome_version": "120",

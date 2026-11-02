@@ -43,10 +43,13 @@ async function setJob(job) {
   }
 }
 async function logEvent(event, message, diagnostic = null) {
-  const logs = (await chrome.storage.local.get('logs')).logs || [];
+  const stored = (await chrome.storage.local.get('logs')).logs;
+  const logs = Array.isArray(stored) ? stored.filter(entry => entry && typeof entry === 'object' && !Array.isArray(entry)
+    && Number.isFinite(entry.at) && typeof entry.event === 'string' && entry.event.length > 0 && typeof entry.message === 'string') : [];
   const codes = ['adapter-result', 'execution-exception', 'no-valid-result'];
   const detail = diagnostic && codes.includes(diagnostic.code)
-    ? { diagnostic: { code: diagnostic.code, durationMs: Math.max(0, Math.min(120000, Number(diagnostic.durationMs) || 0)) } } : {};
+    ? { diagnostic: { code: diagnostic.code, ...(Number.isFinite(diagnostic.durationMs)
+      ? { durationMs: Math.max(0, Math.min(120000, diagnostic.durationMs)) } : {}) } } : {};
   await chrome.storage.local.set({ logs: [...logs.slice(-199), { at: Date.now(), event, message, ...detail }] });
 }
 async function updateBadge(job) {

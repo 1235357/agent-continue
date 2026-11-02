@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Developer email - Zhentong Ye
+    url: mailto:zhentongye2028@u.northwestern.edu
+    about: Contact the developer directly. Do not send private prompts, conversation URLs, credentials, cookies, or documents.
+  - name: Project source and documentation
+    url: https://github.com/1235357/agent-continue
+    about: Read the documentation and privacy policy before sharing diagnostic information.
+  - name: Author's LinkedIn - Zhentong Ye
+    url: https://www.linkedin.com/in/tony-zhentong-ye/
+    about: View the author's profile. Use the bug report form for reproducible problems and optional sanitized activity logs.

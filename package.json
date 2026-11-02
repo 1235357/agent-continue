@@ -7,8 +7,9 @@
   "description": "Private local prompt scheduling for ChatGPT and Your dot in Chrome and Edge",
   "scripts": {
     "test:safety": "node tests/background-state-tests.mjs && node tests/background-v2-tests.mjs && node --test tests/release-adapter-tests.mjs && node tests/release-safety-source-tests.mjs",
-    "check": "node --check background.js && node --check adapter.js && node --check popup.js && node --check config.js && node --check file-import.js && node --check i18n.js && node --check static-locale.js && node --test tests/i18n-tests.mjs",
-    "test": "npm run check && npm run test:safety && node tests/run-adapter-tests.mjs && node tests/dot-adapter-tests.mjs && node tests/dot-keyboard-tests.mjs && node tests/file-import-tests.mjs && node tests/ui-v2-tests.mjs && node tests/mv3-integration-tests.mjs && node tests/prosemirror-keyboard-tests.mjs",
+    "check": "node --check background.js && node --check adapter.js && node --check popup.js && node --check config.js && node --check file-import.js && node --check i18n.js && node --check static-locale.js && node --check support.js && node --check support-info.js && node --check activity-export.js && node --test tests/i18n-tests.mjs",
+    "test:support": "node --test tests/support-tests.mjs",
+    "test": "npm run check && npm run test:safety && npm run test:support && node tests/run-adapter-tests.mjs && node tests/dot-adapter-tests.mjs && node tests/dot-keyboard-tests.mjs && node tests/file-import-tests.mjs && node tests/ui-v2-tests.mjs && node tests/mv3-integration-tests.mjs && node tests/prosemirror-keyboard-tests.mjs",
     "vendor": "node scripts/vendor-pdfjs.mjs"
   },
   "devDependencies": {

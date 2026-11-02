@@ -1,12 +1,25 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { runInNewContext } from 'node:vm';
 
 const here=path.dirname(fileURLToPath(import.meta.url));
 const root=path.resolve(process.env.EXTENSION_ROOT || path.dirname(here));
 const { setLanguage } = await import(pathToFileURL(path.join(root, 'i18n.js')));
 const url='https://chatgpt.com/c/test-conversation';
 const copy=value=>value===undefined ? undefined : structuredClone(value);
+const writerSource=readFileSync(path.join(root,'background.js'),'utf8')
+  .match(/async function logEvent\([\s\S]*?(?=\r?\nasync function updateBadge\()/)?.[0];
+assert.ok(writerSource,'The focused writer harness must execute the production logEvent function');
+function writerHarness(logs=[]) {
+  const state={logs:copy(logs)};
+  const chrome={storage:{local:{
+    async get(){return {logs:copy(state.logs)};},
+    async set(value){state.logs=copy(value.logs);},
+  }}};
+  return {state,write:runInNewContext(`${writerSource}\nlogEvent`,{chrome})};
+}
 let importId=0;
 const results=[];
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -251,6 +264,93 @@ await scenario('An empty browser session clears old alarms instead of reusing ta
   assert.equal(h.state.alarms.size,0);
   assert.ok(!h.state.session.job);
   assert.equal(h.state.injections.length,0);
+});
+
+await scenario('Log writer replaces non-array persisted logs with a valid record',async()=>{
+  for(const logs of [undefined,null,false,0,true,42,'corrupt logs',{stale:true}]) {
+    const h=writerHarness(logs);
+    await h.write('started','Synthetic task started.');
+    assert.equal(h.state.logs.length,1);
+    assert.equal(h.state.logs[0].event,'started');
+    assert.equal(h.state.logs[0].message,'Synthetic task started.');
+    assert.ok(Number.isFinite(h.state.logs[0].at));
+  }
+});
+await scenario('Log writer filters malformed rows before keeping the newest 199 valid records',async()=>{
+  const at=1700000000000;
+  const valid=Array.from({length:205},(_,index)=>({at:at+index,event:'busy',message:`Synthetic row ${index}`}));
+  const malformed=[null,undefined,true,42,'bad row',[],{},
+    {at:NaN,event:'busy',message:'Invalid time'},
+    {at:Infinity,event:'busy',message:'Invalid time'},
+    {at:String(at),event:'busy',message:'Invalid time'},
+    {at,event:42,message:'Invalid event'},
+    {at,event:{nested:'SYNTHETIC_PRIVATE_SENTINEL'},message:'Invalid event'},
+    {at,event:'',message:'Invalid event'},
+    {at,event:'busy',message:null},
+    {at,event:'busy',message:42},
+    {at,event:'busy',message:{nested:'SYNTHETIC_PRIVATE_SENTINEL'}}];
+  const h=writerHarness([...valid,...malformed]);
+  await h.write('sent','Synthetic send confirmed.');
+  assert.equal(h.state.logs.length,200);
+  assert.deepEqual(h.state.logs.slice(0,-1),valid.slice(-199));
+  assert.equal(h.state.logs.at(-1).event,'sent');
+  assert.equal(h.state.logs.at(-1).message,'Synthetic send confirmed.');
+  assert.doesNotMatch(JSON.stringify(h.state.logs),/SYNTHETIC_PRIVATE_SENTINEL/);
+});
+for(const [name,durationMs] of [
+  ['boolean',true],['numeric string','25'],['object',{}],['array',[]],
+  ['Infinity',Infinity],['negative Infinity',-Infinity],['NaN',NaN],
+  ['null',null],['missing',undefined],
+]) {
+  await scenario(`Log writer omits ${name} duration while preserving each known diagnostic code`,async()=>{
+    for(const code of ['adapter-result','execution-exception','no-valid-result']) {
+      const h=writerHarness();
+      await h.write('unconfirmed','Synthetic uncertainty.',{code,durationMs});
+      assert.deepEqual(h.state.logs[0].diagnostic,{code});
+      assert.equal(Object.hasOwn(h.state.logs[0].diagnostic,'durationMs'),false);
+    }
+  });
+}
+await scenario('Log writer preserves finite numeric durations and existing clamp boundaries',async()=>{
+  for(const code of ['adapter-result','execution-exception','no-valid-result']) {
+    for(const [durationMs,expected] of [[0,0],[12.5,12.5],[-4,0],[120000,120000],[250000,120000]]) {
+      const h=writerHarness();
+      await h.write('unconfirmed','Synthetic uncertainty.',{code,durationMs,stack:'SYNTHETIC_PRIVATE_SENTINEL'});
+      assert.deepEqual(h.state.logs[0].diagnostic,{code,durationMs:expected});
+    }
+  }
+});
+await scenario('Log writer ignores diagnostics without a known code',async()=>{
+  for(const diagnostic of [true,'bad diagnostic',{},Infinity,null,[],
+    {code:'unknown-code',durationMs:10},{code:['adapter-result'],durationMs:10}]) {
+    const h=writerHarness();
+    await h.write('busy','Synthetic status.',diagnostic);
+    assert.equal(Object.hasOwn(h.state.logs[0],'diagnostic'),false);
+  }
+});
+await scenario('Log writer preserves all legitimate current event codes and messages',async()=>{
+  const events=['started','resumed','paused','replaced','scheduler-error','sent','reply-complete',
+    'busy','draft','blocked','error','marker-reached','limit-reached','queue-complete',
+    'unconfirmed','browser-restored','interrupted'];
+  const h=writerHarness();
+  for(const event of events) await h.write(event,`Synthetic ${event}.`);
+  assert.deepEqual(h.state.logs.map(row=>row.event),events);
+  assert.deepEqual(h.state.logs.map(row=>row.message),events.map(event=>`Synthetic ${event}.`));
+});
+await scenario('START repairs malformed logs without changing the interval or sending immediately',async()=>{
+  const valid={at:1700000000000,event:'browser-restored',message:'Synthetic recovery.'};
+  for(const logs of [{stale:true},[null,valid,{},'bad row']]) {
+    const h=await harness({local:{logs}});
+    const now=Date.now();
+    const job=await h.start({startImmediately:false});
+    assert.equal(job.enabled,true);
+    assert.ok(job.nextAt>=now+30*60_000);
+    assert.equal(h.state.injections.filter(item=>item.args[0].mode==='send').length,0);
+    assert.equal(h.state.local.logs.length,Array.isArray(logs)?2:1);
+    if(Array.isArray(logs)) assert.deepEqual(h.state.local.logs[0],valid);
+    assert.equal(h.state.local.logs.at(-1).event,'started');
+    await h.message({type:'PAUSE'});
+  }
 });
 
 for (const [name, pageResult, code] of [

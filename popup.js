@@ -14,6 +14,7 @@ await initializeLanguage();
 
 import { DEFAULT_CONFIG, readConfig } from './config.js';
 import { importPromptFile, SUPPORTED_ACCEPT, MAX_PROMPT_CHARS } from './file-import.js';
+import { buildActivityExport } from './activity-export.js';
 
 const $ = id => document.getElementById(id);
 const clone = value => structuredClone(value);
@@ -244,18 +245,21 @@ function renderTemplates() {
   if (templates.some(template => template.id === previous)) $('templateSelect').value = previous;
 }
 function renderLogs() {
-  $('logCount').textContent = t`${logs.length} 条记录`;
-  $('logsEmpty').hidden = logs.length > 0;
+  const entries = (Array.isArray(logs) ? logs : []).filter(log => log !== null && typeof log === 'object' && !Array.isArray(log)).slice(-200);
+  const labels = eventLabels();
+  $('logCount').textContent = t`${entries.length} 条记录`;
+  $('logsEmpty').hidden = entries.length > 0;
   $('logList').replaceChildren();
-  for (const log of [...logs].reverse()) {
+  for (const log of [...entries].reverse()) {
     const row = document.createElement('li'); row.className = 'log-item';
     if (['unknown', 'unconfirmed', 'error', 'blocked'].includes(log.event)) row.classList.add('warning');
     const time = document.createElement('time');
-    const date = new Date(log.at);
+    const date = new Date(typeof log.at === 'number' ? log.at : NaN);
     time.textContent = Number.isFinite(date.getTime()) ? date.toLocaleString(getLanguage() === 'zh_CN' ? 'zh-CN' : 'en-US') : t('时间未提供');
     if (Number.isFinite(date.getTime())) time.dateTime = date.toISOString();
-    const title = document.createElement('strong'); title.textContent = eventLabels()[log.event] || t('运行状态');
-    const message = document.createElement('p'); message.textContent = String(log.message || '');
+    const title = document.createElement('strong');
+    title.textContent = typeof log.event === 'string' && Object.hasOwn(labels, log.event) ? labels[log.event] : t('运行状态');
+    const message = document.createElement('p'); message.textContent = typeof log.message === 'string' ? log.message : '';
     row.append(time, title, message); $('logList').append(row);
   }
 }
@@ -584,8 +588,11 @@ $('configFile').addEventListener('change', async event => {
 $('refreshLogs').addEventListener('click', refresh);
 $('clearLogs').addEventListener('click', () => act('CLEAR_LOGS'));
 $('exportLogs').addEventListener('click', () => {
-  downloadJson('agent-continue-activity.json', { format: 'agent-continue-activity', version: 2, logs: logs.map(({ at, event, message, diagnostic }) => ({ at, event, message, ...(diagnostic && ['adapter-result', 'execution-exception', 'no-valid-result'].includes(diagnostic.code) ? { diagnostic: { code: diagnostic.code, durationMs: Math.max(0, Math.min(120000, Number(diagnostic.durationMs) || 0)) } } : {}) })) });
-  tell(t('已导出不含提示词的运行日志。'));
+  try {
+    const extensionVersion = chrome.runtime.getManifest?.()?.version;
+    downloadJson('agent-continue-activity.json', buildActivityExport({ logs, extensionVersion }));
+    tell(t('已请求下载诊断日志。分享前请检查文件。'));
+  } catch { tell(t('未能导出诊断日志。没有上传文件。'), true); }
 });
 $('clearData').addEventListener('click', () => $('clearDialog').showModal());
 $('cancelClear').addEventListener('click', () => $('clearDialog').close());

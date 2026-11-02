@@ -1,0 +1,91 @@
+name: Bug report
+description: Report a reproducible problem using synthetic prompts and optional sanitized diagnostics.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Developer: Zhentong Ye. Email: [zhentongye2028@u.northwestern.edu](mailto:zhentongye2028@u.northwestern.edu).
+        Project: [1235357/agent-continue](https://github.com/1235357/agent-continue). Author's [LinkedIn](https://www.linkedin.com/in/tony-zhentong-ye/).
+
+        **This issue and its attachments will be public.** Review all text and files before posting. Remove identifying data, private prompts, conversation URLs, credentials, cookies, real conversation content, and documents. Use synthetic prompts only.
+
+        Diagnostics are optional and shared manually. The extension does not upload support logs automatically, and exported logs are not guaranteed to be anonymous.
+
+  - type: input
+    id: extension_version
+    attributes:
+      label: Extension version
+      description: Check your browser's extensions page and type the installed extension version manually.
+      placeholder: "For example: 2.1.0"
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and version
+      description: Type the browser name and full version manually. This form does not detect them.
+      placeholder: "Browser name and full version"
+    validations:
+      required: true
+  - type: input
+    id: operating_system
+    attributes:
+      label: Operating system and version
+      description: Type the operating system and version manually. Do not include your device name or username.
+      placeholder: "Operating system and version"
+    validations:
+      required: true
+  - type: dropdown
+    id: target
+    attributes:
+      label: Conversation type
+      description: Select the target where the problem occurred. Do not include a conversation URL.
+      options:
+        - Ordinary ChatGPT
+        - Your dot
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include relevant settings and a synthetic prompt that reproduces the problem, not a private prompt or document.
+      placeholder: |
+        Synthetic prompt:
+        Relevant settings (interval, send mode, and other settings involved):
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: Expected behavior
+      description: Describe what you expected without including private conversation content.
+    validations:
+      required: true
+  - type: textarea
+    id: actual_behavior
+    attributes:
+      label: Actual behavior
+      description: Describe what happened, including any visible status or error category. Do not paste private content or raw exceptions containing personal data.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Optional sanitized JSON activity logs
+      description: |
+        Manually export activity logs from the extension, then review the entire JSON file and remove identifying data before sharing. Logs can reveal activity patterns even when timings are relative; anonymity is not guaranteed.
+        You may attach the sanitized JSON file using this textarea's attachment control, or paste a small sanitized excerpt. Do not attach configuration exports, private prompts, conversation URLs, credentials, cookies, or documents. Exporting does not upload anything automatically.
+    validations:
+      required: false
+  - type: checkboxes
+    id: public_report_review
+    attributes:
+      label: Public report review
+      options:
+        - label: I have reviewed all report text and attachments, removed identifying data and private content, and understand that this issue and its attachments are public.
+          required: true

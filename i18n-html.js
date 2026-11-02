@@ -150,4 +150,6 @@ export default {
   '这会暂停任务，并删除本扩展保存的提示词、模板、设置和日志。不会删除聊天网站中的消息。': 'This pauses the task and deletes prompts, templates, settings, and logs saved by this extension. It does not delete messages on chat websites.',
   '保留数据': 'Keep data',
   '确认清空': 'Confirm clear',
+  '开发者与支持': 'Developer & support',
+  '支持与反馈': 'Support & feedback',
 };

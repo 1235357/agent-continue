@@ -28,6 +28,18 @@ No separate extension account, API key, developer backend, analytics telemetry, 
 
 Free and open source under the MIT license.
 
+## Developer and Support
+
+- Developer: Zhentong Ye
+- Email: [zhentongye2028@u.northwestern.edu](mailto:zhentongye2028@u.northwestern.edu)
+- Project: [1235357/agent-continue](https://github.com/1235357/agent-continue)
+- Bug reports: [Open a GitHub issue](https://github.com/1235357/agent-continue/issues/new/choose)
+- Author's LinkedIn: [Zhentong Ye](https://www.linkedin.com/in/tony-zhentong-ye/)
+
+For a bug report, manually provide your extension version, browser version, operating system, ordinary ChatGPT or Your dot target, steps to reproduce with synthetic prompts, and expected and actual behavior. Activity logs can be exported manually as JSON. Review the file before optionally attaching a sanitized copy to the issue; exporting does not upload it or contact support automatically.
+
+**GitHub issues and their attachments are public.** Remove identifying data, private prompts, conversation URLs, credentials, cookies, and documents from report text and attachments. Task timing and status may remain identifying, so exported logs are not guaranteed to be anonymous. Support links do not introduce external telemetry.
+
 ## Single Purpose
 
 Schedule and control user-authored prompt submissions to one user-selected ChatGPT or Your dot conversation on chatgpt.com. Local file import, queues, templates, status checks, and scheduling controls support this purpose.
@@ -58,4 +70,10 @@ Executable extension code and PDF parsing resources are bundled; no remote execu
 - Release downloads: https://github.com/1235357/agent-continue/releases
 - Privacy policy source: https://github.com/1235357/agent-continue/blob/main/PRIVACY.md
 
-These are listing-copy links, not a claim that v2.1.0 has been uploaded or accepted. No personal LinkedIn link is supplied because no precise existing URL was found in the repository.
+These are listing-copy links, not a claim that v2.1.0 has been uploaded or accepted.
+
+## Next-Candidate Notes (Not Store Copy)
+
+The following is a next-candidate plan, not part of released v2.1.0 or public store copy. It does not establish runtime acceptance or a live store update.
+
+The planned popup export and support page will share a schema 3 builder that omits stored free-text messages, validates event/timestamp/duration fields, and includes the installed `extensionVersion`. Relative millisecond timings will be the default. Explicit opt-in through **Include exact timestamps** will include absolute Unix-millisecond timestamps and the export time. Browser and OS details will be entered manually in the bug form, without browser fingerprinting or browser/OS autodetection. Relative timings can also identify activity patterns; review and sanitize exports before any public attachment. No anonymity is guaranteed, and exporting will not upload diagnostics automatically.

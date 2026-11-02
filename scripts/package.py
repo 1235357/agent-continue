@@ -25,6 +25,7 @@ RUNTIME_FILES = (
     "manifest.json", "background.js", "content.js", "adapter.js", "config.js", "preset.js",
     "file-import.js", "popup.html", "popup.css", "popup.js", "README.md", "README.zh-CN.md",
     "i18n.js", "i18n-html.js", "i18n-popup.js", "i18n-runtime.js", "static-locale.js",
+    "support.html", "support.css", "support.js", "support-info.js", "activity-export.js",
     "_locales/en/messages.json", "_locales/zh_CN/messages.json",
     "LICENSE", "CHANGELOG.md", "PRIVACY.md", "VALIDATION.md", "ALTERNATIVES.md",
     "CONTRIBUTING.md", "docs/FILE_FORMATS.md",

@@ -10,6 +10,20 @@
 
 商店可用状态和可下载版本以对应页面为准。本文说明 v2.1.0 本地化工作及 v2.0.x 已引入的单次提交行为，不代表新版本已经发布。
 
+## 开发者与支持
+
+- **开发者：** Zhentong Ye
+- **邮箱：** [zhentongye2028@u.northwestern.edu](mailto:zhentongye2028@u.northwestern.edu)
+- **项目：** [1235357/agent-continue](https://github.com/1235357/agent-continue)
+- **问题反馈：** [新建 GitHub Issue](https://github.com/1235357/agent-continue/issues/new/choose) 或 [查看已有问题](https://github.com/1235357/agent-continue/issues)
+- **作者 LinkedIn：** [Zhentong Ye](https://www.linkedin.com/in/tony-zhentong-ye/)
+
+报告问题时，请手动填写扩展版本、浏览器版本、操作系统，以及使用的是普通 ChatGPT 还是 Your dot。使用合成提示词说明复现步骤、预期行为与实际行为。
+
+如需诊断材料，请在扩展内手动导出运行日志，审阅 JSON 文件后，再自行决定是否在 Issue 的可选诊断字段中附上脱敏副本。**GitHub Issue 及其附件是公开的。** 反馈正文与附件均需移除身份识别信息、私人提示词、会话网址、凭据、Cookie 和文档。日志仍可能体现任务时间及状态，不保证匿名。导出日志不会自动上传文件或联系开发者。
+
+**下一候选版本计划，不属于已发布的 v2.1.0：** 弹窗与支持页面的诊断导出将共用 schema 3，默认使用相对毫秒；精确时间需明确勾选 **Include exact timestamps**。相对时间也可能识别活动模式，公开分享前仍需审阅导出文件。详见 [候选导出计划与隐私边界](PRIVACY.md#planned-next-candidate-log-export)。
+
 ## 安装
 
 使用上方商店链接，或从 GitHub Releases 选择实际可用的安装 ZIP。解压到长期保留的目录，打开 `chrome://extensions` 或 `edge://extensions`，开启开发者模式，点击“加载已解压的扩展程序”，选择直接包含 `manifest.json` 的 `AgentContinue` 文件夹，不要选择 ZIP 或上级目录。
@@ -63,4 +77,4 @@
 
 ## 项目
 
-源码、问题反馈与贡献：[1235357/agent-continue](https://github.com/1235357/agent-continue)。反馈请使用合成提示词，不要上传真实会话、凭据或私人文件。采用 [MIT 许可证](LICENSE)。
+贡献：[1235357/agent-continue](https://github.com/1235357/agent-continue)。采用 [MIT 许可证](LICENSE)。

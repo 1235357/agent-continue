@@ -10,6 +10,20 @@ Schedule your own prompts in one existing ChatGPT or Your dot conversation, with
 
 Store availability and downloadable versions are determined by their respective listings, not by this README. This document describes the v2.1.0 localization work and the existing single-submit behavior introduced in v2.0.x.
 
+## Developer and Support
+
+- **Developer:** Zhentong Ye
+- **Email:** [zhentongye2028@u.northwestern.edu](mailto:zhentongye2028@u.northwestern.edu)
+- **Project:** [1235357/agent-continue](https://github.com/1235357/agent-continue)
+- **Bug reports:** [Open a GitHub issue](https://github.com/1235357/agent-continue/issues/new/choose) or [check existing issues](https://github.com/1235357/agent-continue/issues)
+- **Author's LinkedIn:** [Zhentong Ye](https://www.linkedin.com/in/tony-zhentong-ye/)
+
+For a bug report, provide the extension version, browser version, operating system, whether you use ordinary ChatGPT or Your dot, and steps to reproduce with synthetic prompts. Describe the expected and actual behavior.
+
+If diagnostics would help, manually export the activity logs from the extension and review the JSON file before sharing it. You may attach a sanitized copy in the GitHub issue's optional diagnostics field. **GitHub issues and their attachments are public.** Remove identifying data, private prompts, conversation URLs, credentials, cookies, and documents from all report text and attachments. Logs can reveal task timing and status; an export is not guaranteed to be anonymous. Exporting logs does not upload them or contact support automatically.
+
+**Planned next candidate, not released v2.1.0:** Popup and support-page diagnostics will share schema 3, with relative millisecond timings by default and an **Include exact timestamps** opt-in. Relative timings can also identify activity patterns; review exports before public sharing. See [planned-export details and privacy limits](PRIVACY.md#planned-next-candidate-log-export).
+
 ![English control console with synthetic demonstration data](docs/store-2.1.0-en-console.png)
 
 The screenshot uses synthetic content, not a private conversation.
@@ -83,4 +97,4 @@ Local storage is not encrypted. Hiding prompt text reduces accidental on-screen 
 
 ## Project
 
-Source, issue reporting, and contributions: [1235357/agent-continue](https://github.com/1235357/agent-continue). Use synthetic prompts and redact credentials, conversation content, and private files in reports. Licensed under [MIT](LICENSE).
+Contributions: [1235357/agent-continue](https://github.com/1235357/agent-continue). Licensed under [MIT](LICENSE).

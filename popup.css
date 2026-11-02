@@ -544,6 +544,7 @@ kbd { font: 9px Consolas, monospace; border: 1px solid var(--line); padding: 1px
   overflow-wrap: anywhere;
 }
 .feedback.error { color: var(--red); }
+.support-entry{grid-column:1/-1;border-bottom:1px solid var(--line);padding:0 0 12px}.support-entry p{margin:6px 0}.developer-email{overflow-wrap:anywhere;font-size:14px}.support-entry a,footer a{color:var(--green);text-underline-offset:3px}footer a{margin-left:8px;white-space:nowrap}
 footer {
   background: var(--surface);
   display: flex;

@@ -65,8 +65,29 @@ The pause-and-clear-local-data command removes the task, recovery copy, configur
 
 Clearing the extension does not delete original imported files, exported JSON, screenshots, backups, private installation files, or messages already sent to ChatGPT. Manage those at their respective locations. Uninstalling the extension removes its browser-managed storage; separately exported files and website messages remain outside that storage.
 
-## Reporting Issues
+## Developer and Support
 
-Use synthetic prompts. Do not include credentials, Cookies, real conversation content, confidential documents, or private preconfigured packages in issues, screenshots, logs, or attachments. Redacted page structure, browser version, route type, and error status are usually sufficient.
+- Developer: Zhentong Ye
+- Email: [zhentongye2028@u.northwestern.edu](mailto:zhentongye2028@u.northwestern.edu)
+- Project: [1235357/agent-continue](https://github.com/1235357/agent-continue)
+- Bug reports: [Open a GitHub issue](https://github.com/1235357/agent-continue/issues/new/choose)
+- Author's LinkedIn: [Zhentong Ye](https://www.linkedin.com/in/tony-zhentong-ye/)
+
+Support diagnostics are shared manually. Exporting activity logs creates a local JSON file; it does not upload the file, open an issue, or contact the developer automatically. You choose whether to attach a reviewed, sanitized copy to a GitHub issue. This voluntary sharing is separate from the extension's operation and is subject to the service you use.
+
+**GitHub issues and their attachments are public.** Review the entire report and every attachment before posting. Remove identifying data, private prompts, conversation URLs, credentials, cookies, real conversation content, documents, and private preconfigured packages. Use synthetic prompts and provide only the diagnostic details needed to reproduce the problem. Log exports omit prompt and conversation bodies, but their timestamps and status information can still reveal activity; neither export nor manual sanitization guarantees anonymity.
+
+### Planned Next-Candidate Log Export
+
+The following describes a next-candidate plan, not the behavior of released v2.1.0. The release data-handling description above remains unchanged.
+
+- Popup export and the planned `support.html` page will use the same schema 3 diagnostics builder.
+- The builder will omit the stored free-text `message` field, validate event, timestamp, and duration fields, and include the installed extension's version as `extensionVersion`.
+- The default export will use relative millisecond timings, without exact timestamps or the export time. Only explicit opt-in through **Include exact timestamps** will include `logs[].at` as absolute Unix-millisecond timestamps and `exportedAt` as an ISO 8601 UTC string.
+- Browser and operating-system details will not be auto-detected. No browser fingerprinting is planned; users will enter browser and OS details manually in the bug form.
+
+Relative timings can also identify activity patterns. Omitting free-text messages, validating fields, and using relative timings do not guarantee anonymity. Review and sanitize the complete JSON file before any public issue attachment. Export and upload will remain separate, manual actions; the plan does not introduce automatic support uploads or external telemetry.
+
+The support links do not add background telemetry or automatic support uploads. Contacting the developer does not authorize access to your browser, account, conversations, or local files.
 
 Implementation references: [background.js](background.js), [adapter.js](adapter.js), [file-import.js](file-import.js), [popup.js](popup.js), and [i18n.js](i18n.js). Validation scope: [VALIDATION.md](VALIDATION.md).

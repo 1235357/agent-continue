@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Add an English-default, Chinese-optional developer/support page, prominent developer email, project/issue links, and the author's LinkedIn. The console links to the same support page.
+- Add a manual schema 3 diagnostic export shared by both entry points. Include the installed extension version, validate event/diagnostic metadata, omit free-text messages and unknown fields, and cap exports at 200 entries. Relative millisecond timings are the default; exact timestamps require a separate opt-in on the support page. Review exports before sharing them publicly.
+- Handle malformed persisted log containers/rows and invalid diagnostic durations without changing scheduling, permission or submission behavior.
+- Add an English GitHub bug form and matching developer/support documentation. These source changes do not alter the already submitted v2.1.0 package or establish new store approval.
+
 ## [2.1.0] - 2026-11-02
 
 - Add an English-default interface with a Simplified Chinese switch and a locally stored language preference. User prompts, imported content, and custom labels are not translated.
