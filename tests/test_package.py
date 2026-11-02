@@ -54,6 +54,13 @@ class PackageTests(unittest.TestCase):
             package.package_release(self.root)
         self.assertFalse((self.root / "dist").exists())
 
+    def test_windows_and_ci_line_endings_produce_identical_archive(self):
+        output = package.package_release(self.root, store=True)
+        before = output.read_bytes()
+        target = self.root / "popup.js"
+        target.write_bytes(target.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+        self.assertEqual(before, package.package_release(self.root, store=True).read_bytes())
+
     def test_manifest_reference_not_in_allowlist_is_rejected(self):
         manifest_path = self.root / "manifest.json"
         manifest = json.loads(manifest_path.read_bytes())

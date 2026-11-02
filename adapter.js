@@ -1,3 +1,14 @@
+import { createTranslator } from './i18n.js';
+import runtimeCatalog from './i18n-runtime.js';
+
+const t = createTranslator(runtimeCatalog);
+
+// Extension-context boundary: pageAction must remain closure-free when injected.
+export function translatePageResult(value) {
+  if (!value || typeof value !== 'object') return value;
+  return { ...value, message: typeof value.message === 'string' && Object.hasOwn(runtimeCatalog, value.message) ? t(value.message) : value.message };
+}
+
 // This function is injected into one explicitly selected tab.
 // Executed in ISOLATED world with authoritative background permission checks.
 export async function pageAction(args) {

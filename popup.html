@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>Agent Continue · 后台任务控制台</title>
+  <title>Agent Continue - Background Task Console</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
@@ -78,6 +78,7 @@
         </section>
       </section>
       <section id="panel-settings" class="tab-panel" role="tabpanel" aria-labelledby="tab-settings" hidden>
+        <section class="card"><h3>Language / 语言</h3><label for="language">界面语言</label><select id="language"><option value="en">English</option><option value="zh_CN">简体中文</option></select></section>
         <div class="panel-intro"><span class="eyebrow">PREFERENCES / 自定义</span><h2>按你的方式运行。</h2></div>
         <section class="card"><div class="section-heading"><h3>持续运行</h3><span class="quiet-tag">默认不限次数</span></div><label for="maxSends">已确认发送次数上限</label><input id="maxSends" type="number" min="0" max="1000000" step="1" value="0"><p class="helper">0 表示无限循环，直到你手动暂停。未知回执不计入已确认次数。队列仅执行一遍、次数上限和停止标记均是可选条件。</p><label for="stopMarkers">可选停止标记（每行一条）</label><textarea id="stopMarkers" rows="2" maxlength="2020" spellcheck="false" placeholder="留空：不因回复内容自动停止"></textarea><p class="helper">只在最近一条回复中单独成行匹配时暂停。默认关闭。</p><label class="check-line"><input id="waitForIdle" type="checkbox"><span>可选：等待 Agent 空闲后再发送</span></label><p class="helper">默认关闭：到点后打断正在进行的回复并发送提示词。开启后才等待 Agent 空闲；已有其他草稿或附件仍会保留。</p><label for="sendMethod">发送方式</label><select id="sendMethod"><option value="auto">自动选择单次提交</option><option value="button">仅发送按钮</option><option value="ctrl-enter">仅快捷键 · Ctrl+Enter</option></select><p class="helper">自动模式在 Dot 使用一次 Ctrl+Enter，在普通 ChatGPT 使用可用发送按钮。结果未确认时不追加另一种提交操作；也可明确选择按钮或快捷键。</p></section>
         <section class="card"><h3>标签与电脑保持活动</h3><label class="check-line"><input id="preventDiscard" type="checkbox" checked><span>运行时禁止目标标签自动丢弃</span></label><label class="check-line"><input id="keepAwake" type="checkbox"><span>运行时防止电脑因空闲自动休眠</span></label><p class="helper">电脑防休眠需要可选权限，允许屏幕熄灭。暂停后释放。它不能阻止合盖、手动休眠或浏览器关闭。</p><div class="notice">浏览器的冻结 / 睡眠是另一层机制。请将 <strong>chatgpt.com</strong> 加入 Chrome / Edge 的“始终保持活动”网站列表。扩展不会为唤醒页面而切换你的标签页。</div></section>
@@ -101,6 +102,6 @@
   </section>
   <footer><span class="small-dot"></span>本地处理 · 后台运行 · 由你掌控</footer>
   <dialog id="clearDialog" aria-labelledby="clearTitle"><h2 id="clearTitle">清空本机数据？</h2><p>这会暂停任务，并删除本扩展保存的提示词、模板、设置和日志。不会删除聊天网站中的消息。</p><div class="button-row"><button id="cancelClear">保留数据</button><button id="confirmClear" class="danger-button">确认清空</button></div></dialog>
-  <script type="module" src="popup.js"></script>
+  <script type="module" src="static-locale.js"></script>
 </body>
 </html>

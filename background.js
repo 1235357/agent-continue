@@ -1,5 +1,10 @@
+import { createTranslator, initializeLanguage } from './i18n.js';
+import runtimeCatalog from './i18n-runtime.js';
+
+const t = createTranslator(runtimeCatalog);
+
 import { DEFAULT_CONFIG, DELIVERY_BEHAVIOR_VERSION, normalizeUrl, validateTarget, readConfig, currentPrompt, inQuietHours, MAX_PROMPT_CHARS } from './config.js';
-import { pageAction } from './adapter.js';
+import { pageAction, translatePageResult } from './adapter.js';
 import { BUNDLED_PROMPT } from './preset.js';
 
 const ALARM_NAME = 'agent-continue-heartbeat';
@@ -18,7 +23,7 @@ function transact(callback) {
 }
 const token = () => crypto.randomUUID();
 // Exceptions may contain browser/page data. Only our fixed messages enter logs.
-const errorMessage = error => error?.safeMessage || '操作未完成，请检查目标页面和扩展权限后再试。';
+const errorMessage = error => error?.safeMessage || t('操作未完成，请检查目标页面和扩展权限后再试。');
 function fail(message) { const error = new Error(message); error.safeMessage = message; return error; }
 
 async function getJob() { return (await chrome.storage.session.get('job')).job || null; }
@@ -48,7 +53,7 @@ async function updateBadge(job) {
   try {
     await chrome.action.setBadgeText({ text: !job ? '' : !job.enabled ? 'Ⅱ' : job.phase === 'sending' ? '…' : job.needsAttention ? '!' : 'ON' });
     await chrome.action.setBadgeBackgroundColor({ color: !job?.enabled ? '#64748B' : job.needsAttention ? '#B45F2A' : '#156C52' });
-    await chrome.action.setTitle({ title: job ? `Agent Continue — ${job.statusText}` : 'Agent Continue — 选择 dot 或会话后开始' });
+    await chrome.action.setTitle({ title: job ? `Agent Continue — ${job.statusText}` : t('Agent Continue — 选择 dot 或会话后开始') });
   } catch { /* Badge errors cannot authorize a send. */ }
 }
 async function syncAlarm(job) {
@@ -89,13 +94,13 @@ async function pauseLocked(job, message, event = 'paused') {
   await updateBadge(paused);
   return paused;
 }
-async function pause(message = '已手动暂停；后续定时发送已停止。') {
+async function pause(message = t('已手动暂停；后续定时发送已停止。')) {
   return transact(async () => ({ ok: true, job: await pauseLocked(await getJob(), message) }));
 }
-function assertIntent(version) { if (version !== intentVersion) throw fail('此操作已被较新的开始或暂停操作取消。'); }
+function assertIntent(version) { if (version !== intentVersion) throw fail(t('此操作已被较新的开始或暂停操作取消。')); }
 function assertSupportedTab(tab, expectedUrl = null) {
-  if (!tab || !Number.isInteger(tab.id) || !validateTarget(tab.url)) throw fail('请选择 chatgpt.com 的 Your dot 页面或已有会话；首页与共享页面不支持。');
-  if (expectedUrl && normalizeUrl(tab.url) !== expectedUrl) throw fail('目标标签页已切换到其他会话；原任务会等待原地址重新打开。');
+  if (!tab || !Number.isInteger(tab.id) || !validateTarget(tab.url)) throw fail(t('请选择 chatgpt.com 的 Your dot 页面或已有会话；首页与共享页面不支持。'));
+  if (expectedUrl && normalizeUrl(tab.url) !== expectedUrl) throw fail(t('目标标签页已切换到其他会话；原任务会等待原地址重新打开。'));
 }
 async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS) {
   let timer;
@@ -117,17 +122,17 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS) {
 
     const result = await Promise.race([
       runner(),
-      new Promise((_, reject) => { timer = setTimeout(() => reject(fail('页面操作超时，本周期结果未确认。')), Math.max(1, deadline - Date.now())); }),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(fail(t('页面操作超时，本周期结果未确认。'))), Math.max(1, deadline - Date.now())); }),
     ]);
-    const value = result;
-    if (!value || !RESULT_STATUSES.has(value.status)) return { status: 'unknown', message: '页面未返回可确认的结果。', diagnosticCode: 'no-valid-result' };
+    const value = translatePageResult(result);
+    if (!value || !RESULT_STATUSES.has(value.status)) return { status: 'unknown', message: t('页面未返回可确认的结果。'), diagnosticCode: 'no-valid-result' };
     // Return only bounded adapter status fields.
     return { status: value.status, message: String(value.message || '').slice(0, 300), identity: typeof value.identity === 'string' ? value.identity.slice(0, 500) : null, assistantToken: typeof value.assistantToken === 'string' ? value.assistantToken.slice(0, 500) : null, assistantCount: Number(value.assistantCount) || 0 };
   } finally { clearTimeout(timer); }
 }
 async function probe(tab, config, targetIdentity = null) {
   assertSupportedTab(tab);
-  if (tab.discarded || tab.frozen) return { status: 'busy', message: '目标标签页已休眠或冻结，等待页面恢复。' };
+  if (tab.discarded || tab.frozen) return { status: 'busy', message: t('目标标签页已休眠或冻结，等待页面恢复。') };
   return executePage({ mode: 'check', expectedUrl: normalizeUrl(tab.url), prompt: '', runId: null, stopMarkers: config.stopMarkers ?? [], waitForIdle: config.waitForIdle ?? false, sendMethod: config.sendMethod ?? 'auto', targetIdentity }, tab.id);
 }
 async function currentTab(tabId) {
@@ -151,25 +156,25 @@ async function start(configInput, version, tabId) {
   await transact(async () => {
     assertIntent(version);
     const old = await getJob();
-    if (old?.enabled) await pauseLocked(old, '正在绑定新的目标，原任务已替换。', 'replaced');
+    if (old?.enabled) await pauseLocked(old, t('正在绑定新的目标，原任务已替换。'), 'replaced');
   });
   const tab = await currentTab(tabId);
   assertSupportedTab(tab);
   const result = await probe(tab, config);
-  if (!['ready', 'busy', 'draft'].includes(result.status)) throw fail(result.message || '页面暂时无法启用自动发送。');
-  if (new URL(tab.url).pathname.startsWith('/dots/') && !result.identity) throw fail('请先打开 dot 页面并等待会话历史加载，再绑定任务。');
+  if (!['ready', 'busy', 'draft'].includes(result.status)) throw fail(result.message || t('页面暂时无法启用自动发送。'));
+  if (new URL(tab.url).pathname.startsWith('/dots/') && !result.identity) throw fail(t('请先打开 dot 页面并等待会话历史加载，再绑定任务。'));
   const response = await transact(async () => {
     assertIntent(version);
     const latestTab = await chrome.tabs.get(tab.id);
     assertSupportedTab(latestTab, normalizeUrl(tab.url));
     const protection = await protectFromDiscard(latestTab, config.preventDiscard);
     const now = Date.now();
-    const job = { ...config, id: token(), runId: token(), enabled: true, tabId: latestTab.id, url: normalizeUrl(latestTab.url), title: latestTab.title || 'ChatGPT / dot', targetIdentity: result.identity, sentCount: 0, unknownCount: 0, queueIndex: 0, nextAt: now + (config.startImmediately ? 0 : config.intervalMinutes * 60_000), lastRunAt: null, runDeadline: null, phase: 'idle', awaitingReply: false, assistantToken: null, assistantCount: 0, needsAttention: false, statusText: config.startImmediately ? '已开始，即将进行首次后台检查。' : `持续运行中；约 ${config.intervalMinutes} 分钟后首次检查。`, ...protection };
+    const job = { ...config, id: token(), runId: token(), enabled: true, tabId: latestTab.id, url: normalizeUrl(latestTab.url), title: latestTab.title || 'ChatGPT / dot', targetIdentity: result.identity, sentCount: 0, unknownCount: 0, queueIndex: 0, nextAt: now + (config.startImmediately ? 0 : config.intervalMinutes * 60_000), lastRunAt: null, runDeadline: null, phase: 'idle', awaitingReply: false, assistantToken: null, assistantCount: 0, needsAttention: false, statusText: config.startImmediately ? t('已开始，即将进行首次后台检查。') : t`持续运行中；约 ${config.intervalMinutes} 分钟后首次检查。`, ...protection };
     job.systemAwake = await syncPower(job);
     await chrome.storage.local.set({ config });
     await setJob(job);
-    try { await syncAlarm(job); } catch { await pauseLocked(job, '后台计时器不可用，未启动任务。', 'scheduler-error'); throw fail('无法创建后台计时器。'); }
-    await logEvent('started', `开始任务，间隔 ${config.intervalMinutes} 分钟，${config.maxSends ? `上限 ${config.maxSends} 次` : '不限次数'}。`);
+    try { await syncAlarm(job); } catch { await pauseLocked(job, t('后台计时器不可用，未启动任务。'), 'scheduler-error'); throw fail(t('无法创建后台计时器。')); }
+    await logEvent('started', t`开始任务，间隔 ${config.intervalMinutes} 分钟，${config.maxSends ? t`上限 ${config.maxSends} 次` : t('不限次数')}。`);
     await updateBadge(job);
     return { ok: true, job };
   });
@@ -180,23 +185,23 @@ async function resume(version) {
   const snapshot = await transact(async () => {
     assertIntent(version);
     const job = await getJob();
-    if (!job) throw fail('请先绑定 dot 或会话。');
-    if (job.maxSends > 0 && job.sentCount >= job.maxSends) throw fail('已达到所设上限；请开始新任务。');
-    if (job.mode === 'queue-once' && job.queueIndex >= job.queue.length) throw fail('队列已完成；请开始新任务。');
+    if (!job) throw fail(t('请先绑定 dot 或会话。'));
+    if (job.maxSends > 0 && job.sentCount >= job.maxSends) throw fail(t('已达到所设上限；请开始新任务。'));
+    if (job.mode === 'queue-once' && job.queueIndex >= job.queue.length) throw fail(t('队列已完成；请开始新任务。'));
     return job;
   });
   if (snapshot.enabled) return { ok: true, job: snapshot };
   return transact(async () => {
     assertIntent(version);
     const current = await getJob();
-    if (!current || current.id !== snapshot.id) throw fail('目标任务已改变，请刷新面板。');
+    if (!current || current.id !== snapshot.id) throw fail(t('目标任务已改变，请刷新面板。'));
     let protection = {};
     try { const tab = await chrome.tabs.get(current.tabId); if (normalizeUrl(tab.url) === current.url) protection = await protectFromDiscard(tab, current.preventDiscard); } catch { /* Wait for original page. */ }
-    const job = { ...current, ...protection, enabled: true, runId: token(), runDeadline: null, phase: 'idle', nextAt: Date.now() + current.intervalMinutes * 60_000, needsAttention: false, statusText: `已继续原任务；约 ${current.intervalMinutes} 分钟后检查。` };
+    const job = { ...current, ...protection, enabled: true, runId: token(), runDeadline: null, phase: 'idle', nextAt: Date.now() + current.intervalMinutes * 60_000, needsAttention: false, statusText: t`已继续原任务；约 ${current.intervalMinutes} 分钟后检查。` };
     job.systemAwake = await syncPower(job);
     await setJob(job);
     await syncAlarm(job);
-    await logEvent('resumed', '已使用原提示词与原设置继续任务。');
+    await logEvent('resumed', t('已使用原提示词与原设置继续任务。'));
     await updateBadge(job);
     return { ok: true, job };
   });
@@ -217,7 +222,7 @@ async function resolveTarget(snapshot) {
   if (!tab || normalizeUrl(tab.url) !== snapshot.url) {
     const allTabs = await chrome.tabs.query({ url: 'https://chatgpt.com/*' });
     let matches = allTabs.filter(item => normalizeUrl(item.url) === snapshot.url);
-    if (matches.length !== 1) return { status: 'busy', message: matches.length ? '找到多个相同目标页，等待只保留一个或重新绑定。' : '等待原目标页面重新打开；任务仍保持启用。' };
+    if (matches.length !== 1) return { status: 'busy', message: matches.length ? t('找到多个相同目标页，等待只保留一个或重新绑定。') : t('等待原目标页面重新打开；任务仍保持启用。') };
     tab = matches[0];
   }
   const nextUrl = normalizeUrl(tab.url);
@@ -231,7 +236,7 @@ async function resolveTarget(snapshot) {
       await setJob({ ...current, ...protection, tabId: tab.id, url: nextUrl });
       return true;
     });
-    if (!changed) return { status: 'cancelled', message: '本次检查已取消。' };
+    if (!changed) return { status: 'cancelled', message: t('本次检查已取消。') };
   }
   return { tab };
 }
@@ -245,27 +250,27 @@ async function finishRound(snapshot, result) {
     if (result.status === 'sent') {
       job.sentCount += 1;
       if (job.mode !== 'repeat') job.queueIndex += 1;
-      if (job.maxSends > 0 && job.sentCount >= job.maxSends) return { ok: true, job: await pauseLocked(job, `已确认发送 ${job.sentCount} 次，达到你设置的上限。`, 'limit-reached') };
-      if (job.mode === 'queue-once' && job.queueIndex >= job.queue.length) return { ok: true, job: await pauseLocked(job, '队列已全部发送，按单次队列设置结束。', 'queue-complete') };
+      if (job.maxSends > 0 && job.sentCount >= job.maxSends) return { ok: true, job: await pauseLocked(job, t`已确认发送 ${job.sentCount} 次，达到你设置的上限。`, 'limit-reached') };
+      if (job.mode === 'queue-once' && job.queueIndex >= job.queue.length) return { ok: true, job: await pauseLocked(job, t('队列已全部发送，按单次队列设置结束。'), 'queue-complete') };
       if (job.mode === 'queue-loop') job.queueIndex %= job.queue.length;
       job.awaitingReply = job.scheduleMode === 'after-reply';
       job.assistantToken = result.assistantToken;
       job.assistantCount = result.assistantCount;
       job.nextAt = now + (job.awaitingReply ? RETRY_MS : job.intervalMinutes * 60_000);
-      job.statusText = job.awaitingReply ? '已确认发送，等待 Agent 回复完成后开始下一间隔。' : `已确认发送 ${job.sentCount} 次；约 ${job.intervalMinutes} 分钟后继续。`;
-      await logEvent('sent', '已在目标会话确认新消息。');
+      job.statusText = job.awaitingReply ? t('已确认发送，等待 Agent 回复完成后开始下一间隔。') : t`已确认发送 ${job.sentCount} 次；约 ${job.intervalMinutes} 分钟后继续。`;
+      await logEvent('sent', t('已在目标会话确认新消息。'));
     } else if (result.status === 'reply-complete') {
       job.awaitingReply = false;
       job.nextAt = now + job.intervalMinutes * 60_000;
-      job.statusText = `检测到新的回复已结束；约 ${job.intervalMinutes} 分钟后发送下一条。`;
-      await logEvent('reply-complete', '新的回复已结束，开始下一发送间隔。');
+      job.statusText = t`检测到新的回复已结束；约 ${job.intervalMinutes} 分钟后发送下一条。`;
+      await logEvent('reply-complete', t('新的回复已结束，开始下一发送间隔。'));
     } else if (['busy', 'draft', 'blocked', 'error'].includes(result.status)) {
       job.nextAt = now + RETRY_MS;
       job.needsAttention = ['blocked', 'error'].includes(result.status);
-      job.statusText = (result.message || '页面暂不可用。') + ' 一分钟后再检查，任务仍保持启用。';
-      if (current.lastResult !== result.status) await logEvent(result.status, result.status === 'draft' ? '保留现有草稿或附件，等待输入框空闲。' : result.status === 'busy' ? '目标暂忙或未就绪，延后检查。' : '页面暂不可用，保持启用并等待恢复。');
+      job.statusText = (result.message || t('页面暂不可用。')) + t(' 一分钟后再检查，任务仍保持启用。');
+      if (current.lastResult !== result.status) await logEvent(result.status, result.status === 'draft' ? t('保留现有草稿或附件，等待输入框空闲。') : result.status === 'busy' ? t('目标暂忙或未就绪，延后检查。') : t('页面暂不可用，保持启用并等待恢复。'));
     } else if (result.status === 'done') {
-      return { ok: true, job: await pauseLocked(job, '检测到你设置的停止标记，按设置暂停。', 'marker-reached') };
+      return { ok: true, job: await pauseLocked(job, t('检测到你设置的停止标记，按设置暂停。'), 'marker-reached') };
     } else {
       // A missed/uncertain cycle is never replayed immediately. In repeat mode
       // the next scheduled cycle remains enabled, as explicitly requested.
@@ -273,8 +278,8 @@ async function finishRound(snapshot, result) {
       job.nextAt = now + job.intervalMinutes * 60_000;
       job.awaitingReply = false;
       job.needsAttention = true;
-      job.statusText = '本周期提交结果未确认；本周期不重试，完整间隔后继续。请检查页面记录。';
-      await logEvent('unconfirmed', '本周期结果未知；未立即重试，将在下一正常周期继续。', { code: result.diagnosticCode || 'adapter-result', durationMs: now - snapshot.lastRunAt });
+      job.statusText = t('本周期提交结果未确认；本周期不重试，完整间隔后继续。请检查页面记录。');
+      await logEvent('unconfirmed', t('本周期结果未知；未立即重试，将在下一正常周期继续。'), { code: result.diagnosticCode || 'adapter-result', durationMs: now - snapshot.lastRunAt });
     }
     job.lastResult = result.status;
     await setJob(job);
@@ -287,15 +292,15 @@ async function runRound(force = false, expectedJobId = null) {
   const claim = await transact(async () => {
     const job = await getJob();
     if (expectedJobId && job?.id !== expectedJobId) return { job, claimed: false };
-    if (!job?.enabled) { await syncAlarm(job); if (force) throw fail('请先开始或继续任务。'); return { job, claimed: false }; }
-    if (job.phase !== 'idle') { if (force) throw fail('本次检查尚未结束。'); return { job, claimed: false }; }
+    if (!job?.enabled) { await syncAlarm(job); if (force) throw fail(t('请先开始或继续任务。')); return { job, claimed: false }; }
+    if (job.phase !== 'idle') { if (force) throw fail(t('本次检查尚未结束。')); return { job, claimed: false }; }
     if (!force && Date.now() < job.nextAt) return { job, claimed: false };
     if (inQuietHours(job)) {
-      const waiting = { ...job, nextAt: Date.now() + RETRY_MS, statusText: '处于你设置的静默时段；任务保持启用，时段结束后继续。' };
+      const waiting = { ...job, nextAt: Date.now() + RETRY_MS, statusText: t('处于你设置的静默时段；任务保持启用，时段结束后继续。') };
       await setJob(waiting); await updateBadge(waiting); return { job: waiting, claimed: false };
     }
-    if (job.maxSends > 0 && job.sentCount >= job.maxSends) return { job: await pauseLocked(job, '已达到你设置的发送上限。', 'limit-reached'), claimed: false };
-    const snapshot = { ...job, phase: 'sending', runKind: job.awaitingReply && !force ? 'reply-check' : 'send', runId: token(), runDeadline: Date.now() + EXECUTION_MS, lastRunAt: Date.now(), statusText: '正在后台检查目标页面…' };
+    if (job.maxSends > 0 && job.sentCount >= job.maxSends) return { job: await pauseLocked(job, t('已达到你设置的发送上限。'), 'limit-reached'), claimed: false };
+    const snapshot = { ...job, phase: 'sending', runKind: job.awaitingReply && !force ? 'reply-check' : 'send', runId: token(), runDeadline: Date.now() + EXECUTION_MS, lastRunAt: Date.now(), statusText: t('正在后台检查目标页面…') };
     await setJob(snapshot); await updateBadge(snapshot); return { job: snapshot, claimed: true };
   });
   if (!claim.claimed) return { ok: true, job: claim.job };
@@ -308,20 +313,20 @@ async function runRound(force = false, expectedJobId = null) {
     else if (resolved.tab.frozen || resolved.tab.discarded) {
       try {
         await chrome.tabs.reload(resolved.tab.id);
-        result = { status: 'busy', message: '目标标签已休眠，正在自动唤醒刷新，一分钟后再检查。' };
+        result = { status: 'busy', message: t('目标标签已休眠，正在自动唤醒刷新，一分钟后再检查。') };
       } catch {
-        result = { status: 'busy', message: '目标标签已冻结或休眠，请设置网站始终保持活动。' };
+        result = { status: 'busy', message: t('目标标签已冻结或休眠，请设置网站始终保持活动。') };
       }
     }
     else if (snapshot.awaitingReply && !force) {
       result = await probe(resolved.tab, { ...snapshot, waitForIdle: true }, snapshot.targetIdentity);
-      if (['unknown', 'cancelled'].includes(result.status)) result = { status: 'error', message: '回复检查暂不可用，继续等待新回复。' };
+      if (['unknown', 'cancelled'].includes(result.status)) result = { status: 'error', message: t('回复检查暂不可用，继续等待新回复。') };
       const changed = result.assistantToken ? result.assistantToken !== snapshot.assistantToken : result.assistantCount > snapshot.assistantCount;
-      if (result.status === 'ready') result = changed ? { status: 'reply-complete' } : { status: 'busy', message: '等待新的 Agent 回复完成。' };
+      if (result.status === 'ready') result = changed ? { status: 'reply-complete' } : { status: 'busy', message: t('等待新的 Agent 回复完成。') };
     } else {
       result = await executePage({ mode: 'send', expectedUrl: snapshot.url, prompt: currentPrompt(snapshot), runId: snapshot.runId, runDeadline: snapshot.runDeadline, stopMarkers: snapshot.stopMarkers ?? [], waitForIdle: snapshot.waitForIdle ?? false, sendMethod: snapshot.sendMethod ?? 'auto', targetIdentity: snapshot.targetIdentity }, snapshot.tabId, snapshot.runDeadline);
     }
-  } catch { result = snapshot.runKind === 'reply-check' ? { status: 'error', message: '回复检查暂不可用，继续等待新回复。' } : { status: 'unknown', message: '后台页面操作未确认。', diagnosticCode: 'execution-exception' }; }
+  } catch { result = snapshot.runKind === 'reply-check' ? { status: 'error', message: t('回复检查暂不可用，继续等待新回复。') } : { status: 'unknown', message: t('后台页面操作未确认。'), diagnosticCode: 'execution-exception' }; }
   return finishRound(snapshot, result);
 }
 async function initializePrivatePreset() {
@@ -344,6 +349,7 @@ async function initializePrivatePreset() {
   } catch { /* User can still import through the local file picker. */ }
 }
 async function initialize() {
+  await initializeLanguage();
   try { await chrome.storage.local.setAccessLevel?.({ accessLevel: 'TRUSTED_CONTEXTS' }); } catch { /* Old browser. */ }
   await initializePrivatePreset();
   return transact(async () => {
@@ -368,15 +374,15 @@ async function initialize() {
         job = { ...recovery, tabId: null, runId: token(), runDeadline: null, autoDiscardableChanged: false, discardProtection: 'pending' };
         if (job.enabled && (!job.nextAt || job.nextAt <= Date.now())) {
           job.nextAt = Date.now() + 3000;
-          job.statusText = '已从重启中恢复；正在连接目标页面并继续推进…';
+          job.statusText = t('已从重启中恢复；正在连接目标页面并继续推进…');
         }
-        await logEvent('browser-restored', '已恢复任务设置；等待唯一匹配的原目标页面。');
+        await logEvent('browser-restored', t('已恢复任务设置；等待唯一匹配的原目标页面。'));
       }
     }
     if (job?.phase === 'sending') {
       const readOnly = job.runKind === 'reply-check';
-      job = { ...job, phase: 'idle', runKind: null, runId: token(), runDeadline: null, awaitingReply: readOnly ? job.awaitingReply : false, unknownCount: (job.unknownCount || 0) + (readOnly ? 0 : 1), nextAt: Date.now() + (readOnly ? RETRY_MS : job.intervalMinutes * 60_000), statusText: readOnly ? '回复检查被中断；恢复后继续等待新回复。' : '上周期执行被中断；完整间隔后继续，未立即重发。', needsAttention: !readOnly };
-      await logEvent('interrupted', readOnly ? '只读回复检查被中断；仍等待新回复。' : '后台执行被中断；延后到下一完整周期。');
+      job = { ...job, phase: 'idle', runKind: null, runId: token(), runDeadline: null, awaitingReply: readOnly ? job.awaitingReply : false, unknownCount: (job.unknownCount || 0) + (readOnly ? 0 : 1), nextAt: Date.now() + (readOnly ? RETRY_MS : job.intervalMinutes * 60_000), statusText: readOnly ? t('回复检查被中断；恢复后继续等待新回复。') : t('上周期执行被中断；完整间隔后继续，未立即重发。'), needsAttention: !readOnly };
+      await logEvent('interrupted', readOnly ? t('只读回复检查被中断；仍等待新回复。') : t('后台执行被中断；延后到下一完整周期。'));
     }
     if (job) { job.systemAwake = await syncPower(job); await setJob(job); }
     else await syncPower(null);
@@ -386,9 +392,9 @@ async function initialize() {
 const initialized = initialize();
 async function dispatch(message, sender, version) {
   await initialized;
-  if (!message || typeof message.type !== 'string') throw fail('无效请求。');
+  if (!message || typeof message.type !== 'string') throw fail(t('无效请求。'));
   const ownExtensionPage = chrome.runtime.id && sender.id === chrome.runtime.id && typeof sender.url === 'string' && sender.url.startsWith(chrome.runtime.getURL(''));
-  if (message.type !== 'CHECK_RUN' && sender.tab && !ownExtensionPage) throw fail('此操作只能从扩展控制面板发起。');
+  if (message.type !== 'CHECK_RUN' && sender.tab && !ownExtensionPage) throw fail(t('此操作只能从扩展控制面板发起。'));
   switch (message.type) {
     case 'GET_STATE': return transact(async () => ({ ok: true, job: await getJob(), config: await getConfig(), logs: (await chrome.storage.local.get('logs')).logs || [], availableTargets: await availableTargets() }));
     case 'CHECK_PAGE': return checkPage(message.tabId);
@@ -399,14 +405,14 @@ async function dispatch(message, sender, version) {
     case 'SEND_NOW': return runRound(true);
     case 'CLEAR_LOGS': return transact(async () => { await chrome.storage.local.remove('logs'); return { ok: true }; });
     case 'CLEAR_DATA': return transact(async () => {
-      await pauseLocked(await getJob(), '已停止任务并清除本地数据。');
+      await pauseLocked(await getJob(), t('已停止任务并清除本地数据。'));
       await setJob(null);
       for (const key of ['config', 'logs', 'templates', 'uiTheme']) await chrome.storage.local.remove(key);
       // Do not silently reimport a personal bundle after an explicit clear.
       if (BUNDLED_PROMPT) await chrome.storage.local.set({ privatePresetImported: true });
       return { ok: true };
     });
-    default: throw fail('不支持的操作。');
+    default: throw fail(t('不支持的操作。'));
   }
 }
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -426,8 +432,8 @@ chrome.tabs.onRemoved.addListener(tabId => {
     const job = await getJob();
     if (job?.tabId !== tabId) return;
     const interrupted = job.phase === 'sending' && job.runKind !== 'reply-check';
-    const waiting = { ...job, tabId: null, runId: token(), runDeadline: null, phase: 'idle', runKind: null, awaitingReply: interrupted ? false : job.awaitingReply, unknownCount: (job.unknownCount || 0) + (interrupted ? 1 : 0), nextAt: job.enabled ? Math.max(job.nextAt || 0, Date.now() + (interrupted ? job.intervalMinutes * 60_000 : RETRY_MS)) : null, autoDiscardableChanged: false, discardProtection: 'pending', statusText: interrupted ? '发送期间目标关闭，结果未确认；完整间隔后检查原页面。' : '目标标签已关闭；任务保持原启用状态，等待原页面重新打开。' };
-    if (interrupted) await logEvent('interrupted', '发送期间目标关闭，等待下一完整周期。');
+    const waiting = { ...job, tabId: null, runId: token(), runDeadline: null, phase: 'idle', runKind: null, awaitingReply: interrupted ? false : job.awaitingReply, unknownCount: (job.unknownCount || 0) + (interrupted ? 1 : 0), nextAt: job.enabled ? Math.max(job.nextAt || 0, Date.now() + (interrupted ? job.intervalMinutes * 60_000 : RETRY_MS)) : null, autoDiscardableChanged: false, discardProtection: 'pending', statusText: interrupted ? t('发送期间目标关闭，结果未确认；完整间隔后检查原页面。') : t('目标标签已关闭；任务保持原启用状态，等待原页面重新打开。') };
+    if (interrupted) await logEvent('interrupted', t('发送期间目标关闭，等待下一完整周期。'));
     await setJob(waiting); await updateBadge(waiting);
   })).catch(() => undefined);
 });
@@ -447,8 +453,8 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
     }
     await restoreDiscard(job);
     const interrupted = job.phase === 'sending' && job.runKind !== 'reply-check';
-    const waiting = { ...job, tabId: null, runId: token(), runDeadline: null, phase: 'idle', runKind: null, awaitingReply: interrupted ? false : job.awaitingReply, unknownCount: (job.unknownCount || 0) + (interrupted ? 1 : 0), nextAt: Math.max(job.nextAt || 0, Date.now() + (interrupted ? job.intervalMinutes * 60_000 : RETRY_MS)), autoDiscardableChanged: false, discardProtection: 'pending', statusText: interrupted ? '发送期间页面改变，结果未确认；完整间隔后检查原地址。' : '原目标页面已离开；等待原地址重新打开，不会给其他会话发送。' };
-    if (interrupted) await logEvent('interrupted', '发送期间目标改变，等待下一完整周期。');
+    const waiting = { ...job, tabId: null, runId: token(), runDeadline: null, phase: 'idle', runKind: null, awaitingReply: interrupted ? false : job.awaitingReply, unknownCount: (job.unknownCount || 0) + (interrupted ? 1 : 0), nextAt: Math.max(job.nextAt || 0, Date.now() + (interrupted ? job.intervalMinutes * 60_000 : RETRY_MS)), autoDiscardableChanged: false, discardProtection: 'pending', statusText: interrupted ? t('发送期间页面改变，结果未确认；完整间隔后检查原地址。') : t('原目标页面已离开；等待原地址重新打开，不会给其他会话发送。') };
+    if (interrupted) await logEvent('interrupted', t('发送期间目标改变，等待下一完整周期。'));
     await setJob(waiting); await updateBadge(waiting);
   })).catch(() => undefined);
 });

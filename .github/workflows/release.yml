@@ -67,12 +67,14 @@ jobs:
               raise SystemExit(f"CHANGELOG.md needs a ## [{version}] section.")
           notes = changelog[heading.start():].split("\n## ", 1)[0].strip()
           notes += (
-              "\n\n### 安装\n\n"
-              f"下载本 Release 的 `agent-continue-{version}.zip`，解压后在 Chrome / Edge "
-              "扩展管理页打开开发者模式，加载其中直接包含 `manifest.json` 的 `AgentContinue` 文件夹。"
-              "无需 Node.js 或构建工具。\n\n"
-              "`SHA256SUMS` 提供 ZIP 的 SHA-256 校验值。"
-              "自动化测试只使用本地模拟页面，实际网站界面变化仍可能需要适配更新。\n"
+              "\n\n### Installation\n\n"
+              f"Download `agent-continue-{version}.zip`, extract it, and load its "
+              "`AgentContinue` directory in Chrome or Edge developer mode. "
+              "No Node.js or build tools are required for installation.\n\n"
+              f"`agent-continue-{version}-store.zip` is the matching store-upload package. "
+              "`SHA256SUMS` contains both archive checksums. "
+              "The interface defaults to English; Simplified Chinese is available in Settings. "
+              "Automated tests use synthetic pages and do not guarantee permanent website compatibility.\n"
           )
           Path(os.environ["RUNNER_TEMP"], "agent-continue-release-notes.md").write_text(notes, encoding="utf-8")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
@@ -92,7 +94,10 @@ jobs:
         run: xvfb-run -a env TEST_HEADED=1 npm test
 
       - name: Package the loadable extension
-        run: python3 scripts/package.py
+        run: |
+          python3 scripts/package.py
+          python3 scripts/package.py --store
+          python3 -m unittest discover -s tests -p test_package.py
 
       - name: Check ZIP integrity and embedded version
         env:
@@ -119,7 +124,7 @@ jobs:
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          sha256sum "agent-continue-${RELEASE_VERSION}.zip" > SHA256SUMS
+          sha256sum "agent-continue-${RELEASE_VERSION}.zip" "agent-continue-${RELEASE_VERSION}-store.zip" > SHA256SUMS
           sha256sum --check SHA256SUMS
 
       - name: Create or update the GitHub Release
@@ -130,15 +135,16 @@ jobs:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           archive="dist/agent-continue-${RELEASE_VERSION}.zip"
+          store="dist/agent-continue-${RELEASE_VERSION}-store.zip"
           notes="${RUNNER_TEMP}/agent-continue-release-notes.md"
           if is_draft="$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft')"; then
             # Re-running a tag replaces only these two generated assets.
             # A partially created draft can be completed by the same workflow.
-            gh release upload "$RELEASE_TAG" "$archive" dist/SHA256SUMS --clobber
+            gh release upload "$RELEASE_TAG" "$archive" "$store" dist/SHA256SUMS --clobber
             if [ "$is_draft" = 'true' ]; then
               gh release edit "$RELEASE_TAG" --draft=false --title "Agent Continue ${RELEASE_TAG}" --notes-file "$notes"
             fi
           else
-            gh release create "$RELEASE_TAG" "$archive" dist/SHA256SUMS \
+            gh release create "$RELEASE_TAG" "$archive" "$store" dist/SHA256SUMS \
               --verify-tag --title "Agent Continue ${RELEASE_TAG}" --notes-file "$notes"
           fi

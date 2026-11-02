@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const here=path.dirname(fileURLToPath(import.meta.url));
 const root=path.resolve(process.env.EXTENSION_ROOT || path.dirname(here));
+const { setLanguage } = await import(pathToFileURL(path.join(root, 'i18n.js')));
 const url='https://chatgpt.com/c/test-conversation';
 const copy=value=>value===undefined ? undefined : structuredClone(value);
 let importId=0;
@@ -74,6 +75,8 @@ async function harness(seed={}) {
     },
   };
   globalThis.chrome=chrome;
+  // Use the actual shared translator; legacy assertions intentionally use Chinese.
+  await setLanguage(seed.language || 'zh_CN');
   await import(pathToFileURL(path.join(root,'background.js')).href+`?test=${++importId}`);
   await h.message({type:'GET_STATE'});
   return h;
@@ -267,6 +270,23 @@ for (const [name, pageResult, code] of [
     await h.message({type:'PAUSE'});
   });
 }
+await scenario('English runtime copy preserves private content and switches languages', async()=>{
+  const h = await harness({ language: 'en' });
+  const prompt = '用户提示词 PRIVATE_SENTINEL';
+  const job = await h.start({ prompt, intervalMinutes: 30, maxSends: 2 });
+  assert.equal(job.statusText, 'Running; the first check is in about 30 minutes.');
+  assert.equal(job.prompt, prompt);
+  assert.equal(h.state.local.logs.at(-1).message, 'Task started with a 30-minute interval, limit of 2 sends.');
+  h.pageResult = async()=>({ status: 'busy', message: 'Agent 仍在运行，稍后再次检查。', identity: '中文身份' });
+  const checked = await h.message({ type: 'CHECK_PAGE' });
+  assert.equal(checked.result.message, 'The Agent is still running. Checking again later.');
+  assert.equal(checked.result.identity, '中文身份');
+  h.pageResult = async()=>({ status: 'busy', message: '用户自定义消息' });
+  assert.equal((await h.message({ type: 'CHECK_PAGE' })).result.message, '用户自定义消息');
+  assert.equal((await h.message({ type: 'PAUSE' })).job.statusText, 'Manually paused; future scheduled sends have stopped.');
+  await setLanguage('zh_CN');
+  assert.equal((await h.message({ type: 'PAUSE' })).job.statusText, '已手动暂停；后续定时发送已停止。');
+});
 const failed=results.filter(x=>x.status==='FAIL').length;
 console.log(`RESULT ${results.length-failed}/${results.length} passed`);
 process.exitCode=failed?1:0;

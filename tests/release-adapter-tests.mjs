@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { pageAction } from '../adapter.js';
 import vm from 'node:vm';
 import test from 'node:test';
 
-const source = readFileSync(new URL('../adapter.js', import.meta.url), 'utf8');
+const source = pageAction.toString();
 
 // Deliberately small DOM contract: selectors are routed, not browser-parsed.
 // Coverage excludes real layout, trusted events, ProseMirror/React integration,
@@ -105,7 +105,7 @@ function fixture(options = {}) {
       return options.authorize ? options.authorize(state) : { ok: true, allowed: true };
     } } };
   }
-  vm.runInContext(source.replace('export async function pageAction', 'async function pageAction') + '\nglobalThis.run = pageAction;', context);
+  vm.runInContext('globalThis.run = (' + source + ');', context);
   return {
     state,
     run: () => context.run({

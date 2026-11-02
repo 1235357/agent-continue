@@ -1,0 +1,6 @@
+{
+  "extensionName": { "message": "Agent Continue - Background Prompt Scheduler" },
+  "extensionDescription": { "message": "Schedule your own prompts in ChatGPT or Your dot, with local queues, pause controls, and English or Chinese settings." },
+  "actionTitle": { "message": "Agent Continue - Start / Pause" },
+  "toggleRunningDescription": { "message": "Pause or resume the bound task" }
+}

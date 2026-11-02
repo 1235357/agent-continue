@@ -212,10 +212,10 @@ try {
   await control.locator('#tab-task').click();
   await control.locator('#targetSelect').selectOption(String(dotTab.id));
   await control.locator('#check').click();
-  await control.waitForFunction(() => document.querySelector('#feedback').textContent.includes('已识别'));
+  await control.waitForFunction(() => document.querySelector('#feedback').textContent.includes('Composer detected'));
   assert.deepEqual(await dot.evaluate(() => [fixture.sendClicks, fixture.keyboardSends]), [0, 0]);
   await control.locator('#start').click();
-  await control.waitForFunction(() => document.querySelector('#badge').textContent === '运行中');
+  await control.waitForFunction(() => document.querySelector('#badge').textContent === 'Running');
   const started = await state(control);
   assert.equal(started.job.tabId, dotTab.id); assert.equal(started.job.prompt, sentinel); assert.equal(started.job.intervalMinutes, 20);
   assert.equal(started.job.maxSends, 0); assert.deepEqual(started.job.stopMarkers, []);

@@ -1,74 +1,72 @@
-# 隐私与数据处理
+# Privacy and Data Handling
 
-适用范围：Agent Continue 2.0.0 候选版本。更新日期：2026-11-01。不会自动替换现有解压安装目录。
+Scope: Agent Continue v2.1.0 release documentation. Updated: 2026-11-02.
 
-**本扩展没有开发者服务器、分析遥测、云端同步或在线文档转换。提示词由本机扩展处理，并在你启动任务后提交到绑定的 ChatGPT / dot 页面。**
+Agent Continue processes configuration and imported documents locally. It has no developer backend, external analytics telemetry, cloud synchronization, or online document conversion. No separate extension account or API key is required. Sending a prompt submits it to your selected ChatGPT or Your dot conversation on `chatgpt.com`; that service then processes it under its own policies. Local processing does not mean that sent prompts stay on your computer.
 
-“开发者不接收文件内容”与“扩展不能处理原文”不是同一件事。自动发送需要扩展在本机读取所选文档；扩展不会将该内容发送给项目维护者。本项目的测试使用合成文档，不需要用户提供实际保密提示词。
+## Data Flow
 
-## 数据流
+1. You type a prompt or select local files through the file picker or drag and drop.
+2. The extension reads and parses those files locally. Text is imported as text; HTML, DOCX, and PDF import extract text without executing document scripts or calling a remote conversion service.
+3. Prompts, queues, templates, and configuration are saved in the current browser profile's extension storage.
+4. When you start a task or request a send, the scheduler passes the prompt to an isolated-world script on the bound target. Each attempt uses one submission mechanism after a background permission check. It does not use the system clipboard or activate the target tab.
+5. The website receives the submitted message. The extension inspects page state and new user-message markers for confirmation; missing confirmation remains an unknown result, not proof that the service did not receive it.
 
-1. 你手动输入文字，或使用文件选择器 / 拖放选择本机文件。
-2. 扩展页面在本机读取并解析文件。纯文本按原文导入；DOCX、PDF、HTML 提取文字。解析器不执行文档脚本，也不调用远程转换 API。
-3. 提示词存入当前浏览器配置文件的扩展存储。队列、模板和用于任务恢复的配置也保存在本机。
-4. 启动后，后台调度器把当前提示词传给所绑定标签的隔离世界脚本。脚本填写输入框，并按选择向目标编辑器发送 Ctrl+Enter 或点击发送按钮；不经过系统剪贴板，不激活目标标签。
-5. 目标聊天网站收到这条消息，并按自己的服务规则处理。扩展随后只根据页面新消息标记判断前端提交是否得到确认。
+Importing a file does not itself send a message or start a task. A normal first installation does not automatically start sending. An optional private preconfigured package can import its bundled prompt without automatically starting a task.
 
-导入文件本身不会发送聊天。普通包首次安装不会自动运行；个人预配置包首次载入原文件也不会自动启动。
+## Stored Data
 
-## 保存什么
-
-| 数据 | 保存位置 / 用途 |
+| Data | Storage and purpose |
 | --- | --- |
-| 提示词、间隔、停止条件、队列 | `chrome.storage.local`，用于配置与后续运行 |
-| 模板、主题 | `chrome.storage.local`；不使用 `chrome.storage.sync` |
-| 当前任务、令牌与执行状态 | `chrome.storage.session`；后台 service worker 休眠后可继续读取 |
-| 恢复任务副本 | `chrome.storage.local`；包含目标地址、名称、dot 身份标记、配置及计数，用于浏览器重启后恢复 |
-| 运行日志 | `chrome.storage.local`，最多保留 200 条时间 / 事件 / 固定状态信息 |
-| 修订版诊断 | 固定枚举分类及限制在 0–120000 ms 的耗时；随日志保存在本机和用户主动导出的 JSON 中 |
-| 解析过程与当前显示正文 | 扩展内存；用户明确显示时也会进入界面 DOM |
-| 用户主动导出的 JSON | 用户选定的下载位置；导出后由用户管理 |
+| Prompts, queues, intervals, and stop conditions | `chrome.storage.local`, for configuration and later sending |
+| Templates and theme | `chrome.storage.local`, not Chrome Sync |
+| Interface language | `chrome.storage.local` as `uiLanguage`; English is the default, with Simplified Chinese selectable locally |
+| Current task, internal execution tokens, and run state | `chrome.storage.session`, to survive service-worker suspension; tokens are internal run identifiers, not account credentials |
+| Recovery task copy | `chrome.storage.local`, including target URL, title, Dot identity markers, configuration, and counters for restart recovery |
+| Activity logs | `chrome.storage.local`, limited to 200 timestamped event/status entries |
+| Diagnostics | Fixed categories and elapsed times bounded to 0–120000 ms, stored in logs and user-requested JSON exports |
+| Parsing buffers and displayed prompt text | Extension memory; explicitly revealed text also appears in the interface DOM |
+| Exported JSON files | Your selected download location, under your control after export |
 
-不会记录提示词正文、导入文件名或聊天正文到操作日志。后台和解析器不会把底层异常、文档摘录或页面内容拼入诊断信息。运行日志仍会反映任务时间及状态，请按自己的需要保存或分享。
+Activity logs do not include prompt bodies, imported filenames, conversation bodies, raw exceptions, or full target URLs. Recovery state does contain target metadata, and prompts must remain readable to the extension for sending. Logs still reveal task timing and status. The language preference is not sent to a telemetry service, and changing it does not translate your content.
 
-## 默认隐藏正文
+## Hidden Text Is Not Encryption
 
-打开控制面板时，提示词正文只留在扩展状态中，不写入隐藏 textarea 的 value，也不出现在可访问性树中。用户点击“显示 / 编辑正文”才会呈现它。导入后、切换实际任务配置或离开提示词页时，正文会再次隐藏。
+Prompt text is hidden by default and is not placed in the hidden prompt textarea until you explicitly reveal or edit it. Importing text, switching task configuration, or leaving the prompt view hides it again. This reduces accidental exposure in screenshots, screen sharing, and routine interface inspection.
 
-这是防止常规截图、屏幕共享和界面检查意外展示正文的设计。**它不是加密，也不能抵御对浏览器配置文件、扩展内存或调试工具的访问。** 扩展本身必须能读取原文才能自动发送。
+Local storage and extension memory are not encrypted vaults. Someone with browser-profile or debugging access may be able to read the data. The extension must access plaintext to send it.
 
-## 导入、导出与个人安装包
+## Imports and Exports
 
-- 文件导入只在本机完成；文件名不写入日志。批量队列默认使用通用项名称，用户可自行修改。
-- 默认的配置 JSON 导出不包含提示词、队列正文或目标会话地址。
-- 只有明确勾选“此次导出包含提示词和队列正文”时，导出的 JSON 才包含这些明文内容；勾选在导出后重置。
-- 日志导出仅包含时间、事件和状态信息。
-- 个人预配置包可包含明文原文件；不得将它混同通用包公开转发。公开源码与通用 Release 使用明确打包范围，不包含个人文件。
-- PDF.js 模块、Worker、字体及 CMap 随包提供。没有运行时 CDN；首次从源码安装依赖 / 构建资源则需要访问 npm 等开发工具来源。
+- Files are parsed locally. Imported filenames are not written to activity logs; imported queue items use generic names unless you rename them.
+- Default configuration JSON exports omit prompt bodies, queue bodies, and target conversation URLs. Explicitly opting to include prompt and queue text exports that content in plaintext; the opt-in resets after export.
+- Log exports contain timestamped events, status information, and bounded diagnostics, not prompt or conversation bodies.
+- PDF.js modules, worker, fonts, and character maps are bundled. Runtime parsing does not load a CDN. Installing development dependencies or preparing resources from source can contact package registries separately.
+- A private preconfigured package may include a plaintext original file. Do not share it as a public installation package. Public packaging is intended to exclude personal files; review any package before sharing it.
 
-## 权限
+## Permissions
 
-`https://chatgpt.com/*` 用于读取对应标签元数据、在选定页面注入操作并恢复原目标。它不会授权其他域名。`scripting`、`storage`、`alarms` 与 `activeTab` 服务于页面操作和本地调度；可选 `power` 仅在用户开启电脑防休眠时申请。
+| Permission | Why it is used |
+| --- | --- |
+| `https://chatgpt.com/*` | Discover eligible targets, inspect conversation state and identity, fill the composer, submit prompts, and recover the original target |
+| `activeTab` | Access a selected tab following a user action |
+| `scripting` | Execute read-only checks and authorized sending logic on the target page |
+| `storage` | Save local settings, language, content, logs, templates, and task/recovery state |
+| `alarms` | Wake the background scheduler to check due tasks |
+| Optional `power` | Request system idle-sleep prevention only when you enable it |
 
-没有 Cookie 权限、剪贴板权限、调试器权限、全部网站权限或开发者网络端点。没有以隐藏正文为由进行远程加密上传的服务。
+The manifest does not request all-site access, Cookie, clipboard, debugger, or native-messaging permissions. The extension does not send files or prompts to project maintainers, sell user data, or use external telemetry endpoints. Sending through ChatGPT is the intended website interaction, not developer telemetry.
 
-## 暂停与删除
+## Pause and Deletion
 
-暂停会撤销后续发送许可、清除调度 alarm，并释放本扩展设置的保持活动状态；已经提交给聊天网站的消息不会撤回。
+Pausing revokes subsequent sending permission, clears the scheduling alarm, and releases the extension's keep-active settings. It cannot retract a submission already dispatched to the website.
 
-“暂停并清空本机数据”会删除本扩展保存的任务、配置、模板、主题与日志。尚未完成的文件导入会被作废，不能在清空后重新写回。个人包的“已处理预置文件”标记可保留，以避免再次静默导入；包内的明文原文件仍由安装目录的所有者自行管理。
+The pause-and-clear-local-data command removes the task, recovery copy, configuration, templates, theme, and logs. Pending imports are invalidated so that their results cannot repopulate cleared configuration. **The current command does not remove `uiLanguage`, so the interface-language preference remains locally stored.** A private-preset processed marker may remain to prevent silent reimport. Plaintext files bundled in a private installation folder remain the folder owner's responsibility.
 
-清空扩展不会删除：
+Clearing the extension does not delete original imported files, exported JSON, screenshots, backups, private installation files, or messages already sent to ChatGPT. Manage those at their respective locations. Uninstalling the extension removes its browser-managed storage; separately exported files and website messages remain outside that storage.
 
-- 你选择导入的原始文件。
-- 你主动导出的 JSON、截图或备份。
-- 已经发送到 ChatGPT / dot 的消息。
-- 个人预配置安装目录中的原文件。
+## Reporting Issues
 
-这些数据需在其所在位置分别处理。卸载扩展前，若要保留配置，请按需主动导出；若不想保留，请先使用清空功能。
+Use synthetic prompts. Do not include credentials, Cookies, real conversation content, confidential documents, or private preconfigured packages in issues, screenshots, logs, or attachments. Redacted page structure, browser version, route type, and error status are usually sufficient.
 
-## 报告问题时
-
-使用合成提示词复现即可。Issue、PR、截图、日志和附件中不要放入真实提示词、账号凭据、Cookie、会话全文或个人预配置包。需要描述选择器失效时，提供脱敏的结构信息、浏览器版本、路径类型和错误状态；维护者不需要实际提示词内容。
-
-相关实现：[background.js](background.js)、[file-import.js](file-import.js)、[popup.js](popup.js)。测试边界见 [VALIDATION.md](VALIDATION.md)。
+Implementation references: [background.js](background.js), [adapter.js](adapter.js), [file-import.js](file-import.js), [popup.js](popup.js), and [i18n.js](i18n.js). Validation scope: [VALIDATION.md](VALIDATION.md).

@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(process.env.EXTENSION_ROOT || path.dirname(here));
+const { setLanguage } = await import(pathToFileURL(path.join(root, 'i18n.js')));
 const { DEFAULT_CONFIG, inQuietHours, readConfig } = await import(pathToFileURL(path.join(root, 'config.js')));
 const originalUrl = 'https://chatgpt.com/c/synthetic-original';
 const otherUrl = 'https://chatgpt.com/c/synthetic-other';
@@ -129,6 +130,8 @@ async function harness(seed = {}) {
     },
   };
   globalThis.chrome = chrome;
+  // Share the production translator and explicitly pin legacy Chinese copy.
+  await setLanguage(seed.language || 'zh_CN');
   await import(pathToFileURL(path.join(root, 'background.js')).href + `?v2-test=${++importId}`);
   assert.equal((await h.message({ type: 'GET_STATE' })).ok, true);
   return h;
@@ -654,6 +657,22 @@ await scenario('Unexpected page exceptions cannot copy prompt content into opera
   assert.equal(h.state.local.resumeJob, undefined);
   assert.equal(h.state.session.job, undefined);
   assert.equal(h.state.alarms.size, 0);
+});
+
+await scenario('English validation and queued sends preserve user-owned Chinese text', async () => {
+  const h = await harness({ language: 'en' });
+  assert.throws(() => readConfig({ prompt: '测试', sendMethod: 'invalid' }), {
+    message: 'Select a valid send method.',
+  });
+  const queue = [{ name: '用户队列名称', text: '用户提示词：继续' }];
+  const job = await h.start({ mode: 'queue-once', queue });
+  assert.deepEqual(job.queue, queue);
+  assert.equal(job.title, 'Synthetic conversation');
+  const result = await h.message({ type: 'SEND_NOW' });
+  assert.equal(h.sends()[0].args[0].prompt, queue[0].text);
+  assert.equal(result.job.statusText, 'All queued prompts were sent; the one-time queue has finished.');
+  await setLanguage('zh_CN');
+  assert.throws(() => readConfig({ prompt: '测试', sendMethod: 'invalid' }), /发送方式/);
 });
 
 const failed = results.filter(result => result.status === 'FAIL');

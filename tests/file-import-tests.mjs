@@ -26,7 +26,7 @@ await context.route('**/*', async route => {
     headers: { 'Content-Security-Policy': "default-src 'none'; script-src 'self'; worker-src 'self'; connect-src 'self'; object-src 'none'" },
     body: '<!doctype html><meta charset="utf-8"><title>Local import test fixture</title>',
   });
-  if (url.pathname === '/file-import.js' || /^\/vendor\/pdfjs\/[\w./-]+$/.test(url.pathname)) {
+  if (['/file-import.js','/i18n.js','/i18n-runtime.js'].includes(url.pathname) || /^\/vendor\/pdfjs\/[\w./-]+$/.test(url.pathname)) {
     const target = path.resolve(root, '.' + url.pathname);
     assert.ok(target.startsWith(root + path.sep));
     return route.fulfill({ status: 200, contentType: /\.m?js$/.test(target) ? 'text/javascript' : 'application/octet-stream', body: await fs.readFile(target) });
@@ -34,7 +34,11 @@ await context.route('**/*', async route => {
   return route.fulfill({ status: 404, body: '' });
 });
 await page.goto('http://import.test/');
-await page.evaluate(async () => { window.importer = await import('/file-import.js'); });
+await page.evaluate(async () => {
+  globalThis.chrome={storage:{local:{async set() {}}}};
+  await (await import('/i18n.js')).setLanguage('zh_CN');
+  window.importer = await import('/file-import.js');
+});
 
 let passed = 0;
 let failed = 0;

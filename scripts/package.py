@@ -23,7 +23,9 @@ REVIEWED_PDF_FILE_COUNT = 188
 
 RUNTIME_FILES = (
     "manifest.json", "background.js", "content.js", "adapter.js", "config.js", "preset.js",
-    "file-import.js", "popup.html", "popup.css", "popup.js", "README.md",
+    "file-import.js", "popup.html", "popup.css", "popup.js", "README.md", "README.zh-CN.md",
+    "i18n.js", "i18n-html.js", "i18n-popup.js", "i18n-runtime.js", "static-locale.js",
+    "_locales/en/messages.json", "_locales/zh_CN/messages.json",
     "LICENSE", "CHANGELOG.md", "PRIVACY.md", "VALIDATION.md", "ALTERNATIVES.md",
     "CONTRIBUTING.md", "docs/FILE_FORMATS.md",
     "icons/icon-16.png", "icons/icon-32.png", "icons/icon-48.png", "icons/icon-128.png",
@@ -127,6 +129,14 @@ def validate_release(root, cache):
     )
     if any(candidate != version for candidate in versions):
         raise PackageError("manifest.json, package.json and both package-lock.json versions must match.")
+    if manifest.get("default_locale") != "en":
+        raise PackageError("The public release requires English as its default locale.")
+    references = set(re.findall(r"__MSG_([A-Za-z0-9_]+)__", json.dumps(manifest)))
+    for locale in ("en", "zh_CN"):
+        messages = read_json(root, f"_locales/{locale}/messages.json", cache)
+        for key in references:
+            if not isinstance(messages.get(key, {}).get("message"), str):
+                raise PackageError(f"Missing manifest translation: {locale}/{key}")
     preset = read_public(root, "preset.js", cache).decode("utf-8")
     effective_preset = "\n".join(line for line in preset.splitlines() if not line.lstrip().startswith("//")).strip()
     if not re.fullmatch(r"export\s+const\s+BUNDLED_PROMPT\s*=\s*false\s*;", effective_preset):
@@ -249,7 +259,15 @@ def package_release(root, include_source=False, store=False):
                     member.compress_type = zipfile.ZIP_DEFLATED
                     member.extra = b""
                     member.comment = b""
-                    archive.writestr(member, cache[filename], compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+                    contents = cache[filename]
+                    # Git checkouts may use CRLF on Windows and LF on CI. Keep
+                    # shipped first-party text identical without altering the
+                    # separately hash-verified upstream PDF asset bytes.
+                    if not filename.startswith("vendor/") and (
+                            Path(filename).suffix in {".js", ".mjs", ".json", ".html", ".css", ".md", ".py", ".yml", ".yaml"}
+                            or filename == "LICENSE"):
+                        contents = contents.replace(b"\r\n", b"\n")
+                    archive.writestr(member, contents, compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
         # Atomic replacement prevents an interrupted build from publishing a
         # partial ZIP. Fixed ordering, timestamps and permissions remove host
         # filesystem metadata from the archive.

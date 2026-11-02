@@ -1,4 +1,14 @@
-# 更新记录
+# Changelog
+
+## [2.1.0] - 2026-11-02
+
+- Add an English-default interface with a Simplified Chinese switch and a locally stored language preference. User prompts, imported content, and custom labels are not translated.
+- Replace the outdated README with concise English-first release documentation and a matching Chinese translation; include the Chrome Web Store and GitHub Releases links without asserting publication status.
+- Rewrite privacy documentation in English, including local language storage, ChatGPT prompt submission, and the current clear-data command's retention of the language preference. No external telemetry or developer backend is introduced.
+- Add English store-listing copy, a single-purpose statement, and permission justifications consistent with the manifest and runtime behavior.
+- Preserve the v2.0.x single-submit contract: one mechanism per attempt, confirmation from a matching new user-message marker, and no immediate retry after an unknown result. Remove obsolete multi-path fallback and delivery-guarantee claims from the current README.
+
+This entry documents release preparation, not a published store version, uploaded package, or a new live-site validation result. Historical entries below retain their original language; v2.0.x corrections supersede older implementation and guarantee claims.
 
 记录实际实现与适配边界。发布状态与日期以 GitHub Release 和对应 Actions 运行结果为准。
 
