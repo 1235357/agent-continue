@@ -130,6 +130,104 @@ One active stdio client per tunnel ID remains required. The official client's
 have not yet been adopted or verified by this candidate. Initial OS/native
 installation, activation, pause/resume and login policy remain unfinished.
 
+## Next Increment: Owned Runtime Control
+
+### Problem
+
+The configuration CLI does not own a running client. Browser controls need a
+device-side owner that can connect and pause without guessing process identities,
+silently clearing pause, or starting overlapping stdio clients. A successful local
+health probe is not ChatGPT authorization. This increment is an ordinary-user
+library, not an installed service, native-messaging host or autostart policy.
+
+### Technical Plan
+
+Add `lifecycle.mjs` with `openController(root)` and explicit `reconnect()`,
+`pause()`, `status()` and `dispose()` methods. One create-only lease under the
+validated state root owns this controller. No stale lease is automatically
+reclaimed: a crash needs explicit reconciliation before another owner can start.
+The owner retains the actual child handle; it never loads a PID and kills by
+name. The configured official binary supervises the existing full-account core.
+Tool commands still go directly through the official tunnel, not this controller.
+
+### Alternatives
+
+The official `runtimes connect/status/stop` helpers were inspected, including
+their profile generation and native process implementation. They rewrite their
+own profiles and keep a different alias state; adopting them without checking
+our pinned profile/privacy and no-window requirements would create competing
+owners. This increment keeps one fixed `run --profile-file` launch. An OS service
+adapter can later own this library; another periodic watchdog is not required.
+PID-file takeover, lease expiry and blind restart after an observation timeout
+are deliberately not recovery strategies.
+
+### Detailed Implementation and Acceptance
+
+- Opening/inspecting never starts a process. No saved intent defaults to paused.
+  A bounded canonical `lifecycle.json` persists only the desired paused bit;
+  malformed, redirected or partial state rejects without repair. Intent is
+  atomically published before an OS effect; a publication failure has no launch
+  or signal effect. Lease file identity and bytes are rechecked before operations;
+  ownership loss forbids launches and lease deletion, not PID-name takeover.
+  Ownership checks do not require an unchanged provider policy: a user-edited
+  provider policy may block another launch, but cannot disable manual pause of
+  the already owned client. Filesystem failures use fixed error codes.
+- Explicit reconnect verifies configuration and code before launch, records the
+  connected intent and launches once. A concurrent reconnect is rejected, not
+  replayed. A live owned client is reused; failed readiness does not start a
+  second client. Unexpected exit is observed as failed, without a retry loop.
+- Pause records paused intent before signaling the owned child and interrupts
+  pending readiness work. Reconnect cannot overtake pause. Stop waits are bounded;
+  timeout remains unconfirmed and does not authorize force-kill or replacement.
+  All elapsed budgets use a monotonic clock rather than adjustable wall time.
+  A late successful readiness response after pause is discarded. Dispose cannot
+  replay an unconfirmed stop and releases nothing until exit is confirmed.
+- Every launch gets a new private health URL file under the state root, passed
+  as `--health.url-file <new-owned-path>`. Flags override the unchanged canonical
+  profile in pinned 0.0.19; the profile/binding bytes are not rewritten. Readiness
+  accepts only a bounded regular file containing
+  a loopback HTTP origin, follows no redirects and has a bounded request timeout.
+  Only HTTP 200 from `GET /readyz` establishes local readiness. Pause cancels the
+  active probe. Status performs at most one local probe, with no OpenAI request.
+  No inspection path contacts OpenAI or reads a runtime-key file.
+- Status returns only paused intent, owned-client state, local readiness and
+  `chatAuthorization: not-observed`. It does not expose paths, command output,
+  credentials, PID inventories or raw exceptions.
+- Before reporting a running client, capture the direct Node core's PID, OS
+  creation identity and executable, matching the configured Node executable.
+  `process-observation.mjs` exposes `observeCore(parentPid, nodeExecutable)` and
+  `hasExited(identity)`. Linux reads only `/proc` process metadata; Windows uses
+  bounded, hidden, profile-free PowerShell/CIM queries for those exact identities.
+  Discovery is discarded if the retained client exits before or during the
+  observation; it cannot capture a reused parent PID's child after client exit.
+  Neither path reads command lines, environments or other users' session files.
+  Missing, ambiguous or inaccessible observation is unknown, not proof of exit.
+- Dispose pauses, waits and releases only its own unchanged lease. The retained
+  client handle must have exited and the captured core identity must be gone or
+  replaced by a different OS creation identity. Linux additionally recognizes
+  the captured process's explicit terminal `Z`/`X`/`x` state; sleeping, stopped,
+  idle or missing executable metadata is not exit evidence. See the Linux
+  [stat fields](https://man7.org/linux/man-pages/man5/proc_pid_stat.5.html) and
+  [terminated-child semantics](https://man7.org/linux/man-pages/man2/waitpid.2.html).
+  Unknown client/core exit or a
+  changed lease prevents release and replacement. Only the owned tunnel client
+  is signaled; the core is expected to exit when its stdio closes. Independent processes started through
+  tools are not enumerated or killed; interruption of an in-flight MCP request
+  remains possible and must be disclosed before eventual GUI activation.
+- Tests cover conflicting ownership, changed/partial intent, pause-before-stop,
+  pause during readiness, duplicate reconnect, stopped/failed/unknown distinction,
+  bounded probes, no mutation from status and lease release. A finite official-
+  client exchange against a loopback mock control plane must connect, pause,
+  confirm both identities stopped, stay paused and reconnect without overlap on
+  Windows/Linux. It must exercise the pinned executable, not just a fake child.
+  Only fake keys and owned fixture state are allowed. Trusted in-process test
+  adapters may replace spawn/fetch/process observation and bounded timing; none
+  is exposed through browser requests or a production command/endpoint option.
+
+Windows process hiding, protected installation, crash reconciliation, real OS
+login policy, macOS execution and real per-chat authorization remain separate
+gates. This library must not be used elevated or replace production runtimes.
+
 ## Current Development Checkpoint
 
 The prototype loads the pinned package's `server.js` and filtered stdio transport,
@@ -187,15 +285,18 @@ removed by the external launcher: invoking Node directly with hostile
 `NODE_OPTIONS` has already executed that code before this entrypoint can react.
 
 Preparation uses private POSIX modes where supported. Windows ACL ownership,
-no-race privileged file handling, activation, credentials, native registration,
-autostart and lifecycle coordination are **not implemented by this prototype**.
+no-race privileged file handling, installed activation, credential provisioning,
+native registration and autostart are **not implemented by this prototype**.
+The owned-runtime library above is not yet connected to a production installer,
+browser control surface or OS login policy.
 Do not run this source as administrator/root or interpret a successful fixture
 as authorization to replace a production MCP installation. No new browser
 release or Chrome Web Store submission is implied by this source checkpoint.
 
 ### Observed Checks (2026-11-02)
 
-Windows, Node 24.16.0: 40 native checks passed, zero skipped. This includes a
+Windows, Node 24.16.0: 69 native checks passed, with one Linux-specific process
+metadata regression skipped. This includes a
 real stdio initialization and five correlated RPC replies, 25 discovered tools,
 an owned-file roundtrip, a harmless process, and normal exit after stdin closes.
 The additional profile/CLI checks cover exact input/output contracts, unchanged
@@ -208,24 +309,40 @@ acceptance claim.
 
 The official Windows tunnel 0.0.19 binary matched its supplied SPDX SHA-256
 (`7e93a39a567c87154a0aef2091b81100d78f9093c4603412cc2b55bed3dfe5ea`).
-Against a loopback-only fake control plane, both the fixed-argument and generated
-profile paths supervised the actual core and each completed five correlated
+Against a loopback-only fake control plane, three integration checks passed.
+Both the fixed-argument and generated-profile paths supervised the actual core
+and each completed five correlated
 responses, including file write/read. The generated path exercised the strict
 configuration CLI with a fake key file, resisted inherited target/raw-log/browser
 overrides and returned HTTP 200 from loopback `/readyz`. Forwarded log
 notifications were acknowledged separately, never counted as RPC completion.
-The finite test ran inside an owned kill-on-close Windows Job; zero owned
+The owned-runtime path additionally connected, paused, confirmed the retained
+client and captured core identities exited, stayed paused during status probes,
+then explicitly reconnected and paused again. Both launches completed five
+correlated RPC replies each; the canonical profile bytes stayed unchanged.
+This validates a finite local lifecycle cycle, not independent long-running
+tool processes or production recovery. All three checks ran inside an owned
+kill-on-close Windows Job; zero owned
 processes remained before disposal. This does not verify a real OpenAI tunnel,
 ChatGPT/Dot authorization, graceful production service stop or remote restart.
 
 Independent review found and prompted fixes for a lost Windows Promise contract,
 a raw startup-error path, dangling binding links and key/client input overlap.
-Regression checks now cover those cases. An earlier Windows fixture run completed
+Regression checks now cover those cases. This increment's review additionally
+identified late process-identity capture after parent exit, ambiguous Linux
+executable metadata, inconsistent unknown-exit classification, raw lease errors,
+and adjustable-clock stop waits. Counterexamples were added before the fixes;
+manual pause also remains available if the owned provider policy changes.
+The Linux-specific regression covers missing executable metadata and an
+unavailable `/proc` mount without treating either as a live process's exit.
+An earlier Windows fixture run completed
 the RPC exchange but failed directory cleanup; it was not counted as a passing
 run. The subsequent asynchronous-cleanup run passed both paths, with zero owned
 processes before Job disposal.
 
-The previous core-only commit `b0f909a` passed both Windows and Linux CI. The new
-generated-profile Linux integration must pass its own CI run; consult Actions
-for the exact commit's result. Workflow configuration alone is not a completed
-run, and no macOS execution is established here.
+The previous configuration-CLI commit `0aae0a9` passed both Windows and Linux CI,
+including its two official-client integration paths. Consult Actions for this
+increment's exact commit: Linux must execute the platform-specific regression
+and all three official-client paths before Linux coverage can be claimed.
+Workflow configuration alone is not a completed run, and no macOS execution is
+established here.

@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test runtime.test.mjs windows-child.test.mjs boundary.test.mjs stdio.test.mjs profile.test.mjs setup-cli.test.mjs"
+    "test": "node --test --test-concurrency=2 runtime.test.mjs windows-child.test.mjs boundary.test.mjs stdio.test.mjs profile.test.mjs setup-cli.test.mjs lifecycle.test.mjs process-observation.test.mjs"
   },
   "engines": {
     "node": ">=22.12.0"

@@ -9,12 +9,14 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { prepareState, buildHostLaunch } from './runtime.mjs';
 import { buildTunnelLaunch, profileEnvironment } from './profile.mjs';
+import { openController } from './lifecycle.mjs';
+import { observeCore, hasExited } from './process-observation.mjs';
 
 const executable = process.env.TUNNEL_CLIENT_TEST_EXE;
 const here = path.dirname(fileURLToPath(import.meta.url));
 const pins = JSON.parse(fs.readFileSync(new URL('./tunnel-pins.json', import.meta.url), 'utf8'));
 
-for (const mode of ['arguments', 'generated-profile']) test('official ' + process.platform + ' tunnel 0.0.19 supervises the real core via ' + mode + ' against a loopback-only fake control plane',
+for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle']) test('official ' + process.platform + ' tunnel 0.0.19 supervises the real core via ' + mode + ' against a loopback-only fake control plane',
   { skip: !executable || !pins.platforms[process.platform + '-' + process.arch], timeout: 45000 }, async t => {
     assert.ok(path.isAbsolute(executable));
     assert.equal(crypto.createHash('sha256').update(fs.readFileSync(executable)).digest('hex'),
@@ -33,13 +35,15 @@ for (const mode of ['arguments', 'generated-profile']) test('official ' + proces
     ];
     const replies = [], errors = [];
     let lastResponse;
-    let queued = 0, child, childExited, forwardedNotifications = 0, mockRequests = 0, mockConnections = 0;
+    let queued = 0, child, childExited, controller, forwardedNotifications = 0, mockRequests = 0, mockConnections = 0;
+    let ownedStarts = 0, controllerReady = false, pauseCycleVerified = false;
+    const cores = [];
     const sockets = new Set();
     const mock = http.createServer(async (req, res) => {
       mockRequests++;
       try {
         if (req.method === 'GET' && req.url.split('?')[0].endsWith('/poll')) {
-          if (mode === 'generated-profile') assert.equal(req.headers.authorization, 'Bearer not-a-real-key-from-file');
+          if (mode !== 'arguments') assert.equal(req.headers.authorization, 'Bearer not-a-real-key-from-file');
           if (queued === null) { res.writeHead(204); res.end(); return; }
           const index = queued; queued = null;
           res.setHeader('Content-Type', 'application/json');
@@ -86,7 +90,7 @@ for (const mode of ['arguments', 'generated-profile']) test('official ' + proces
     mock.on('connection', socket => { mockConnections++; sockets.add(socket); socket.once('close', () => sockets.delete(socket)); });
     await new Promise(resolve => mock.listen(0, '127.0.0.1', resolve));
     t.after(async () => {
-      if (child && child.exitCode === null) { child.kill(); await childExited; }
+      if (child && child.exitCode === null && child.signalCode === null) { child.kill(); await childExited; }
       for (const socket of sockets) socket.destroy();
       await new Promise(resolve => mock.close(resolve));
       // Windows can retain the child's working-directory handle briefly after
@@ -112,7 +116,7 @@ for (const mode of ['arguments', 'generated-profile']) test('official ' + proces
       '--health.listen-addr', '127.0.0.1:0', '--mcp.stdio-failure-policy', 'exit',
       '--log.level', 'warn', '--log.file', path.join(scratch, 'tunnel.log')];
     let childEnv = { ...launch.env, AGENT_CONTINUE_FAKE_KEY: 'not-a-real-key' };
-    if (mode === 'generated-profile') {
+    if (mode !== 'arguments') {
       const key = path.join(scratch, 'runtime.key');
       fs.writeFileSync(key, 'not-a-real-key-from-file', { mode: 0o600 });
       const setup = spawn(process.execPath, [path.join(here, 'setup-cli.mjs'), 'configure', '--state-dir', root,
@@ -137,11 +141,33 @@ for (const mode of ['arguments', 'generated-profile']) test('official ' + proces
       args = [...generated.args, '--control-plane.base-url', 'http://127.0.0.1:' + mock.address().port];
       childEnv = generated.env;
     }
-    child = spawn(executable, args, { cwd: launch.cwd, env: childEnv,
-      windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
     let stderrBytes = 0;
-    child.stderr.on('data', data => { stderrBytes += data.length; });
-    childExited = new Promise(resolve => child.once('exit', (code, signal) => resolve({ code, signal })));
+    function startClient(command, argv, options) {
+      child = spawn(command, argv, options);
+      child.stderr.on('data', data => { stderrBytes += data.length; });
+      childExited = new Promise(resolve => child.once('exit', (code, signal) => resolve({ code, signal })));
+      return child;
+    }
+    if (mode === 'owned-lifecycle') {
+      const before = fs.readFileSync(path.join(root, 'tunnel.yaml'));
+      controller = openController(root, {
+        spawn(command, argv, options) {
+          ownedStarts++;
+          return startClient(command, [...argv, '--control-plane.base-url', 'http://127.0.0.1:' + mock.address().port], { ...options, env: childEnv });
+        },
+        async observeCore(parent, node) {
+          const identity = await observeCore(parent, node);
+          if (identity) cores.push(identity);
+          return identity;
+        },
+      });
+      const connected = await controller.reconnect();
+      assert.equal(connected.runtime, 'running'); assert.equal(connected.ready, true);
+      assert.equal(connected.chatAuthorization, 'not-observed');
+      assert.deepEqual(fs.readFileSync(path.join(root, 'tunnel.yaml')), before);
+      controllerReady = true;
+    } else startClient(executable, args, { cwd: launch.cwd, env: childEnv,
+      windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
     const deadline = Date.now() + 30000;
     while (replies.length < requests.length && Date.now() < deadline && child.exitCode === null && errors.length === 0) {
       await new Promise(resolve => setTimeout(resolve, 50));
@@ -165,7 +191,30 @@ for (const mode of ['arguments', 'generated-profile']) test('official ' + proces
       assert.equal(ready.status, 200);
       loopbackReadyVerified = true;
     }
-    child.kill(); await childExited;
+    if (controller) {
+      const firstCore = cores.at(-1);
+      assert.ok(firstCore);
+      const paused = await controller.pause();
+      assert.equal(paused.paused, true); assert.equal(paused.runtime, 'stopped'); assert.equal(paused.ready, false);
+      assert.equal(await hasExited(firstCore), true);
+      const pollsWhenStopped = mockRequests;
+      await new Promise(resolve => setTimeout(resolve, 150));
+      await controller.status();
+      assert.equal(mockRequests, pollsWhenStopped); assert.equal(ownedStarts, 1);
+      replies.length = 0; queued = 0;
+      const reconnected = await controller.reconnect();
+      assert.equal(reconnected.ready, true); assert.equal(ownedStarts, 2);
+      const secondDeadline = Date.now() + 10000;
+      while (replies.length < requests.length && Date.now() < secondDeadline && !errors.length) {
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      assert.equal(replies.length, requests.length); assert.equal(errors.length, 0);
+      assert.equal((await controller.pause()).runtime, 'stopped');
+      assert.equal(await hasExited(cores.at(-1)), true);
+      await controller.dispose();
+      assert.equal(fs.existsSync(path.join(root, 'controller.lease')), false);
+      pauseCycleVerified = true;
+    } else { child.kill(); await childExited; }
     if (mode === 'arguments') {
       const exitDeadline = Date.now() + 5000;
       while (!fs.readFileSync(guardLog, 'utf8').includes('guard-exit') && Date.now() < exitDeadline) {
@@ -177,6 +226,7 @@ for (const mode of ['arguments', 'generated-profile']) test('official ' + proces
     }
     t.diagnostic(JSON.stringify({ loopbackOnlyMock: true, productionCredentials: false, tunnelVersion: '0.0.19',
       upstream: '0.3.1', tools: toolNames.length, correlatedResponses: replies.length, fileRoundtrip: true,
-      forwardedNotifications, generatedProfile: mode === 'generated-profile', loopbackReadyVerified, hostGuardInstrumented: mode === 'arguments',
+      forwardedNotifications, generatedProfile: mode !== 'arguments', loopbackReadyVerified: loopbackReadyVerified || controllerReady,
+      hostGuardInstrumented: mode === 'arguments', ownedStarts, pauseCycleVerified,
       realOpenAITunnelTested: false, realChatGrantTested: false, stderrBytes }));
   });
