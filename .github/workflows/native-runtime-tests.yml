@@ -34,3 +34,11 @@ jobs:
           package-manager-cache: false
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm test
+      - name: Acquire pinned official Linux runtime for an isolated protocol fixture
+        if: runner.os == 'Linux'
+        shell: pwsh
+        run: ./test-fixtures/fetch-ci-tunnel.ps1
+      - name: Generated-profile exchange in the disposable CI runner
+        if: runner.os == 'Linux'
+        shell: bash
+        run: timeout --kill-after=5s 50s node --test tunnel.test.mjs

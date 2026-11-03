@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test runtime.test.mjs windows-child.test.mjs boundary.test.mjs stdio.test.mjs"
+    "test": "node --test runtime.test.mjs windows-child.test.mjs boundary.test.mjs stdio.test.mjs profile.test.mjs setup-cli.test.mjs"
   },
   "engines": {
     "node": ">=22.12.0"

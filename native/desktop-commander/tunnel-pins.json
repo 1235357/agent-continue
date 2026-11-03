@@ -1,0 +1,16 @@
+{
+  "release": "v0.0.19",
+  "source": "https://github.com/openai/tunnel-client/releases/tag/v0.0.19",
+  "platforms": {
+    "win32-x64": {
+      "asset": "tunnel-client-v0.0.19-windows-amd64.zip",
+      "archiveSha256": "1d0ecc3a54f2a51e27a635ac155f40fbb95df58c52cdeddf6c75532cc0bbeb25",
+      "executableSha256": "7e93a39a567c87154a0aef2091b81100d78f9093c4603412cc2b55bed3dfe5ea"
+    },
+    "linux-x64": {
+      "asset": "tunnel-client-runtime-v0.0.19-linux-amd64.zip",
+      "archiveSha256": "a43beae6f08505a1b6751057d02797baa70a88ef7f9eb5dfd03a55b6b29116ad",
+      "executableSha256": "4d3a40113c330c2588f4c1dce312499acd207a26047ea6e6a6aa7c1415deb9a3"
+    }
+  }
+}

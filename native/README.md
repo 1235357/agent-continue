@@ -57,6 +57,79 @@ Later gates remain: reusable protected installers, platform-specific bridge
 registration, official tunnel provisioning/readiness, ChatGPT approval and
 matching tool-call receipts, macOS implementation, updates and revocation.
 
+## Next Increment: Local Configuration CLI
+
+Problem: the fixed core has a real stdio path, but onboarding cannot yet turn
+device-local inputs into a repeatable official-client profile. A browser setup
+request must not contain a secret or arbitrary shell command.
+
+Plan: add a strict `prepare / configure / inspect` CLI. Preparation requires
+explicit full-account consent. Configuration verifies the existing state, the
+pinned provider and official tunnel executable, and references an existing
+device-local runtime-key file without reading or copying its contents. It writes
+a create-only profile and binding receipt; a partial or changed binding is an
+error, never silently overwritten. The endpoint is fixed to the official OpenAI
+API, health is loopback-only, startup browser opening is off, and raw HTTP logs
+are off. Inherited configuration/proxy variables must not override the profile.
+
+Alternative: accepting a browser-supplied command, endpoint or key would turn
+onboarding into another command/credential transport. This is explicitly not
+the design. Automatically connecting from an `inspect` operation would also
+erase the distinction between configuration and device lifecycle.
+
+Implementation/acceptance: pure profile construction, actual write/inspect and
+negative tamper cases, sanitized CLI framing, and an official-client loopback
+exchange using the generated profile with only a fake runtime-key file. Unit
+fixtures with synthetic executable pins are not official-binary acceptance.
+The CLI does not activate the tunnel or implement pause/autostart; those remain
+coordinator responsibilities. `activated: false` on prepare/configure describes
+that operation only; inspection reports activation as `not-observed`, not that
+the device is offline. Supported executable pins are Windows/Linux x64 for now;
+macOS and other architectures are not silently accepted.
+
+### Developer CLI (Not An Installer)
+
+Run these from `native/desktop-commander/` as an ordinary user after the pinned
+dependencies are installed. Replace the placeholders with absolute paths;
+choose a new state directory and an existing device-local runtime-key file.
+Do not put the key under this source tree or inside the state directory: keep
+credentials separate from executable/configuration inputs. Runtime and admin
+keys have different permissions; use a runtime key with the official Read/Use
+scope, not an admin-management key. No real key is supplied by this repository.
+
+```sh
+node setup-cli.mjs prepare --state-dir "<absolute-new-state-directory>" --consent full-account
+node setup-cli.mjs configure --state-dir "<absolute-state-directory>" --tunnel-id "<complete-service-returned-tunnel-id>" --runtime-key-file "<absolute-runtime-key-file>" --tunnel-client "<absolute-verified-official-client>"
+node setup-cli.mjs inspect --state-dir "<absolute-state-directory>"
+```
+
+`configure` writes `tunnel.yaml` (JSON-compatible YAML) and `binding.json` only.
+It references, but does not read/copy, the validated runtime-key file's contents.
+It rejects key/client file identity overlap, reserved state/source locations,
+redirected inputs, conflicting destinations and unknown executable bytes.
+Unix key references must be owned by the current user and not group/world
+accessible. Windows ACL protection is still a separate installer gate.
+
+The CLI returns bounded JSON with no raw exception, local path or secret. It
+has no start, install, elevation, registration or arbitrary-command subcommand.
+`inspect` validates configuration only; it does not connect, clear pause,
+authenticate the key, or establish a ChatGPT/Dot tool grant. It cannot report
+the current active runtime's state. Changed or partial bindings require an
+explicit maintenance decision; no automatic overwrite/repair is attempted.
+
+The profile's device-to-OpenAI traffic has no developer relay. Its launch
+environment drops inherited tunnel target, endpoint, proxy, tracing, raw-log
+and browser-opening overrides rather than allowing them to supersede YAML.
+This changes the candidate child environment, not system VPN/routes/DNS or
+the user's global environment. Enterprise proxy/CA choices need a separate
+explicit integration path; OS networking and trust stores remain in effect.
+
+The profile contract follows the pinned [official configuration reference](https://github.com/openai/tunnel-client/blob/v0.0.19/docs/configuration.md).
+One active stdio client per tunnel ID remains required. The official client's
+`runtimes connect/status/stop` helpers are a possible lifecycle backend, but
+have not yet been adopted or verified by this candidate. Initial OS/native
+installation, activation, pause/resume and login policy remain unfinished.
+
 ## Current Development Checkpoint
 
 The prototype loads the pinned package's `server.js` and filtered stdio transport,
@@ -89,17 +162,21 @@ stdio-close exit. Instrumentation observes the Node host, not all descendant or
 OS network traffic. It does not establish reliability under every user's PATH,
 Python installation, shell environment or long-running workload.
 
-`tunnel.test.mjs` is a separate opt-in Windows integration fixture. It requires
+`tunnel.test.mjs` is a separate opt-in Windows/Linux x64 integration fixture. It requires
 `TUNNEL_CLIENT_TEST_EXE` pointing to the pinned official 0.0.19 executable, whose
 digest is checked before launch. It serves a fake control plane on loopback and
 uses only a fake key. No real OpenAI account, remote device or ChatGPT grant is
 used. Run it only in finite owned-process containment; a failed assertion must
-not leave tunnel children running. It is intentionally not an automatic CI
-download or a substitute for real per-chat acceptance.
+not leave tunnel children running. The Linux CI job downloads the pinned official
+runtime into its disposable runner, verifies both archive and executable digests,
+and bounds the fixture with `timeout`. This is not a real per-chat acceptance test.
 The fixture's child-exit hook is not an OS process-termination receipt. Its
-internal cleanup stops the tunnel parent only; an external owned-process Job
-must confirm/terminate the complete test tree on both success and failure before
-the fixture can be treated as cleaned up. Do not run it as a standalone test.
+internal cleanup stops the tunnel parent only; an external owned-process Job on
+Windows, or disposable CI isolation on Linux, must contain the complete tree on
+both success and failure. Windows fixture-directory removal is asynchronous with
+bounded retries so child working-directory handles can close. It does not replay
+MCP calls or establish graceful production lifecycle handling. Do not run the
+fixture standalone on a working machine.
 
 The package pin verifies a 274-file inventory covering `package.json` and `dist`.
 Transitive dependencies use npm lock integrity during acquisition; the startup
@@ -118,10 +195,12 @@ release or Chrome Web Store submission is implied by this source checkpoint.
 
 ### Observed Checks (2026-11-02)
 
-Windows, Node 24.16.0: 17 native checks passed, zero skipped. This includes a
+Windows, Node 24.16.0: 40 native checks passed, zero skipped. This includes a
 real stdio initialization and five correlated RPC replies, 25 discovered tools,
 an owned-file roundtrip, a harmless process, and normal exit after stdin closes.
-Missing/malformed pins, a missing runtime module, a missing upstream tree,
+The additional profile/CLI checks cover exact input/output contracts, unchanged
+and partial bindings, dangling receipt links, key/client identity overlap and
+reserved key locations. Missing/malformed pins, a missing runtime module, a missing upstream tree,
 changed package bytes, redirected state and changed policy were rejected in
 disposable fixtures. Mocked Windows process APIs verified the preserved
 `util.promisify` stdout/stderr/child contract; this is not a real process-list
@@ -129,14 +208,24 @@ acceptance claim.
 
 The official Windows tunnel 0.0.19 binary matched its supplied SPDX SHA-256
 (`7e93a39a567c87154a0aef2091b81100d78f9093c4603412cc2b55bed3dfe5ea`).
-Against a loopback-only fake control plane, it supervised the actual core and
-completed five correlated responses, including file write/read. Forwarded log
+Against a loopback-only fake control plane, both the fixed-argument and generated
+profile paths supervised the actual core and each completed five correlated
+responses, including file write/read. The generated path exercised the strict
+configuration CLI with a fake key file, resisted inherited target/raw-log/browser
+overrides and returned HTTP 200 from loopback `/readyz`. Forwarded log
 notifications were acknowledged separately, never counted as RPC completion.
 The finite test ran inside an owned kill-on-close Windows Job; zero owned
 processes remained before disposal. This does not verify a real OpenAI tunnel,
 ChatGPT/Dot authorization, graceful production service stop or remote restart.
 
-Independent review found and prompted fixes for a lost Windows Promise contract
-and a raw startup-error path. Regression checks now cover both. GitHub CI is
-configured separately for Windows/Linux; configuration alone is not a completed
-CI run, and no macOS execution is established here.
+Independent review found and prompted fixes for a lost Windows Promise contract,
+a raw startup-error path, dangling binding links and key/client input overlap.
+Regression checks now cover those cases. An earlier Windows fixture run completed
+the RPC exchange but failed directory cleanup; it was not counted as a passing
+run. The subsequent asynchronous-cleanup run passed both paths, with zero owned
+processes before Job disposal.
+
+The previous core-only commit `b0f909a` passed both Windows and Linux CI. The new
+generated-profile Linux integration must pass its own CI run; consult Actions
+for the exact commit's result. Workflow configuration alone is not a completed
+run, and no macOS execution is established here.
