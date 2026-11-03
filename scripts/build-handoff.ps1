@@ -52,7 +52,8 @@ function CopyChecked([string]$Base, [string]$Relative, [string]$TargetBase) {
     if ($Relative -match '(?i)(^|/)(\.env(?:\..*)?|auth\.json|.*(?:runtimekey|api[_-]?key|github[_-]?token).*\.txt)$') { throw 'handoff_secret_filename' }
     if ([IO.Path]::GetExtension($file) -match '^\.(js|mjs|cjs|json|md|yml|yaml|ps1|py|sh|cs|html|css|txt|conf|in|service)$') {
         $text = [IO.File]::ReadAllText($file)
-        if ($text -match '(?:sk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{32,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|-----BEGIN (?:OPENSSH |RSA |EC )?PRIVATE KEY-----)') {
+        # A header-only negative-test marker is not a private key. Require PEM body bytes.
+        if ($text -match '(?:sk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{32,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|-----BEGIN (?:OPENSSH |RSA |EC )?PRIVATE KEY-----[\r\n]+[A-Za-z0-9+/=\r\n \t]{64,}-----END (?:OPENSSH |RSA |EC )?PRIVATE KEY-----)') {
             throw ('handoff_secret_pattern:' + $Relative)
         }
     }
