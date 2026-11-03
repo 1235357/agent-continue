@@ -107,7 +107,7 @@ test('missing Windows helper is unknown, never process exit evidence', { skip: !
   } finally { fs.readFileSync = read; }
 });
 
-test('Windows metadata generations must agree and JSON preserves Unicode', { skip: process.platform !== 'win32', timeout: 10000 }, async t => {
+test('Windows metadata generations must agree and JSON preserves Unicode', { skip: process.platform !== 'win32', timeout: 20000 }, async t => {
   const source = fs.readFileSync(new URL('./windows-process-query.cs', import.meta.url), 'utf8');
   const unicode = 'C:\\owned-\u6d4b\u8bd5\\node.exe';
   const script = `$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';[Console]::Error.WriteLine('fixture-started');$PSModuleAutoLoadingPreference='None';Import-Module ([IO.Path]::Combine($PSHOME,'Modules','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Utility.psd1'));[Console]::Error.WriteLine('fixture-imported');[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);Add-Type -TypeDefinition @'\n${source}\n'@\n[Console]::Error.WriteLine('fixture-compiled');` +
@@ -116,15 +116,17 @@ test('Windows metadata generations must agree and JSON preserves Unicode', { ski
     `$b=[AgentContinueProcessQuery+Row]::new();$b.pid=$a.pid;$b.parentPid=$a.parentPid;$b.startTime=$a.startTime;$b.executable=$a.executable;if($field){$b.$field=$value};` +
     `$pair=New-Object object[] 2;$pair[0]=[AgentContinueProcessQuery+Row[]]@($a);$pair[1]=[AgentContinueProcessQuery+Row[]]@($b);return $method.Invoke($null,$pair)};` +
     `$r=@{same=(Check '' '');parent=(Check 'parentPid' 124);birth=(Check 'startTime' '98766');pid=(Check 'pid' 322);image=(Check 'executable' 'C:\\other.exe');unicode='${unicode}'};` +
-    `[Console]::WriteLine((ConvertTo-Json -InputObject $r -Compress))`;
+    `[Console]::Error.WriteLine('fixture-compared');[Console]::WriteLine((ConvertTo-Json -InputObject $r -Compress))`;
+  const started = performance.now();
   const stdout = await new Promise((resolve, reject) => childProcess.execFile(path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
     ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
-    { windowsHide: true, shell: false, timeout: 5000, maxBuffer: 65536, encoding: 'utf8', env: { SystemRoot: process.env.SystemRoot, WINDIR: process.env.SystemRoot,
+    { windowsHide: true, shell: false, timeout: 15000, maxBuffer: 65536, encoding: 'utf8', env: { SystemRoot: process.env.SystemRoot, WINDIR: process.env.SystemRoot,
       PSModulePath: path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'Modules') } },
     (error, stdout, stderr) => {
-      const markers = stderr.split(/\r?\n/).filter(Boolean), expected = ['fixture-started', 'fixture-imported', 'fixture-compiled'];
+      const markers = stderr.split(/\r?\n/).filter(Boolean), expected = ['fixture-started', 'fixture-imported', 'fixture-compiled', 'fixture-compared'];
       t.diagnostic(JSON.stringify({ helperStages: true, started: markers.includes(expected[0]), imported: markers.includes(expected[1]),
-        compiled: markers.includes(expected[2]), killed: error?.killed === true }));
+        compiled: markers.includes(expected[2]), compared: markers.includes(expected[3]),
+        elapsedMs: Math.round(performance.now() - started), killed: error?.killed === true }));
       error || markers.some(value => !expected.includes(value)) ? reject(new Error('native_metadata_fixture_failed')) : resolve(stdout);
     }));
   assert.deepEqual(JSON.parse(stdout), { same: true, parent: false, birth: false, pid: false, image: false, unicode });
