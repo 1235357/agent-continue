@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import childProcess from 'node:child_process';
 import { spawn } from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
+import { performance } from 'node:perf_hooks';
 
 const file = new URL('./process-observation.mjs', import.meta.url);
 const api = fs.existsSync(file) ? await import(file) : null;
@@ -30,6 +33,21 @@ check('Linux stat parser handles spaces and closing parentheses in the comm fiel
 });
 
 test('a finite owned Node child is identified and its actual exit is observed', { skip: !api, timeout: 20000 }, async t => {
+  const originalExecFile = childProcess.execFile;
+  if (process.platform === 'win32') {
+    childProcess.execFile = function(...args) {
+      const callback = args.pop(), started = performance.now();
+      return Reflect.apply(originalExecFile, this, [...args, (error, stdout, stderr) => {
+        t.diagnostic(JSON.stringify({ processMetadataQuery: true,
+          elapsedMs: Math.round(performance.now() - started),
+          killed: error?.killed === true, failed: Boolean(error), stderrPresent: Boolean(stderr),
+          errorKind: ['ENOENT', 'EACCES', 'ETIMEDOUT'].includes(error?.code) ? error.code : (error ? 'other' : 'none') }));
+        callback(error, stdout, stderr);
+      }]);
+    };
+    syncBuiltinESMExports();
+    t.after(() => { childProcess.execFile = originalExecFile; syncBuiltinESMExports(); });
+  }
   const child = spawn(process.execPath, ['-e', "process.stdin.resume();process.stdin.once('end',()=>process.exit(0));setTimeout(()=>process.exit(0),15000);console.log('owned-ready')"],
     { windowsHide: true, shell: false, stdio: ['pipe', 'pipe', 'pipe'] });
   const exited = new Promise(resolve => child.once('exit', resolve));
