@@ -565,12 +565,16 @@ test('opt-in: installed tarball stages real pinned provider from explicitly writ
         '--offline-cache', cache], { ok: true, ...receipt }, 0, 195000);
     } catch (error) {
       const logs = path.join(installDir, 'acquisition', 'logs');
-      let bytes = 0, logCount = 0, lastPhase = 'none';
+      let bytes = 0, logCount = 0, lastPhase = 'none', npmExit = null, npmOk = false, exitHandlerNeverCalled = false;
       const codes = new Set();
       if (fs.existsSync(logs)) for (const name of fs.readdirSync(logs)) {
         const file = path.join(logs, name), stat = fs.lstatSync(file);
         if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 4 * 1024 * 1024) continue;
         const text = fs.readFileSync(file, 'utf8'); bytes += stat.size; logCount++;
+        const exit = [...text.matchAll(/\bverbose exit (-?\d+)/g)].at(-1);
+        if (exit) npmExit = Number(exit[1]);
+        npmOk ||= /\binfo ok\b/.test(text);
+        exitHandlerNeverCalled ||= text.includes('Exit handler never called');
         let last = -1;
         for (const phase of ['idealTree', 'reify', 'tarball', 'fetch', 'exit']) {
           const at = text.lastIndexOf(phase); if (at > last) { last = at; lastPhase = phase; }
@@ -582,8 +586,15 @@ test('opt-in: installed tarball stages real pinned provider from explicitly writ
       const modules = path.join(installDir, 'app', 'node_modules');
       const provider = path.join(modules, '@wonderwhy-er', 'desktop-commander', 'package.json');
       const npmVersion = JSON.parse(fs.readFileSync(path.join(path.dirname(path.dirname(f.npmCli)), 'package.json'))).version;
+      const reportFile = path.join(installDir, 'acquisition', 'process.json');
+      const processReport = fs.existsSync(reportFile) ? JSON.parse(fs.readFileSync(reportFile)) : {};
+      const flags = {};
+      for (const key of ['exitObserved', 'closeObserved']) if (typeof processReport[key] === 'boolean') flags[key] = processReport[key];
+      for (const key of ['exitCode', 'closeCode', 'durationMs']) if (Number.isInteger(processReport[key])) flags[key] = processReport[key];
+      if (['deadline', 'cancelled', null].includes(processReport.cancelReason)) flags.cancelReason = processReport.cancelReason;
       t.diagnostic(JSON.stringify({ failureOnlyAcquisition: true, nodeVersion: process.version, npmVersion,
-        logCount, bytes, lastPhase, errorCodes: [...codes].sort(),
+        logCount, bytes, lastPhase, errorCodes: [...codes].sort(), npmExit, npmOk, exitHandlerNeverCalled,
+        ...flags,
         moduleEntries: fs.existsSync(modules) ? fs.readdirSync(modules).length : 0,
         providerMetadataPresent: fs.existsSync(provider) }));
       throw error;

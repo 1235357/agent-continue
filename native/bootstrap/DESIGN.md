@@ -81,10 +81,19 @@ This trusts the registry, TLS, npm's redirect handling and integrity validation;
 it is not OS-level egress enforcement. No inherited npm config,
 auth tokens, Node preloads, proxy settings or personal home is passed to npm.
 Empty user/global npm configs and the fixed registry are passed explicitly.
+Acquisition declares CI=true to require noninteractive package-manager behavior.
+Windows gets the selected Node directory plus the system System32 path, fixed
+system cmd.exe as ComSpec and standard executable suffixes, not inherited PATH
+or user shell/module configuration. These OS prerequisites are not a runtime
+filesystem sandbox.
 Npm's at-most-two diagnostic logs stay in INSTALL/acquisition/logs, not a shared
 cache log directory, and npm's update notifier is disabled. CLI output remains
 fixed-code only. These acquisition logs contain public dependency/install paths,
 not user conversation data; they are not automatically uploaded.
+A best-effort private acquisition/process.json contains only format/version,
+fixed result code, exit/close observed flags and integer codes (or null), a fixed
+cancel reason and monotonic duration. It never carries PID, command, URL, path,
+credentials or raw npm output. Diagnostic write failure does not change receipts.
 Npm CLI discovery checks `npm_execpath`, then Node's sibling
 `node_modules/npm/bin/npm-cli.js`, then its prefix's `lib/node_modules/npm/bin/`
 entry. Resolve links once, require a regular `npm-cli.js` in `npm/bin` with

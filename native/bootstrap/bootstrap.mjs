@@ -131,13 +131,20 @@ function findNpm(supplied) {
   fail('npm_unavailable');
 }
 
-function acquire(npm, args, cwd, env, timeout, signal) {
+function acquire(npm, args, cwd, env, timeout, signal, reportFile) {
   return new Promise((resolve, reject) => {
     let child, deadline, force, final, settled = false, cancelled = false, failed = false;
+    const started = performance.now();
+    let exitObserved = false, closeObserved = false, exitCode = null, closeCode = null, cancelReason = null;
     const finish = code => {
       if (settled) return;
       settled = true; clearTimeout(deadline); clearTimeout(force); clearTimeout(final);
       signal?.removeEventListener('abort', stop);
+      try {
+        fs.writeFileSync(reportFile, encode({ format: 'agent-continue-acquisition-process', version: 1,
+          result: code || 'completed', exitObserved, closeObserved, exitCode, closeCode, cancelReason,
+          durationMs: Math.round(performance.now() - started) }), { flag: 'wx', mode: 0o600 });
+      } catch { /* Diagnostics never change the acquisition/receipt result. */ }
       if (code === 'acquisition_exit_unconfirmed') {
         child?.unref(); child?.stdout?.destroy(); child?.stderr?.destroy();
       }
@@ -147,6 +154,7 @@ function acquire(npm, args, cwd, env, timeout, signal) {
     const stop = () => {
       if (cancelled || settled) return;
       cancelled = true;
+      cancelReason = signal?.aborted ? 'cancelled' : 'deadline';
       if (live()) { try { child.kill('SIGTERM'); } catch { /* Exit still requires close. */ } }
       force = setTimeout(() => {
         if (live()) { try { child.kill('SIGKILL'); } catch { /* Never widen the signal target. */ } }
@@ -157,7 +165,11 @@ function acquire(npm, args, cwd, env, timeout, signal) {
       child = spawn(process.execPath, [npm, ...args], { cwd, env, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
       child.stdout.resume(); child.stderr.resume();
       child.once('error', () => { failed = true; });
-      child.once('close', code => finish(code === 0 && !failed && !cancelled ? null : 'dependency_acquisition_failed'));
+      child.once('exit', code => { exitObserved = true; exitCode = Number.isInteger(code) ? code : null; });
+      child.once('close', code => {
+        closeObserved = true; closeCode = Number.isInteger(code) ? code : null;
+        finish(code === 0 && !failed && !cancelled ? null : 'dependency_acquisition_failed');
+      });
       deadline = setTimeout(stop, timeout);
       signal?.addEventListener('abort', stop, { once: true });
       if (signal?.aborted) stop();
@@ -206,15 +218,23 @@ export async function stageRuntime(options, trusted = {}) {
     const home = path.join(acquisition, 'home'), temp = path.join(acquisition, 'temp');
     const env = { HOME: home, USERPROFILE: home, APPDATA: home, LOCALAPPDATA: home,
       TEMP: temp, TMP: temp, TMPDIR: temp, PATH: path.dirname(process.execPath),
-      DESKTOP_COMMANDER_DISABLE_TELEMETRY: '1', PUPPETEER_SKIP_DOWNLOAD: '1' };
+      CI: 'true', NO_COLOR: '1', DESKTOP_COMMANDER_DISABLE_TELEMETRY: '1', PUPPETEER_SKIP_DOWNLOAD: '1' };
     for (const key of ['SystemRoot', 'WINDIR']) if (process.env[key]) env[key] = process.env[key];
+    if (process.platform === 'win32') {
+      const systemRoot = process.env.SystemRoot || process.env.WINDIR;
+      if (!systemRoot || !path.isAbsolute(systemRoot)) fail('bootstrap_failed');
+      const system = path.join(systemRoot, 'System32');
+      env.PATH += path.delimiter + system;
+      env.ComSpec = path.join(system, 'cmd.exe');
+      env.PATHEXT = '.COM;.EXE;.BAT;.CMD';
+    }
     const args = ['ci', '--ignore-scripts', '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org/',
       '--prefix', app, '--workspaces=false',
       '--logs-dir', path.join(acquisition, 'logs'), '--logs-max=2', '--update-notifier=false',
       '--userconfig', path.join(acquisition, 'user.npmrc'), '--globalconfig', path.join(acquisition, 'global.npmrc'),
       '--cache', cache || path.join(acquisition, 'cache')];
     if (cache) args.push('--offline');
-    cancelled(); await acquire(npm.file, args, app, env, timeout, options.signal); cancelled();
+    cancelled(); await acquire(npm.file, args, app, env, timeout, options.signal, path.join(acquisition, 'process.json')); cancelled();
     verifyFiles(app, manifest, false);
     try {
       const module = await import(pathToFileURL(path.join(app, 'runtime.mjs')).href);

@@ -173,6 +173,12 @@ check('npm receives fixed arguments and isolated configuration without inherited
   assert.equal(result.cwd, path.join(installDir, 'app'));
   for (const key of inherited) assert.equal(result.env[key], undefined);
   assert.equal(result.env.HOME, path.join(installDir, 'acquisition', 'home'));
+  assert.equal(result.env.CI, 'true');
+  if (process.platform === 'win32') {
+    const system = path.join(process.env.SystemRoot || process.env.WINDIR, 'System32');
+    assert.equal(result.env.ComSpec, path.join(system, 'cmd.exe'));
+    assert.deepEqual(result.env.PATH.split(path.delimiter), [path.dirname(process.execPath), system]);
+  }
 });
 
 check('npm success without the pinned provider never becomes staged success', async t => {
@@ -279,6 +285,9 @@ check('acquisition deadline does not retry or publish a success receipt', async 
   /dependency_acquisition_failed|acquisition_exit_unconfirmed/);
   assert.equal(fs.readFileSync(marker, 'utf8'), '1');
   assert.equal(fs.existsSync(path.join(installDir, 'receipt.json')), false);
+  const report = JSON.parse(fs.readFileSync(path.join(installDir, 'acquisition', 'process.json')));
+  assert.equal(report.cancelReason, 'deadline');
+  assert.equal(report.result === 'completed', false);
 });
 
 check('verified inventory yields only an acquisition receipt, never configuration or activation', async t => {
