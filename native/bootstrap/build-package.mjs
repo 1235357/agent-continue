@@ -32,6 +32,8 @@ export function buildPackage(destination, options = {}) {
     fs.mkdirSync(path.join(destination, 'payload'), { mode: 0o700 });
     for (const name of PACKAGE_FILES) {
       let bytes = regular(path.join(here, name));
+      // npm's bin-links performs this same rewrite during install; do it before packing.
+      if (name === 'bin.mjs') bytes = Buffer.from(bytes.toString('utf8').replace(/^(#![^\n]+)\r\n/, '$1\n'));
       if (name === 'package.json') {
         const meta = JSON.parse(bytes); delete meta.scripts;
         bytes = Buffer.from(JSON.stringify(meta, null, 2) + '\n');

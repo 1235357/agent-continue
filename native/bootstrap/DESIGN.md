@@ -29,6 +29,8 @@ the twelve runtime source/pin/lock files listed in `payload-layout.mjs`:
 `buildPackage(destination, {runtimeRoot?})`; runtimeRoot is a trusted build/test
 input, not a CLI argument. It is excluded from packed runtime files.
 A canonical `payload-manifest.json` records their sizes and SHA-256 hashes.
+The packed bin hashbang has LF even after a Windows CRLF source checkout, so
+npm's normal bin-links newline fix does not change installed package bytes.
 Its exact closed JSON shape is `{format:"agent-continue-payload",version:1,
 provider:{name:"@wonderwhy-er/desktop-commander",version:"0.3.1"},
 files:[{path,bytes,sha256},...]}`. Files are exactly the twelve names above,

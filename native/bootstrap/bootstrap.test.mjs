@@ -82,6 +82,21 @@ check('built package is private, dependency-free and has no lifecycle hooks', t 
   assert.equal(api.verifyPayload(packaged).files, 12);
 });
 
+check('builder canonicalizes a CRLF bin hashbang before npm can rewrite the installed file', t => {
+  const { root } = fixture(t), destination = path.join(root, 'crlf-package');
+  const read = fs.readFileSync;
+  fs.readFileSync = function(file, ...args) {
+    const bytes = Reflect.apply(read, this, [file, ...args]);
+    if (String(file) === path.join(here, 'bin.mjs') && Buffer.isBuffer(bytes)) {
+      return Buffer.from(bytes.toString('utf8').replace(/\r?\n/g, '\r\n'));
+    }
+    return bytes;
+  };
+  try { builder.buildPackage(destination); }
+  finally { fs.readFileSync = read; }
+  assert.ok(fs.readFileSync(path.join(destination, 'bin.mjs'), 'utf8').startsWith('#!/usr/bin/env node\n'));
+});
+
 check('consent refusal precedes destination creation and npm execution', async t => {
   const { root, packaged, installDir } = fixture(t);
   const marker = path.join(root, 'must-not-run');
