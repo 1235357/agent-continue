@@ -375,3 +375,32 @@ fixture. It creates only one child. Production query and controller budgets are
 unchanged: an unavailable or slow observation can still leave the controller
 `unknown`, which blocks replacement rather than proving a successful stop.
 Finite fixture success is not a universal cold-start availability claim.
+
+## Consent-Gated Acquisition Bootstrap
+
+The separate [bootstrap source](bootstrap/README.md) packages only its own
+zero-dependency entrypoint and an exact twelve-file runtime/pin/lock payload.
+It is private and not npm-published. Acquisition consent precedes all staging
+and dependency installation; it is distinct from full-account runtime consent
+and from ChatGPT conversation authorization.
+
+Build and run its checks from `native/bootstrap/`:
+
+```sh
+node build-package.mjs --output "<absolute-new-package-directory>"
+node --test --test-concurrency=1 bootstrap.test.mjs packed.test.mjs
+```
+
+Set `AGENT_CONTINUE_REAL_CACHE` only to an explicitly selected, populated writable
+npm cache to execute the installed-tarball real-provider test offline; without it,
+that case is skipped. Npm can update bookkeeping in the selected cache. Other
+tests use disposable prefixes and synthetic install-hook sentinels. See
+[DESIGN.md](bootstrap/DESIGN.md) for result shapes, source-trust boundaries,
+deadline/exit semantics and the exact vendored dependency exception.
+
+A successful acquisition receipt means only `staged`: configured, activated,
+protected installation and native-dependency verification remain false. No
+keys, browser registration, tunnel activation, elevation, services or startup
+policy are installed by this increment. Existing device connections and pauses
+are not migration inputs. The browser setup/native-host handoff, official-client
+acquisition, missing-Node adapters and platform grants remain separate work.

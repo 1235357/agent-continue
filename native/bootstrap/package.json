@@ -1,0 +1,15 @@
+{
+  "name": "agent-continue-device-bootstrap",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Experimental consent-gated acquisition for Agent Continue native devices",
+  "type": "module",
+  "main": "bootstrap.mjs",
+  "bin": { "agent-continue-device": "bin.mjs" },
+  "files": ["bin.mjs", "bootstrap.mjs", "payload-layout.mjs", "payload-manifest.json", "payload", "README.md", "LICENSE"],
+  "scripts": { "test": "node --test --test-concurrency=1 bootstrap.test.mjs packed.test.mjs" },
+  "engines": { "node": ">=22.12.0" },
+  "license": "MIT",
+  "author": { "name": "Zhentong Ye", "email": "zhentongye2028@u.northwestern.edu" },
+  "repository": { "type": "git", "url": "https://github.com/1235357/agent-continue.git", "directory": "native/bootstrap" }
+}
