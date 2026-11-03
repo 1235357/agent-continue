@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import childProcess from 'node:child_process';
 import { spawn } from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
@@ -105,6 +107,31 @@ test('missing Windows helper is unknown, never process exit evidence', { skip: !
   } finally { fs.readFileSync = read; }
 });
 
+test('Windows metadata generations must agree and JSON preserves Unicode', { skip: process.platform !== 'win32', timeout: 10000 }, async t => {
+  const source = fs.readFileSync(new URL('./windows-process-query.cs', import.meta.url), 'utf8');
+  const unicode = 'C:\\owned-\u6d4b\u8bd5\\node.exe';
+  const script = `$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';[Console]::Error.WriteLine('fixture-started');$PSModuleAutoLoadingPreference='None';Import-Module ([IO.Path]::Combine($PSHOME,'Modules','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Utility.psd1'));[Console]::Error.WriteLine('fixture-imported');[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);Add-Type -TypeDefinition @'\n${source}\n'@\n[Console]::Error.WriteLine('fixture-compiled');` +
+    `$method=[AgentContinueProcessQuery].GetMethod('Consistent',[Reflection.BindingFlags]'NonPublic,Static');` +
+    `function Check($field,$value){$a=[AgentContinueProcessQuery+Row]::new();$a.pid=321;$a.parentPid=123;$a.startTime='98765';$a.executable='${unicode}';` +
+    `$b=[AgentContinueProcessQuery+Row]::new();$b.pid=$a.pid;$b.parentPid=$a.parentPid;$b.startTime=$a.startTime;$b.executable=$a.executable;if($field){$b.$field=$value};` +
+    `$pair=New-Object object[] 2;$pair[0]=[AgentContinueProcessQuery+Row[]]@($a);$pair[1]=[AgentContinueProcessQuery+Row[]]@($b);return $method.Invoke($null,$pair)};` +
+    `$r=@{same=(Check '' '');parent=(Check 'parentPid' 124);birth=(Check 'startTime' '98766');pid=(Check 'pid' 322);image=(Check 'executable' 'C:\\other.exe');unicode='${unicode}'};` +
+    `[Console]::WriteLine((ConvertTo-Json -InputObject $r -Compress))`;
+  const stdout = await new Promise((resolve, reject) => childProcess.execFile(path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+    ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
+    { windowsHide: true, shell: false, timeout: 5000, maxBuffer: 65536, encoding: 'utf8', env: { SystemRoot: process.env.SystemRoot, WINDIR: process.env.SystemRoot,
+      PSModulePath: path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'Modules') } },
+    (error, stdout, stderr) => {
+      const markers = stderr.split(/\r?\n/).filter(Boolean), expected = ['fixture-started', 'fixture-imported', 'fixture-compiled'];
+      t.diagnostic(JSON.stringify({ helperStages: true, started: markers.includes(expected[0]), imported: markers.includes(expected[1]),
+        compiled: markers.includes(expected[2]), killed: error?.killed === true }));
+      error || markers.some(value => !expected.includes(value)) ? reject(new Error('native_metadata_fixture_failed')) : resolve(stdout);
+    }));
+  assert.deepEqual(JSON.parse(stdout), { same: true, parent: false, birth: false, pid: false, image: false, unicode });
+  assert.match(fs.readFileSync(file, 'utf8'), /\[Console\]::OutputEncoding=\[Text\.UTF8Encoding\]::new\(\$false\)/);
+  assert.match(fs.readFileSync(file, 'utf8'), /\$PSModuleAutoLoadingPreference='None'/);
+});
+
 test('a finite owned Node child is identified and its actual exit is observed', { skip: !api, timeout: 35000 }, async t => {
   const originalExecFile = childProcess.execFile;
   if (process.platform === 'win32') {
@@ -121,15 +148,34 @@ test('a finite owned Node child is identified and its actual exit is observed', 
     syncBuiltinESMExports();
     t.after(() => { childProcess.execFile = originalExecFile; syncBuiltinESMExports(); });
   }
-  const child = spawn(process.execPath, ['-e', "process.stdin.resume();process.stdin.once('end',()=>process.exit(0));setTimeout(()=>process.exit(0),30000);console.log('owned-ready')"],
+  let childExecutable = process.execPath, ownedDirectory;
+  if (process.platform === 'win32') {
+    ownedDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-query-\u6d4b\u8bd5-'));
+    childExecutable = path.join(ownedDirectory, 'node.exe');
+    fs.copyFileSync(process.execPath, childExecutable);
+  }
+  const child = spawn(childExecutable, ['-e', "process.stdin.resume();process.stdin.once('end',()=>process.exit(0));setTimeout(()=>process.exit(0),30000);console.log('owned-ready')"],
     { windowsHide: true, shell: false, stdio: ['pipe', 'pipe', 'pipe'] });
-  const exited = new Promise(resolve => child.once('exit', resolve));
-  t.after(async () => { if (child.exitCode === null) child.kill(); await exited; });
+  const exited = new Promise(resolve => child.once('close', resolve));
+  t.after(async () => {
+    if (child.pid && child.exitCode === null && child.signalCode === null) child.kill();
+    await exited;
+    if (ownedDirectory) {
+      for (let attempt = 0; ; attempt++) {
+        try { fs.unlinkSync(childExecutable); break; }
+        catch (error) {
+          if (!['EBUSY', 'EPERM', 'EACCES'].includes(error.code) || attempt >= 39) throw error;
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+      }
+      fs.rmdirSync(ownedDirectory);
+    }
+  });
   child.stderr.resume();
   await new Promise((resolve, reject) => { child.stdout.once('data', resolve); child.once('error', reject); });
-  const identity = await observeOwnedChild(child, () => api.observeCore(process.pid, process.execPath), process.platform === 'win32' ? 3 : 1);
+  const identity = await observeOwnedChild(child, () => api.observeCore(process.pid, childExecutable), process.platform === 'win32' ? 3 : 1);
   assert.equal(identity.pid, child.pid); assert.match(identity.startTime, /^[1-9]\d*$/);
-  assert.equal(identity.executable, process.execPath);
+  assert.equal(identity.executable, childExecutable);
   assert.equal(await api.hasExited(identity), false);
   assert.equal(await api.hasExited({ ...identity, startTime: '1' }), true);
   child.stdin.end(); await exited;

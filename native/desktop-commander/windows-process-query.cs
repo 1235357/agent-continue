@@ -55,8 +55,7 @@ public static class AgentContinueProcessQuery {
         } finally { CloseHandle(process); }
     }
 
-    public static Row[] Query(uint processId, bool byParent) {
-        if (processId == 0 || processId > Int32.MaxValue) throw Unknown();
+    private static Row[] Take(uint processId, bool byParent) {
         IntPtr snapshot = CreateToolhelp32Snapshot(2, 0);
         if (snapshot == new IntPtr(-1)) throw Unknown();
         try {
@@ -77,5 +76,27 @@ public static class AgentContinueProcessQuery {
             if (Marshal.GetLastWin32Error() != 18) throw Unknown();
             return rows.ToArray();
         } finally { CloseHandle(snapshot); }
+    }
+
+    private static bool Consistent(Row[] before, Row[] after) {
+        if (before.Length != after.Length) return false;
+        foreach (Row first in before) {
+            Row second = null;
+            foreach (Row candidate in after) {
+                if (candidate.pid != first.pid) continue;
+                if (second != null) return false;
+                second = candidate;
+            }
+            if (second == null || first.parentPid != second.parentPid || first.startTime != second.startTime ||
+                !String.Equals(first.executable, second.executable, StringComparison.OrdinalIgnoreCase)) return false;
+        }
+        return true;
+    }
+
+    public static Row[] Query(uint processId, bool byParent) {
+        if (processId == 0 || processId > Int32.MaxValue) throw Unknown();
+        Row[] before = Take(processId, byParent), after = Take(processId, byParent);
+        if (!Consistent(before, after)) throw Unknown();
+        return after;
     }
 }

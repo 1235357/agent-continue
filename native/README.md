@@ -202,6 +202,10 @@ are deliberately not recovery strategies.
   `PROCESS_QUERY_LIMITED_INFORMATION`; creation time and image path come from
   those handles. It does not use WMI/CIM, debug privileges or process-control
   access. See Microsoft's [snapshot example](https://learn.microsoft.com/en-us/windows/win32/toolhelp/taking-a-snapshot-and-viewing-processes).
+  Two complete observations must agree on the matched PID set, ancestry, birth
+  identity and image path before returning a row. This rejects changed snapshots;
+  it is cooperative race detection, not an atomic OS ancestry attestation.
+  JSON output explicitly uses UTF-8, including non-ASCII executable paths.
   Discovery is discarded if the retained client exits before or during the
   observation; it cannot capture a reused parent PID's child after client exit.
   Neither path reads command lines, environments or other users' session files.
@@ -299,7 +303,7 @@ release or Chrome Web Store submission is implied by this source checkpoint.
 
 ### Observed Checks (2026-11-02)
 
-Windows, Node 24.16.0: 73 native checks passed, with one Linux-specific process
+Windows, Node 24.16.0: 74 native checks passed, with one Linux-specific process
 metadata regression skipped. This includes a
 real stdio initialization and five correlated RPC replies, 25 discovered tools,
 an owned-file roundtrip, a harmless process, and normal exit after stdin closes.
@@ -351,12 +355,19 @@ and all three official-client paths before Linux coverage can be claimed.
 Workflow configuration alone is not a completed run, and no macOS execution is
 established here.
 
-Windows CI exposed CIM queries exceeding their five-second budget on every
-attempt. Failure-only probes confirmed PowerShell had started, while CIM still
-had not returned after fifteen seconds with either environment variant. This
-prompted replacement of CIM with the fixed native metadata helper, not a larger
-production timeout. A regression also verifies that a missing helper is unknown,
+Windows CI exposed metadata scripts exceeding their five-second budget on every
+attempt. Failure-only probes confirmed PowerShell had started, while the CIM
+command still had not returned after fifteen seconds with either environment
+variant. Replacing CIM alone did not resolve the CI stall, so the original
+measurement cannot distinguish module loading from the CIM provider itself.
+The native helper now uses a fixed system module path, disables implicit module
+autoloading and imports the required system Utility module explicitly. Fixture
+stage flags distinguish startup, module import and C# compilation without
+printing metadata. Production timeouts were not increased.
+A regression also verifies that a missing helper is unknown,
 never evidence that a process exited. The temporary CIM probes were removed.
+Pure generation-mismatch fixtures exercise the actual compiled comparison,
+and the Windows owned-child check uses a copied Node binary in a Unicode path.
 The test retains timing and bounded failure flags, not process metadata or
 command output. Its owned-child fixture allows at most three read-only identity
 observations and never retries a wrong identity, unexpected error or exited

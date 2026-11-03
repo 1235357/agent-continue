@@ -33,11 +33,12 @@ async function windowsQuery(field, pid) {
   if (!root || !path.isAbsolute(root)) unknown();
   const source = fs.readFileSync(new URL('./windows-process-query.cs', import.meta.url), 'utf8');
   if (Buffer.byteLength(source) > 65536 || source.includes("\n'@")) unknown();
-  const script = `$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';Add-Type -TypeDefinition @'\n${source}\n'@\n$r=[AgentContinueProcessQuery]::Query(${pid},$${field === 'ParentProcessId' ? 'true' : 'false'});ConvertTo-Json -InputObject @($r) -Compress`;
+  const script = `$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';$PSModuleAutoLoadingPreference='None';Import-Module ([IO.Path]::Combine($PSHOME,'Modules','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Utility.psd1'));[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);Add-Type -TypeDefinition @'\n${source}\n'@\n$r=[AgentContinueProcessQuery]::Query(${pid},$${field === 'ParentProcessId' ? 'true' : 'false'});[Console]::WriteLine((ConvertTo-Json -InputObject @($r) -Compress))`;
   const stdout = await new Promise((resolve, reject) => execFile(path.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
     ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], {
       windowsHide: true, shell: false, timeout: 5000, maxBuffer: 65536, encoding: 'utf8',
-      env: { SystemRoot: root, WINDIR: root },
+      env: { SystemRoot: root, WINDIR: root,
+        PSModulePath: path.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'Modules') },
     }, (error, out, stderr) => error || stderr ? reject(new Error('process_observation_failed')) : resolve(out)));
   const rows = JSON.parse(stdout.replace(/^\uFEFF/, '').trim());
   if (!Array.isArray(rows) || rows.length > 256) unknown();
