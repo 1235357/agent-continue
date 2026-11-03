@@ -31,7 +31,9 @@ function procText(file, limit = 65536) {
 async function windowsQuery(field, pid) {
   const root = process.env.SystemRoot;
   if (!root || !path.isAbsolute(root)) unknown();
-  const script = `$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';$r=@(Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,CreationDate,ExecutablePath -Filter '${field} = ${pid}' | ForEach-Object { if(-not $_.ExecutablePath -or -not $_.CreationDate){throw 'unknown_identity'}; [pscustomobject]@{pid=[int]$_.ProcessId;parentPid=[int]$_.ParentProcessId;startTime=$_.CreationDate.ToUniversalTime().Ticks.ToString([Globalization.CultureInfo]::InvariantCulture);executable=$_.ExecutablePath} });ConvertTo-Json -InputObject @($r) -Compress`;
+  const source = fs.readFileSync(new URL('./windows-process-query.cs', import.meta.url), 'utf8');
+  if (Buffer.byteLength(source) > 65536 || source.includes("\n'@")) unknown();
+  const script = `$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';Add-Type -TypeDefinition @'\n${source}\n'@\n$r=[AgentContinueProcessQuery]::Query(${pid},$${field === 'ParentProcessId' ? 'true' : 'false'});ConvertTo-Json -InputObject @($r) -Compress`;
   const stdout = await new Promise((resolve, reject) => execFile(path.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
     ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], {
       windowsHide: true, shell: false, timeout: 5000, maxBuffer: 65536, encoding: 'utf8',
@@ -68,10 +70,7 @@ async function processIdentity(pid) {
       return rows[0] || null;
     }
     unknown();
-  } catch (error) {
-    if (error.code === 'ENOENT' || error.code === 'ESRCH') return null;
-    unknown();
-  }
+  } catch { unknown(); }
 }
 
 export async function observeCore(parentPid, nodeExecutable) {

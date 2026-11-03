@@ -197,7 +197,11 @@ are deliberately not recovery strategies.
   creation identity and executable, matching the configured Node executable.
   `process-observation.mjs` exposes `observeCore(parentPid, nodeExecutable)` and
   `hasExited(identity)`. Linux reads only `/proc` process metadata; Windows uses
-  bounded, hidden, profile-free PowerShell/CIM queries for those exact identities.
+  bounded, hidden, profile-free PowerShell to call fixed Windows APIs. A Toolhelp
+  snapshot filters PID/parent PID before opening matching processes with only
+  `PROCESS_QUERY_LIMITED_INFORMATION`; creation time and image path come from
+  those handles. It does not use WMI/CIM, debug privileges or process-control
+  access. See Microsoft's [snapshot example](https://learn.microsoft.com/en-us/windows/win32/toolhelp/taking-a-snapshot-and-viewing-processes).
   Discovery is discarded if the retained client exits before or during the
   observation; it cannot capture a reused parent PID's child after client exit.
   Neither path reads command lines, environments or other users' session files.
@@ -295,7 +299,7 @@ release or Chrome Web Store submission is implied by this source checkpoint.
 
 ### Observed Checks (2026-11-02)
 
-Windows, Node 24.16.0: 71 native checks passed, with one Linux-specific process
+Windows, Node 24.16.0: 73 native checks passed, with one Linux-specific process
 metadata regression skipped. This includes a
 real stdio initialization and five correlated RPC replies, 25 discovered tools,
 an owned-file roundtrip, a harmless process, and normal exit after stdin closes.
@@ -347,11 +351,16 @@ and all three official-client paths before Linux coverage can be claimed.
 Workflow configuration alone is not a completed run, and no macOS execution is
 established here.
 
-Windows CI also exposed a cold process-metadata query exceeding its five-second
-budget. The test records only timing and bounded failure flags, not process
-metadata or command output. Its owned-child fixture allows at most three
-read-only identity observations and never retries a wrong identity, unexpected
-error or exited fixture. It creates only one child. Production query and
-controller budgets are unchanged: an unavailable or slow provider can still
-leave the controller `unknown`, which blocks replacement rather than proving a
-successful stop. This fixture adjustment is not a cold-start availability claim.
+Windows CI exposed CIM queries exceeding their five-second budget on every
+attempt. Failure-only probes confirmed PowerShell had started, while CIM still
+had not returned after fifteen seconds with either environment variant. This
+prompted replacement of CIM with the fixed native metadata helper, not a larger
+production timeout. A regression also verifies that a missing helper is unknown,
+never evidence that a process exited. The temporary CIM probes were removed.
+The test retains timing and bounded failure flags, not process metadata or
+command output. Its owned-child fixture allows at most three read-only identity
+observations and never retries a wrong identity, unexpected error or exited
+fixture. It creates only one child. Production query and controller budgets are
+unchanged: an unavailable or slow observation can still leave the controller
+`unknown`, which blocks replacement rather than proving a successful stop.
+Finite fixture success is not a universal cold-start availability claim.

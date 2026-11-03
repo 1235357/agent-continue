@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import path from 'node:path';
 import childProcess from 'node:child_process';
 import { spawn } from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
@@ -86,7 +85,27 @@ check('Linux stat parser handles spaces and closing parentheses in the comm fiel
   assert.throws(() => api.parseLinuxStat('457 (wrong pid) ' + fields.join(' '), 456), /process_observation_failed/);
 });
 
-test('a finite owned Node child is identified and its actual exit is observed', { skip: !api, timeout: 70000 }, async t => {
+test('Windows metadata helper requests limited query rights without WMI or process control', () => {
+  const source = fs.readFileSync(new URL('./windows-process-query.cs', import.meta.url), 'utf8');
+  assert.match(source, /OpenProcess\(0x1000, false, entry\.th32ProcessID\)/);
+  assert.match(source, /Marshal\.GetLastWin32Error\(\) != 18/);
+  assert.doesNotMatch(source, /PROCESS_ALL_ACCESS|TerminateProcess|ReadProcessMemory|WriteProcessMemory|Get-CimInstance|Win32_Process/);
+  assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /Get-CimInstance|Win32_Process/);
+});
+
+test('missing Windows helper is unknown, never process exit evidence', { skip: !api || process.platform !== 'win32' }, async () => {
+  const read = fs.readFileSync;
+  fs.readFileSync = function(file, ...args) {
+    if (String(file).endsWith('/windows-process-query.cs')) throw Object.assign(new Error('private missing path'), { code: 'ENOENT' });
+    return Reflect.apply(read, this, [file, ...args]);
+  };
+  try {
+    await assert.rejects(api.hasExited({ pid: process.pid, startTime: '1', executable: process.execPath }),
+      error => error.message === 'process_observation_failed');
+  } finally { fs.readFileSync = read; }
+});
+
+test('a finite owned Node child is identified and its actual exit is observed', { skip: !api, timeout: 35000 }, async t => {
   const originalExecFile = childProcess.execFile;
   if (process.platform === 'win32') {
     childProcess.execFile = function(...args) {
@@ -102,37 +121,13 @@ test('a finite owned Node child is identified and its actual exit is observed', 
     syncBuiltinESMExports();
     t.after(() => { childProcess.execFile = originalExecFile; syncBuiltinESMExports(); });
   }
-  const child = spawn(process.execPath, ['-e', "process.stdin.resume();process.stdin.once('end',()=>process.exit(0));setTimeout(()=>process.exit(0),60000);console.log('owned-ready')"],
+  const child = spawn(process.execPath, ['-e', "process.stdin.resume();process.stdin.once('end',()=>process.exit(0));setTimeout(()=>process.exit(0),30000);console.log('owned-ready')"],
     { windowsHide: true, shell: false, stdio: ['pipe', 'pipe', 'pipe'] });
   const exited = new Promise(resolve => child.once('exit', resolve));
   t.after(async () => { if (child.exitCode === null) child.kill(); await exited; });
   child.stderr.resume();
   await new Promise((resolve, reject) => { child.stdout.once('data', resolve); child.once('error', reject); });
-  let identity;
-  try { identity = await observeOwnedChild(child, () => api.observeCore(process.pid, process.execPath), process.platform === 'win32' ? 3 : 1); }
-  catch (error) {
-    if (process.platform === 'win32' && error.message === 'process_observation_failed') {
-      const minimal = { SystemRoot: process.env.SystemRoot, WINDIR: process.env.SystemRoot };
-      const account = { ...minimal };
-      for (const name of ['USERPROFILE', 'TEMP', 'TMP', 'APPDATA', 'LOCALAPPDATA']) {
-        if (process.env[name]) account[name] = process.env[name];
-      }
-      const script = `$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';[Console]::Error.WriteLine('query-started');$r=@(Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,CreationDate,ExecutablePath -Filter 'ParentProcessId = ${process.pid}');[Console]::Error.WriteLine('query-completed')`;
-      for (const [environment, env] of [['minimal', minimal], ['account-paths', account]]) {
-        const started = performance.now();
-        await new Promise(resolve => originalExecFile(path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
-          ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
-          { windowsHide: true, shell: false, timeout: 15000, maxBuffer: 65536, encoding: 'utf8', env },
-          (failure, stdout, stderr) => {
-            t.diagnostic(JSON.stringify({ failureProbe: environment, elapsedMs: Math.round(performance.now() - started),
-              killed: failure?.killed === true, failed: Boolean(failure),
-              started: stderr.includes('query-started'), completed: stderr.includes('query-completed') }));
-            resolve();
-          }));
-      }
-    }
-    throw error;
-  }
+  const identity = await observeOwnedChild(child, () => api.observeCore(process.pid, process.execPath), process.platform === 'win32' ? 3 : 1);
   assert.equal(identity.pid, child.pid); assert.match(identity.startTime, /^[1-9]\d*$/);
   assert.equal(identity.executable, process.execPath);
   assert.equal(await api.hasExited(identity), false);
