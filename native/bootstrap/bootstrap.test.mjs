@@ -168,6 +168,8 @@ check('npm receives fixed arguments and isolated configuration without inherited
   assert.ok(result.args.includes('--registry=https://registry.npmjs.org/'));
   assert.ok(result.args.includes('--workspaces=false'));
   assert.equal(result.args[result.args.indexOf('--prefix') + 1], path.join(installDir, 'app'));
+  assert.equal(result.args[result.args.indexOf('--logs-dir') + 1], path.join(installDir, 'acquisition', 'logs'));
+  assert.ok(result.args.includes('--update-notifier=false'));
   assert.equal(result.cwd, path.join(installDir, 'app'));
   for (const key of inherited) assert.equal(result.env[key], undefined);
   assert.equal(result.env.HOME, path.join(installDir, 'acquisition', 'home'));

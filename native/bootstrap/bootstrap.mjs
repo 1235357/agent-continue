@@ -201,7 +201,7 @@ export async function stageRuntime(options, trusted = {}) {
       fs.writeFileSync(path.join(app, record.path), regular(path.join(packageRoot, 'payload', record.path)), { flag: 'wx', mode: 0o600 });
     }
     verifyFiles(app, manifest, true);
-    for (const name of ['home', 'temp', 'cache']) fs.mkdirSync(path.join(acquisition, name), { mode: 0o700 });
+    for (const name of ['home', 'temp', 'cache', 'logs']) fs.mkdirSync(path.join(acquisition, name), { mode: 0o700 });
     for (const name of ['user.npmrc', 'global.npmrc']) fs.writeFileSync(path.join(acquisition, name), '', { flag: 'wx', mode: 0o600 });
     const home = path.join(acquisition, 'home'), temp = path.join(acquisition, 'temp');
     const env = { HOME: home, USERPROFILE: home, APPDATA: home, LOCALAPPDATA: home,
@@ -210,6 +210,7 @@ export async function stageRuntime(options, trusted = {}) {
     for (const key of ['SystemRoot', 'WINDIR']) if (process.env[key]) env[key] = process.env[key];
     const args = ['ci', '--ignore-scripts', '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org/',
       '--prefix', app, '--workspaces=false',
+      '--logs-dir', path.join(acquisition, 'logs'), '--logs-max=2', '--update-notifier=false',
       '--userconfig', path.join(acquisition, 'user.npmrc'), '--globalconfig', path.join(acquisition, 'global.npmrc'),
       '--cache', cache || path.join(acquisition, 'cache')];
     if (cache) args.push('--offline');

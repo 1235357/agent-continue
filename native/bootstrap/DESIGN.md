@@ -81,6 +81,10 @@ This trusts the registry, TLS, npm's redirect handling and integrity validation;
 it is not OS-level egress enforcement. No inherited npm config,
 auth tokens, Node preloads, proxy settings or personal home is passed to npm.
 Empty user/global npm configs and the fixed registry are passed explicitly.
+Npm's at-most-two diagnostic logs stay in INSTALL/acquisition/logs, not a shared
+cache log directory, and npm's update notifier is disabled. CLI output remains
+fixed-code only. These acquisition logs contain public dependency/install paths,
+not user conversation data; they are not automatically uploaded.
 Npm CLI discovery checks `npm_execpath`, then Node's sibling
 `node_modules/npm/bin/npm-cli.js`, then its prefix's `lib/node_modules/npm/bin/`
 entry. Resolve links once, require a regular `npm-cli.js` in `npm/bin` with

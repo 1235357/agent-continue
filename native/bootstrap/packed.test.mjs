@@ -290,8 +290,15 @@ async function packAndInstall(t) {
 
 async function command(f, args, expected, code = 0, timeout) {
   const result = await f.run([f.bin, ...args], { timeout: timeout ?? 10000 });
+  let failureCode = 'unclassified';
+  try {
+    const output = JSON.parse(result.stdout);
+    if (output.ok === false && ['consent_required', 'payload_invalid', 'invalid_install_path', 'destination_exists',
+      'npm_unavailable', 'dependency_acquisition_failed', 'acquisition_exit_unconfirmed',
+      'provider_verification_failed', 'receipt_write_failed', 'bootstrap_failed', 'invalid_arguments'].includes(output.error)) failureCode = output.error;
+  } catch { /* Never include unvalidated child output in a failure message. */ }
   assert.ok(result.code === code && result.signal === null,
-    `installed_cli_exit_mismatch:exit=${result.code};signal=${result.signal};stderrBytes=${result.stderrBytes}`);
+    `installed_cli_exit_mismatch:exit=${result.code};signal=${result.signal};stderrBytes=${result.stderrBytes};code=${failureCode}`);
   assert.equal(result.stderrBytes, 0, 'installed_cli_leaked_stderr');
   assert.ok(result.stdout.endsWith('\n') && result.stdout.trim().split('\n').length === 1,
     'installed_cli_not_one_json_line');
@@ -553,8 +560,34 @@ test('opt-in: installed tarball stages real pinned provider from explicitly writ
     const f = await packAndInstall(t);
     const cache = validateRealCache(realCache, f.root, f.npmCli);
     const installDir = path.join(f.root, 'staged runtime \u6d4b\u8bd5');
-    await command(f, ['stage', '--install-dir', installDir, '--consent', 'acquire-provider',
-      '--offline-cache', cache], { ok: true, ...receipt }, 0, 195000);
+    try {
+      await command(f, ['stage', '--install-dir', installDir, '--consent', 'acquire-provider',
+        '--offline-cache', cache], { ok: true, ...receipt }, 0, 195000);
+    } catch (error) {
+      const logs = path.join(installDir, 'acquisition', 'logs');
+      let bytes = 0, logCount = 0, lastPhase = 'none';
+      const codes = new Set();
+      if (fs.existsSync(logs)) for (const name of fs.readdirSync(logs)) {
+        const file = path.join(logs, name), stat = fs.lstatSync(file);
+        if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 4 * 1024 * 1024) continue;
+        const text = fs.readFileSync(file, 'utf8'); bytes += stat.size; logCount++;
+        let last = -1;
+        for (const phase of ['idealTree', 'reify', 'tarball', 'fetch', 'exit']) {
+          const at = text.lastIndexOf(phase); if (at > last) { last = at; lastPhase = phase; }
+        }
+        for (const code of ['EINTEGRITY', 'ENOTCACHED', 'ENOENT', 'EPERM', 'ETIMEDOUT', 'EACCES', 'EBUSY', 'ECONNRESET']) {
+          if (text.includes(code)) codes.add(code);
+        }
+      }
+      const modules = path.join(installDir, 'app', 'node_modules');
+      const provider = path.join(modules, '@wonderwhy-er', 'desktop-commander', 'package.json');
+      const npmVersion = JSON.parse(fs.readFileSync(path.join(path.dirname(path.dirname(f.npmCli)), 'package.json'))).version;
+      t.diagnostic(JSON.stringify({ failureOnlyAcquisition: true, nodeVersion: process.version, npmVersion,
+        logCount, bytes, lastPhase, errorCodes: [...codes].sort(),
+        moduleEntries: fs.existsSync(modules) ? fs.readdirSync(modules).length : 0,
+        providerMetadataPresent: fs.existsSync(provider) }));
+      throw error;
+    }
     sameJSON(parseJSON(fs.readFileSync(path.join(installDir, 'receipt.json'), 'utf8'), 'invalid_receipt_json'),
       receipt, 'real_acquisition_receipt_mismatch');
     const app = path.join(installDir, 'app');
