@@ -82,6 +82,12 @@ not proof that the reusable Agent Continue product is deployed.
 This reconstruction uses the current source, Git history, changelog, reviewed
 notes and the owner's instructions. It is not an export of every personal chat.
 `git-log.txt` and `history.bundle` preserve the available canonical code history.
+The first handoff assembly exposed a shallow-clone problem: verification inside
+the original shallow repository passed, but a clean offline clone lacked a
+parent commit. Complete origin history was fetched, and the handoff builder now
+refuses shallow sources and actually clones/checks out its bundle in a separate
+directory, then checks that the pending patch applies. Use the verified handoff,
+not the superseded initial archive. No production runtime was involved.
 
 ## Scheduler Contracts To Preserve
 

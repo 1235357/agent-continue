@@ -87,6 +87,7 @@ function Seal([string]$Directory, [string]$Archive) {
 }
 
 if (![IO.Path]::IsPathRooted($Destination)) { throw 'handoff_absolute_destination_required' }
+if ((Git -Arguments @('rev-parse', '--is-shallow-repository')).Trim() -ne 'false') { throw 'handoff_shallow_history_fetch_required' }
 $Destination = [IO.Path]::GetFullPath($Destination)
 if (Test-Path -LiteralPath $Destination) { throw 'handoff_destination_exists' }
 if ($Destination.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'handoff_output_inside_source' }
@@ -111,10 +112,16 @@ WriteText (Join-Path $public 'pending-untracked.json') ((ConvertTo-Json -InputOb
 WriteText (Join-Path $public 'git-log.txt') (Git -Arguments @('log', 'main', '--date=iso-strict', '--format=%H %ad %s'))
 $null = Git -Arguments @('bundle', 'create', (Join-Path $public 'history.bundle'), 'main', '--tags')
 $null = Git -Arguments @('bundle', 'verify', (Join-Path $public 'history.bundle'))
+# Verify without the source repository's object database or shallow boundaries.
+$recovery = Join-Path $Destination 'restore-check'
+$null = Git -Arguments @('clone', '--no-checkout', (Join-Path $public 'history.bundle'), $recovery)
+$null = Git -Arguments @('-C', $recovery, 'checkout', 'main')
+$null = Git -Arguments @('-C', $recovery, 'apply', '--check', (Join-Path $public 'pending-tracked.patch'))
 $metadata = [ordered]@{ format = 'agent-continue-handoff'; version = 1; createdAtUtc = [DateTime]::UtcNow.ToString('o');
     branch = $branch; commit = $head; repository = 'https://github.com/1235357/agent-continue';
     developmentPaused = $true; stableExtension = '2.2.0'; privateBootstrap = '0.3.0';
     sourceSnapshotIncludesUnshippedCandidates = $true; sourceFiles = $paths.Count;
+    cleanOfflineCloneVerified = $true; pendingTrackedPatchApplicable = $true;
     exclusions = @('credentials and auth files', 'browser profiles and private prompts', 'production state and research files', 'node_modules and npm caches', 'arbitrary .artifacts/test-results', 'legacy private prototype source from the public package');
     integrityScope = 'file checksums and known-secret-pattern scan, not proof of absence of all sensitive content' }
 WriteText (Join-Path $public 'handoff.json') (($metadata | ConvertTo-Json -Depth 6) + "`n")
