@@ -1,7 +1,8 @@
 # Agent Continue Device Bootstrap (Experimental)
 
-This private, zero-dependency package stages a pinned native runtime after
-explicit acquisition consent. It is not a connected device, protected installer,
+This private, zero-dependency bootstrap acquires a pinned native provider and
+official runtime-only tunnel client after one explicit informed consent.
+It is not a connected device, protected installer,
 administrator/root setup, registered browser host, or npm registry release.
 
 The intended connected product is **not a sandbox**: after informed consent it
@@ -24,7 +25,34 @@ its contents and digest before installing it in a disposable user prefix. No
 registry command is advertised until a separate publication actually happens.
 Node.js 22.12+ and a trusted existing npm installation are prerequisites.
 
-The installed `agent-continue-device` bin supports `help`, `version`, and:
+The installed `agent-continue-device` bin supports `help`, `version`, and a
+combined preparation command:
+
+```sh
+agent-continue-device acquire --install-dir "<absolute-new-directory>" --consent full-account
+```
+
+This stages Desktop Commander 0.3.1 through the existing locked npm acquisition,
+then downloads the pinned OpenAI tunnel-client **runtime-only v0.0.19**, verifies
+the archive/executable/SBOM SHA-256 values, and retains the licenses. Supported
+asset mappings are Windows, Linux and macOS, x64/arm64. Acquisition does not run
+the client. It uses the official GitHub release directly, not a developer relay.
+The receipt states `status: acquired` and `configured: false, activated: false`.
+Actual account/tunnel binding, OS elevation, browser registration and startup
+integration remain separate unfinished work, not another consent dialog.
+
+Use `--tunnel-archive "<absolute-official-runtime-zip>"` for an already downloaded
+official ZIP. Its digest must match the same platform pin. No arbitrary download
+URL, mutable latest version, shell extraction or executable override is accepted.
+The client deadline is cooperative and bounded to 60 seconds; provider npm has
+its own 180-second budget. Neither step retries automatically. Partial client
+failure preserves the valid staged provider and owned partial files, without an
+acquired receipt. Existing destinations are never overwritten or auto-repaired.
+ZIP work runs in a short-lived Node worker thread whose termination is awaited
+on success or failure; it does not install a service or restrict the connected
+account. This owns the decompressor's internal resources, including cancellation.
+
+For provider-only preparation, the existing command remains available:
 
 ```sh
 agent-continue-device stage --install-dir "<absolute-new-directory>" --consent acquire-provider
@@ -46,8 +74,18 @@ success receipt and cannot be automatically reused or repaired. An unconfirmed
 child exit is reported explicitly; it is not evidence that all effects stopped.
 
 Desktop Commander 0.3.1 remains an upstream MIT-licensed dependency acquired by
-npm, with its own licenses. The official OpenAI tunnel is a later separately
-verified component. Neither provider credentials nor user state are packaged.
+npm, with its own licenses. OpenAI tunnel-client is Apache-2.0 licensed; its
+LICENSE, NOTICE, third-party licenses and SPDX inventory remain with the client.
+Pins trust the official HTTPS distribution, not independent signature checking.
+Neither provider credentials nor user state are packaged. A successful receipt
+commit wins over a subsequent cancellation or temporary-link cleanup error.
+
+Tests: `npm test` runs synthetic and packed-bin checks. Set
+`AGENT_CONTINUE_REAL_CACHE` to an explicitly writable populated npm cache for real
+provider/MCP fixture acceptance; additionally set `AGENT_CONTINUE_OFFICIAL_CLIENT=1`
+for official online acquisition, or `AGENT_CONTINUE_OFFICIAL_ARCHIVE` for its local
+ZIP. Without those options the corresponding real acceptance is skipped.
+Tests do not imply privileged installation or a connected device.
 
 Developer: [zhentongye2028@u.northwestern.edu](mailto:zhentongye2028@u.northwestern.edu).
 Source: [GitHub](https://github.com/1235357/agent-continue).

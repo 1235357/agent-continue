@@ -16,9 +16,10 @@ test('zero-dependency acquisition API and package builder exist', () => { assert
 const check = (name, run) => test(name, { skip: !api || !builder }, run);
 
 function fixture(t) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-bootstrap-test-'));
+  const temporary = fs.realpathSync(os.tmpdir());
+  const root = fs.mkdtempSync(path.join(temporary, 'agent-bootstrap-test-'));
   t.after(() => {
-    assert.equal(path.dirname(path.resolve(root)), path.resolve(os.tmpdir()));
+    assert.equal(path.dirname(path.resolve(root)), temporary);
     assert.match(path.basename(root), /^agent-bootstrap-test-/);
     fs.rmSync(root, { recursive: true, force: true });
   });
@@ -141,6 +142,17 @@ check('existing destinations and relative or overlapping targets have no effects
   assert.equal(fs.readFileSync(marker, 'utf8'), 'original');
   assert.deepEqual(fs.readdirSync(installDir), ['keep']);
   assert.deepEqual(fs.readdirSync(root).sort(), ['install', 'package']);
+});
+
+check('case aliases of existing source ancestors cannot become a writable destination', async t => {
+  const { packaged } = fixture(t);
+  const alias = path.join(path.dirname(packaged), 'PACKAGE');
+  if (!fs.existsSync(alias) || fs.statSync(alias, { bigint: true }).ino !== fs.statSync(packaged, { bigint: true }).ino) {
+    t.skip('Case-sensitive test volume; case-insensitive filesystem regression not executed'); return;
+  }
+  const installDir = path.join(alias, 'must-not-be-created');
+  await assert.rejects(api.stageRuntime({ installDir, consent: 'acquire-provider' }, { packageRoot: packaged }), /^Error: invalid_install_path$/);
+  assert.equal(fs.existsSync(installDir), false);
 });
 
 check('failed dependency acquisition is one attempt with no success receipt or repair', async t => {
@@ -297,6 +309,20 @@ check('verified inventory yields only an acquisition receipt, never configuratio
     configured: false, activated: false, protectedInstallationVerified: false, nativeDependenciesVerified: false });
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(installDir, 'receipt.json'))), result);
   assert.equal(fs.existsSync(path.join(installDir, 'app', 'consent.json')), false);
+});
+
+check('provider stage verification checks canonical receipt, copied bytes and installed inventory', async t => {
+  const { root, packaged, installDir } = fixture(t);
+  await api.stageRuntime({ installDir, consent: 'acquire-provider' }, composition(packaged, inventoryNpm(root)));
+  assert.equal(typeof api.verifyProviderStage, 'function');
+  assert.deepEqual(await api.verifyProviderStage(installDir, packaged), { providerVersion: '0.3.1', files: 12 });
+  const receiptFile = path.join(installDir, 'receipt.json'), bytes = fs.readFileSync(receiptFile);
+  fs.appendFileSync(receiptFile, ' ');
+  await assert.rejects(api.verifyProviderStage(installDir, packaged), /^Error: provider_stage_invalid$/);
+  fs.writeFileSync(receiptFile, bytes);
+  const runtimeFile = path.join(installDir, 'app', 'host.mjs');
+  fs.appendFileSync(runtimeFile, '\nchanged');
+  await assert.rejects(api.verifyProviderStage(installDir, packaged), /^Error: provider_stage_invalid$/);
 });
 
 check('cancellation before receipt commit and publication errors leave no final receipt', async t => {

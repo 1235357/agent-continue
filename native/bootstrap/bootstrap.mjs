@@ -21,17 +21,35 @@ function localPath(value) {
   let current = parsed.root;
   for (const part of result.slice(parsed.root.length).split(path.sep).filter(Boolean)) {
     current = path.join(current, part);
-    try { if (fs.lstatSync(current).isSymbolicLink()) fail('invalid_install_path'); }
+    try {
+      if (fs.lstatSync(current).isSymbolicLink()) fail('invalid_install_path');
+      current = fs.realpathSync(current);
+    }
     catch (error) { if (error.code !== 'ENOENT') throw error; }
   }
-  return result;
+  return current;
 }
 
 function overlap(first, second) {
   const fold = value => process.platform === 'win32' ? value.toLowerCase() : value;
   first = fold(first); second = fold(second);
   const contains = (a, b) => a === b || a.startsWith(b.endsWith(path.sep) ? b : b + path.sep);
-  return contains(first, second) || contains(second, first);
+  if (contains(first, second) || contains(second, first)) return true;
+  // realpath can preserve a case alias; identity comparisons work on both case modes.
+  const physicalAncestor = (ancestor, child) => {
+    let identity;
+    try { identity = fs.statSync(ancestor, { bigint: true }); }
+    catch (error) { if (error.code === 'ENOENT') return false; throw error; }
+    if (identity.ino === 0n) fail('invalid_install_path');
+    for (let current = child; ; current = path.dirname(current)) {
+      try {
+        const info = fs.statSync(current, { bigint: true });
+        if (info.dev === identity.dev && info.ino === identity.ino) return true;
+      } catch (error) { if (error.code !== 'ENOENT') throw error; }
+      if (path.dirname(current) === current) return false;
+    }
+  };
+  return physicalAncestor(first, second) || physicalAncestor(second, first);
 }
 
 function regular(file, limit = 4 * 1024 * 1024) {
@@ -113,6 +131,29 @@ export function verifyPayload(packageRoot = here) {
     verifyFiles(payload, manifest, true); verifyLock(payload);
     return { files: RUNTIME_FILES.length, providerVersion: PROVIDER.version };
   } catch { fail('payload_invalid'); }
+}
+
+function stageReceipt() {
+  return { format: 'agent-continue-acquisition', version: 1, status: 'staged', providerVersion: PROVIDER.version,
+    configured: false, activated: false, protectedInstallationVerified: false, nativeDependenciesVerified: false };
+}
+
+export async function verifyProviderStage(installDir, packageRoot = here) {
+  try {
+    const root = localPath(installDir);
+    packageRoot = localPath(packageRoot);
+    if (overlap(root, packageRoot) || !fs.lstatSync(root).isDirectory()) fail('provider_stage_invalid');
+    verifyPayload(packageRoot);
+    const manifest = checkedManifest(packageRoot), app = path.join(root, 'app');
+    verifyFiles(app, manifest, false); verifyLock(app);
+    const receiptFile = localPath(path.join(root, 'receipt.json'));
+    const info = fs.lstatSync(receiptFile);
+    if (!info.isFile() || info.size > 16384 || fs.readFileSync(receiptFile, 'utf8') !== encode(stageReceipt())) fail('provider_stage_invalid');
+    const module = await import(pathToFileURL(path.join(app, 'runtime.mjs')).href);
+    const result = module.verifyUpstream(), pin = providerPin(app);
+    if (!exact(result, ['version', 'verifiedFiles']) || result.version !== PROVIDER.version || result.verifiedFiles !== pin.files) fail('provider_stage_invalid');
+    return { providerVersion: PROVIDER.version, files: RUNTIME_FILES.length };
+  } catch { fail('provider_stage_invalid'); }
 }
 
 function findNpm(supplied) {
@@ -242,8 +283,7 @@ export async function stageRuntime(options, trusted = {}) {
       if (!exact(result, ['version', 'verifiedFiles']) || result.version !== PROVIDER.version || result.verifiedFiles !== pin.files) throw new Error('invalid_result');
     } catch { fail('provider_verification_failed'); }
     cancelled();
-    const receipt = { format: 'agent-continue-acquisition', version: 1, status: 'staged', providerVersion: PROVIDER.version,
-      configured: false, activated: false, protectedInstallationVerified: false, nativeDependenciesVerified: false };
+    const receipt = stageReceipt();
     const pending = path.join(root, 'receipt.pending.' + crypto.randomUUID());
     try { fs.writeFileSync(pending, encode(receipt), { flag: 'wx', mode: 0o600 }); }
     catch { fail('receipt_write_failed'); }

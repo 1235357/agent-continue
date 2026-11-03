@@ -63,7 +63,7 @@ check('launch environment drops old endpoints, targets, proxy settings and brows
     'OPEN_WEB_UI', 'LOG_HTTP_RAW_UNSAFE', 'HTTPS_PROXY', 'all_proxy', 'HEALTH_LISTEN_ADDR', 'CLOUDFLARED_MANAGED', 'TUNNEL_CLIENT_CONFIG']) assert.equal(key in env, false, key);
 });
 
-async function fixtureAPI(base) {
+async function fixtureAPI(base, compatible = false) {
   const copy = path.join(base, 'fixture-source'); fs.mkdirSync(copy);
   fs.copyFileSync(target, path.join(copy, 'profile.mjs'));
   fs.writeFileSync(path.join(copy, 'runtime.mjs'), `export * from ${JSON.stringify(new URL('./runtime.mjs', import.meta.url).href)};\n`);
@@ -71,10 +71,18 @@ async function fixtureAPI(base) {
   fs.writeFileSync(executable, 'inert-test-fixture-never-executed', { mode: 0o700 });
   const pin = JSON.parse(fs.readFileSync(new URL('./tunnel-pins.json', import.meta.url), 'utf8'));
   pin.platforms[process.platform + '-' + process.arch] = { ...pin.platforms['win32-x64'],
-    executableSha256: crypto.createHash('sha256').update(fs.readFileSync(executable)).digest('hex') };
+    executableSha256: compatible ? '0'.repeat(64) : crypto.createHash('sha256').update(fs.readFileSync(executable)).digest('hex'),
+    compatibleExecutableSha256: compatible ? [crypto.createHash('sha256').update(fs.readFileSync(executable)).digest('hex')] : [] };
   fs.writeFileSync(path.join(copy, 'tunnel-pins.json'), JSON.stringify(pin));
   return { isolated: await import(pathToFileURL(path.join(copy, 'profile.mjs')).href), executable };
 }
+
+check('existing explicitly pinned compatible client remains verifiable without rewriting configuration', async t => {
+  const { base } = scratch(t), { isolated, executable } = await fixtureAPI(base, true);
+  assert.deepEqual(isolated.verifyTunnelExecutable(executable), { file: executable, release: 'v0.0.19' });
+  fs.appendFileSync(executable, 'modified');
+  assert.throws(() => isolated.verifyTunnelExecutable(executable), /^Error: tunnel_pin_mismatch$/);
+});
 
 check('configure/inspect roundtrip uses file metadata but never reads runtime-key contents', async t => {
   const { base, root } = scratch(t), key = path.join(base, 'runtime.key');

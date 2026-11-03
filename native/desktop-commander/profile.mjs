@@ -92,7 +92,7 @@ export function verifyTunnelExecutable(value) {
   if (!info.isFile() || info.isSymbolicLink() || info.size < 1 || info.size > 128 * 1024 * 1024 ||
       (process.platform !== 'win32' && (info.mode & 0o111) === 0)) fail('tunnel_pin_mismatch');
   const digest = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-  if (digest !== pin.executableSha256) fail('tunnel_pin_mismatch');
+  if (digest !== pin.executableSha256 && !pin.compatibleExecutableSha256?.includes(digest)) fail('tunnel_pin_mismatch');
   return { file, release: pins.release };
 }
 

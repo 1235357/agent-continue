@@ -14,7 +14,7 @@ const payloadFiles = [
   'tunnel-pins.json', 'upstream-pin.json', 'windows-child.mjs', 'windows-process-query.cs',
 ];
 const packageFiles = [
-  'bin.mjs', 'bootstrap.mjs', 'payload-layout.mjs', 'package.json',
+  'bin.mjs', 'bootstrap.mjs', 'client-acquisition.mjs', 'payload-layout.mjs', 'package.json',
   'README.md', 'LICENSE', 'payload-manifest.json',
   ...payloadFiles.map(name => `payload/${name}`),
 ].sort();
@@ -24,6 +24,8 @@ const receipt = Object.freeze({
   nativeDependenciesVerified: false,
 });
 const realCache = process.env.AGENT_CONTINUE_REAL_CACHE;
+const officialArchive = process.env.AGENT_CONTINUE_OFFICIAL_ARCHIVE;
+const officialClient = process.env.AGENT_CONTINUE_OFFICIAL_CLIENT === '1' || officialArchive !== undefined;
 const hash = (bytes, algorithm = 'sha256', encoding = 'hex') =>
   crypto.createHash(algorithm).update(bytes).digest(encoding);
 
@@ -76,10 +78,15 @@ function fixture(t) {
   const root = fs.mkdtempSync(path.join(temp, 'agent-continue-packed-'));
   const identity = fs.lstatSync(root, { bigint: true });
   const children = new Set();
+  let nestedExitUnconfirmed = false;
   t.after(async () => {
     // If any retained child cannot be confirmed closed, preserve its files.
     const stopped = await Promise.all([...children].map(child => child.stop()));
     assert.ok(stopped.every(Boolean), 'owned_child_exit_unconfirmed');
+    if (nestedExitUnconfirmed) {
+      t.diagnostic('Disposable fixture retained: nested acquisition exit unconfirmed');
+      return;
+    }
     assert.equal(path.dirname(path.resolve(root)), temp, 'cleanup_outside_temp_root');
     assert.match(path.basename(root), /^agent-continue-packed-[A-Za-z0-9]+$/);
     const current = fs.lstatSync(root, { bigint: true });
@@ -180,7 +187,8 @@ function fixture(t) {
       `local_npm_failed:exit=${result.code};signal=${result.signal};stderrBytes=${result.stderrBytes}`);
     return result;
   }
-  return { root, cache, work, env, npmCli, start, run, npm };
+  return { root, cache, work, env, npmCli, start, run, npm,
+    holdUnconfirmedAcquisition: () => { nestedExitUnconfirmed = true; } };
 }
 
 function inventory(root) {
@@ -236,7 +244,7 @@ async function packAndInstall(t) {
   const manifest = verifyClosure(packaged);
   const meta = parseJSON(fs.readFileSync(path.join(packaged, 'package.json'), 'utf8'), 'invalid_package_metadata');
   assert.equal(meta.name, 'agent-continue-device-bootstrap');
-  assert.equal(meta.version, '0.1.0');
+  assert.equal(meta.version, '0.2.0');
   assert.equal(meta.private, true);
   assert.equal(meta.type, 'module');
   sameJSON(meta.bin, { 'agent-continue-device': 'bin.mjs' }, 'package_bin_metadata_mismatch');
@@ -289,14 +297,34 @@ async function packAndInstall(t) {
 }
 
 async function command(f, args, expected, code = 0, timeout) {
-  const result = await f.run([f.bin, ...args], { timeout: timeout ?? 10000 });
+  let result;
+  try { result = await f.run([f.bin, ...args], { timeout: timeout ?? 10000 }); }
+  catch (error) {
+    if (['stage', 'acquire'].includes(args[0])) f.holdUnconfirmedAcquisition();
+    throw error;
+  }
   let failureCode = 'unclassified';
   try {
     const output = JSON.parse(result.stdout);
     if (output.ok === false && ['consent_required', 'payload_invalid', 'invalid_install_path', 'destination_exists',
       'npm_unavailable', 'dependency_acquisition_failed', 'acquisition_exit_unconfirmed',
-      'provider_verification_failed', 'receipt_write_failed', 'bootstrap_failed', 'invalid_arguments'].includes(output.error)) failureCode = output.error;
+      'provider_verification_failed', 'receipt_write_failed', 'bootstrap_failed', 'invalid_arguments',
+      'provider_stage_invalid', 'unsupported_tunnel_platform', 'client_input_invalid', 'client_exists',
+      'client_acquisition_failed', 'client_archive_invalid', 'client_verification_failed', 'client_receipt_failed'].includes(output.error)) failureCode = output.error;
+    if (output.error === 'acquisition_exit_unconfirmed') f.holdUnconfirmedAcquisition();
   } catch { /* Never include unvalidated child output in a failure message. */ }
+  if (['stage', 'acquire'].includes(args[0])) {
+    const at = args.indexOf('--install-dir'), destination = args[at + 1];
+    if (at > 0 && typeof destination === 'string' && path.isAbsolute(destination) && isWithin(f.root, destination)) {
+      const acquisition = path.join(destination, 'acquisition');
+      if (fs.existsSync(acquisition)) {
+        try {
+          const report = JSON.parse(fs.readFileSync(path.join(acquisition, 'process.json')));
+          if (report.closeObserved !== true) f.holdUnconfirmedAcquisition();
+        } catch { f.holdUnconfirmedAcquisition(); }
+      }
+    }
+  }
   assert.ok(result.code === code && result.signal === null,
     `installed_cli_exit_mismatch:exit=${result.code};signal=${result.signal};stderrBytes=${result.stderrBytes};code=${failureCode}`);
   assert.equal(result.stderrBytes, 0, 'installed_cli_leaked_stderr');
@@ -310,8 +338,11 @@ test('actual local npm tarball has exact closure and installed help/version/refu
     const f = await packAndInstall(t);
     const destination = path.join(f.root, 'must not be created \u6d4b\u8bd5');
     const before = inventory(f.root);
-    await command(f, ['help'], { ok: true, commands: ['help', 'version', 'stage'] });
-    await command(f, ['version'], { ok: true, version: '0.1.0' });
+    await command(f, ['help'], { ok: true, commands: ['help', 'version', 'stage', 'acquire'] });
+    await command(f, ['version'], { ok: true, version: '0.2.0' });
+    await command(f, ['acquire', '--install-dir', destination, '--consent', 'yes'], { ok: false, error: 'consent_required' }, 1);
+    await command(f, ['acquire', '--install-dir', destination, '--consent', 'full-account', '--tunnel-archive', 'relative'],
+      { ok: false, error: 'client_input_invalid' }, 1);
     for (const consent of [undefined, 'full-account', 'yes']) {
       await command(f, ['stage', '--install-dir', destination,
         ...(consent ? ['--consent', consent] : []), '--offline-cache', f.cache],
@@ -331,6 +362,30 @@ test('actual local npm tarball has exact closure and installed help/version/refu
       packedFiles: packageFiles.length, payloadFiles: payloadFiles.length,
       installedBinMetadata: true, installedHelpVersionRefusal: true, registryPublication: false }));
   });
+
+test('outer CLI closure cannot authorize fixture deletion after an unconfirmed nested acquisition exit', async t => {
+  let retained, identity;
+  try {
+    await t.test('retain disposable fixture on typed unconfirmed result', async inner => {
+      const f = fixture(inner);
+      retained = f.root; identity = fs.lstatSync(retained, { bigint: true });
+      f.bin = path.join(f.work, 'synthetic-exit.mjs');
+      fs.writeFileSync(f.bin, `process.stdout.write('{"ok":false,"error":"acquisition_exit_unconfirmed"}\\n');process.exitCode=1;`);
+      await command(f, ['stage', '--install-dir', path.join(f.root, 'unused'), '--consent', 'acquire-provider'],
+        { ok: false, error: 'acquisition_exit_unconfirmed' }, 1);
+    });
+    assert.equal(fs.existsSync(retained), true);
+  } finally {
+    // This fixture's CLI only printed a synthetic result; it spawned no npm.
+    if (retained && fs.existsSync(retained)) {
+      const current = fs.lstatSync(retained, { bigint: true });
+      assert.equal(current.ino, identity.ino); assert.equal(current.dev, identity.dev);
+      assert.equal(fs.realpathSync(retained), retained);
+      assert.equal(path.dirname(retained), fs.realpathSync(os.tmpdir()));
+      fs.rmSync(retained, { recursive: true, force: true });
+    }
+  }
+});
 
 test('actual offline npm acquisition suppresses synthetic provider installation hooks',
   { timeout: 180000 }, async t => {
@@ -561,8 +616,29 @@ test('opt-in: installed tarball stages real pinned provider from explicitly writ
     const cache = validateRealCache(realCache, f.root, f.npmCli);
     const installDir = path.join(f.root, 'staged runtime \u6d4b\u8bd5');
     try {
-      await command(f, ['stage', '--install-dir', installDir, '--consent', 'acquire-provider',
-        '--offline-cache', cache], { ok: true, ...receipt }, 0, 195000);
+      const pins = parseJSON(fs.readFileSync(path.join(f.installed, 'payload', 'tunnel-pins.json')), 'invalid_tunnel_pins');
+      const platform = process.platform + '-' + process.arch;
+      const acquired = { format: 'agent-continue-device-acquisition', version: 1, status: 'acquired',
+        providerVersion: '0.3.1', tunnelRelease: 'v0.0.19', platform,
+        executableSha256: pins.platforms[platform].executableSha256, configured: false, activated: false,
+        protectedInstallationVerified: false, nativeDependenciesVerified: false };
+      await command(f, [officialClient ? 'acquire' : 'stage', '--install-dir', installDir,
+        '--consent', officialClient ? 'full-account' : 'acquire-provider', '--offline-cache', cache,
+        ...(officialArchive !== undefined ? ['--tunnel-archive', officialArchive] : [])],
+      { ok: true, ...(officialClient ? acquired : receipt) }, 0, officialClient ? 260000 : 195000);
+      if (officialClient) {
+        const client = path.join(installDir, 'client'), pin = pins.platforms[platform];
+        sameJSON(parseJSON(fs.readFileSync(path.join(client, 'receipt.json'))), acquired, 'client_receipt_mismatch');
+        const executable = process.platform === 'win32' ? 'tunnel-client-runtime.exe' : 'tunnel-client-runtime';
+        assert.equal(hash(fs.readFileSync(path.join(client, executable))), pin.executableSha256);
+        assert.equal(hash(fs.readFileSync(path.join(client, 'release.zip'))), pin.archiveSha256);
+        assert.equal(hash(fs.readFileSync(path.join(client, pin.asset.slice(0, -4) + '.spdx.json'))), pin.spdxSha256);
+        for (const name of ['LICENSE', 'NOTICE', pin.asset.slice(0, -4) + '-licenses.txt']) {
+          assert.ok(fs.statSync(path.join(client, name)).size > 0);
+        }
+        assert.equal(fs.existsSync(path.join(client, 'tunnel.yaml')), false);
+        t.diagnostic(JSON.stringify({ actualInstalledBinCombinedAcquisition: true, ...acquired }));
+      } else t.diagnostic('Official client opt-in absent: real-client acquisition not executed');
     } catch (error) {
       const logs = path.join(installDir, 'acquisition', 'logs');
       let bytes = 0, logCount = 0, lastPhase = 'none', npmExit = null, npmOk = false, exitHandlerNeverCalled = false;
@@ -616,7 +692,6 @@ test('opt-in: installed tarball stages real pinned provider from explicitly writ
     t.diagnostic(JSON.stringify({ actualInstalledBinOfflineStage: true, providerVersion: '0.3.1',
       verifiedFiles: pin.files, deliberatelyWritableSelectedCache: true, ...receipt }));
     await t.test('bounded actual staged MCP initialize/list/owned-file roundtrip',
-      { timeout: 75000, skip: !['win32', 'linux'].includes(process.platform) ?
-        'MCP runtime acceptance is scoped to Windows/Linux; macOS is not established' : false },
+      { timeout: 75000 },
       async child => fileRoundtrip(child, f, runtime, app));
   });

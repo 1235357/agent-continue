@@ -3,14 +3,41 @@
   "source": "https://github.com/openai/tunnel-client/releases/tag/v0.0.19",
   "platforms": {
     "win32-x64": {
-      "asset": "tunnel-client-v0.0.19-windows-amd64.zip",
-      "archiveSha256": "1d0ecc3a54f2a51e27a635ac155f40fbb95df58c52cdeddf6c75532cc0bbeb25",
-      "executableSha256": "7e93a39a567c87154a0aef2091b81100d78f9093c4603412cc2b55bed3dfe5ea"
+      "asset": "tunnel-client-runtime-v0.0.19-windows-amd64.zip",
+      "archiveSha256": "e8962891696bccc05f27c47cf0f383fed127e955c1b0f4866471e3d0851f2fdd",
+      "executableSha256": "cb3b2ab34a77096750561b8d46319af282096a169a90b9c8e36567dd4fe06837",
+      "spdxSha256": "f5315cb83ab0bbcb18e3c4bee45571271bd484b2fb174425af744ffbce1adb9a",
+      "compatibleExecutableSha256": ["7e93a39a567c87154a0aef2091b81100d78f9093c4603412cc2b55bed3dfe5ea"]
+    },
+    "win32-arm64": {
+      "asset": "tunnel-client-runtime-v0.0.19-windows-arm64.zip",
+      "archiveSha256": "4b02852e8b0a4c0ab50e8a41455262b595ce1e8e49c62d97cd9ee9bd6a45ec93",
+      "executableSha256": "54e595c5bd9bbb239a3d04ca4a6c92decca587a51648f2c52ed81ad1813fa5bb",
+      "spdxSha256": "6f334a05004d73941969cc4e5e47b43a449fae34c1df7c2710a560436a9a7218"
     },
     "linux-x64": {
       "asset": "tunnel-client-runtime-v0.0.19-linux-amd64.zip",
       "archiveSha256": "a43beae6f08505a1b6751057d02797baa70a88ef7f9eb5dfd03a55b6b29116ad",
-      "executableSha256": "4d3a40113c330c2588f4c1dce312499acd207a26047ea6e6a6aa7c1415deb9a3"
+      "executableSha256": "4d3a40113c330c2588f4c1dce312499acd207a26047ea6e6a6aa7c1415deb9a3",
+      "spdxSha256": "be3bd15eb797ad3a1850c504564c82f14e7ad4b0633d7096749ebc9382414ba4"
+    },
+    "linux-arm64": {
+      "asset": "tunnel-client-runtime-v0.0.19-linux-arm64.zip",
+      "archiveSha256": "edd01667d46bcebfa88dd17d92bdb561586768a7de3410b8b3c8397b527fd6e9",
+      "executableSha256": "80cc5264d9083705483dd17113e9eb984dd3c06e0989da5de38bb1157358f64a",
+      "spdxSha256": "c2d14ce42dde069b86dcaf0ae1a3c4257f9ed0f9d1d28c00bc85afd0e38d9bad"
+    },
+    "darwin-x64": {
+      "asset": "tunnel-client-runtime-v0.0.19-darwin-amd64.zip",
+      "archiveSha256": "e19e52f92e34f7502db87e54e6a1f5429e1828ca1cb5a821b05dc563e56fe2f4",
+      "executableSha256": "5993c28642113af4aa24977ee730c14d10cd9ffe969a65902fe4265cf92359c6",
+      "spdxSha256": "3d4bd2bd69b1ffdc31d9cf1cfc35599a5e16f3a1e1fbab4960aa83391be05b7c"
+    },
+    "darwin-arm64": {
+      "asset": "tunnel-client-runtime-v0.0.19-darwin-arm64.zip",
+      "archiveSha256": "225760584563a1ad6ee72585bc001bae34a7141d73246a117ceed284090590cc",
+      "executableSha256": "e7c29416509f8ee6974845f624c631c0c84dea0e95aa27b011e380a5910a36c9",
+      "spdxSha256": "333b948c3b83c623a5232c5ddbf6e9f49de2b3b75f4ede689f3aed3adc42b0b9"
     }
   }
 }
