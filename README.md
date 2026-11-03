@@ -10,6 +10,12 @@ Schedule your own prompts in one existing ChatGPT or Your dot conversation, with
 
 This document describes v2.2.0 developer support, schema 3 diagnostics, and support-page error recovery, alongside the existing single-submit behavior introduced in v2.0.x. GitHub releases may ship ahead of Chrome Web Store review. Store availability and downloadable versions are determined by their respective listings; neither this README nor a GitHub release establishes store approval or the version installed in your browser.
 
+Development is paused at the owner's request as of November 3, 2026. The
+[complete development handoff](docs/DEVELOPMENT-HANDOFF.md) separates stable
+releases, verified native source and pending browser candidates; it also records
+the architecture, history, known limits and remaining work. A handoff archive is
+not a new stable extension or an installer.
+
 ## Developer and Support
 
 - **Developer:** Zhentong Ye

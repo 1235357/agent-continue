@@ -84,8 +84,14 @@ fixtures with synthetic executable pins are not official-binary acceptance.
 The CLI does not activate the tunnel or implement pause/autostart; those remain
 coordinator responsibilities. `activated: false` on prepare/configure describes
 that operation only; inspection reports activation as `not-observed`, not that
-the device is offline. Supported executable pins are Windows/Linux x64 for now;
-macOS and other architectures are not silently accepted.
+the device is offline. Runtime-only v0.0.19 executable pins cover Windows, Linux
+and macOS x64/arm64; hash coverage is not proof of execution on every architecture
+or of macOS Gatekeeper approval.
+
+The private [device bootstrap](bootstrap/README.md) now composes this preparation
+with provider/client acquisition and the real browser request producer in one
+`setup` command. It creates a configured profile but does not activate it,
+register a browser host or manufacture an OS/platform authorization.
 
 ### Developer CLI (Not An Installer)
 

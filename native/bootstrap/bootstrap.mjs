@@ -52,6 +52,8 @@ function overlap(first, second) {
   return physicalAncestor(first, second) || physicalAncestor(second, first);
 }
 
+export { localPath as resolveLocalPath, overlap as pathsOverlap };
+
 function regular(file, limit = 4 * 1024 * 1024) {
   const stat = fs.lstatSync(file, { bigint: true });
   if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1n || stat.ino === 0n || stat.size > BigInt(limit)) fail('payload_invalid');
@@ -165,7 +167,7 @@ function findNpm(supplied) {
       if (!path.isAbsolute(candidate)) continue;
       const file = fs.realpathSync(candidate), root = path.dirname(path.dirname(file));
       if (path.basename(file) !== 'npm-cli.js' || path.basename(path.dirname(file)) !== 'bin' ||
-          !fs.statSync(file).isFile() || JSON.parse(fs.readFileSync(path.join(root, 'package.json'))).name !== 'npm') continue;
+          !fs.statSync(file).isFile() || JSON.parse(regular(localPath(path.join(root, 'package.json')), 65536)).name !== 'npm') continue;
       return { file, root };
     } catch { /* Another supported installation layout may still exist. */ }
   }

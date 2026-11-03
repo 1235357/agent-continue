@@ -6,6 +6,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { buildSetupRequest, serializeSetupRequest } from '../../setup-model.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const payloadFiles = [
@@ -14,7 +15,7 @@ const payloadFiles = [
   'tunnel-pins.json', 'upstream-pin.json', 'windows-child.mjs', 'windows-process-query.cs',
 ];
 const packageFiles = [
-  'bin.mjs', 'bootstrap.mjs', 'client-acquisition.mjs', 'payload-layout.mjs', 'package.json',
+  'bin.mjs', 'bootstrap.mjs', 'client-acquisition.mjs', 'device-setup.mjs', 'payload-layout.mjs', 'package.json',
   'README.md', 'LICENSE', 'payload-manifest.json',
   ...payloadFiles.map(name => `payload/${name}`),
 ].sort();
@@ -244,7 +245,7 @@ async function packAndInstall(t) {
   const manifest = verifyClosure(packaged);
   const meta = parseJSON(fs.readFileSync(path.join(packaged, 'package.json'), 'utf8'), 'invalid_package_metadata');
   assert.equal(meta.name, 'agent-continue-device-bootstrap');
-  assert.equal(meta.version, '0.2.0');
+  assert.equal(meta.version, '0.3.0');
   assert.equal(meta.private, true);
   assert.equal(meta.type, 'module');
   sameJSON(meta.bin, { 'agent-continue-device': 'bin.mjs' }, 'package_bin_metadata_mismatch');
@@ -300,7 +301,7 @@ async function command(f, args, expected, code = 0, timeout) {
   let result;
   try { result = await f.run([f.bin, ...args], { timeout: timeout ?? 10000 }); }
   catch (error) {
-    if (['stage', 'acquire'].includes(args[0])) f.holdUnconfirmedAcquisition();
+    if (['stage', 'acquire', 'setup'].includes(args[0])) f.holdUnconfirmedAcquisition();
     throw error;
   }
   let failureCode = 'unclassified';
@@ -310,10 +311,12 @@ async function command(f, args, expected, code = 0, timeout) {
       'npm_unavailable', 'dependency_acquisition_failed', 'acquisition_exit_unconfirmed',
       'provider_verification_failed', 'receipt_write_failed', 'bootstrap_failed', 'invalid_arguments',
       'provider_stage_invalid', 'unsupported_tunnel_platform', 'client_input_invalid', 'client_exists',
-      'client_acquisition_failed', 'client_archive_invalid', 'client_verification_failed', 'client_receipt_failed'].includes(output.error)) failureCode = output.error;
+      'client_acquisition_failed', 'client_archive_invalid', 'client_verification_failed', 'client_receipt_failed',
+      'setup_request_invalid', 'setup_target_mismatch', 'setup_input_invalid', 'setup_configuration_failed',
+      'setup_receipt_failed', 'setup_cancelled'].includes(output.error)) failureCode = output.error;
     if (output.error === 'acquisition_exit_unconfirmed') f.holdUnconfirmedAcquisition();
   } catch { /* Never include unvalidated child output in a failure message. */ }
-  if (['stage', 'acquire'].includes(args[0])) {
+  if (['stage', 'acquire', 'setup'].includes(args[0])) {
     const at = args.indexOf('--install-dir'), destination = args[at + 1];
     if (at > 0 && typeof destination === 'string' && path.isAbsolute(destination) && isWithin(f.root, destination)) {
       const acquisition = path.join(destination, 'acquisition');
@@ -338,8 +341,15 @@ test('actual local npm tarball has exact closure and installed help/version/refu
     const f = await packAndInstall(t);
     const destination = path.join(f.root, 'must not be created \u6d4b\u8bd5');
     const before = inventory(f.root);
-    await command(f, ['help'], { ok: true, commands: ['help', 'version', 'stage', 'acquire'] });
-    await command(f, ['version'], { ok: true, version: '0.2.0' });
+    await command(f, ['help'], { ok: true, commands: ['help', 'version', 'stage', 'acquire', 'setup'] });
+    await command(f, ['version'], { ok: true, version: '0.3.0' });
+    const setupArgs = ['setup', '--install-dir', destination, '--consent', 'no',
+      '--setup-request', path.join(f.root, 'missing-request'), '--tunnel-id', 'tunnel_' + 'a'.repeat(32),
+      '--runtime-key-file', path.join(f.root, 'missing-key')];
+    await command(f, setupArgs, { ok: false, error: 'consent_required' }, 1);
+    await command(f, [...setupArgs, '--setup-request', 'duplicate'], { ok: false, error: 'invalid_arguments' }, 1);
+    await command(f, ['setup', '--install-dir', destination, '--consent', 'full-account'],
+      { ok: false, error: 'invalid_arguments' }, 1);
     await command(f, ['acquire', '--install-dir', destination, '--consent', 'yes'], { ok: false, error: 'consent_required' }, 1);
     await command(f, ['acquire', '--install-dir', destination, '--consent', 'full-account', '--tunnel-archive', 'relative'],
       { ok: false, error: 'client_input_invalid' }, 1);
@@ -518,9 +528,9 @@ record('guard-loaded');
 process.once('exit', () => record('guard-exit'));
 `;
 
-async function fileRoundtrip(t, f, runtime, app) {
-  const state = path.join(f.root, 'private full-account fixture \u6d4b\u8bd5');
-  sameJSON(runtime.prepareState(state, { consent: 'full-account' }),
+async function fileRoundtrip(t, f, runtime, app, preparedState) {
+  const state = preparedState ?? path.join(f.root, 'private full-account fixture \u6d4b\u8bd5');
+  if (!preparedState) sameJSON(runtime.prepareState(state, { consent: 'full-account' }),
     { prepared: true, activated: false, protectedInstallationVerified: false }, 'private_state_result_mismatch');
   const guard = path.join(f.root, 'host-guard.mjs'), guardLog = path.join(f.root, 'guard.log');
   fs.writeFileSync(guard, hostGuard, { flag: 'wx', mode: 0o600 });
@@ -608,13 +618,14 @@ async function fileRoundtrip(t, f, runtime, app) {
   }
 }
 
-test('opt-in: installed tarball stages real pinned provider from explicitly writable offline cache',
+test('opt-in: installed tarball configures real pinned device from browser request and writable offline cache',
   { timeout: 420000, skip: realCache === undefined ?
     'AGENT_CONTINUE_REAL_CACHE absent; real installed-provider staging and MCP acceptance not executed' : false },
   async t => {
     const f = await packAndInstall(t);
     const cache = validateRealCache(realCache, f.root, f.npmCli);
     const installDir = path.join(f.root, 'staged runtime \u6d4b\u8bd5');
+    let setupReceipt;
     try {
       const pins = parseJSON(fs.readFileSync(path.join(f.installed, 'payload', 'tunnel-pins.json')), 'invalid_tunnel_pins');
       const platform = process.platform + '-' + process.arch;
@@ -622,10 +633,22 @@ test('opt-in: installed tarball stages real pinned provider from explicitly writ
         providerVersion: '0.3.1', tunnelRelease: 'v0.0.19', platform,
         executableSha256: pins.platforms[platform].executableSha256, configured: false, activated: false,
         protectedInstallationVerified: false, nativeDependenciesVerified: false };
-      await command(f, [officialClient ? 'acquire' : 'stage', '--install-dir', installDir,
+      const target = { win32: 'windows', darwin: 'macos', linux: 'linux-server' }[process.platform];
+      const request = buildSetupRequest(target, 'jpioilmpbolfokedaefmbfbjeaahfdkl');
+      const requestBytes = serializeSetupRequest(request);
+      const requestFile = path.join(f.root, 'browser-request.json'), key = path.join(f.root, 'opaque-fake-key');
+      fs.writeFileSync(requestFile, requestBytes, { flag: 'wx', mode: 0o600 });
+      fs.writeFileSync(key, 'FAKE-NON-CREDENTIAL-FOR-CONFIGURATION-ONLY', { flag: 'wx', mode: 0o600 });
+      setupReceipt = { format: 'agent-continue-device-setup-result', version: 1, status: 'configured',
+        providerVersion: '0.3.1', tunnelRelease: 'v0.0.19', target, extensionId: request.extensionId,
+        nativeHost: request.nativeHost, requestSha256: hash(requestBytes), configured: true, activated: false,
+        authenticationVerified: false, nativeRegistrationVerified: false, chatAuthorizationVerified: false,
+        protectedInstallationVerified: false, nativeDependenciesVerified: false };
+      await command(f, [officialClient ? 'setup' : 'stage', '--install-dir', installDir,
         '--consent', officialClient ? 'full-account' : 'acquire-provider', '--offline-cache', cache,
+        ...(officialClient ? ['--setup-request', requestFile, '--tunnel-id', 'tunnel_' + 'a'.repeat(32), '--runtime-key-file', key] : []),
         ...(officialArchive !== undefined ? ['--tunnel-archive', officialArchive] : [])],
-      { ok: true, ...(officialClient ? acquired : receipt) }, 0, officialClient ? 260000 : 195000);
+      { ok: true, ...(officialClient ? setupReceipt : receipt) }, 0, officialClient ? 280000 : 195000);
       if (officialClient) {
         const client = path.join(installDir, 'client'), pin = pins.platforms[platform];
         sameJSON(parseJSON(fs.readFileSync(path.join(client, 'receipt.json'))), acquired, 'client_receipt_mismatch');
@@ -637,7 +660,17 @@ test('opt-in: installed tarball stages real pinned provider from explicitly writ
           assert.ok(fs.statSync(path.join(client, name)).size > 0);
         }
         assert.equal(fs.existsSync(path.join(client, 'tunnel.yaml')), false);
-        t.diagnostic(JSON.stringify({ actualInstalledBinCombinedAcquisition: true, ...acquired }));
+        const state = path.join(installDir, 'state');
+        assert.equal(fs.readFileSync(path.join(installDir, 'setup-receipt.json'), 'utf8'), JSON.stringify(setupReceipt) + '\n');
+        const profile = await import(pathToFileURL(path.join(installDir, 'app', 'profile.mjs')));
+        sameJSON(profile.inspectTunnelProfile(state),
+          { configured: true, activation: 'not-observed', authenticationVerified: false }, 'installed_profile_inspection_mismatch');
+        const document = parseJSON(fs.readFileSync(path.join(state, 'tunnel.yaml')));
+        assert.equal(document.control_plane.base_url, 'https://api.openai.com');
+        assert.equal(document.control_plane.api_key, 'file:' + key);
+        assert.equal(fs.existsSync(path.join(state, 'health.url')), false);
+        t.diagnostic(JSON.stringify({ actualInstalledBinSetup: true, realBrowserProducer: true,
+          keyContentsNotNeededForConfiguration: true, ...setupReceipt }));
       } else t.diagnostic('Official client opt-in absent: real-client acquisition not executed');
     } catch (error) {
       const logs = path.join(installDir, 'acquisition', 'logs');
@@ -693,5 +726,5 @@ test('opt-in: installed tarball stages real pinned provider from explicitly writ
       verifiedFiles: pin.files, deliberatelyWritableSelectedCache: true, ...receipt }));
     await t.test('bounded actual staged MCP initialize/list/owned-file roundtrip',
       { timeout: 75000 },
-      async child => fileRoundtrip(child, f, runtime, app));
+      async child => fileRoundtrip(child, f, runtime, app, officialClient ? path.join(installDir, 'state') : undefined));
   });
