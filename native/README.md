@@ -295,7 +295,7 @@ release or Chrome Web Store submission is implied by this source checkpoint.
 
 ### Observed Checks (2026-11-02)
 
-Windows, Node 24.16.0: 69 native checks passed, with one Linux-specific process
+Windows, Node 24.16.0: 71 native checks passed, with one Linux-specific process
 metadata regression skipped. This includes a
 real stdio initialization and five correlated RPC replies, 25 discovered tools,
 an owned-file roundtrip, a harmless process, and normal exit after stdin closes.
@@ -346,3 +346,12 @@ increment's exact commit: Linux must execute the platform-specific regression
 and all three official-client paths before Linux coverage can be claimed.
 Workflow configuration alone is not a completed run, and no macOS execution is
 established here.
+
+Windows CI also exposed a cold process-metadata query exceeding its five-second
+budget. The test records only timing and bounded failure flags, not process
+metadata or command output. Its owned-child fixture allows at most three
+read-only identity observations and never retries a wrong identity, unexpected
+error or exited fixture. It creates only one child. Production query and
+controller budgets are unchanged: an unavailable or slow provider can still
+leave the controller `unknown`, which blocks replacement rather than proving a
+successful stop. This fixture adjustment is not a cold-start availability claim.

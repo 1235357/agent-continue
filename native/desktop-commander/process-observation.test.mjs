@@ -11,6 +11,56 @@ const api = fs.existsSync(file) ? await import(file) : null;
 test('read-only process observation exists', () => assert.ok(api));
 const check = (name, run) => test(name, { skip: !api }, run);
 
+// A cold metadata provider may time out; retry reads, never child creation.
+async function observeOwnedChild(child, read, attempts) {
+  let lastError;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    assert.equal(child.exitCode, null, 'owned fixture already exited');
+    try {
+      const identity = await read();
+      assert.equal(child.exitCode, null, 'owned fixture exited during observation');
+      if (identity) {
+        assert.equal(identity.pid, child.pid, 'observation must identify the owned fixture');
+        return identity;
+      }
+    } catch (error) {
+      if (error.message !== 'process_observation_failed') throw error;
+      lastError = error;
+    }
+    if (attempt + 1 < attempts) await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  throw lastError || new Error('owned_fixture_not_identified');
+}
+
+test('owned fixture observation retries only bounded unknown reads', async () => {
+  const child = { pid: 321, exitCode: null }, identity = { pid: 321 };
+  let reads = 0;
+  assert.equal(await observeOwnedChild(child, async () => {
+    if (++reads === 1) throw new Error('process_observation_failed');
+    return identity;
+  }, 3), identity);
+  assert.equal(reads, 2);
+  reads = 0;
+  await assert.rejects(observeOwnedChild(child, async () => {
+    reads++; throw new Error('process_observation_failed');
+  }, 3), /process_observation_failed/);
+  assert.equal(reads, 3);
+});
+
+test('wrong identity, unexpected error and fixture exit are never retried', async () => {
+  for (const result of ['wrong', 'error', 'exited']) {
+    let reads = 0;
+    const child = { pid: 321, exitCode: null };
+    await assert.rejects(observeOwnedChild(child, async () => {
+      reads++;
+      if (result === 'error') throw new Error('unexpected_failure');
+      if (result === 'exited') child.exitCode = 0;
+      return { pid: result === 'wrong' ? 322 : 321 };
+    }, 3));
+    assert.equal(reads, 1);
+  }
+});
+
 check('malformed process identities reject before operating-system queries', async () => {
   for (const pid of [0, -1, 1.5, true, '1', Number.NaN, 2147483648]) {
     await assert.rejects(api.observeCore(pid, process.execPath), /invalid_process_identity/);
@@ -32,7 +82,7 @@ check('Linux stat parser handles spaces and closing parentheses in the comm fiel
   assert.throws(() => api.parseLinuxStat('457 (wrong pid) ' + fields.join(' '), 456), /process_observation_failed/);
 });
 
-test('a finite owned Node child is identified and its actual exit is observed', { skip: !api, timeout: 20000 }, async t => {
+test('a finite owned Node child is identified and its actual exit is observed', { skip: !api, timeout: 35000 }, async t => {
   const originalExecFile = childProcess.execFile;
   if (process.platform === 'win32') {
     childProcess.execFile = function(...args) {
@@ -48,13 +98,13 @@ test('a finite owned Node child is identified and its actual exit is observed', 
     syncBuiltinESMExports();
     t.after(() => { childProcess.execFile = originalExecFile; syncBuiltinESMExports(); });
   }
-  const child = spawn(process.execPath, ['-e', "process.stdin.resume();process.stdin.once('end',()=>process.exit(0));setTimeout(()=>process.exit(0),15000);console.log('owned-ready')"],
+  const child = spawn(process.execPath, ['-e', "process.stdin.resume();process.stdin.once('end',()=>process.exit(0));setTimeout(()=>process.exit(0),30000);console.log('owned-ready')"],
     { windowsHide: true, shell: false, stdio: ['pipe', 'pipe', 'pipe'] });
   const exited = new Promise(resolve => child.once('exit', resolve));
   t.after(async () => { if (child.exitCode === null) child.kill(); await exited; });
   child.stderr.resume();
   await new Promise((resolve, reject) => { child.stdout.once('data', resolve); child.once('error', reject); });
-  const identity = await api.observeCore(process.pid, process.execPath);
+  const identity = await observeOwnedChild(child, () => api.observeCore(process.pid, process.execPath), process.platform === 'win32' ? 3 : 1);
   assert.equal(identity.pid, child.pid); assert.match(identity.startTime, /^[1-9]\d*$/);
   assert.equal(identity.executable, process.execPath);
   assert.equal(await api.hasExited(identity), false);
