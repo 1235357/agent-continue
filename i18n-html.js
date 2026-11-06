@@ -95,6 +95,8 @@ export default {
   '留空：不因回复内容自动停止': 'Leave blank to disable stopping based on reply content',
   '只在最近一条回复中单独成行匹配时暂停。默认关闭。': 'Pause only when a marker matches a complete line in the latest reply. Off by default.',
   '可选：等待 Agent 空闲后再发送': 'Optional: wait until the agent is idle before sending',
+  '扩展优先：允许覆盖未发送文字': 'Extension priority: allow replacing unsent text',
+  '开启后，扩展可覆盖目标输入框中的未发送文字，只提交配置的提示词。已有附件时仍不会发送。': 'May replace unsent text in the target composer. Sends only the configured prompt and never submits existing attachments.',
   '默认关闭：到点后打断正在进行的回复并发送提示词。开启后才等待 Agent 空闲；已有其他草稿或附件仍会保留。': 'Off by default: interrupt the current reply and send when due. Enable to wait for the agent to become idle. Existing drafts and attachments are preserved.',
   '发送方式': 'Send method',
   '自动选择单次提交': 'Automatically choose one submission method',

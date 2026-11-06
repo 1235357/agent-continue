@@ -370,6 +370,19 @@ for (const [name, pageResult, code] of [
     await h.message({type:'PAUSE'});
   });
 }
+await scenario('Explicit priority reaches the adapter and logs only bounded composer diagnostics', async()=>{
+  const h=await harness();
+  await h.start({extensionPriority:true});
+  h.pageResult=async()=>({status:'draft',diagnosticCode:'composer-changed',message:'Synthetic protection.'});
+  await h.message({type:'SEND_NOW'});
+  assert.equal(h.state.injections.findLast(item=>item.args[0].mode==='send').args[0].extensionPriority,true);
+  assert.equal(h.state.local.logs.findLast(item=>item.event==='draft').diagnostic.code,'composer-changed');
+  h.pageResult=async()=>({status:'draft',diagnosticCode:'PRIVATE_SENTINEL',message:'Synthetic protection.'});
+  await h.message({type:'SEND_NOW'});
+  assert.equal(h.state.local.logs.findLast(item=>item.event==='draft').diagnostic,undefined);
+  assert.doesNotMatch(JSON.stringify(h.state.local.logs),/PRIVATE_SENTINEL/);
+  await h.message({type:'PAUSE'});
+});
 await scenario('English runtime copy preserves private content and switches languages', async()=>{
   const h = await harness({ language: 'en' });
   const prompt = '用户提示词 PRIVATE_SENTINEL';

@@ -5,7 +5,7 @@ const EVENTS = new Set([
   'target-closed', 'quiet', 'skipped', 'done', 'stopped', 'browser-restored',
   'interrupted', 'cancelled', 'ready', 'replaced', 'scheduler-error',
 ]);
-const DIAGNOSTICS = new Set(['adapter-result', 'execution-exception', 'no-valid-result']);
+const DIAGNOSTICS = new Set(['adapter-result', 'execution-exception', 'no-valid-result', 'existing-draft', 'composer-changed']);
 const validTime = value => Number.isSafeInteger(value) && value >= 0 && value <= 8_640_000_000_000_000;
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 

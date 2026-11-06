@@ -118,6 +118,68 @@ async function scenario(name, callback) {
 }
 
 try {
+  await scenario('Equivalent paragraph rendering after fill submits the unchanged draft exactly once', async ({ page, args }) => {
+    await page.evaluate(() => {
+      const editor = document.querySelector('[data-composer-markdown]');
+      editor.addEventListener('input', () => {
+        editor.innerHTML = '<div>Alpha</div><div>Beta</div>';
+        const before = editor.innerText;
+        setTimeout(() => {
+          editor.innerHTML = '<p>Alpha</p><p>Beta</p>';
+          fixture.presentationChanged = editor.innerText !== before;
+        }, 15);
+      }, { once: true });
+    });
+    const outcome = await page.evaluate(pageAction, { ...args, prompt: 'Alpha\nBeta' });
+    const state = await page.evaluate(() => ({ sends: fixture.sends, presentationChanged: fixture.presentationChanged }));
+    assert.equal(state.presentationChanged, true);
+    assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
+    assert.equal(state.sends, 1);
+  });
+
+  await scenario('Explicit extension priority replaces existing and later text, and Auto uses one usable Dot button', async ({ page, args }) => {
+    const editor = page.getByRole('textbox', { name: 'Message' });
+    await editor.fill('Existing draft not intended to be sent');
+    await page.evaluate(() => {
+      const editor = document.querySelector('[data-composer-markdown]');
+      editor.addEventListener('input', () => {
+        setTimeout(() => { editor.textContent = 'Different text after the extension filled'; }, 15);
+      }, { once: true });
+    });
+    const configured = 'Configured continuation only';
+    const outcome = await page.evaluate(pageAction, { ...args, prompt: configured, sendMethod: 'auto', extensionPriority: true });
+    assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
+    const state = await page.evaluate(() => ({ sends: fixture.sends, texts: fixture.sentTexts }));
+    assert.equal(state.sends, 1);
+    assert.equal(state.texts[0].replace(/\u00a0/g, ' '), configured);
+  });
+
+  await scenario('A disabled duplicate does not mask the usable Send button in the same composer', async ({ page, args }) => {
+    await page.evaluate(() => {
+      const stale = document.createElement('button');
+      stale.setAttribute('data-testid', 'send-button');
+      stale.disabled = true;
+      stale.textContent = 'Stale Send';
+      document.querySelector('[data-composer-body]').prepend(stale);
+    });
+    const outcome = await page.evaluate(pageAction, { ...args, extensionPriority: true, sendMethod: 'auto' });
+    assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
+    assert.equal(await page.evaluate(() => fixture.sends), 1);
+  });
+
+  await scenario('Extension priority cannot submit an attachment-only draft', async ({ page, args }) => {
+    await page.evaluate(() => {
+      const file = document.createElement('button');
+      file.setAttribute('aria-label', 'Remove attachment');
+      file.textContent = 'Synthetic attachment';
+      document.querySelector('#attachment-slot').append(file);
+    });
+    const outcome = await page.evaluate(pageAction, { ...args, extensionPriority: true });
+    assert.equal(outcome.status, 'draft');
+    assert.equal(await page.evaluate(() => fixture.sends), 0);
+    assert.equal(await page.getByRole('button', { name: 'Remove attachment' }).count(), 1);
+  });
+
   await scenario('Dot home target is accepted while public/shared and non-HTTPS pages are rejected', async () => {
     assert.equal(validateTarget(expectedUrl), true);
     for (const url of ['https://chatgpt.com/', 'https://chatgpt.com/share/abc', 'https://example.invalid/dots/home', 'http://chatgpt.com/dots/home', 'https://chatgpt.com:8443/dots/home']) assert.equal(validateTarget(url), false, url);

@@ -254,6 +254,31 @@ try {
   assert.equal((await call(control, { type: 'SEND_NOW' })).ok, false);
   pass('Pause: actual alarms are removed, original autoDiscardable is restored and Send Now is rejected.');
 
+  const priorityPage = await newTestPage(context);
+  await priorityPage.goto('https://chatgpt.com/dots/mv3-priority');
+  const priorityTab = await workerTab(worker, priorityPage.url());
+  const priorityPrompt = 'MV3 configured priority prompt';
+  await priorityPage.evaluate(() => {
+    const editor = document.querySelector('[contenteditable]');
+    editor.textContent = 'Synthetic unsent text';
+    editor.addEventListener('input', () => queueMicrotask(() => {
+      editor.textContent = 'Synthetic composer mutation before send';
+      fixture.composerMutated = true;
+    }), { once: true });
+  });
+  const priorityStart = await call(control, { type: 'START', tabId: priorityTab.id, config: { prompt: priorityPrompt, extensionPriority: true } });
+  assert.equal(priorityStart.ok, true, priorityStart.error);
+  assert.equal(priorityStart.job.extensionPriority, true);
+  assert.equal(await priorityPage.evaluate(() => document.querySelector('[contenteditable]').textContent), 'Synthetic unsent text');
+  await work.bringToFront();
+  const prioritySend = await call(control, { type: 'SEND_NOW' });
+  assert.equal(prioritySend.job.sentCount, 1, prioritySend.job.statusText);
+  const priorityProof = await priorityPage.evaluate(() => ({ mutated: fixture.composerMutated, clicks: fixture.sendClicks, keys: fixture.keyboardSends, texts: fixture.sentTexts }));
+  assert.deepEqual(priorityProof, { mutated: true, clicks: 1, keys: 0, texts: [priorityPrompt] });
+  await call(control, { type: 'PAUSE' });
+  await priorityPage.close();
+  pass('Real isolated-world extension priority replaces text only and submits the configured payload once.');
+
   for (const busy of [true, false]) {
     const controlled = await newTestPage(context);
     await controlled.goto('https://chatgpt.com/dots/' + (busy ? 'mv3-interrupt' : 'mv3-controlled'));

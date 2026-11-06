@@ -18,6 +18,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   preventDiscard: true,
   keepAwake: false,
   waitForIdle: false,
+  extensionPriority: false,
   sendMethod: 'auto',
   startImmediately: false,
   mode: 'repeat',
@@ -70,7 +71,7 @@ export function readConfig(value = {}, { allowEmpty = false } = {}) {
   if (queue.reduce((n, item) => n + item.text.length, 0) > MAX_QUEUE_CHARS) throw new Error(t('队列总长度最多 600000 个字符，请分批导入。'));
   if (!allowEmpty && ((mode === 'repeat' && !prompt.trim()) || (mode !== 'repeat' && !queue.length))) throw new Error(mode === 'repeat' ? t('请先输入或导入提示词。') : t('请先向队列添加提示词。'));
   const booleans = {};
-  for (const key of ['preventDiscard', 'keepAwake', 'waitForIdle', 'startImmediately']) {
+  for (const key of ['preventDiscard', 'keepAwake', 'waitForIdle', 'startImmediately', 'extensionPriority']) {
     const item = value[key] ?? DEFAULT_CONFIG[key];
     if (typeof item !== 'boolean') throw new Error(t('开关设置必须为布尔值。'));
     booleans[key] = item;

@@ -51,7 +51,7 @@ let targetSignature = '';
 let queueSignature = '';
 let currentSourceIdentity = null;
 const configFields = ['interval', 'maxSends', 'stopMarkers', 'preventDiscard', 'mode',
-  'scheduleMode', 'startImmediately', 'waitForIdle', 'sendMethod', 'quietEnabled', 'quietStart', 'quietEnd'];
+  'scheduleMode', 'startImmediately', 'waitForIdle', 'extensionPriority', 'sendMethod', 'quietEnabled', 'quietStart', 'quietEnd'];
 const editableButtons = ['importPrompt', 'importQueue', 'addToQueue', 'loadTemplate', 'deleteTemplate',
   'saveTemplate', 'importConfig', 'saveQueueItem'];
 const eventLabels = () => ({
@@ -132,6 +132,7 @@ function gatherConfig() {
     scheduleMode: $('scheduleMode').value,
     startImmediately: $('startImmediately').checked,
     waitForIdle: $('waitForIdle').checked,
+    extensionPriority: $('extensionPriority').checked,
     sendMethod: $('sendMethod').value,
     keepAwake: $('keepAwake').checked,
     quietHours: { enabled: $('quietEnabled').checked, start: $('quietStart').value, end: $('quietEnd').value },
@@ -293,7 +294,7 @@ function paint(job) {
     stopMarkers: (config.stopMarkers || []).join('\n'), mode: config.mode, scheduleMode: config.scheduleMode, sendMethod: config.sendMethod,
     quietStart: config.quietHours.start, quietEnd: config.quietHours.end })) setField(id, value);
   for (const [id, value] of Object.entries({ preventDiscard: config.preventDiscard, keepAwake: config.keepAwake,
-    startImmediately: config.startImmediately, waitForIdle: config.waitForIdle, quietEnabled: config.quietHours.enabled })) $(id).checked = !!value;
+    startImmediately: config.startImmediately, waitForIdle: config.waitForIdle, extensionPriority: config.extensionPriority, quietEnabled: config.quietHours.enabled })) $(id).checked = !!value;
   $('start').hidden = enabled || activating; $('start').disabled = !loaded || busy;
   $('pause').hidden = !enabled && !activating; $('pause').disabled = false;
   $('resume').hidden = enabled || activating || !job; $('resume').disabled = !loaded || busy;

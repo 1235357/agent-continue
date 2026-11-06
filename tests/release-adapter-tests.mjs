@@ -203,3 +203,25 @@ test('human edit during final authorization prevents submission', async () => {
   assert.equal(f.state.editor.value, 'continue fixture ');
   assert.equal(f.state.clicks, 0);
 });
+
+test('priority mode reasserts the configured text in an ordinary ChatGPT composer', async () => {
+  const f = fixture({ draft: 'old draft', args: { extensionPriority: true }, authorize: state => {
+    if (state.checks === 3) state.editor.value = 'do not submit this text';
+    if (state.checks === 4) assert.equal(state.editor.value, 'continue fixture');
+    return { ok: true, allowed: true };
+  } });
+  assert.equal((await f.run()).status, 'sent');
+  assert.equal(f.state.clicks, 1);
+  assert.equal(f.state.keys, 0);
+});
+
+test('pause during priority reassertion still wins before dispatch', async () => {
+  const f = fixture({ args: { extensionPriority: true }, authorize: state => {
+    if (state.checks === 3) state.editor.value = 'another message';
+    return { ok: true, allowed: state.checks < 4 };
+  } });
+  assert.equal((await f.run()).status, 'cancelled');
+  assert.equal(f.state.clicks, 0);
+  assert.equal(f.state.keys, 0);
+  assert.equal(f.state.editor.value, '');
+});

@@ -46,7 +46,7 @@ async function logEvent(event, message, diagnostic = null) {
   const stored = (await chrome.storage.local.get('logs')).logs;
   const logs = Array.isArray(stored) ? stored.filter(entry => entry && typeof entry === 'object' && !Array.isArray(entry)
     && Number.isFinite(entry.at) && typeof entry.event === 'string' && entry.event.length > 0 && typeof entry.message === 'string') : [];
-  const codes = ['adapter-result', 'execution-exception', 'no-valid-result'];
+  const codes = ['adapter-result', 'execution-exception', 'no-valid-result', 'existing-draft', 'composer-changed'];
   const detail = diagnostic && codes.includes(diagnostic.code)
     ? { diagnostic: { code: diagnostic.code, ...(Number.isFinite(diagnostic.durationMs)
       ? { durationMs: Math.max(0, Math.min(120000, diagnostic.durationMs)) } : {}) } } : {};
@@ -130,7 +130,8 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS) {
     const value = translatePageResult(result);
     if (!value || !RESULT_STATUSES.has(value.status)) return { status: 'unknown', message: t('页面未返回可确认的结果。'), diagnosticCode: 'no-valid-result' };
     // Return only bounded adapter status fields.
-    return { status: value.status, message: String(value.message || '').slice(0, 300), identity: typeof value.identity === 'string' ? value.identity.slice(0, 500) : null, assistantToken: typeof value.assistantToken === 'string' ? value.assistantToken.slice(0, 500) : null, assistantCount: Number(value.assistantCount) || 0 };
+    const diagnosticCode = ['draft', 'blocked'].includes(value.status) && ['existing-draft', 'composer-changed'].includes(value.diagnosticCode) ? value.diagnosticCode : null;
+    return { status: value.status, message: String(value.message || '').slice(0, 300), identity: typeof value.identity === 'string' ? value.identity.slice(0, 500) : null, assistantToken: typeof value.assistantToken === 'string' ? value.assistantToken.slice(0, 500) : null, assistantCount: Number(value.assistantCount) || 0, diagnosticCode };
   } finally { clearTimeout(timer); }
 }
 async function probe(tab, config, targetIdentity = null) {
@@ -271,7 +272,10 @@ async function finishRound(snapshot, result) {
       job.nextAt = now + RETRY_MS;
       job.needsAttention = ['blocked', 'error'].includes(result.status);
       job.statusText = (result.message || t('页面暂不可用。')) + t(' 一分钟后再检查，任务仍保持启用。');
-      if (current.lastResult !== result.status) await logEvent(result.status, result.status === 'draft' ? t('保留现有草稿或附件，等待输入框空闲。') : result.status === 'busy' ? t('目标暂忙或未就绪，延后检查。') : t('页面暂不可用，保持启用并等待恢复。'));
+      if (current.lastResult !== result.status || (current.lastDiagnosticCode ?? null) !== (result.diagnosticCode ?? null)) {
+        await logEvent(result.status, result.status === 'draft' ? t('保留现有草稿或附件，等待输入框空闲。') : result.status === 'busy' ? t('目标暂忙或未就绪，延后检查。') : t('页面暂不可用，保持启用并等待恢复。'),
+          result.diagnosticCode ? { code: result.diagnosticCode, durationMs: now - snapshot.lastRunAt } : null);
+      }
     } else if (result.status === 'done') {
       return { ok: true, job: await pauseLocked(job, t('检测到你设置的停止标记，按设置暂停。'), 'marker-reached') };
     } else {
@@ -285,6 +289,7 @@ async function finishRound(snapshot, result) {
       await logEvent('unconfirmed', t('本周期结果未知；未立即重试，将在下一正常周期继续。'), { code: result.diagnosticCode || 'adapter-result', durationMs: now - snapshot.lastRunAt });
     }
     job.lastResult = result.status;
+    job.lastDiagnosticCode = result.diagnosticCode ?? null;
     await setJob(job);
     await syncAlarm(job);
     await updateBadge(job);
@@ -327,7 +332,7 @@ async function runRound(force = false, expectedJobId = null) {
       const changed = result.assistantToken ? result.assistantToken !== snapshot.assistantToken : result.assistantCount > snapshot.assistantCount;
       if (result.status === 'ready') result = changed ? { status: 'reply-complete' } : { status: 'busy', message: t('等待新的 Agent 回复完成。') };
     } else {
-      result = await executePage({ mode: 'send', expectedUrl: snapshot.url, prompt: currentPrompt(snapshot), runId: snapshot.runId, runDeadline: snapshot.runDeadline, stopMarkers: snapshot.stopMarkers ?? [], waitForIdle: snapshot.waitForIdle ?? false, sendMethod: snapshot.sendMethod ?? 'auto', targetIdentity: snapshot.targetIdentity }, snapshot.tabId, snapshot.runDeadline);
+      result = await executePage({ mode: 'send', expectedUrl: snapshot.url, prompt: currentPrompt(snapshot), runId: snapshot.runId, runDeadline: snapshot.runDeadline, stopMarkers: snapshot.stopMarkers ?? [], waitForIdle: snapshot.waitForIdle ?? false, extensionPriority: snapshot.extensionPriority === true, sendMethod: snapshot.sendMethod ?? 'auto', targetIdentity: snapshot.targetIdentity }, snapshot.tabId, snapshot.runDeadline);
     }
   } catch { result = snapshot.runKind === 'reply-check' ? { status: 'error', message: t('回复检查暂不可用，继续等待新回复。') } : { status: 'unknown', message: t('后台页面操作未确认。'), diagnosticCode: 'execution-exception' }; }
   return finishRound(snapshot, result);

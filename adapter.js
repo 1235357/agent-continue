@@ -52,6 +52,7 @@ export async function pageAction(args) {
   // - on normal ChatGPT: prefers Send button
   const sendMethod = args.sendMethod || 'auto';
   const useKeyboardOnly = sendMethod === 'ctrl-enter';
+  const extensionPriority = args.mode === 'send' && args.extensionPriority === true;
 
   const stopSelector = 'button[data-testid="stop-button"], button[aria-label="Stop streaming"], button[aria-label="Stop generating"], button[aria-label="Stop response"], button[aria-label="停止生成"], button[aria-label="停止输出"], button[aria-label="停止流式传输"], button[aria-label*="Stop" i], button[aria-label*="停止" i]';
   const busySelector = '.typing-indicator, ' + stopSelector;
@@ -80,7 +81,9 @@ export async function pageAction(args) {
   };
 
   let beforeAssistant = null;
-  const result = (status, message) => ({ status, message, identity: identity(), ...(status === 'sent' ? beforeAssistant : assistantState()) });
+  const result = (status, message, diagnosticCode) => ({ status, message,
+    ...(diagnosticCode ? { diagnosticCode } : {}), identity: identity(),
+    ...(status === 'sent' ? beforeAssistant : assistantState()) });
   const samePage = () => {
     const curUrl = normalizeUrl(location.href);
     const expUrl = args.expectedUrl;
@@ -165,6 +168,23 @@ export async function pageAction(args) {
     return value;
   };
 
+  // Rendered innerText may change when the same plain content is rewrapped
+  // by the page. Compare exact logical text, including whitespace. For rich
+  // content we cannot serialize, require the exact markup and visible text.
+  const snapshotDraft = () => {
+    if (editor instanceof HTMLTextAreaElement) return { plain: editor.value };
+    const plain = plainDraft(editor);
+    return plain === null ? { plain, markup: editor.innerHTML, rendered: textOf(editor) } : { plain };
+  };
+  const draftUnchanged = snapshot => {
+    if (!snapshot || !editor.isConnected || hasAttachment()) return false;
+    const current = snapshotDraft();
+    return current.plain === snapshot.plain && (current.plain !== null ||
+      (current.markup === snapshot.markup && current.rendered === snapshot.rendered));
+  };
+  const protectedDraft = message => result('draft', message, 'existing-draft');
+  const changedDraft = (message, status = 'draft') => result(status, message, 'composer-changed');
+
   // Only force-mode sends may adopt an exact matching, attachment-free draft.
   // This recovers a v0.2.0 insertion without treating whitespace edits as ours.
   const matchingDraft = () => {
@@ -175,6 +195,7 @@ export async function pageAction(args) {
   };
 
   const draftPresent = () => {
+    if (extensionPriority) return hasAttachment();
     const draft = editor instanceof HTMLTextAreaElement ? textOf(editor) : (plainDraft(editor) ?? textOf(editor));
     return hasAttachment() || (draft.length > 0 && !matchingDraft());
   };
@@ -184,7 +205,7 @@ export async function pageAction(args) {
   if (!editable() && !(forceInterrupt && visibleMatches(stopSelector, composer).length === 1)) {
     return result('blocked', '输入框当前不可编辑。');
   }
-  if (draftPresent()) return result('draft', '输入框已有草稿或附件，本次跳过。');
+  if (draftPresent()) return protectedDraft('输入框已有草稿或附件，本次跳过。');
 
   const lastAssistant = [...document.querySelectorAll(assistantSelector)].at(-1);
   if (lastAssistant && args.stopMarkers?.length) {
@@ -204,7 +225,7 @@ export async function pageAction(args) {
   beforeAssistant = assistantState();
   const previousFocus = document.activeElement;
   let inserted = false;
-  let insertedTextSnapshot = null;
+  let insertedDraftSnapshot = null;
   let submitted = false;
   let interrupted = false;
 
@@ -316,7 +337,7 @@ export async function pageAction(args) {
   };
 
   const clearOwnDraft = async () => {
-    if (!submitted && inserted && editor.isConnected && textOf(editor) === insertedTextSnapshot && !hasAttachment()) {
+    if (!submitted && inserted && draftUnchanged(insertedDraftSnapshot)) {
       const focusAtCleanup = document.activeElement;
       try { await fill(''); } catch {}
       finally {
@@ -344,7 +365,7 @@ export async function pageAction(args) {
       const next = findComposer();
       if (next) {
         ({ editor, composer } = next);
-        if (draftPresent()) return result('draft', '打断后检测到其他草稿或附件，已保留。');
+        if (draftPresent()) return protectedDraft('打断后检测到其他草稿或附件，已保留。');
         if (editable() && !visibleMatches(stopSelector, composer).length) return null;
       }
       await wait(150);
@@ -355,32 +376,36 @@ export async function pageAction(args) {
   try {
     if (!samePage() || !editor.isConnected) return result('blocked', '页面已变化。');
     if (busy()) return result('busy', 'Agent 仍在运行。');
-    if (draftPresent()) return result('draft', '检测到新草稿或附件，本次跳过。');
+    if (draftPresent()) return protectedDraft('检测到新草稿或附件，本次跳过。');
 
     const interruptedResult = await interrupt();
     if (interruptedResult) return interruptedResult;
 
     if (!samePage() || !withinDeadline() || !editor.isConnected || !editable()) return result('blocked', '输入框当前不可用，稍后重试。');
-    if (draftPresent()) return result('draft', '检测到新草稿或附件，本次跳过。');
+    if (draftPresent()) return protectedDraft('检测到新草稿或附件，本次跳过。');
 
     const accepted = await fill(prompt);
     inserted = accepted;
-    insertedTextSnapshot = textOf(editor);
-    let insertedDraftSnapshot = plainDraft(editor);
+    insertedDraftSnapshot = snapshotDraft();
     await wait(60);
-    if (textOf(editor) !== insertedTextSnapshot || plainDraft(editor) !== insertedDraftSnapshot) {
+    if (!extensionPriority && !draftUnchanged(insertedDraftSnapshot)) {
       inserted = false;
-      return result('draft', '填写后检测到内容变化，已保留草稿，本轮不提交。');
+      return changedDraft('填写后检测到内容变化，已保留草稿，本轮不提交。');
     }
-    if (!accepted) return result('blocked', '输入框未接受完整填写，未点击发送；稍后重试。');
+    if (!accepted && !extensionPriority) return result('blocked', '输入框未接受完整填写，未点击发送；稍后重试。');
 
     const findSendButton = (root = composer) => {
       const scope = root;
       if (!scope) return null;
+      const usable = btn => visible(btn) && enabled(btn) && !btn.matches?.(stopSelector);
+      const firstUsable = selector => {
+        const first = scope.querySelector(selector);
+        return usable(first) ? first : [...scope.querySelectorAll(selector)].find(usable);
+      };
       const testIds = ['send-button', 'composer-submit-button', 'fruitjuice-send-button'];
       for (const tid of testIds) {
-        const btn = scope.querySelector(`button[data-testid="${tid}"]`);
-        if (btn && visible(btn)) return btn;
+        const btn = firstUsable(`button[data-testid="${tid}"]`);
+        if (btn) return btn;
       }
       const ariaLabels = [
         'button[aria-label="Send prompt"]',
@@ -391,10 +416,10 @@ export async function pageAction(args) {
         'button[aria-label="发送"]'
       ];
       for (const sel of ariaLabels) {
-        const btn = scope.querySelector(sel);
-        if (btn && visible(btn)) return btn;
+        const btn = firstUsable(sel);
+        if (btn) return btn;
       }
-      const matches = [...scope.querySelectorAll(sendSelector)].filter(b => visible(b) && !b.matches(stopSelector));
+      const matches = [...scope.querySelectorAll(sendSelector)].filter(usable);
       if (matches.length > 0) {
         const preferred = matches.find(b => {
           const tid = (b.getAttribute('data-testid') || '').toLowerCase();
@@ -404,18 +429,6 @@ export async function pageAction(args) {
         return preferred || matches[matches.length - 1];
       }
       return null;
-    };
-
-    const isHumanDraft = () => {
-      if (!editor.isConnected || hasAttachment()) return true;
-      const currentText = textOf(editor);
-      if (currentText === insertedTextSnapshot) return false;
-      if (editor instanceof HTMLTextAreaElement) return true;
-      const currentStructured = plainDraft(editor);
-      if (currentStructured !== null && insertedDraftSnapshot !== null && currentStructured === insertedDraftSnapshot) {
-        return false;
-      }
-      return true;
     };
 
     let sendButton = null;
@@ -429,24 +442,24 @@ export async function pageAction(args) {
         await clearOwnDraft();
         return result('busy', '检测到正在运行，本次未提交。');
       }
-      if (isHumanDraft()) {
-        return result('blocked', '输入框内容发生变化，已保留当前内容。');
+      if (!extensionPriority && !draftUnchanged(insertedDraftSnapshot)) {
+        return changedDraft('输入框内容发生变化，已保留当前内容。', 'blocked');
       }
       if (forceInterrupt && visibleMatches(stopSelector, composer).length) {
         await clearOwnDraft();
         inserted = false;
         const interruption = await interrupt();
         if (interruption) return interruption;
+        if (hasAttachment()) return protectedDraft('提交前检测到附件，已保留输入框内容。');
         const refilled = await fill(prompt);
         inserted = refilled;
-        insertedTextSnapshot = textOf(editor);
-        insertedDraftSnapshot = plainDraft(editor);
+        insertedDraftSnapshot = snapshotDraft();
         await wait(60);
-        if (textOf(editor) !== insertedTextSnapshot || plainDraft(editor) !== insertedDraftSnapshot) {
+        if (!extensionPriority && !draftUnchanged(insertedDraftSnapshot)) {
           inserted = false;
-          return result('draft', '重新填写后检测到内容变化，已保留草稿，本轮不提交。');
+          return changedDraft('重新填写后检测到内容变化，已保留草稿，本轮不提交。');
         }
-        if (!refilled) return result('blocked', '打断后输入框未接受完整填写，稍后重试。');
+        if (!refilled && !extensionPriority) return result('blocked', '打断后输入框未接受完整填写，稍后重试。');
       }
 
       sendButton = findSendButton(composer);
@@ -459,7 +472,7 @@ export async function pageAction(args) {
       await wait(150);
     }
 
-    if (sendMethod === 'button' && !sendButton) return result('blocked', '未找到可用发送按钮；本轮未提交，稍后重试。');
+    if (!extensionPriority && sendMethod === 'button' && !sendButton) return result('blocked', '未找到可用发送按钮；本轮未提交，稍后重试。');
     if (!await stillAllowed()) {
       await clearOwnDraft();
       return result('cancelled', '已暂停，本次未提交。');
@@ -469,12 +482,33 @@ export async function pageAction(args) {
       return result('cancelled', '本次发送许可已过期，未提交。');
     }
 
-    if (!samePage() || !editor.isConnected || (sendMethod === 'button' && !sendButton.isConnected)) return result('blocked', '提交前页面已变化。');
+    if (!samePage() || !editor.isConnected || (!extensionPriority && sendMethod === 'button' && !sendButton.isConnected)) return result('blocked', '提交前页面已变化。');
     if (busy()) { await clearOwnDraft(); return result('busy', 'Agent 仍在运行。'); }
-    if (isHumanDraft()) return result('blocked', '输入框内容发生变化，已保留当前内容。');
     if (hasAttachment()) return result('blocked', '提交前检测到附件，已保留输入框内容。');
+    if (extensionPriority) {
+      // The opt-in mode owns the composer text, not attachments or the
+      // conversation. Reassert only our configured payload before dispatch.
+      const payload = value => normalizeLineEndings(value).replace(/\u00a0/g, ' ');
+      const hasExactPrompt = () => {
+        const actual = snapshotDraft().plain;
+        return actual !== null && payload(actual) === payload(prompt);
+      };
+      if (!hasExactPrompt()) {
+        if (!editable() || !await fill(prompt)) return result('blocked', '输入框未接受完整填写，未点击发送；稍后重试。');
+        inserted = true;
+        insertedDraftSnapshot = snapshotDraft();
+        if (!await stillAllowed()) return result('cancelled', '已暂停，本次未提交。');
+      }
+      if (!samePage() || !withinDeadline() || !editor.isConnected || !editable()) return result('blocked', '提交前页面已变化。');
+      if (hasAttachment()) return protectedDraft('提交前检测到附件，已保留输入框内容。');
+      if (!hasExactPrompt()) return result('blocked', '输入框未接受完整填写，未点击发送；稍后重试。');
+      if (busy()) { await clearOwnDraft(); return result('busy', 'Agent 仍在运行。'); }
+      sendButton = findSendButton(composer);
+    } else if (!draftUnchanged(insertedDraftSnapshot)) {
+      return changedDraft('输入框内容发生变化，已保留当前内容。', 'blocked');
+    }
     if (forceInterrupt && visibleMatches(stopSelector, composer).length) return result('blocked', '提交前 Agent 状态变化，稍后重新打断并发送。');
-    if (sendMethod === 'button' && !enabled(sendButton)) return result('blocked', '发送按钮已不可用。');
+    if (sendMethod === 'button' && (!enabled(sendButton) || !sendButton.isConnected)) return result('blocked', '发送按钮已不可用。');
 
     beforeAssistant = assistantState();
     submitted = true;
@@ -513,10 +547,12 @@ export async function pageAction(args) {
       dispatchKey(true);
     } else {
       // 'auto' mode:
-      if (isDot) {
+      if (extensionPriority && enabled(sendButton) && sendButton.isConnected && composer.contains(sendButton)) {
+        clickButton(sendButton);
+      } else if (isDot) {
         dispatchKey(true);
       } else {
-        const targetBtn = sendButton || findSendButton(composer) || findSendButton(document);
+        const targetBtn = sendButton || findSendButton(composer);
         if (targetBtn) clickButton(targetBtn);
         else dispatchKey(false);
       }

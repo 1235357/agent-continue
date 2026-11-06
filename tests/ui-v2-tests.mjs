@@ -273,6 +273,11 @@ try {
   await page.waitForFunction(() => __uiMock.config.waitForIdle === true);
   await page.locator('#waitForIdle').uncheck();
   await page.waitForFunction(() => __uiMock.config.waitForIdle === false);
+  assert.equal(await page.locator('#extensionPriority').isChecked(), false);
+  await page.locator('#extensionPriority').check();
+  await page.waitForFunction(() => __uiMock.config.extensionPriority === true);
+  await page.locator('#extensionPriority').uncheck();
+  await page.waitForFunction(() => __uiMock.config.extensionPriority === false);
   await page.locator('#tab-task').click();
   pass('Interrupt is the visible default; optional waiting can be selected and persisted.');
   await page.locator('#tab-settings').click();
