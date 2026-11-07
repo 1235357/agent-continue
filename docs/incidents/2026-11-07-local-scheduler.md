@@ -46,7 +46,37 @@ The local source repair commit0e6b37e6f19796a1acfb6123fb68aaf968c81da8 was pushe
 to the unique GitHub main branch and independently read back from the remote.
 No new Release, Store submission or approval follows from that push.
 
-## Remaining Boundary
+## Follow-Up: Saved Target Selection
+
+A real no-send Check exposed a separate local-console defect: the saved task
+still named the original dot, but the selector was blank after a tab-ID change.
+The original page was present in the target menu. Check returned an unsupported
+page error instead of checking the saved conversation. This observation does
+not prove a production send failed or identify every earlier failure.
+
+The full console now resolves an inherited choice only by the unique normalized
+saved URL. It never trusts an old/reused tab ID or a title match. Missing or
+duplicate original pages leave the choice empty and require explicit selection;
+Check does not fall back to the active page. Manual selections remain manual.
+The popup-to-full-console entry also preserves this distinction instead of
+passing an inherited saved-job ID as if it were an explicit choice.
+
+Two new regression failures were reproduced before fixes: reused ID41 was
+selected instead of the exact original URL at99, and popup expansion carried
+inherited ID41. The expanded suite passes22/22 for source and the exact installed
+preview. The unchanged installed background still passes40/40. A fresh focused
+static review found and closed the expansion-entry omission; it did not execute
+these tests independently.
+
+Only the installed popup.js was backed up and patched. A local-console-only
+reload selected the original dot without manual rebinding; actual no-send Check
+then returned "Composer detected" and explicitly stated that it did not enter
+or send a message. The saved task remains manually paused,20minutes, with its
+original4728-character prompt and confirmed count unchanged. The prompt was
+neither changed nor submitted. This is local control/probe recovery,
+not an actual scheduled-send or administrator-runtime acceptance.
+
+## Delivery Still Unverified
 
 Actual post-repair production delivery is still unverified because the original
 manual Pause has not been cleared. Do not infer failure from that intentional

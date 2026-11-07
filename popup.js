@@ -12,7 +12,7 @@ function t(key, ...values) {
 }
 await initializeLanguage();
 
-import { DEFAULT_CONFIG, readConfig } from './config.js';
+import { DEFAULT_CONFIG, normalizeUrl, readConfig } from './config.js';
 import { importPromptFile, SUPPORTED_ACCEPT, MAX_PROMPT_CHARS } from './file-import.js';
 import { buildActivityExport } from './activity-export.js';
 
@@ -33,6 +33,8 @@ const parameters = new URLSearchParams(location.search);
 const fullView = parameters.get('view') === 'full';
 const initialTabId = Number(parameters.get('targetTabId'));
 let selectedTabId = Number.isInteger(initialTabId) && initialTabId > 0 ? initialTabId : null;
+let explicitTargetSelection = selectedTabId !== null;
+let selectSavedTarget = fullView && selectedTabId === null;
 let latestJob = null;
 let draftConfig = normalized();
 let loaded = false;
@@ -221,6 +223,13 @@ function queueAction(action, index) {
   queueSignature = ''; saveDraft(); paint(latestJob);
 }
 function renderTargets() {
+  // Tab IDs can disappear or be reused after Chrome reloads. Resolve an
+  // inherited selection by the saved URL, never by its old ID or page title.
+  if (selectSavedTarget) {
+    const savedUrl = normalizeUrl(latestJob?.url);
+    const matches = savedUrl ? targets.filter(target => normalizeUrl(target.url) === savedUrl) : [];
+    selectedTabId = matches.length === 1 ? matches[0].id : null;
+  }
   const signature = JSON.stringify([getLanguage(), targets.map(target => [target.id, target.title, target.url])]);
   if (signature !== targetSignature) {
     targetSignature = signature;
@@ -233,7 +242,7 @@ function renderTargets() {
       $('targetSelect').append(option);
     }
   }
-  const value = latestJob?.enabled ? latestJob.tabId : selectedTabId;
+  const value = latestJob?.enabled && !selectSavedTarget ? latestJob.tabId : selectedTabId;
   if (targets.some(target => target.id === value)) $('targetSelect').value = String(value);
   else $('targetSelect').value = '';
 }
@@ -326,7 +335,6 @@ async function refresh() {
     if (!state?.ok) throw new Error(state?.error || t('无法读取扩展状态。'));
     if (!loaded) { draftConfig = normalized(state.config); loaded = true; }
     targets = Array.isArray(state.availableTargets) ? state.availableTargets : targets;
-    if (fullView && !selectedTabId && state.job?.tabId) selectedTabId = state.job.tabId;
     if (Array.isArray(state.logs)) { logs = state.logs; renderLogs(); }
     paint(state.job || null);
   } catch (error) { tell(safeFailure(error), true); }
@@ -359,6 +367,7 @@ async function act(type, extras = {}) {
 function selectedTarget() {
   const value = Number($('targetSelect').value);
   const id = Number.isInteger(value) && value > 0 ? value : selectedTabId;
+  if (fullView && !targets.some(target => target.id === id)) return {};
   return Number.isInteger(id) && id > 0 ? { tabId: id } : {};
 }
 async function importFiles(files, appendQueue = false) {
@@ -458,7 +467,7 @@ window.addEventListener('keydown', event => {
   }
 });
 $('goPrompt').addEventListener('click', () => showPanel('prompt'));
-$('targetSelect').addEventListener('change', () => { selectedTabId = Number($('targetSelect').value) || null; });
+$('targetSelect').addEventListener('change', () => { explicitTargetSelection = true; selectSavedTarget = false; selectedTabId = Number($('targetSelect').value) || null; });
 $('start').addEventListener('click', async () => {
   if (!canEdit()) return;
   draftConfig = gatherConfig();
@@ -474,7 +483,11 @@ $('start').addEventListener('click', async () => {
 });
 $('pause').addEventListener('click', () => act('PAUSE'));
 $('resume').addEventListener('click', () => act('RESUME'));
-$('check').addEventListener('click', () => act('CHECK_PAGE', selectedTarget()));
+$('check').addEventListener('click', () => {
+  const target = selectedTarget();
+  if (fullView && !target.tabId) { tell(t('请选择目标标签页'), true); return; }
+  act('CHECK_PAGE', target);
+});
 $('sendNow').addEventListener('click', () => act('SEND_NOW'));
 for (const id of configFields) $(id).addEventListener('input', onConfigurationInput);
 for (const button of document.querySelectorAll('[data-interval]')) button.addEventListener('click', () => { if (canEdit()) { $('interval').value = button.dataset.interval; onConfigurationInput(); } });
@@ -530,8 +543,8 @@ $('theme').addEventListener('change', () => { const theme = $('theme').value; ap
 $('expand').addEventListener('click', async () => {
   try {
     await persistDraftNow();
-    let tabId = selectedTarget().tabId || latestJob?.tabId;
-    if (!tabId && chrome.tabs?.query) tabId = (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id;
+    let tabId = explicitTargetSelection ? selectedTarget().tabId : null;
+    if (!tabId && !latestJob && chrome.tabs?.query) tabId = (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id;
     const url = new URL(chrome.runtime.getURL('popup.html')); url.searchParams.set('view', 'full');
     if (Number.isInteger(tabId)) url.searchParams.set('targetTabId', String(tabId));
     await chrome.tabs.create({ url: url.href });

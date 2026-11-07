@@ -19,7 +19,7 @@ const original = { ...structuredClone(DEFAULT_CONFIG), prompt: 'SYNTHETIC-PRIVAT
 const resources = new Set(['popup.html', 'popup.css', 'popup.js', 'config.js', 'file-import.js',
   'static-locale.js', 'i18n.js', 'i18n-html.js', 'i18n-popup.js', 'i18n-runtime.js', 'activity-export.js']);
 
-async function createPage({ full = false, enabled = false, uiLanguage, fixture = original, title = 'Your dot', statusText = '合成测试任务。' } = {}) {
+async function createPage({ full = false, enabled = false, uiLanguage, fixture = original, title = 'Your dot', statusText = '合成测试任务。', initialTarget = 41, availableTargets = null } = {}) {
   const context = await browser.newContext({ viewport: { width: full ? 1200 : 650, height: full ? 900 : 600 }, locale: 'zh-CN', colorScheme: 'light', acceptDownloads: true });
   await context.route('**/*', async route => {
     const name = new URL(route.request().url()).pathname.slice(1);
@@ -27,7 +27,7 @@ async function createPage({ full = false, enabled = false, uiLanguage, fixture =
     if (!resources.has(name)) return route.abort();
     return route.fulfill({ status: 200, contentType: name.endsWith('.html') ? 'text/html' : name.endsWith('.css') ? 'text/css' : 'application/javascript', body: await fs.readFile(path.join(root, name)) });
   });
-  await context.addInitScript(({ original, enabled, uiLanguage, title, statusText }) => {
+  await context.addInitScript(({ original, enabled, uiLanguage, title, statusText, availableTargets }) => {
     const mock = {
       config: structuredClone(original), templates: [], uiTheme: 'system', listeners: [], requests: [],
       logs: [{ at: Date.now(), event: 'started', message: '合成任务已就绪；没有记录正文。' }],
@@ -35,6 +35,7 @@ async function createPage({ full = false, enabled = false, uiLanguage, fixture =
         url: 'https://chatgpt.com/dots/home', title, sentCount: 2,
         nextAt: Date.now() + 20 * 60000, discardProtection: 'active', statusText, queueIndex: 0 },
       exports: [], tabs: [], permissionRequests: [], grantPower: true,
+      availableTargets: availableTargets || [{ id: 41, title, url: 'https://chatgpt.com/dots/home' }, { id: 42, title: '测试对话', url: 'https://chatgpt.com/c/test' }],
     };
     if (uiLanguage !== undefined) mock.uiLanguage = uiLanguage;
     globalThis.__uiMock = mock;
@@ -47,7 +48,7 @@ async function createPage({ full = false, enabled = false, uiLanguage, fixture =
         async sendMessage(message) {
           mock.requests.push(structuredClone(message));
           if (message.type === 'GET_STATE') return { ok: true, config: structuredClone(mock.config), job: structuredClone(mock.job), logs: structuredClone(mock.logs),
-            availableTargets: [{ id: 41, title, url: 'https://chatgpt.com/dots/home' }, { id: 42, title: '测试对话', url: 'https://chatgpt.com/c/test' }] };
+            availableTargets: structuredClone(mock.availableTargets) };
           if (message.type === 'CHECK_PAGE') return { ok: true, result: { status: 'ready', message: '合成页面可用；未填写或发送。' } };
           if (message.type === 'CHECK_TIMING') {
             if (mock.deferTiming) await new Promise(resolve => { mock.finishTiming = resolve; });
@@ -93,10 +94,10 @@ async function createPage({ full = false, enabled = false, uiLanguage, fixture =
     };
     const nativeCreate = URL.createObjectURL.bind(URL);
     URL.createObjectURL = blob => { mock.exports.push(blob); return nativeCreate(blob); };
-  }, { original: fixture, enabled, uiLanguage, title, statusText });
+  }, { original: fixture, enabled, uiLanguage, title, statusText, availableTargets });
   const page = await context.newPage();
   const errors = []; page.on('pageerror', error => errors.push(error.message));
-  await page.goto('https://ui-fixture.invalid/popup.html' + (full ? '?view=full&targetTabId=41' : ''));
+  await page.goto('https://ui-fixture.invalid/popup.html' + (full ? '?view=full' + (initialTarget === null ? '' : '&targetTabId=' + initialTarget) : ''));
   await page.waitForFunction(() => !document.querySelector('#check').disabled && document.querySelector('#targetSelect').options.length > 1)
     .catch(async error => { throw new Error(JSON.stringify({ errors, state: await page.evaluate(() => ({ requests: globalThis.__uiMock?.requests, feedback: document.querySelector('#feedback')?.textContent })) }), { cause: error }); });
   if (screenshotFont) {
@@ -155,6 +156,53 @@ async function capture(page, name) {
 }
 
 try {
+  for (const enabled of [false, true]) {
+    const { page, context } = await createPage({ enabled, availableTargets: [
+      { id: 41, title: 'Reused tab ID', url: 'https://chatgpt.com/c/unrelated' },
+      { id: 99, title: 'Reopened original dot', url: 'https://chatgpt.com/dots/home' },
+    ] });
+    const before = await page.evaluate(() => structuredClone(__uiMock.job));
+    await page.locator('#expand').click();
+    await page.waitForFunction(() => __uiMock.tabs.length === 1);
+    const expanded = new URL(await page.evaluate(() => __uiMock.tabs[0].url));
+    assert.equal(expanded.searchParams.get('targetTabId'), null, 'inherited job ID must not become an explicit choice');
+    assert.deepEqual(await page.evaluate(() => __uiMock.job), before);
+    assert.deepEqual(await page.evaluate(() => __uiMock.requests.filter(r => /^(START|RESUME|SEND)/.test(r.type))), []);
+    await context.close(); pass(`Expand preserves saved-URL recovery rather than an inherited tab ID (enabled=${enabled})`);
+  }
+  {
+    const targets = [
+      { id: 41, title: 'Reused old tab ID', url: 'https://chatgpt.com/c/unrelated' },
+      { id: 99, title: 'Reopened original dot', url: 'https://chatgpt.com/dots/home/' },
+    ];
+    const { page, context, errors } = await createPage({ full: true, initialTarget: null, availableTargets: targets });
+    assert.equal(await page.locator('#targetSelect').inputValue(), '99');
+    const before = await page.evaluate(() => structuredClone(__uiMock.job));
+    await page.locator('#check').click();
+    await page.waitForFunction(() => __uiMock.requests.some(r => r.type === 'CHECK_PAGE'));
+    assert.equal(await page.evaluate(() => __uiMock.requests.find(r => r.type === 'CHECK_PAGE').tabId), 99);
+    assert.deepEqual(await page.evaluate(() => __uiMock.job), before);
+    assert.deepEqual(await page.evaluate(() => __uiMock.requests.filter(r => /^(START|RESUME|SEND)/.test(r.type))), []);
+    assert.deepEqual(errors, []);
+    await context.close(); pass('Full console resolves the saved exact URL after tab-ID reuse without resuming or sending');
+  }
+  for (const ambiguous of [false, true]) {
+    const targets = [{ id: 41, title: 'Unrelated', url: 'https://chatgpt.com/c/unrelated' }];
+    if (ambiguous) targets.push({ id: 99, title: 'Original A', url: 'https://chatgpt.com/dots/home' },
+      { id: 100, title: 'Original B', url: 'https://chatgpt.com/dots/home/' });
+    const { page, context, errors } = await createPage({ full: true, initialTarget: null, availableTargets: targets });
+    assert.equal(await page.locator('#targetSelect').inputValue(), '');
+    await page.locator('#check').click();
+    assert.ok((await page.locator('#feedback').textContent()).includes('Select a target tab'));
+    assert.deepEqual(await page.evaluate(() => __uiMock.requests.filter(r => /^(CHECK_PAGE|START|RESUME|SEND)/.test(r.type))), []);
+    await page.locator('#targetSelect').selectOption('41');
+    await page.locator('#tab-logs').click();
+    await page.locator('#refreshLogs').click();
+    await page.waitForFunction(() => __uiMock.requests.filter(r => r.type === 'GET_STATE').length >= 2);
+    assert.equal(await page.locator('#targetSelect').inputValue(), '41', 'explicit manual selection wins over saved-target recovery');
+    assert.deepEqual(errors, []);
+    await context.close(); pass(`Full console refuses ${ambiguous ? 'duplicate' : 'missing'} saved targets without probing the active page`);
+  }
   // Use catalog-key collisions to catch accidental translation of private content.
   const bilingualFixture = { ...structuredClone(original), prompt: '设置\n  保存\n',
     queue: [{ name: '设置', text: '保存\n  任务\n' }, { name: '任务', text: '设置' }] };
