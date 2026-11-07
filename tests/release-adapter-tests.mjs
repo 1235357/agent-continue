@@ -17,7 +17,7 @@ function fixture(options = {}) {
   let identity = 'fixture~conversation';
   let acceptedAt = Infinity;
   let attachment = null;
-  const users = [];
+  const users = [...(options.messages ?? [])];
   const timers = [];
   const sentTexts = [];
   class Element {
@@ -51,6 +51,7 @@ function fixture(options = {}) {
     clicks++;
     sentTexts.push(editor.value);
     acceptedAt = now + (options.acceptDelay ?? 0);
+    options.onSubmit?.(state);
   };
   button.click = submit;
   const composer = {
@@ -189,6 +190,46 @@ test('acceptance beyond confirmation window remains unknown without retry or cle
   assert.equal(f.state.clicks, 1);
   assert.equal(f.state.keys, 0);
   assert.equal(f.state.editor.value, 'continue fixture');
+});
+
+for (const dot of [false, true]) {
+  for (const extensionPriority of [false, true]) {
+    for (const initialKey of [null, 'old-user']) {
+      test(`known history cannot confirm after its key changes (dot=${dot}, priority=${extensionPriority}, keyed=${!!initialKey})`, async () => {
+        let key = initialKey;
+        const history = {
+          innerText: 'continue fixture',
+          getAttribute: name => name === 'data-message-id' ? key : null,
+          closest: () => null,
+        };
+        const f = fixture({
+          dot, messages: [history], acceptDelay: Infinity,
+          args: { extensionPriority },
+          onSubmit: () => { key = 'hydrated-user'; },
+        });
+        assert.equal((await f.run()).status, 'unknown');
+        assert.deepEqual(f.state.sentTexts, ['continue fixture']);
+        assert.equal(f.state.clicks, 1);
+        assert.equal(f.state.keys, 0);
+      });
+    }
+  }
+}
+
+test('a recycled known message node remains uncertain even with new submitted text and ID', async () => {
+  let key = 'old-user';
+  const history = {
+    innerText: 'earlier fixture message',
+    getAttribute: name => name === 'data-message-id' ? key : null,
+    closest: () => null,
+  };
+  const f = fixture({
+    messages: [history], acceptDelay: Infinity,
+    onSubmit: () => { history.innerText = 'continue fixture'; key = 'new-user'; },
+  });
+  assert.equal((await f.run()).status, 'unknown');
+  assert.equal(f.state.clicks, 1);
+  assert.equal(f.state.keys, 0);
 });
 
 test('preexisting human draft is preserved before authorization', async () => {

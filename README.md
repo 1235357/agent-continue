@@ -4,17 +4,16 @@ English | [简体中文](README.zh-CN.md)
 
 Schedule your own prompts in one existing ChatGPT or Your dot conversation, with local controls to start, pause, resume, and inspect activity.
 
-**v2.2.0 release documentation · Manifest V3 · Free and MIT-licensed**
+**v2.2.1 release documentation · Manifest V3 · Free and MIT-licensed**
 
 [Chrome Web Store](https://chromewebstore.google.com/detail/jpioilmpbolfokedaefmbfbjeaahfdkl) · [GitHub Releases](https://github.com/1235357/agent-continue/releases) · [Source](https://github.com/1235357/agent-continue) · [Changelog](CHANGELOG.md) · [Privacy](PRIVACY.md)
 
-This document describes v2.2.0 developer support, schema 3 diagnostics, and support-page error recovery, alongside the existing single-submit behavior introduced in v2.0.x. GitHub releases may ship ahead of Chrome Web Store review. Store availability and downloadable versions are determined by their respective listings; neither this README nor a GitHub release establishes store approval or the version installed in your browser.
+This document describes v2.2.1 scheduling and acknowledgement fixes, alongside developer support, schema 3 diagnostics, and the existing single-submit behavior. GitHub releases may ship ahead of Chrome Web Store review. Store availability and downloadable versions are determined by their respective listings; neither this README nor a GitHub release establishes store approval or the version installed in your browser.
 
-Development is paused at the owner's request as of November 3, 2026. The
-[complete development handoff](docs/DEVELOPMENT-HANDOFF.md) separates stable
-releases, verified native source and pending browser candidates; it also records
-the architecture, history, known limits and remaining work. A handoff archive is
-not a new stable extension or an installer.
+Development has resumed. This patch is scheduler-only; Windows device-control
+and administrator-runtime work remain separate, unreleased candidates. The
+[development handoff](docs/DEVELOPMENT-HANDOFF.md) contains historical checkpoints,
+not proof that those candidates have passed current acceptance.
 
 ## Developer and Support
 
@@ -32,7 +31,7 @@ Logs are timestamped locally, but diagnostic exports use relative millisecond ti
 
 ![English control console with synthetic demonstration data](docs/store-2.1.0-en-console.png)
 
-The screenshot shows the v2.1.0 console with synthetic content, not a private conversation or evidence of a v2.2.0 installation.
+The screenshot shows the v2.1.0 console with synthetic content, not a private conversation or evidence of a v2.2.1 installation.
 
 ## Install
 
@@ -71,9 +70,13 @@ Resume retains the original task's prompt, target, interval, and counters. To ap
 
 ### One Submission Mechanism per Attempt
 
-Each attempt requires a current background permit and uses one submission mechanism. In automatic mode, Your dot uses Ctrl+Enter; ordinary ChatGPT uses a send button when found, otherwise Enter. Explicit button-only and Ctrl+Enter-only modes are also available. There is no subsequent switch to another mechanism within that attempt.
+Each attempt requires a current background permit and uses one submission mechanism. In automatic mode, Your dot uses Ctrl+Enter; ordinary ChatGPT uses a send button when found, otherwise Enter. With opt-in Extension Priority, automatic mode first uses an available Send button in the target composer. Explicit button-only and Ctrl+Enter-only modes are also available. There is no subsequent switch to another mechanism within that attempt.
+
+By default, an existing draft is preserved. To let the configured prompt replace unsent text, pause the task, enable **Extension priority: allow replacing unsent text** in Settings, and start a new task. Resuming keeps the original settings. This mode never submits existing attachments or bypasses pause and target checks. See [Extension Priority](docs/COMPOSER-PRIORITY.md).
 
 A matching new user-message marker is required for confirmation. An empty composer or a busy indicator alone is not success. If confirmation is unavailable, the result remains **unknown**, the confirmed-send count does not increase, and no immediate retry occurs. A later attempt may occur after the full normal interval. This is not exactly-once delivery: an unconfirmed message may already have reached ChatGPT. Pause and inspect the conversation when the result is uncertain. Pausing cannot retract a submission already dispatched.
+
+Confirmation is a page-level observation, not a service receipt. A known node reused for a new message remains uncertain. Historical content remounted with both a different node and a previously unseen ID cannot be reliably distinguished from a new acknowledgement by these DOM checks alone.
 
 ### Runtime Limits
 
@@ -100,7 +103,7 @@ No extension account, API key, developer backend, analytics telemetry, or cloud 
 | `alarms` | Wake the scheduler for due checks |
 | Optional `power` | Prevent system idle sleep when explicitly enabled |
 
-Stable v2.2.0 does not request `nativeMessaging` and does not include the unshipped device-control, setup/onboarding, or native-messaging candidates.
+Stable v2.2.1 does not request `nativeMessaging` and does not include the unshipped device-control, setup/onboarding, or native-messaging candidates.
 
 Local storage is not encrypted. Hiding prompt text reduces accidental on-screen exposure but is not a security boundary. Configuration exports omit prompt and queue bodies unless explicitly included. Clearing local data does not remove original files, exported files, or messages already sent to ChatGPT. See [PRIVACY.md](PRIVACY.md) for storage, deletion, and disclosure details.
 

@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.2.1] - 2026-11-06
+
+- In opt-in Extension Priority mode, refill the configured prompt once more if composer text changes again during authorization. Do not dispatch more than once.
+- Preserve attachment, pause, and conversation-identity checks. An ambiguous acknowledgement does not advance the prompt queue.
+- Compare message identities from before preparation and immediately before dispatch so restored history is not mistaken for a new receipt.
+- Keep known message rows excluded from acknowledgement even if their IDs are assigned or changed after dispatch, preventing false queue advancement.
+- Find the current Send button after authorization so a button re-render does not drop an ordinary ChatGPT send. Do not send or clean up if the editor has moved to another composer.
+- Require a tagged first-parent commit on the canonical main line for releases. Refuse to replace an existing release or draft and stop if release lookup fails.
+
+This scheduler update does not include the Windows device-control preview and does not change Chrome permissions.
+
 ## [2.2.0] - 2026-11-02
 
 - Add an English-default, Chinese-optional developer/support page, prominent developer email, project/issue links, and the author's LinkedIn. The console links to the same support page.

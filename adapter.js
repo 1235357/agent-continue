@@ -587,7 +587,9 @@ export async function pageAction(args) {
       const messages = [...document.querySelectorAll(userSelector)];
       const last = messages.at(-1);
       // A same-text row buried under later activity cannot be attributed to this dispatch.
-      if (last && (messageKey(last) ? !beforeKeys.has(messageKey(last)) : !beforeMessages.has(last)) && clean(textOf(last)) === clean(prompt)) {
+      // A known row stays historical even if its message key hydrates or changes.
+      const lastKey = messageKey(last);
+      if (last && !beforeMessages.has(last) && (!lastKey || !beforeKeys.has(lastKey)) && clean(textOf(last)) === clean(prompt)) {
         return result('sent', useKeyboardOnly ? '已通过 Ctrl+Enter 提交，并在会话中确认新消息。' : '已确认发送并在会话中确认新消息。');
       }
       await wait(180);

@@ -1,6 +1,6 @@
 # Privacy and Data Handling
 
-Scope: Agent Continue v2.2.0 stable release documentation. Updated: 2026-11-02.
+Scope: Agent Continue v2.2.1 stable release documentation. Updated: 2026-11-06.
 
 Agent Continue processes configuration and imported documents locally. It has no developer backend, external analytics telemetry, cloud synchronization, or online document conversion. No separate extension account or API key is required. Sending a prompt submits it to your selected ChatGPT or Your dot conversation on `chatgpt.com`; that service then processes it under its own policies. Local processing does not mean that sent prompts stay on your computer.
 
@@ -13,6 +13,8 @@ Agent Continue processes configuration and imported documents locally. It has no
 5. The website receives the submitted message. The extension inspects page state and new user-message markers for confirmation; missing confirmation remains an unknown result, not proof that the service did not receive it.
 
 Importing a file does not itself send a message or start a task. A normal first installation does not automatically start sending. An optional private preconfigured package can import its bundled prompt without automatically starting a task.
+
+Existing unsent text is preserved by default. If you explicitly enable Extension Priority for a new task, its configured prompt may replace unsent composer text, including text changed while authorization is pending. Existing attachments are not submitted by this mode. Pause, background authorization, and target-identity checks still apply; the setting does not add permissions or send drafts to the developer.
 
 ## Stored Data
 
@@ -67,7 +69,7 @@ Relative timings and status information can also identify activity patterns. Omi
 | `alarms` | Wake the background scheduler to check due tasks |
 | Optional `power` | Request system idle-sleep prevention only when you enable it |
 
-The stable v2.2.0 release manifest does not request all-site access, Cookie, clipboard, debugger, or `nativeMessaging` permissions. Unshipped device-control, setup/onboarding, and native-messaging candidates are excluded from this release. The extension does not send files or prompts to project maintainers, sell user data, or use external telemetry endpoints. Sending through ChatGPT is the intended website interaction, not developer telemetry.
+The stable v2.2.1 release manifest does not request all-site access, Cookie, clipboard, debugger, or `nativeMessaging` permissions. Unshipped device-control, setup/onboarding, and native-messaging candidates are excluded from this release. The extension does not send files or prompts to project maintainers, sell user data, or use external telemetry endpoints. Sending through ChatGPT is the intended website interaction, not developer telemetry.
 
 ## Pause and Deletion
 
@@ -91,6 +93,6 @@ Support diagnostics are shared manually. Exporting activity logs creates a local
 
 The support links do not add background telemetry or automatic support uploads. Contacting the developer does not authorize access to your browser, account, conversations, or local files.
 
-This policy describes the stable v2.2.0 data flow, not Chrome Web Store approval or an installed-version readback. GitHub releases may ship before store review completes; consult the corresponding listing and your browser's extension details for their versions.
+This policy describes the stable v2.2.1 data flow, not Chrome Web Store approval or an installed-version readback. GitHub releases may ship before store review completes; consult the corresponding listing and your browser's extension details for their versions.
 
 Implementation references: [background.js](background.js), [adapter.js](adapter.js), [file-import.js](file-import.js), [popup.js](popup.js), [activity-export.js](activity-export.js), [support.js](support.js), and [i18n.js](i18n.js). Validation scope: [VALIDATION.md](VALIDATION.md).

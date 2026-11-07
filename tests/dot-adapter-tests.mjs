@@ -547,6 +547,27 @@ try {
     assert.equal(outcome.status, 'unknown', JSON.stringify(outcome));
     assert.equal(await page.evaluate(() => fixture.sends), 1);
   });
+  for (const initiallyKeyed of [false, true]) {
+    await scenario(`An existing matching row cannot confirm after key hydration (keyed=${initiallyKeyed})`, async ({ page, args }) => {
+      await page.evaluate(({ prompt, initiallyKeyed }) => {
+        const row = document.querySelector('article.message-row.self');
+        const body = row.querySelector('.message-body');
+        body.innerText = prompt;
+        if (!initiallyKeyed) {
+          row.removeAttribute('data-message-id');
+          body.removeAttribute('data-message-id');
+        }
+        fixture.acknowledgement = 'none';
+        document.querySelector('button[aria-label="Send"]').addEventListener('click', () => {
+          row.setAttribute('data-message-id', 'acct~dot~Msg~hydrated-old');
+          body.setAttribute('data-message-id', 'acct~dot~Msg~hydrated-old');
+        }, { once: true });
+      }, { prompt: args.prompt, initiallyKeyed });
+      const outcome = await page.evaluate(pageAction, args);
+      assert.equal(outcome.status, 'unknown', JSON.stringify(outcome));
+      assert.equal(await page.evaluate(() => fixture.sends), 1);
+    });
+  }
   await scenario('An old matching row restored as the last message cannot confirm a send', async ({ page, args }) => {
     await page.evaluate(prompt => {
       const old = document.querySelector('article.message-row.self');

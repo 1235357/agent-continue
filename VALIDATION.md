@@ -1,5 +1,30 @@
 # Validation and Evidence Boundaries
 
+## Version 2.2.1
+
+The scheduler patch has a fresh successful local `npm test` run covering ordinary
+ChatGPT, Dot, document import, bilingual UI, real isolated MV3 loading, browser
+restart recovery, and official ProseMirror fixtures. Dot adapter coverage is now
+48 scenarios; MV3 integration has 10, ordinary composer coverage has 16, and UI
+coverage has 15. The focused release-adapter suite passed 36 tests after the last
+test-only addition. Packaging has six deterministic archive tests; canonical
+release-source and create-only publication checks have seven tests.
+
+Nine new browser-free cases cover historical key hydration and conservative
+handling of recycled message nodes; the eight key-hydration reproductions failed
+before the predicate fix and passed after it. Two real Chromium Dot scenarios
+also cover assigning or changing the key of the same historical row.
+
+These are synthetic-page and local build observations, not signed-in live ChatGPT
+or Dot acceptance. Same-node hydration and same-key clones are rejected, but an
+old message remounted with both a new node and an unseen key remains ambiguous
+under DOM-only confirmation. Reusing a known node for a genuine new message also
+remains unknown rather than advancing the queue. No exactly-once guarantee is made.
+
+Stable release permissions are unchanged. Windows device/admin controls remain
+excluded. GitHub Actions, Release assets, store submission and publication must
+each be checked independently; a local pass does not establish any of them.
+
 ## Version 2.1.0
 
 Validation date: November 2, 2026. The release adds English-default presentation

@@ -28,7 +28,7 @@ RUNTIME_FILES = (
     "support.html", "support.css", "support.js", "support-info.js", "activity-export.js",
     "_locales/en/messages.json", "_locales/zh_CN/messages.json",
     "LICENSE", "CHANGELOG.md", "PRIVACY.md", "VALIDATION.md", "ALTERNATIVES.md",
-    "CONTRIBUTING.md", "docs/FILE_FORMATS.md",
+    "CONTRIBUTING.md", "docs/FILE_FORMATS.md", "docs/COMPOSER-PRIORITY.md",
     "icons/icon-16.png", "icons/icon-32.png", "icons/icon-48.png", "icons/icon-128.png",
 )
 SOURCE_FILES = ("package.json", "package-lock.json", ".gitignore")

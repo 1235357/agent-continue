@@ -5,7 +5,7 @@ on:
     tags:
       - 'v*'
 
-# Repository contents access is sufficient to create/update release assets.
+# Repository contents access is sufficient to create release assets.
 # No personal access token or third-party publishing service is needed.
 permissions:
   contents: write
@@ -26,6 +26,15 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
+          fetch-depth: 0
+
+      - name: Verify canonical release source
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python3 scripts/check_release_source.py "$RELEASE_TAG"
+
+      - name: Test release provenance and immutable publication
+        run: python3 -m unittest discover -s tests -p test_release_source.py
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -127,7 +136,7 @@ jobs:
           sha256sum "agent-continue-${RELEASE_VERSION}.zip" "agent-continue-${RELEASE_VERSION}-store.zip" > SHA256SUMS
           sha256sum --check SHA256SUMS
 
-      - name: Create or update the GitHub Release
+      - name: Create the GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -137,14 +146,13 @@ jobs:
           archive="dist/agent-continue-${RELEASE_VERSION}.zip"
           store="dist/agent-continue-${RELEASE_VERSION}-store.zip"
           notes="${RUNNER_TEMP}/agent-continue-release-notes.md"
-          if is_draft="$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft')"; then
-            # Re-running a tag replaces only these two generated assets.
-            # A partially created draft can be completed by the same workflow.
-            gh release upload "$RELEASE_TAG" "$archive" "$store" dist/SHA256SUMS --clobber
-            if [ "$is_draft" = 'true' ]; then
-              gh release edit "$RELEASE_TAG" --draft=false --title "Agent Continue ${RELEASE_TAG}" --notes-file "$notes"
-            fi
-          else
-            gh release create "$RELEASE_TAG" "$archive" "$store" dist/SHA256SUMS \
-              --verify-tag --title "Agent Continue ${RELEASE_TAG}" --notes-file "$notes"
+          if ! known_tags="$(gh api --paginate "repos/${GH_REPO}/releases?per_page=100" --jq '.[].tag_name')"; then
+            echo 'Release lookup failed; refusing to publish.' >&2
+            exit 1
           fi
+          if grep -Fqx -- "$RELEASE_TAG" <<< "$known_tags"; then
+            echo 'Existing release or draft must be reconciled without replacing assets.' >&2
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" "$archive" "$store" dist/SHA256SUMS \
+            --verify-tag --title "Agent Continue ${RELEASE_TAG}" --notes-file "$notes"
