@@ -32,7 +32,7 @@ test('support export contains version and bounded typed event metadata, not raw 
   const value = await build([{ at: now - 1000, event: 'unconfirmed', message: secret,
     diagnostic: { code: 'execution-exception', durationMs: 123, stack: secret }, prompt: secret, url: secret }]);
   assert.deepEqual(value, {
-    format: 'agent-continue-activity', version: 3, extensionVersion: '2.1.0',
+    format: 'agent-continue-activity', version: 4, extensionVersion: '2.1.0',
     timestampMode: 'relative-ms', excludedEntries: 0,
     logs: [{ elapsedMs: 0, event: 'unconfirmed', diagnostic: { code: 'execution-exception', durationMs: 123 } }],
   });
@@ -54,6 +54,29 @@ test('unknown diagnostics and all free-form diagnostic data are omitted', async 
     const value = await build([{ at: now, event: 'unknown', diagnostic }]);
     assert.deepEqual(value.logs, [{ elapsedMs: 0, event: 'unknown' }]);
   }
+});
+
+test('timing diagnostics export only bounded numbers, fixed enums and actual booleans', async () => {
+  const value = await build([{ at: now, event: 'timing-diagnostics', message: secret,
+    diagnostic: { code: 'timing-probe', kind: 'page-timers', status: 'result', durationMs: 1992.4,
+      firstMs: 991.2, hidden: true, ok: false, allowed: false, stack: secret, url: secret } }]);
+  assert.deepEqual(value.logs[0], { elapsedMs: 0, event: 'timing-diagnostics', diagnostic: {
+    code: 'timing-probe', durationMs: 1992, kind: 'page-timers', status: 'result', firstMs: 991,
+    hidden: true, ok: false, allowed: false,
+  } });
+  assert.equal(JSON.stringify(value).includes(secret), false);
+  for (const bad of [secret, true, null, {}, [], NaN, Infinity]) {
+    const malformed = await build([{ at: now, event: 'timing-diagnostics', diagnostic: {
+      code: 'timing-probe', kind: bad, status: bad, firstMs: bad, hidden: bad, ok: bad, allowed: bad,
+    } }]);
+    const expected = typeof bad === 'boolean' ? { code: 'timing-probe', hidden: true, ok: true, allowed: true }
+      : { code: 'timing-probe' };
+    assert.deepEqual(malformed.logs[0].diagnostic, expected);
+  }
+  const ordinary = await build([{ at: now, event: 'unconfirmed', diagnostic: {
+    code: 'execution-timeout', durationMs: 20002, kind: 'page-timers', hidden: true,
+  } }]);
+  assert.deepEqual(ordinary.logs[0].diagnostic, { code: 'execution-timeout', durationMs: 20002 });
 });
 
 test('duration is finite numeric only and bounded without string coercion', async () => {

@@ -146,6 +146,7 @@ export default {
   '暂停定时发送': 'Pause scheduled sending',
   '继续原任务': 'Resume task',
   '页面自检 · 不发送': 'Check page - Do not send',
+  '诊断发送计时（不发送）': 'Diagnose send timing (no send)',
   '立即发送一次': 'Send once now',
   '本地处理 · 后台运行 · 由你掌控': 'Local processing - Background operation - Your control',
   '清空本机数据？': 'Clear local data?',

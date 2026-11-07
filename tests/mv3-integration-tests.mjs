@@ -47,7 +47,9 @@ function chatFixture(dot) {
     const row=document.createElement(dot?'article':'div');
     if(dot){row.className='message-row self';row.dataset.messageId='test-user~test-thread~'+(fixture.submits+2);const body=document.createElement('div');body.className='message-body';body.textContent=text;row.append(body)}
     else{row.dataset.messageAuthorRole='user';row.textContent=text}
-    document.querySelector('#history').append(row);editor.replaceChildren(document.createElement('p'));send.disabled=true;
+    if(fixture.receiptDelayMs)setTimeout(()=>document.querySelector('#history').append(row),fixture.receiptDelayMs);
+    else document.querySelector('#history').append(row);
+    editor.replaceChildren(document.createElement('p'));send.disabled=true;
   };
   send.addEventListener('click',()=>submit('button'));
   if(dot)for(const type of ['keydown','keyup'])editor.addEventListener(type,event=>{
@@ -278,6 +280,40 @@ try {
   await call(control, { type: 'PAUSE' });
   await priorityPage.close();
   pass('Real isolated-world extension priority replaces text only and submits the configured payload once.');
+
+  const clockPage = await newTestPage(context);
+  await clockPage.goto('https://chatgpt.com/dots/mv3-clock');
+  await clockPage.evaluate(() => { fixture.receiptDelayMs = 500; });
+  const clockTab = await workerTab(worker, clockPage.url());
+  const clockPrompt = 'MV3_EXTENSION_CLOCK_SYNTHETIC';
+  assert.equal((await call(control, { type: 'START', tabId: clockTab.id,
+    config: { prompt: clockPrompt, extensionPriority: true } })).ok, true);
+  await worker.evaluate(async tabId => {
+    await chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => {
+      globalThis.fixtureOriginalTimeout = globalThis.setTimeout;
+      globalThis.fixturePageTimerCalls = 0;
+      globalThis.setTimeout = (callback, ms, ...args) => {
+        globalThis.fixturePageTimerCalls++;
+        return globalThis.fixtureOriginalTimeout(callback, Math.max(60000, ms), ...args);
+      };
+    } });
+  }, clockTab.id);
+  await work.bringToFront();
+  const clockSend = await call(control, { type: 'SEND_NOW' });
+  assert.equal(clockSend.job.sentCount, 1, clockSend.job.statusText);
+  const pageTimerCalls = await worker.evaluate(async tabId => {
+    const frames = await chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => {
+      globalThis.setTimeout = globalThis.fixtureOriginalTimeout;
+      return globalThis.fixturePageTimerCalls;
+    } });
+    return frames[0].result;
+  }, clockTab.id);
+  assert.equal(pageTimerCalls, 0, 'All adapter waits must use the authorized worker clock');
+  assert.deepEqual(await clockPage.evaluate(() => ({ clicks: fixture.sendClicks, texts: fixture.sentTexts })),
+    { clicks: 1, texts: [clockPrompt] });
+  await call(control, { type: 'PAUSE' });
+  await clockPage.close();
+  pass('Real isolated-world page timers clamped to 60 seconds: worker-clock send confirms one delayed receipt with no page timer calls.');
 
   for (const busy of [true, false]) {
     const controlled = await newTestPage(context);

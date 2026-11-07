@@ -90,6 +90,21 @@ function fixture(options = {}) {
     schedule(at, callback) { timers.push({ at, callback }); },
   };
   const expectedUrl = options.dot ? 'https://fixture.invalid/dots/example' : 'https://fixture.invalid/c/example';
+  let pageTimerCalls = 0;
+  let extensionWaits = 0;
+  const advanceClock = delay => {
+    now += delay;
+    for (const timer of [...timers]) {
+      if (timer.at <= now) {
+        timers.splice(timers.indexOf(timer), 1);
+        timer.callback();
+      }
+    }
+    if (now >= acceptedAt && !users.length) {
+      users.push({ innerText: sentTexts.at(-1), getAttribute: name => name === 'data-message-id' ? 'new-user' : null });
+      editor.value = '';
+    }
+  };
   const context = vm.createContext({
     URL, HTMLInputElement: Element, HTMLTextAreaElement: Textarea,
     Node: { TEXT_NODE: 3, ELEMENT_NODE: 1 },
@@ -98,23 +113,21 @@ function fixture(options = {}) {
     document, window: {}, location: { href: expectedUrl },
     Date: { now: () => now },
     setTimeout(callback, delay) {
-      now += delay;
-      for (const timer of [...timers]) {
-        if (timer.at <= now) {
-          timers.splice(timers.indexOf(timer), 1);
-          timer.callback();
-        }
-      }
-      if (now >= acceptedAt && !users.length) {
-        users.push({ innerText: sentTexts.at(-1), getAttribute: name => name === 'data-message-id' ? 'new-user' : null });
-        editor.value = '';
-      }
+      pageTimerCalls++;
+      advanceClock(options.clampedPageTimers ? 60000 : delay);
       callback();
     },
   });
   vm.runInContext('globalThis.InputEvent = globalThis.PointerEvent = globalThis.MouseEvent = globalThis.KeyboardEvent = Event;', context);
   if (options.runtime !== false) {
     context.chrome = { runtime: { async sendMessage(message) {
+      if (message.type === 'WAIT_RUN') {
+        assert.ok([50, 60, 150, 180].includes(message.delayMs));
+        extensionWaits++;
+        if (options.denyWait) return { ok: true, allowed: false };
+        advanceClock(message.delayMs);
+        return { ok: true, allowed: true };
+      }
       assert.equal(message.type, 'CHECK_RUN');
       checks++;
       return options.authorize ? options.authorize(state) : { ok: true, allowed: true };
@@ -123,6 +136,7 @@ function fixture(options = {}) {
   vm.runInContext('globalThis.run = (' + source + ');', context);
   return {
     state,
+    clocks: () => ({ pageTimerCalls, extensionWaits }),
     run: () => context.run({
       expectedUrl, targetIdentity: options.dot ? 'fixture~conversation' : null,
       runId: 'synthetic-run', runDeadline: 20000, mode: 'send',
@@ -130,6 +144,21 @@ function fixture(options = {}) {
     }),
   };
 }
+
+test('extension clock bypasses severely clamped page timers and submits only once', async () => {
+  const h = fixture({ clampedPageTimers: true, acceptDelay: 500,
+    args: { extensionClock: true, extensionPriority: true } });
+  assert.equal((await h.run()).status, 'sent');
+  assert.equal(h.clocks().pageTimerCalls, 0);
+  assert.ok(h.clocks().extensionWaits >= 1);
+  assert.equal(h.state.clicks, 1);
+});
+test('extension clock cancellation before dispatch does not submit', async () => {
+  const h = fixture({ denyWait: true, args: { extensionClock: true, extensionPriority: true } });
+  assert.equal((await h.run()).status, 'error');
+  assert.equal(h.state.clicks, 0);
+  assert.equal(h.clocks().pageTimerCalls, 0);
+});
 
 for (const [name, options] of [
   ['missing runtime', { runtime: false }],

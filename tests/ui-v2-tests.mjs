@@ -49,6 +49,15 @@ async function createPage({ full = false, enabled = false, uiLanguage, fixture =
           if (message.type === 'GET_STATE') return { ok: true, config: structuredClone(mock.config), job: structuredClone(mock.job), logs: structuredClone(mock.logs),
             availableTargets: [{ id: 41, title, url: 'https://chatgpt.com/dots/home' }, { id: 42, title: '测试对话', url: 'https://chatgpt.com/c/test' }] };
           if (message.type === 'CHECK_PAGE') return { ok: true, result: { status: 'ready', message: '合成页面可用；未填写或发送。' } };
+          if (message.type === 'CHECK_TIMING') {
+            if (mock.deferTiming) await new Promise(resolve => { mock.finishTiming = resolve; });
+            if (mock.timingRejected) throw new Error('SYNTHETIC_PRIVATE_API_ERROR');
+            if (mock.timingError) return { ok: false, error: mock.timingError };
+            return { ok: true, observations: [
+              { kind: 'authorization', status: 'result', elapsedMs: 3, ok: true, allowed: false },
+              { kind: 'page-timers', status: 'result', firstMs: 991, elapsedMs: 1992, hidden: true },
+            ] };
+          }
           if (message.type === 'START') {
             const old = structuredClone(mock.job);
             mock.job = { ...structuredClone(message.config), id: 'new-job', enabled: true, phase: 'idle', tabId: message.tabId || 41, title: 'Your dot',
@@ -455,6 +464,36 @@ try {
   assert.deepEqual(full.errors, []);
   pass('Clear/import race: clearing all data invalidates an in-flight file import so old private contents cannot be written back.');
   await full.context.close();
+
+  for (const language of ['en', 'zh_CN']) {
+    const diagnostic = await createPage({ full: true, uiLanguage: language });
+    const { page } = diagnostic;
+    await page.locator('#tab-logs').click();
+    const saved = await page.evaluate(() => JSON.stringify({ config: __uiMock.config, job: __uiMock.job }));
+    await page.evaluate(() => { __uiMock.deferTiming = true; });
+    await page.locator('#diagnoseTiming').click();
+    await page.waitForFunction(() => typeof __uiMock.finishTiming === 'function');
+    assert.equal(await page.locator('#diagnoseTiming').isDisabled(), true);
+    await page.evaluate(() => { __uiMock.finishTiming(); __uiMock.deferTiming = false; });
+    await page.waitForFunction(() => !document.querySelector('#diagnoseTiming').disabled);
+    assert.equal(await page.locator('#timingDiagnostics').innerText(), language === 'en'
+      ? 'Authorization: 3 ms; ok=true; allowed=false | Page timers: 991 / 1992 ms; hidden=true'
+      : '授权消息: 3 ms; ok=true; allowed=false | 页面计时: 991 / 1992 ms; hidden=true');
+    await page.evaluate(() => { __uiMock.timingRejected = true; });
+    await page.locator('#diagnoseTiming').click();
+    await page.waitForFunction(() => !document.querySelector('#diagnoseTiming').disabled);
+    assert.equal(await page.locator('#timingDiagnostics').innerText(), language === 'en' ? 'Diagnostics unavailable.' : '诊断暂不可用。');
+    assert.ok(!(await page.content()).includes('SYNTHETIC_PRIVATE_API_ERROR'));
+    await page.evaluate(() => { __uiMock.timingRejected = false; });
+    await page.locator('#diagnoseTiming').click();
+    await page.waitForFunction(() => document.querySelector('#timingDiagnostics').textContent.includes('1992'));
+    assert.equal(await page.evaluate(() => JSON.stringify({ config: __uiMock.config, job: __uiMock.job })), saved);
+    assert.equal(await page.evaluate(() => __uiMock.requests.filter(r => /^(START|RESUME|SEND)/.test(r.type)).length), 0);
+    await assertSealed(page, ['SYNTHETIC-PRIVATE-PROMPT', 'SYNTHETIC-QUEUE-A']);
+    assert.deepEqual(diagnostic.errors, []);
+    pass(`Timing diagnostics (${language}): bounded values, busy control, private API error suppression, retry and no task mutation.`);
+    await diagnostic.context.close();
+  }
 
   console.log(`\n${checks.length}/${checks.length} UI v2 scenarios passed.`);
 } finally { await browser.close(); }

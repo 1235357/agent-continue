@@ -675,6 +675,148 @@ await scenario('English validation and queued sends preserve user-owned Chinese 
   assert.throws(() => readConfig({ prompt: '测试', sendMethod: 'invalid' }), /发送方式/);
 });
 
+await scenario('Background run clock validates sender and delay and does not block Pause', async () => {
+  const h = await harness();
+  await h.start();
+  const held = deferred();
+  h.pageResult = async () => held.promise;
+  const sending = h.message({ type: 'SEND_NOW' });
+  await until(() => h.state.session.job?.phase === 'sending');
+  const runId = h.state.session.job.runId;
+  assert.equal(h.sends().at(-1)?.args[0].extensionClock, true);
+  for (const delayMs of [0, -1, 1000000, '50', null]) {
+    assert.equal((await h.message({ type: 'WAIT_RUN', runId, delayMs }, h.sender())).allowed, false);
+  }
+  assert.equal((await h.message({ type: 'WAIT_RUN', runId, delayMs: 50 }, { ...h.sender(), frameId: 1 })).allowed, false);
+  assert.equal((await h.message({ type: 'WAIT_RUN', runId: 'wrong', delayMs: 50 }, h.sender())).allowed, false);
+  assert.equal((await h.message({ type: 'WAIT_RUN', runId, delayMs: 50 }, h.sender())).allowed, true);
+  const waiting = h.message({ type: 'WAIT_RUN', runId, delayMs: 180 }, h.sender());
+  await delay(5);
+  await h.message({ type: 'PAUSE' });
+  assert.equal((await waiting).allowed, false);
+  held.resolve({ status: 'sent' });
+  await sending;
+  assert.equal(h.state.session.job.enabled, false);
+  assert.equal(h.state.session.job.sentCount, 0);
+});
+
+await scenario('Timing diagnostics are paused-only and cannot issue a send or change saved state', async () => {
+  const h = await harness();
+  await h.start();
+  const beforeRunning = h.state.injections.length;
+  assert.equal((await h.message({ type: 'CHECK_TIMING' })).ok, false);
+  assert.equal(h.state.injections.length, beforeRunning);
+  await h.message({ type: 'PAUSE' });
+  const controlState = () => JSON.stringify({ local: { ...h.state.local, logs: undefined }, session: h.state.session });
+  const saved = controlState();
+  const originalLogCount = h.state.local.logs.length;
+  h.pageResult = async kind => kind === 'authorization'
+    ? { elapsedMs: 4, ok: true, allowed: false, url: 'MUST_NOT_LEAK' }
+    : { firstMs: 64, elapsedMs: 247, hidden: true, text: 'MUST_NOT_LEAK' };
+  const before = h.state.injections.length;
+  const response = await h.message({ type: 'CHECK_TIMING' });
+  assert.equal(response.ok, true);
+  assert.deepEqual(response.observations, [
+    { kind: 'authorization', status: 'result', elapsedMs: 4, ok: true, allowed: false },
+    { kind: 'page-timers', status: 'result', firstMs: 64, elapsedMs: 247, hidden: true },
+  ]);
+  assert.equal(controlState(), saved);
+  assert.equal(h.state.local.logs.length, originalLogCount + 2);
+  assert.deepEqual(h.state.local.logs.slice(-2).map(item => item.diagnostic), [
+    { code: 'timing-probe', durationMs: 4, kind: 'authorization', status: 'result', ok: true, allowed: false },
+    { code: 'timing-probe', durationMs: 247, kind: 'page-timers', status: 'result', firstMs: 64, hidden: true },
+  ]);
+  const requests = h.state.injections.slice(before);
+  assert.equal(requests.length, 2);
+  assert.ok(requests.every(request => request.world === 'ISOLATED' && request.target.tabId === 7));
+  assert.deepEqual(requests.map(request => request.args), [['authorization'], ['page-timers']]);
+  assert.equal(JSON.stringify(response).includes('MUST_NOT_LEAK'), false);
+});
+await scenario('Timing diagnostics reject unbound or changed targets before injecting', async () => {
+  const h = await harness();
+  assert.equal((await h.message({ type: 'CHECK_TIMING' })).ok, false);
+  assert.equal(h.state.injections.length, 0);
+  await h.start();
+  await h.message({ type: 'PAUSE' });
+  h.state.tabs.get(7).url = otherUrl;
+  const before = h.state.injections.length;
+  assert.equal((await h.message({ type: 'CHECK_TIMING' })).ok, false);
+  assert.equal(h.state.injections.length, before);
+});
+await scenario('Timing diagnostics resolve a reload-invalidated tab without changing the paused task', async () => {
+  const h = await harness();
+  await h.start();
+  await h.message({ type: 'PAUSE' });
+  h.state.session.job.tabId = null;
+  h.pageResult = async kind => kind === 'authorization' ? { elapsedMs: 1, ok: true, allowed: false }
+    : { firstMs: 60, elapsedMs: 240, hidden: true };
+  assert.equal((await h.message({ type: 'CHECK_TIMING' })).ok, true);
+  assert.equal(h.state.session.job.tabId, null);
+  assert.equal(h.state.session.job.enabled, false);
+});
+await scenario('Timing diagnostics classify API rejection and invalid results without raw errors', async () => {
+  const h = await harness();
+  await h.start();
+  await h.message({ type: 'PAUSE' });
+  h.pageResult = async kind => {
+    if (kind === 'authorization') throw new Error('SYNTHETIC_PRIVATE_DATA');
+    return { elapsedMs: -1 };
+  };
+  const response = await h.message({ type: 'CHECK_TIMING' });
+  assert.deepEqual(response.observations, [
+    { kind: 'authorization', status: 'api-rejected' }, { kind: 'page-timers', status: 'invalid-result' },
+  ]);
+  assert.equal(JSON.stringify(response).includes('SYNTHETIC_PRIVATE_DATA'), false);
+});
+
+await scenario('Clearing history serializes behind a diagnostic append and cannot resurrect old entries', async () => {
+  const h = await harness();
+  await h.start();
+  await h.message({ type: 'PAUSE' });
+  const captured = deferred();
+  const release = deferred();
+  const originalGet = h.chrome.storage.local.get;
+  let intercept = true;
+  h.chrome.storage.local.get = async key => {
+    const value = await originalGet(key);
+    if (key === 'logs' && intercept) {
+      intercept = false;
+      captured.resolve();
+      await release.promise;
+    }
+    return value;
+  };
+  h.pageResult = async kind => kind === 'authorization' ? { elapsedMs: 1, ok: true, allowed: false }
+    : { firstMs: 60, elapsedMs: 240, hidden: true };
+  const diagnosing = h.message({ type: 'CHECK_TIMING' });
+  await captured.promise;
+  let clearCompleted = false;
+  const clearing = h.message({ type: 'CLEAR_LOGS' }).then(value => { clearCompleted = true; return value; });
+  await delay(5);
+  const clearWaitedForAppend = !clearCompleted;
+  release.resolve();
+  await diagnosing;
+  await clearing;
+  assert.equal(clearWaitedForAppend, true);
+  assert.equal(Object.hasOwn(h.state.local, 'logs'), false);
+  assert.equal(h.state.session.job.enabled, false);
+});
+
+await scenario('Concurrent timing diagnostics retain all four bounded observations', async () => {
+  const h = await harness();
+  await h.start();
+  await h.message({ type: 'PAUSE' });
+  const originalLogCount = h.state.local.logs.length;
+  h.pageResult = async kind => kind === 'authorization' ? { elapsedMs: 1, ok: true, allowed: false }
+    : { firstMs: 60, elapsedMs: 240, hidden: true };
+  const first = h.message({ type: 'CHECK_TIMING' });
+  const second = h.message({ type: 'CHECK_TIMING' });
+  assert.equal((await first).ok, true);
+  assert.equal((await second).ok, true);
+  assert.equal(h.state.local.logs.length, originalLogCount + 4);
+  assert.equal(h.state.session.job.enabled, false);
+});
+
 const failed = results.filter(result => result.status === 'FAIL');
 console.log(`RESULT ${results.length - failed.length}/${results.length} background v2 scenarios passed`);
 for (const result of failed) console.error(result.error);

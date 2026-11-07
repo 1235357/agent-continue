@@ -101,7 +101,18 @@ export async function pageAction(args) {
   const forceInterrupt = args.waitForIdle !== true;
   const busy = () => !forceInterrupt && visibleMatches(busySelector).length > 0;
   const enabled = button => !!button && !button.disabled && button.getAttribute('aria-disabled') !== 'true';
-  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const wait = async ms => {
+    // Hidden-page timers can be clamped beyond the round deadline. New workers
+    // own the clock; older workers retain the previous adapter contract.
+    if (args.extensionClock === true) {
+      const reply = await chrome.runtime.sendMessage({ type: 'WAIT_RUN', runId: args.runId, delayMs: ms });
+      if (reply?.ok !== true || reply.allowed !== true || !samePage() || !withinDeadline()) {
+        throw new Error('run-wait-cancelled');
+      }
+      return;
+    }
+    await new Promise(resolve => setTimeout(resolve, ms));
+  };
 
   const stillAllowed = async () => {
     if (!samePage() || !withinDeadline()) return false;

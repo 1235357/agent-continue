@@ -3,9 +3,9 @@ const EVENTS = new Set([
   'draft', 'unknown', 'blocked', 'error', 'restored', 'recovered', 'unconfirmed',
   'reply-complete', 'limit-reached', 'queue-complete', 'marker-reached',
   'target-closed', 'quiet', 'skipped', 'done', 'stopped', 'browser-restored',
-  'interrupted', 'cancelled', 'ready', 'replaced', 'scheduler-error',
+  'interrupted', 'cancelled', 'ready', 'replaced', 'scheduler-error', 'timing-diagnostics',
 ]);
-const DIAGNOSTICS = new Set(['adapter-result', 'execution-exception', 'no-valid-result', 'existing-draft', 'composer-changed']);
+const DIAGNOSTICS = new Set(['adapter-result', 'execution-exception', 'execution-timeout', 'no-valid-result', 'existing-draft', 'composer-changed', 'timing-probe']);
 const validTime = value => Number.isSafeInteger(value) && value >= 0 && value <= 8_640_000_000_000_000;
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
@@ -28,11 +28,21 @@ export function buildActivityExport({ logs, extensionVersion, now = Date.now(), 
       if (typeof detail.durationMs === 'number' && Number.isFinite(detail.durationMs)) {
         entry.diagnostic.durationMs = Math.round(Math.max(0, Math.min(120000, detail.durationMs)));
       }
+      if (detail.code === 'timing-probe') {
+        if (['authorization', 'page-timers'].includes(detail.kind)) entry.diagnostic.kind = detail.kind;
+        if (['result', 'invalid-result', 'api-rejected', 'watchdog-expired'].includes(detail.status)) entry.diagnostic.status = detail.status;
+        if (typeof detail.firstMs === 'number' && Number.isFinite(detail.firstMs)) {
+          entry.diagnostic.firstMs = Math.round(Math.max(0, Math.min(120000, detail.firstMs)));
+        }
+        for (const key of ['hidden', 'ok', 'allowed']) {
+          if (typeof detail[key] === 'boolean') entry.diagnostic[key] = detail[key];
+        }
+      }
     }
     output.push(entry);
   }
   return {
-    format: 'agent-continue-activity', version: 3,
+    format: 'agent-continue-activity', version: 4,
     extensionVersion: versionMatch?.[0] === extensionVersion ? extensionVersion : 'unknown',
     timestampMode: includeTimestamps ? 'unix-ms' : 'relative-ms',
     ...(includeTimestamps ? { exportedAt: new Date(now).toISOString() } : {}),

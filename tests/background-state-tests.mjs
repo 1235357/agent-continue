@@ -303,7 +303,7 @@ for(const [name,durationMs] of [
   ['null',null],['missing',undefined],
 ]) {
   await scenario(`Log writer omits ${name} duration while preserving each known diagnostic code`,async()=>{
-    for(const code of ['adapter-result','execution-exception','no-valid-result']) {
+    for(const code of ['adapter-result','execution-exception','execution-timeout','no-valid-result']) {
       const h=writerHarness();
       await h.write('unconfirmed','Synthetic uncertainty.',{code,durationMs});
       assert.deepEqual(h.state.logs[0].diagnostic,{code});
@@ -312,7 +312,7 @@ for(const [name,durationMs] of [
   });
 }
 await scenario('Log writer preserves finite numeric durations and existing clamp boundaries',async()=>{
-  for(const code of ['adapter-result','execution-exception','no-valid-result']) {
+  for(const code of ['adapter-result','execution-exception','execution-timeout','no-valid-result']) {
     for(const [durationMs,expected] of [[0,0],[12.5,12.5],[-4,0],[120000,120000],[250000,120000]]) {
       const h=writerHarness();
       await h.write('unconfirmed','Synthetic uncertainty.',{code,durationMs,stack:'SYNTHETIC_PRIVATE_SENTINEL'});
@@ -327,6 +327,17 @@ await scenario('Log writer ignores diagnostics without a known code',async()=>{
     await h.write('busy','Synthetic status.',diagnostic);
     assert.equal(Object.hasOwn(h.state.logs[0],'diagnostic'),false);
   }
+});
+await scenario('Timing log writer keeps fixed fields only and does not coerce numbers or booleans',async()=>{
+  const h=writerHarness();
+  await h.write('timing-diagnostics','Synthetic timing.',{code:'timing-probe',kind:'page-timers',status:'result',
+    durationMs:1992,firstMs:991,hidden:true,ok:false,allowed:false,url:'SYNTHETIC_PRIVATE_SENTINEL'});
+  assert.deepEqual(h.state.logs[0].diagnostic,{code:'timing-probe',durationMs:1992,kind:'page-timers',
+    status:'result',firstMs:991,hidden:true,ok:false,allowed:false});
+  await h.write('timing-diagnostics','Synthetic timing.',{code:'timing-probe',kind:'SYNTHETIC_PRIVATE_SENTINEL',
+    status:[],durationMs:'5',firstMs:true,hidden:'true',ok:1,allowed:{}});
+  assert.deepEqual(h.state.logs[1].diagnostic,{code:'timing-probe'});
+  assert.doesNotMatch(JSON.stringify(h.state.logs),/SYNTHETIC_PRIVATE_SENTINEL/);
 });
 await scenario('Log writer preserves all legitimate current event codes and messages',async()=>{
   const events=['started','resumed','paused','replaced','scheduler-error','sent','reply-complete',

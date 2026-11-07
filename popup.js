@@ -62,6 +62,7 @@ const eventLabels = () => ({
   unconfirmed: t('本轮结果未知'), 'reply-complete': t('回复已结束'), 'limit-reached': t('达到次数上限'),
   'queue-complete': t('队列已完成'), 'marker-reached': t('匹配停止标记'), 'target-closed': t('等待目标重开'),
   quiet: t('静默时段'), skipped: t('本轮跳过'), done: t('达到停止条件'), stopped: t('任务已停止'),
+  'timing-diagnostics': t('只读计时诊断'),
 });
 
 if (fullView) {
@@ -594,6 +595,25 @@ $('exportLogs').addEventListener('click', () => {
     downloadJson('agent-continue-activity.json', buildActivityExport({ logs, extensionVersion }));
     tell(t('已请求下载诊断日志。分享前请检查文件。'));
   } catch { tell(t('未能导出诊断日志。没有上传文件。'), true); }
+});
+$('diagnoseTiming')?.addEventListener('click', async () => {
+  const button = $('diagnoseTiming');
+  button.disabled = true;
+  $('timingDiagnostics').textContent = t('正在测量授权与页面计时；不会填写或发送消息。');
+  try {
+    const response = await request({ type: 'CHECK_TIMING' });
+    if (!response?.ok) {
+      $('timingDiagnostics').textContent = typeof response?.error === 'string'
+        ? response.error : t('诊断暂不可用。');
+      return;
+    }
+    const statuses = { 'invalid-result': t('返回结果无效'), 'watchdog-expired': t('看门狗超时'), 'api-rejected': t('API 调用被拒绝') };
+    $('timingDiagnostics').textContent = response.observations.map(item => item.status !== 'result'
+      ? `${item.kind === 'authorization' ? t('授权消息') : t('页面计时')}: ${statuses[item.status] || t('返回结果无效')}` : item.kind === 'authorization'
+        ? `${t('授权消息')}: ${item.elapsedMs} ms; ok=${item.ok}; allowed=${item.allowed}`
+        : `${t('页面计时')}: ${item.firstMs} / ${item.elapsedMs} ms; hidden=${item.hidden}`).join(' | ');
+  } catch { $('timingDiagnostics').textContent = t('诊断暂不可用。'); }
+  finally { button.disabled = false; }
 });
 $('clearData').addEventListener('click', () => $('clearDialog').showModal());
 $('cancelClear').addEventListener('click', () => $('clearDialog').close());

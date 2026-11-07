@@ -6,7 +6,6 @@ const t = createTranslator(runtimeCatalog);
 import { DEFAULT_CONFIG, DELIVERY_BEHAVIOR_VERSION, normalizeUrl, validateTarget, readConfig, currentPrompt, inQuietHours, MAX_PROMPT_CHARS } from './config.js';
 import { pageAction, translatePageResult } from './adapter.js';
 import { BUNDLED_PROMPT } from './preset.js';
-
 const ALARM_NAME = 'agent-continue-heartbeat';
 const RETRY_MS = 60_000;
 // Leave room for a Stop -> composer replacement -> Send -> receipt transition.
@@ -46,10 +45,20 @@ async function logEvent(event, message, diagnostic = null) {
   const stored = (await chrome.storage.local.get('logs')).logs;
   const logs = Array.isArray(stored) ? stored.filter(entry => entry && typeof entry === 'object' && !Array.isArray(entry)
     && Number.isFinite(entry.at) && typeof entry.event === 'string' && entry.event.length > 0 && typeof entry.message === 'string') : [];
-  const codes = ['adapter-result', 'execution-exception', 'no-valid-result', 'existing-draft', 'composer-changed'];
+  const codes = ['adapter-result', 'execution-exception', 'execution-timeout', 'no-valid-result', 'existing-draft', 'composer-changed', 'timing-probe'];
   const detail = diagnostic && codes.includes(diagnostic.code)
     ? { diagnostic: { code: diagnostic.code, ...(Number.isFinite(diagnostic.durationMs)
       ? { durationMs: Math.max(0, Math.min(120000, diagnostic.durationMs)) } : {}) } } : {};
+  if (detail.diagnostic?.code === 'timing-probe') {
+    if (['authorization', 'page-timers'].includes(diagnostic.kind)) detail.diagnostic.kind = diagnostic.kind;
+    if (['result', 'invalid-result', 'api-rejected', 'watchdog-expired'].includes(diagnostic.status)) detail.diagnostic.status = diagnostic.status;
+    if (typeof diagnostic.firstMs === 'number' && Number.isFinite(diagnostic.firstMs)) {
+      detail.diagnostic.firstMs = Math.max(0, Math.min(120000, diagnostic.firstMs));
+    }
+    for (const key of ['hidden', 'ok', 'allowed']) {
+      if (typeof diagnostic[key] === 'boolean') detail.diagnostic[key] = diagnostic[key];
+    }
+  }
   await chrome.storage.local.set({ logs: [...logs.slice(-199), { at: Date.now(), event, message, ...detail }] });
 }
 async function updateBadge(job) {
@@ -107,6 +116,7 @@ function assertSupportedTab(tab, expectedUrl = null) {
 }
 async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS) {
   let timer;
+  let watchdogExpired = false;
   try {
     const runScript = async (world) => {
       const res = await chrome.scripting.executeScript({
@@ -125,13 +135,19 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS) {
 
     const result = await Promise.race([
       runner(),
-      new Promise((_, reject) => { timer = setTimeout(() => reject(fail(t('页面操作超时，本周期结果未确认。'))), Math.max(1, deadline - Date.now())); }),
+      new Promise((_, reject) => { timer = setTimeout(() => {
+        watchdogExpired = true;
+        reject(fail(t('页面操作超时，本周期结果未确认。')));
+      }, Math.max(1, deadline - Date.now())); }),
     ]);
     const value = translatePageResult(result);
     if (!value || !RESULT_STATUSES.has(value.status)) return { status: 'unknown', message: t('页面未返回可确认的结果。'), diagnosticCode: 'no-valid-result' };
     // Return only bounded adapter status fields.
     const diagnosticCode = ['draft', 'blocked'].includes(value.status) && ['existing-draft', 'composer-changed'].includes(value.diagnosticCode) ? value.diagnosticCode : null;
     return { status: value.status, message: String(value.message || '').slice(0, 300), identity: typeof value.identity === 'string' ? value.identity.slice(0, 500) : null, assistantToken: typeof value.assistantToken === 'string' ? value.assistantToken.slice(0, 500) : null, assistantCount: Number(value.assistantCount) || 0, diagnosticCode };
+  } catch (error) {
+    if (watchdogExpired) return { status: 'unknown', message: t('页面操作超时，本周期结果未确认。'), diagnosticCode: 'execution-timeout' };
+    throw error;
   } finally { clearTimeout(timer); }
 }
 async function probe(tab, config, targetIdentity = null) {
@@ -151,6 +167,68 @@ async function availableTargets() {
 async function checkPage(tabId) {
   const tab = await currentTab(tabId);
   return { ok: true, result: await probe(tab, await getConfig()) };
+}
+async function timingDiagnostics() {
+  const job = await transact(getJob);
+  if (!job || job.enabled) throw fail(t('请先暂停已绑定的任务，再运行不发送诊断。'));
+  let tab;
+  if (Number.isInteger(job.tabId)) {
+    try { tab = await chrome.tabs.get(job.tabId); } catch { /* Resolve the saved URL below. */ }
+  }
+  if (!tab || normalizeUrl(tab.url) !== job.url) {
+    const matches = (await chrome.tabs.query({ url: 'https://chatgpt.com/*' }))
+      .filter(item => normalizeUrl(item.url) === job.url);
+    if (matches.length !== 1) throw fail(t('请只打开一个原绑定页面副本，再运行诊断。'));
+    [tab] = matches;
+  }
+  assertSupportedTab(tab, job.url);
+  const observations = [];
+  for (const kind of ['authorization', 'page-timers']) {
+    let timer;
+    let watchdogExpired = false;
+    try {
+      const frames = await Promise.race([
+        chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'ISOLATED', args: [kind],
+          func: async kind => {
+            const started = Date.now();
+            if (kind === 'authorization') {
+              const reply = await chrome.runtime.sendMessage({ type: 'CHECK_RUN', runId: 'readonly-timing-probe' });
+              return { elapsedMs: Date.now() - started, ok: reply?.ok === true, allowed: reply?.allowed === true };
+            }
+            await new Promise(resolve => setTimeout(resolve, 60));
+            const firstMs = Date.now() - started;
+            await new Promise(resolve => setTimeout(resolve, 180));
+            return { firstMs, elapsedMs: Date.now() - started, hidden: document.visibilityState === 'hidden' };
+          } }),
+        new Promise((_, reject) => { timer = setTimeout(() => {
+          watchdogExpired = true;
+          reject(new Error('diagnostic-timeout'));
+        }, 4000); }),
+      ]);
+      const value = frames?.find(frame => frame.frameId === 0)?.result;
+      if (!value || !Number.isFinite(value.elapsedMs) || value.elapsedMs < 0) {
+        observations.push({ kind, status: 'invalid-result' });
+      } else if (kind === 'authorization') {
+        observations.push({ kind, status: 'result', elapsedMs: Math.min(120000, Math.round(value.elapsedMs)),
+          ok: value.ok === true, allowed: value.allowed === true });
+      } else if (Number.isFinite(value.firstMs) && value.firstMs >= 0) {
+        observations.push({ kind, status: 'result', firstMs: Math.min(120000, Math.round(value.firstMs)),
+          elapsedMs: Math.min(120000, Math.round(value.elapsedMs)), hidden: value.hidden === true });
+      } else observations.push({ kind, status: 'invalid-result' });
+    } catch {
+      observations.push({ kind, status: watchdogExpired ? 'watchdog-expired' : 'api-rejected' });
+    } finally { clearTimeout(timer); }
+  }
+  await transact(async () => {
+    for (const item of observations) {
+      await logEvent('timing-diagnostics', t('只读发送计时诊断已完成。'), {
+        code: 'timing-probe', kind: item.kind, status: item.status,
+        durationMs: item.elapsedMs, firstMs: item.firstMs,
+        hidden: item.hidden, ok: item.ok, allowed: item.allowed,
+      });
+    }
+  });
+  return { ok: true, observations };
 }
 function validatedConfig(input) {
   try { return readConfig(input); } catch (error) { throw fail(error.message); }
@@ -215,6 +293,14 @@ async function checkRun(runId, sender) {
     const job = await getJob();
     return { ok: true, allowed: Boolean(job?.enabled && job.phase === 'sending' && job.runId === runId && Date.now() < job.runDeadline && sender.tab?.id === job.tabId && sender.frameId === 0 && normalizeUrl(sender.url || sender.tab?.url) === job.url) };
   });
+}
+async function waitRun(message, sender) {
+  if (![50, 60, 150, 180].includes(message.delayMs)) return { ok: false, allowed: false };
+  const before = await checkRun(message.runId, sender);
+  if (!before.allowed) return before;
+  // Never retain the state queue while sleeping: Pause and replacement win.
+  await new Promise(resolve => setTimeout(resolve, message.delayMs));
+  return checkRun(message.runId, sender);
 }
 async function runStillCurrent(snapshot) {
   return transact(async () => { const job = await getJob(); return Boolean(job?.enabled && job.phase === 'sending' && job.id === snapshot.id && job.runId === snapshot.runId && Date.now() < job.runDeadline); });
@@ -332,7 +418,7 @@ async function runRound(force = false, expectedJobId = null) {
       const changed = result.assistantToken ? result.assistantToken !== snapshot.assistantToken : result.assistantCount > snapshot.assistantCount;
       if (result.status === 'ready') result = changed ? { status: 'reply-complete' } : { status: 'busy', message: t('等待新的 Agent 回复完成。') };
     } else {
-      result = await executePage({ mode: 'send', expectedUrl: snapshot.url, prompt: currentPrompt(snapshot), runId: snapshot.runId, runDeadline: snapshot.runDeadline, stopMarkers: snapshot.stopMarkers ?? [], waitForIdle: snapshot.waitForIdle ?? false, extensionPriority: snapshot.extensionPriority === true, sendMethod: snapshot.sendMethod ?? 'auto', targetIdentity: snapshot.targetIdentity }, snapshot.tabId, snapshot.runDeadline);
+      result = await executePage({ mode: 'send', expectedUrl: snapshot.url, prompt: currentPrompt(snapshot), runId: snapshot.runId, runDeadline: snapshot.runDeadline, stopMarkers: snapshot.stopMarkers ?? [], waitForIdle: snapshot.waitForIdle ?? false, extensionPriority: snapshot.extensionPriority === true, extensionClock: true, sendMethod: snapshot.sendMethod ?? 'auto', targetIdentity: snapshot.targetIdentity }, snapshot.tabId, snapshot.runDeadline);
     }
   } catch { result = snapshot.runKind === 'reply-check' ? { status: 'error', message: t('回复检查暂不可用，继续等待新回复。') } : { status: 'unknown', message: t('后台页面操作未确认。'), diagnosticCode: 'execution-exception' }; }
   return finishRound(snapshot, result);
@@ -402,11 +488,13 @@ async function dispatch(message, sender, version) {
   await initialized;
   if (!message || typeof message.type !== 'string') throw fail(t('无效请求。'));
   const ownExtensionPage = chrome.runtime.id && sender.id === chrome.runtime.id && typeof sender.url === 'string' && sender.url.startsWith(chrome.runtime.getURL(''));
-  if (message.type !== 'CHECK_RUN' && sender.tab && !ownExtensionPage) throw fail(t('此操作只能从扩展控制面板发起。'));
+  if (!['CHECK_RUN', 'WAIT_RUN'].includes(message.type) && sender.tab && !ownExtensionPage) throw fail(t('此操作只能从扩展控制面板发起。'));
   switch (message.type) {
     case 'GET_STATE': return transact(async () => ({ ok: true, job: await getJob(), config: await getConfig(), logs: (await chrome.storage.local.get('logs')).logs || [], availableTargets: await availableTargets() }));
     case 'CHECK_PAGE': return checkPage(message.tabId);
+    case 'CHECK_TIMING': return timingDiagnostics();
     case 'CHECK_RUN': return checkRun(message.runId, sender);
+    case 'WAIT_RUN': return waitRun(message, sender);
     case 'START': return start(message.config, version, message.tabId);
     case 'PAUSE': return pause();
     case 'RESUME': return resume(version);

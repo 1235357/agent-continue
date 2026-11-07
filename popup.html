@@ -92,6 +92,8 @@
       <section id="panel-logs" class="tab-panel" role="tabpanel" aria-labelledby="tab-logs" hidden>
         <div class="panel-intro"><span class="eyebrow">ACTIVITY / 运行记录</span><h2>每一步，都有状态。</h2><p>这里只记录时间、结果和状态；不记录提示词、文件名或会话内容。</p></div>
         <div class="log-toolbar"><span id="logCount" class="quiet-tag">0 条记录</span><div><button id="refreshLogs" class="small-button">刷新</button><button id="exportLogs" class="small-button">导出</button><button id="clearLogs" class="small-button">清空</button></div></div>
+        <button id="diagnoseTiming" class="small-button">诊断发送计时（不发送）</button>
+        <p id="timingDiagnostics" role="status" aria-live="polite"></p>
         <ol id="logList" class="log-list"></ol><div id="logsEmpty" class="empty-state">任务开始后，运行状态会显示在这里。</div>
         <p><a href="support.html" target="_blank" rel="noopener">支持与反馈</a></p>
         <details class="card help-card"><summary>运行中遇到等待怎么办？</summary><p>默认到点打断并发送；只有开启“等待 Agent 空闲”才因 Agent 忙碌等待。输入框有其他草稿、附件或网络暂不可用时，任务等待下次检查。点击发送后若无法确认结果，会记录“未知”并跳过本周期，等待完整间隔；可先暂停并核对会话。</p><p>浏览器和电脑必须运行。浏览器重启后的恢复取决于目标页可用性；页面变化会显示状态供你处理。</p><p>快捷键 <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Y</kbd> 可暂停或继续；可在浏览器扩展快捷键页面修改。</p></details>
