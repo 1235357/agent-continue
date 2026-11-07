@@ -34,13 +34,13 @@ window.fixture = {
   checkReplies: []
 };
 const editor = document.querySelector('#prompt-textarea');
-const send = document.querySelector('[data-testid="send-button"]');
+let send = document.querySelector('[data-testid="send-button"]');
 editor.addEventListener('input', () => {
   fixture.inputEvents++;
   send.disabled = !editor.innerText.trim();
   if (fixture.cancelOnInput) fixture.allowed = false;
 });
-send.addEventListener('click', () => {
+function submitFixtureMessage() {
   fixture.sendClicks++;
   const text = editor.innerText;
   fixture.sentTexts.push(text);
@@ -64,12 +64,25 @@ send.addEventListener('click', () => {
   };
   if (fixture.deferAcknowledgement) window.acknowledgePending = acknowledge;
   else acknowledge();
-});
+}
+send.addEventListener('click', submitFixtureMessage);
 window.chrome = window.chrome || {};
 window.chrome.runtime = {
   sendMessage: async (request) => {
     fixture.checks++;
     if (request.type !== 'CHECK_RUN') throw new Error('Unexpected internal message: ' + request.type);
+    if (fixture.checks === fixture.replaceSendAtCheck) {
+      const next = send.cloneNode(true);
+      next.addEventListener('click', submitFixtureMessage);
+      send.replaceWith(next);
+      send = next;
+    }
+    if (fixture.checks === fixture.moveEditorAtCheck) {
+      const newComposer = document.createElement('form');
+      newComposer.innerHTML = '<span data-file-id="fixture-attachment">Attachment</span>';
+      document.querySelector('main').append(newComposer);
+      newComposer.append(editor);
+    }
     const delay = fixture.checkDelays.shift() || 0;
     if (delay) await new Promise(resolve => setTimeout(resolve, delay));
     fixture.checkReplies.push({allowed:fixture.allowed,repliedAt:Date.now()});

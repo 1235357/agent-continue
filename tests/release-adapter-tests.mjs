@@ -7,7 +7,7 @@ const source = pageAction.toString();
 
 // Deliberately small DOM contract: selectors are routed, not browser-parsed.
 // Coverage excludes real layout, trusted events, ProseMirror/React integration,
-// contenteditable serialization, attachments, stop controls, and cross-run retries.
+// contenteditable serialization, stop controls, and cross-run retries.
 // All URLs, messages, identities, authorization replies, and time are synthetic.
 function fixture(options = {}) {
   let now = 0;
@@ -16,8 +16,10 @@ function fixture(options = {}) {
   let keys = 0;
   let identity = 'fixture~conversation';
   let acceptedAt = Infinity;
+  let attachment = null;
   const users = [];
   const timers = [];
+  const sentTexts = [];
   class Element {
     isConnected = true;
     disabled = false;
@@ -44,11 +46,16 @@ function fixture(options = {}) {
   }
   const editor = new Textarea();
   editor.value = options.draft ?? '';
-  const button = new Element();
-  button.click = () => { clicks++; acceptedAt = now + (options.acceptDelay ?? 0); };
+  let button = new Element();
+  const submit = () => {
+    clicks++;
+    sentTexts.push(editor.value);
+    acceptedAt = now + (options.acceptDelay ?? 0);
+  };
+  button.click = submit;
   const composer = {
     querySelector: selector => selector.includes('send-button') ? button : null,
-    querySelectorAll: () => [],
+    querySelectorAll: selector => selector.includes('[data-file-id]') && attachment ? [attachment] : [],
     contains: element => element === button || element === editor,
   };
   const row = {
@@ -68,9 +75,16 @@ function fixture(options = {}) {
   };
   const state = {
     editor,
+    sentTexts,
     get checks() { return checks; },
     get clicks() { return clicks; },
     get keys() { return keys; },
+    replaceSendButton() {
+      button.isConnected = false;
+      button = new Element();
+      button.click = submit;
+    },
+    addAttachment() { attachment = new Element(); },
     loseIdentity() { identity = null; },
     schedule(at, callback) { timers.push({ at, callback }); },
   };
@@ -91,7 +105,7 @@ function fixture(options = {}) {
         }
       }
       if (now >= acceptedAt && !users.length) {
-        users.push({ innerText: 'continue fixture', getAttribute: name => name === 'data-message-id' ? 'new-user' : null });
+        users.push({ innerText: sentTexts.at(-1), getAttribute: name => name === 'data-message-id' ? 'new-user' : null });
         editor.value = '';
       }
       callback();
@@ -139,6 +153,18 @@ test('revocation at final authorization clears only the inserted draft', async (
   assert.equal(f.state.clicks, 0);
   assert.equal(f.state.editor.value, '');
 });
+
+for (const sendMethod of ['auto', 'button']) {
+  test(`ordinary ChatGPT uses the current composer button after a re-render (${sendMethod})`, async () => {
+    const f = fixture({ args: { sendMethod }, authorize: state => {
+      if (state.checks === 3) state.replaceSendButton();
+      return { ok: true, allowed: true };
+    } });
+    assert.equal((await f.run()).status, 'sent');
+    assert.deepEqual(f.state.sentTexts, ['continue fixture']);
+    assert.equal(f.state.keys, 0);
+  });
+}
 
 test('Dot identity disappearing during authorization fails closed', async () => {
   const f = fixture({ dot: true, authorize: state => {
@@ -224,4 +250,66 @@ test('pause during priority reassertion still wins before dispatch', async () =>
   assert.equal(f.state.clicks, 0);
   assert.equal(f.state.keys, 0);
   assert.equal(f.state.editor.value, '');
+});
+
+for (const [status, acceptDelay] of [['sent', 0], ['unknown', 10000]]) {
+  test(`priority recovers a text change during reauthorization with one click (${status})`, async () => {
+    const f = fixture({ acceptDelay, args: { extensionPriority: true }, authorize: state => {
+      if (state.checks === 3) state.editor.value = 'first change';
+      if (state.checks === 4) state.editor.value = 'second change';
+      return { ok: true, allowed: true };
+    } });
+    const outcome = await f.run();
+    assert.deepEqual({ status: outcome.status, sentTexts: f.state.sentTexts },
+      { status, sentTexts: ['continue fixture'] });
+    assert.equal(f.state.checks, 5);
+    assert.equal(f.state.clicks, 1);
+    assert.equal(f.state.keys, 0);
+  });
+}
+
+test('priority does not keep refilling while the draft keeps changing', async () => {
+  const f = fixture({ args: { extensionPriority: true }, authorize: state => {
+    if (state.checks >= 3) state.editor.value = `revision ${state.checks}`;
+    return { ok: true, allowed: true };
+  } });
+  assert.equal((await f.run()).status, 'blocked');
+  assert.equal(f.state.checks, 5);
+  assert.equal(f.state.editor.value, 'revision 5');
+  assert.equal(f.state.clicks, 0);
+  assert.equal(f.state.keys, 0);
+});
+
+for (const [guard, status] of [['pause', 'cancelled'], ['attachment', 'draft'], ['identity loss', 'cancelled']]) {
+  for (const check of [4, 5]) {
+    test(`priority respects ${guard} at authorization check ${check}`, async () => {
+      const f = fixture({ dot: true, args: { extensionPriority: true }, authorize: state => {
+        if (state.checks >= 3) state.editor.value = `revision ${state.checks}`;
+        if (state.checks === check) {
+          if (guard === 'pause') return { ok: true, allowed: false };
+          if (guard === 'attachment') state.addAttachment();
+          if (guard === 'identity loss') state.loseIdentity();
+        }
+        return { ok: true, allowed: true };
+      } });
+      assert.equal((await f.run()).status, status);
+      assert.equal(f.state.checks, check);
+      assert.equal(f.state.editor.value, `revision ${check}`);
+      assert.equal(f.state.clicks, 0);
+      assert.equal(f.state.keys, 0);
+    });
+  }
+}
+
+test('priority cleanup does not edit a composer whose bound identity was lost', async () => {
+  const f = fixture({ dot: true, args: { extensionPriority: true }, authorize: state => {
+    if (state.checks === 3) state.editor.value = 'first change';
+    if (state.checks === 4) state.loseIdentity();
+    return { ok: true, allowed: true };
+  } });
+  assert.equal((await f.run()).status, 'cancelled');
+  assert.equal(f.state.checks, 4);
+  assert.equal(f.state.editor.value, 'continue fixture');
+  assert.equal(f.state.clicks, 0);
+  assert.equal(f.state.keys, 0);
 });

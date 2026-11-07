@@ -547,6 +547,56 @@ try {
     assert.equal(outcome.status, 'unknown', JSON.stringify(outcome));
     assert.equal(await page.evaluate(() => fixture.sends), 1);
   });
+  await scenario('An old matching row restored as the last message cannot confirm a send', async ({ page, args }) => {
+    await page.evaluate(prompt => {
+      const old = document.querySelector('article.message-row.self');
+      old.querySelector('.message-body').innerText = prompt;
+      fixture.acknowledgement = 'none';
+      const editor = document.querySelector('[contenteditable="true"]');
+      editor.addEventListener('input', () => old.remove(), { once:true });
+      document.querySelector('button[aria-label="Send"]').addEventListener('click', () => {
+        document.querySelector('#conversation').append(old.cloneNode(true));
+      }, { once:true });
+    }, args.prompt);
+    const outcome = await page.evaluate(pageAction, args);
+    assert.equal(outcome.status, 'unknown', JSON.stringify(outcome));
+    assert.equal(await page.evaluate(() => fixture.sends), 1);
+  });
+  await scenario('A matching message followed by unrelated activity is ambiguous', async ({ page, args }) => {
+    await page.evaluate(() => {
+      document.querySelector('button[aria-label="Send"]').addEventListener('click', () => {
+        appendMessage('Unrelated later message', 'acct~dot~Msg~other-new');
+      }, { once: true });
+    });
+    const outcome = await page.evaluate(pageAction, args);
+    assert.equal(outcome.status, 'unknown', JSON.stringify(outcome));
+    assert.equal(await page.evaluate(() => fixture.sends), 1);
+  });
+  await scenario('An unrelated matching message never confirms a missed dispatch', async ({ page, args }) => {
+    await page.evaluate(prompt => {
+      fixture.acknowledgement = 'none';
+      document.querySelector('button[aria-label="Send"]').addEventListener('click', () => {
+        appendMessage(prompt, 'acct~dot~Msg~other-matching');
+        appendMessage('Unrelated later message', 'acct~dot~Msg~other-new');
+      }, { once: true });
+    }, args.prompt);
+    const outcome = await page.evaluate(pageAction, args);
+    assert.equal(outcome.status, 'unknown', JSON.stringify(outcome));
+    assert.equal(await page.evaluate(() => fixture.sends), 1);
+  });
+  await scenario('Older history inserted above the baseline is not a receipt', async ({ page, args }) => {
+    await page.evaluate(prompt => {
+      fixture.acknowledgement = 'none';
+      document.querySelector('button[aria-label="Send"]').addEventListener('click', () => {
+        const older = appendMessage(prompt, 'acct~dot~Msg~older-history').closest('article');
+        document.querySelector('#conversation').prepend(older);
+        appendMessage('Unrelated later message', 'acct~dot~Msg~other-new');
+      }, { once: true });
+    }, args.prompt);
+    const outcome = await page.evaluate(pageAction, args);
+    assert.equal(outcome.status, 'unknown', JSON.stringify(outcome));
+    assert.equal(await page.evaluate(() => fixture.sends), 1);
+  });
   await scenario('Dot assistant stop markers are optional and compared without returning marker content', async ({ page, args }) => {
     await page.evaluate(() => { document.querySelector('article.message-row:not(.self) .message-body').innerText = 'Synthetic result\n[STOP_PRIVATE_SYNTHETIC]'; });
     const stopped = await page.evaluate(pageAction, { ...args, stopMarkers: ['[STOP_PRIVATE_SYNTHETIC]'] });

@@ -107,6 +107,27 @@ try {
     assert.equal(await page.evaluate(()=>fixture.sendClicks),0);
   });
 
+  for (const sendMethod of ['auto', 'button']) {
+    await scenario(`Composer button replaced during final permission check (${sendMethod})`, async ({page,args}) => {
+      await page.evaluate(() => { fixture.replaceSendAtCheck = 3; });
+      const outcome = await page.evaluate(pageAction, {...args,sendMethod});
+      assert.equal(outcome.status,'sent',JSON.stringify(outcome));
+      assert.deepEqual(await page.evaluate(() => fixture.sentTexts),[prompt]);
+      assert.equal(await page.locator('[data-message-author-role="user"]').count(),2);
+    });
+  }
+
+  await scenario('Moving the editor to another composer prevents clicking the old Send', async ({page,args}) => {
+    await page.evaluate(() => {
+      fixture.replaceSendAtCheck = 3;
+      fixture.moveEditorAtCheck = 3;
+    });
+    const outcome = await page.evaluate(pageAction, {...args,sendMethod:'button',extensionPriority:true});
+    assert.equal(outcome.status,'blocked',JSON.stringify(outcome));
+    assert.equal(await page.evaluate(() => fixture.sendClicks),0);
+    assert.equal(await page.locator('#prompt-textarea').innerText(),prompt);
+  });
+
   await scenario('A final permission reply arriving after its deadline cannot submit', async ({page,args}) => {
     const runDeadline = await page.evaluate(() => {
       // The first two queries allow filling and finding the send button.
