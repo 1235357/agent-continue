@@ -49,13 +49,24 @@ gaps. Earlier fresh-install acceptance does not close these combined-flow gates:
   metadata. Current copied commands are relative to an already extracted bundle;
   Node provisioning alone is not clean-machine setup. Verify arbitrary working
   directories and checksum/metadata rejection before execution.
+  Implementation refinement: the existing release-stamped install.ps1 already
+  downloads/verifies its payload when run without adjacent source. Reuse that
+  path: acquire and verify the exact entry-script bytes in the first command,
+  rather than introduce a second ZIP acquisition/extraction implementation.
 - [ ] Add a current-account-specific consented installation/connection continuation.
   It currently copies the command without the administrator coordinator. Preserve
   fresh-install-only admission, Pause, withdrawn consent, exact identity and
   no-replay behavior; do not remove the administrator scope guard as a shortcut.
-- [ ] Keep detailed receipt/recovery outcomes inside closed Advanced, with concise
+- [x] Keep detailed receipt/recovery outcomes inside closed Advanced, with concise
   default pending/unknown/connection feedback and visible actionable warnings.
   Test requested, cancelled and unconfirmed outcomes with Advanced closed.
+  Checkpoint79 source correction passed65 rendered checks across both languages
+  and1100px/320px layouts. Two independent-review findings were reproduced and
+  fixed: old terminal history masking a newer attempt, and blank/stale terminal
+  summaries after reopening. Attempt feedback is associated with its journal
+  snapshot; meaningful new evidence supersedes it, progress-only updates do not.
+  Exact identities/progress remain in Advanced. This is not a changed installed
+  preview or a real hosted operation/recovery result.
 
 These are product-imposed steps to simplify, unlike mandatory nativeMessaging,
 Windows UAC and chat-platform approvals. No changed live installation or complete

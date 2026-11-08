@@ -16,18 +16,42 @@ const bundle = `C:\\Program Files\\AgentContinueAdmin\\${digest.slice(0, 24)}`;
 const binding = { version: 1, origin, bundleSha256: digest, systemDirectory: system };
 const windows = { skip: process.platform !== 'win32', timeout: 30_000 };
 
+function fixtureEvidence({ state, started, error, stderr = '' }) {
+  return { state, durationMs: Math.floor(performance.now() - started),
+    code: Number.isInteger(error?.code) ? error.code :
+      ['ETIMEDOUT', 'ENOENT', 'EACCES', 'EPERM'].includes(error?.code) ? error.code : null,
+    killed: error?.killed === true,
+    signal: ['SIGTERM', 'SIGKILL', 'SIGINT'].includes(error?.signal) ? error.signal : null,
+    phases: [...stderr.matchAll(/^OBSERVATION_FIXTURE (entry|source-parsed|helpers-ready|receipt-read|complete)\r?$/gm)]
+      .map(match => match[1]).slice(-8) };
+}
+
+test('fixture diagnostics keep fixed completion evidence without raw errors or private paths', () => {
+  const evidence = fixtureEvidence({ state: 'failed', started: performance.now(),
+    error: { code: 'private-code', killed: true, signal: 'private-signal', message: 'private-path' },
+    stderr: 'OBSERVATION_FIXTURE entry\nprivate-path\nOBSERVATION_FIXTURE private-secret\nOBSERVATION_FIXTURE source-parsed\n' });
+  assert.deepEqual({ ...evidence, durationMs: 0 }, { state: 'failed', durationMs: 0, code: null,
+    killed: true, signal: null, phases: ['entry', 'source-parsed'] });
+  assert.equal(Number.isInteger(evidence.durationMs) && evidence.durationMs >= 0, true);
+  assert.doesNotMatch(JSON.stringify(evidence), /private-/);
+});
+
 async function request(control, mode) {
   const calls = [];
+  let execution;
   const actions = createAdministratorBrowserActions(bundle, binding, async (exe, args, options) => {
     calls.push({ exe, args, options });
-    assert.equal(exe, path.win32.join(system, 'WindowsPowerShell', 'v1.0', 'powershell.exe'));
-    assert.deepEqual(args, ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', `${bundle}.browser\\stager.ps1`,
-      '-Action', 'ObserveHostedOwnerControl', '-Archive', `${bundle}.browser\\bundle.zip`,
-      '-ExpectedSha256', digest, '-ControlKind', control, '-ControlOperationId', operationId]);
-    assert.equal(options.windowsHide, true);
     // Execute only an AST-extracted helper fixture; not the requested stager or installed path.
-    return runFile(exe, ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', fixture,
-      '-Digest', digest, '-Operation', operationId, '-Control', control, '-Fixture', mode], options);
+    const started = performance.now();
+    try {
+      const result = await runFile(exe, ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', fixture,
+        '-Digest', digest, '-Operation', operationId, '-Control', control, '-Fixture', mode], options);
+      execution = fixtureEvidence({ state: 'completed', started, stderr: result.stderr });
+      return result;
+    } catch (error) {
+      execution = fixtureEvidence({ state: 'failed', started, error, stderr: error.stderr });
+      throw error;
+    }
   });
   const input = new PassThrough(), output = new PassThrough();
   const wire = { version: 1, action: 'control-status', id: '11111111-2222-3333-4444-555555555555',
@@ -37,7 +61,14 @@ async function request(control, mode) {
     await serveAdministratorBrowser({ input, output, args: [origin], origin, ...actions });
     const result = await readFrame(output, 4000);
     assert.equal(calls.length, 1);
+    assert.equal(calls[0].exe, path.win32.join(system, 'WindowsPowerShell', 'v1.0', 'powershell.exe'));
+    assert.deepEqual(calls[0].args, ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', `${bundle}.browser\\stager.ps1`,
+      '-Action', 'ObserveHostedOwnerControl', '-Archive', `${bundle}.browser\\bundle.zip`,
+      '-ExpectedSha256', digest, '-ControlKind', control, '-ControlOperationId', operationId]);
+    assert.equal(calls[0].options.windowsHide, true);
     assert.equal(calls[0].options.timeout, 3200);
+    assert.equal(execution?.state, 'completed', 'PS5.1 fixture must finish before semantic assertions: ' + JSON.stringify(execution));
+    assert.deepEqual(execution.phases, ['entry', 'source-parsed', 'helpers-ready', 'receipt-read', 'complete']);
     return { wire, result };
   } finally { input.destroy(); output.destroy(); }
 }

@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import vm from 'node:vm';
 import { administratorControlSupport } from '../admin-control.js';
 import { isAdministratorControlSupport } from '../native/desktop-commander/windows-admin-browser-host.mjs';
 
@@ -46,11 +47,224 @@ function runFixture(fixture) {
     },
   });
   const output = `${result.stdout || ''}\n${result.stderr || ''}`;
-  assert.ifError(result.error);
-  assert.equal(result.signal, null, output);
-  assert.equal(result.status, 0, output);
+  if (fixture !== ledgerFixture) {
+    assert.ifError(result.error);
+    assert.equal(result.signal, null, output);
+    assert.equal(result.status, 0, output);
+    return output;
+  }
+  const phases = new Set(['entry', 'source-extracted', 'canonical-bytes', 'matrix-connect', 'matrix-resume-saved',
+    'matrix-revoke', 'matrix-complete', 'evidence-guards', 'publication-connect', 'publication-resume-saved',
+    'publication-revoke', 'publication-complete', 'input-guards', 'execution-guards', 'complete', 'cleanup']);
+  const bounded = value => [...String(value || '').slice(-65536)
+    .matchAll(/^DIAG control-ledger phase=([a-z-]+) count=(0|[1-9][0-9]{0,8})\r?$/gm)]
+    .filter(row => phases.has(row[1])).slice(-32)
+    .map(([, phase, count]) => `DIAG control-ledger phase=${phase} count=${count}`).join('\n') ||
+      'DIAG control-ledger phase=unobserved count=0';
+  const diagnostic = `stdout:\n${bounded(result.stdout)}\nstderr:\n${bounded(result.stderr)}`;
+  const failurePhase = result.error?.code === 'ETIMEDOUT' ? 'spawn-timeout' :
+    result.error?.killed === true ? 'spawn-killed' : 'spawn-error';
+  assert.ok(!result.error, `DIAG control-ledger-runner phase=${failurePhase} count=1\n` + diagnostic);
+  assert.equal(result.signal, null, diagnostic);
+  assert.equal(result.status, 0, diagnostic);
   return output;
 }
+
+test('ledger diagnostic runner retains sanitized bounded stdout and stderr on spawn failure', () => {
+  const markers = Array.from({ length: 80 }, (_, count) => `DIAG control-ledger phase=matrix-connect count=${count}`);
+  const run = vm.runInNewContext(`(${runFixture.toString()})`, {
+    assert, path: path.win32, ledgerFixture: 'C:\\fixture\\ledger.ps1', process: { env: { SystemRoot: 'C:\\Windows' } },
+    spawnSync(_file, _args, options) {
+      assert.equal(options.timeout, 60_000);
+      assert.equal(options.maxBuffer, 1024 * 1024);
+      assert.equal(options.shell, false);
+      assert.equal(options.windowsHide, true);
+      return { error: Object.assign(new Error('C:\\private\\secret S-1-5-21-1-2-3-1001'), { code: 'ETIMEDOUT' }),
+        stdout: ['private stdout', ...markers, 'DIAG control-ledger phase=private count=1',
+          'DIAG control-ledger phase=matrix-connect count=-1', 'DIAG control-ledger phase=matrix-connect count=9999999999',
+          'C:\\private\\secret'].join('\n'),
+        stderr: 'private stderr\nDIAG control-ledger phase=publication-revoke count=330\nS-1-5-21-1-2-3-1001', signal: null, status: 0 };
+    },
+  });
+  assert.throws(() => run('C:\\fixture\\ledger.ps1'), error => {
+    assert.match(error.message, /phase=spawn-timeout count=1/);
+    assert.match(error.message, /stdout:\nDIAG control-ledger phase=matrix-connect count=48/);
+    assert.match(error.message, /phase=matrix-connect count=79/);
+    assert.match(error.message, /stderr:\nDIAG control-ledger phase=publication-revoke count=330/);
+    assert.doesNotMatch(error.message, /private|S-1-5|C:\\|count=-|count=9999999999/);
+    assert.equal((error.message.match(/DIAG control-ledger phase=matrix-connect/g) || []).length, 32);
+    assert.ok(error.message.length < 8192);
+    return true;
+  });
+});
+
+test('ledger diagnostic runner still fails signals and nonzero exits without printing raw child data', () => {
+  for (const failure of [{ signal: 'SIGTERM', status: null }, { signal: null, status: 1 }]) {
+    const run = vm.runInNewContext(`(${runFixture.toString()})`, {
+      assert, path: path.win32, ledgerFixture: 'C:\\fixture\\ledger.ps1', process: { env: { SystemRoot: 'C:\\Windows' } },
+      spawnSync: () => ({ ...failure, stdout: 'DIAG control-ledger phase=entry count=0\nC:\\private\\secret',
+        stderr: 'DIAG control-ledger phase=source-extracted count=14\nraw data' }),
+    });
+    assert.throws(() => run('C:\\fixture\\ledger.ps1'), error => {
+      assert.match(error.message, /phase=entry count=0/);
+      assert.match(error.message, /phase=source-extracted count=14/);
+      assert.doesNotMatch(error.message, /private|raw data/);
+      return true;
+    });
+  }
+});
+
+test('ledger diagnostic runner preserves successful fixture output unchanged', () => {
+  const output = '{"ok":true}\n';
+  const run = vm.runInNewContext(`(${runFixture.toString()})`, {
+    assert, path: path.win32, ledgerFixture: 'C:\\fixture\\ledger.ps1', process: { env: { SystemRoot: 'C:\\Windows' } },
+    spawnSync: () => ({ stdout: output, stderr: '', signal: null, status: 0 }),
+  });
+  assert.equal(run('C:\\fixture\\ledger.ps1'), output + '\n');
+});
+
+test('ledger diagnostic runner limits typed spawn reasons to fixed timeout, killed and error phases', () => {
+  for (const [error, phase] of [[{ code: 'ETIMEDOUT' }, 'spawn-timeout'], [{ killed: true }, 'spawn-killed'],
+    [{ code: 'C:\\private\\secret', killed: 'true' }, 'spawn-error']]) {
+    const run = vm.runInNewContext(`(${runFixture.toString()})`, {
+      assert, path: path.win32, ledgerFixture: 'C:\\fixture\\ledger.ps1', process: { env: { SystemRoot: 'C:\\Windows' } },
+      spawnSync: () => ({ error, stdout: '', stderr: '', signal: null, status: 0 }),
+    });
+    assert.throws(() => run('C:\\fixture\\ledger.ps1'), failure => {
+      assert.ok(failure.message.includes(`phase=${phase} count=1`));
+      assert.match(failure.message, /stdout:\nDIAG control-ledger phase=unobserved count=0/);
+      assert.match(failure.message, /stderr:\nDIAG control-ledger phase=unobserved count=0/);
+      assert.doesNotMatch(failure.message, /private|C:\\/);
+      return true;
+    });
+  }
+});
+
+test('ledger diagnostic runner preserves other fixtures original spawn and case failure evidence', () => {
+  for (const result of [
+    { error: new Error('peer-fixture-spawn-original'), status: 0, signal: null },
+    { error: null, status: 1, signal: null },
+    { error: null, status: null, signal: 'SIGTERM' },
+  ]) {
+    const run = vm.runInNewContext(`(${runFixture.toString()})`, {
+      assert, path: path.win32, ledgerFixture: 'C:\\fixture\\ledger.ps1', process: { env: { SystemRoot: 'C:\\Windows' } },
+      spawnSync: () => ({ ...result, stdout: 'peer-case-original-stdout', stderr: 'token-case-original-stderr' }),
+    });
+    assert.throws(() => run('C:\\fixture\\peer.ps1'), error => {
+      if (result.error) assert.match(error.message, /peer-fixture-spawn-original/);
+      else {
+        assert.match(error.message, /peer-case-original-stdout/);
+        assert.match(error.message, /token-case-original-stderr/);
+      }
+      assert.doesNotMatch(error.message, /control-ledger|unobserved/);
+      return true;
+    });
+  }
+});
+
+test('ledger diagnostic phases retain exhaustive matrix and publication coverage', () => {
+  const source = readFileSync(ledgerFixture, 'utf8');
+  for (const phase of ['entry', 'source-extracted', 'canonical-bytes', 'matrix-complete',
+    'evidence-guards', 'publication-complete', 'input-guards', 'execution-guards', 'complete', 'cleanup']) {
+    assert.match(source, new RegExp(`Write-LedgerPhase '${phase}' `));
+  }
+  for (const phase of ['matrix-connect', 'matrix-resume-saved', 'matrix-revoke',
+    'publication-connect', 'publication-resume-saved', 'publication-revoke']) assert.ok(source.includes(`'${phase}'`));
+  assert.ok(source.indexOf("Write-LedgerPhase 'entry' 0") < source.indexOf('[Management.Automation.Language.Parser]::ParseFile'));
+  assert.ok(source.indexOf("Write-LedgerPhase 'source-extracted'") < source.indexOf('[IO.Directory]::CreateDirectory($script:Scratch)'));
+  assert.match(source, /for \(\$n = 0; \$n -lt \(1 -shl \$states.Count\); \$n\+\+\)/);
+  assert.match(source, /\$script:MatrixCases\+\+/);
+  assert.match(source, /\$script:PublicationCases\+\+/);
+  assert.match(source, /\$script:MatrixCases % 256/);
+  assert.match(source, /\$script:PublicationCases % 33/);
+  assert.match(source, /same-ID concurrent acquisition is busy/);
+  assert.match(source, /execution function contains explicit Flush\(true\)/);
+  assert.match(source, /control_ledger_cleanup_reparse_refused/);
+});
+
+function assertFixtureHostToken(result, kind) {
+  assert.ok(kind === 'peer' || kind === 'entry');
+  const token = result.observedToken;
+  assert.ok(token && typeof token === 'object' && !Array.isArray(token), 'independent host-token observation is required');
+  assert.deepEqual(Object.keys(token).sort(), ['administrator', 'elevated', 'integrity', 'selectedUserSid', 'session']);
+  for (const field of ['integrity', 'session']) assert.ok(Number.isSafeInteger(token[field]) && token[field] >= 0);
+  for (const field of ['elevated', 'administrator', 'selectedUserSid']) assert.equal(typeof token[field], 'boolean');
+  const medium = token.integrity === 8192 && !token.elevated && !token.administrator && token.session > 0 &&
+    (kind === 'entry' || token.selectedUserSid);
+  assert.equal(result.actualMediumObserved, medium, 'classification must match the independent token');
+  assert.equal(result.actualMediumCallerObserved, medium, 'positive capture/lifetime evidence belongs only to an actual medium token');
+  assert.equal(result.actualNonMediumCaptureRefused, !medium, 'non-medium hosts must prove refusal, not skip capture');
+  const refusal = medium ? null : kind === 'peer' ? 'browser_peer_unavailable' :
+    token.administrator || token.session <= 0 ? 'identity' : 'owner_control_caller';
+  assert.equal(result.actualCaptureRefusal, refusal, 'capture must produce the exact expected refusal');
+  if (kind === 'peer') assert.equal(result.actualMediumAdmissionRefused, medium);
+}
+
+test('source-only token-aware summaries reject fabricated medium evidence and inexact refusal', () => {
+  assert.equal(typeof assertFixtureHostToken, 'function');
+  const medium = { integrity: 8192, elevated: false, administrator: false, session: 1, selectedUserSid: true };
+  const rows = [
+    [medium, true],
+    [{ ...medium, integrity: 12288, elevated: true, administrator: true }, false],
+    [{ ...medium, session: 0 }, false],
+    [{ ...medium, integrity: 4096 }, false],
+    [{ ...medium, elevated: true }, false],
+    [{ ...medium, administrator: true }, false],
+    [{ ...medium, selectedUserSid: false }, false, true],
+  ];
+  for (const kind of ['peer', 'entry']) {
+    for (const [observedToken, peerMedium, entryMedium = peerMedium] of rows) {
+      const actualMediumObserved = kind === 'peer' ? peerMedium : entryMedium;
+      const actualCaptureRefusal = actualMediumObserved ? null : kind === 'peer' ? 'browser_peer_unavailable' :
+        observedToken.administrator || observedToken.session <= 0 ? 'identity' : 'owner_control_caller';
+      const result = { observedToken, actualMediumObserved, actualMediumCallerObserved: actualMediumObserved,
+        actualNonMediumCaptureRefused: !actualMediumObserved, actualCaptureRefusal,
+        actualMediumAdmissionRefused: actualMediumObserved };
+      assert.doesNotThrow(() => assertFixtureHostToken(result, kind));
+      for (const field of ['actualMediumObserved', 'actualMediumCallerObserved', 'actualNonMediumCaptureRefused',
+        ...(kind === 'peer' ? ['actualMediumAdmissionRefused'] : [])]) {
+        assert.throws(() => assertFixtureHostToken({ ...result, [field]: !result[field] }, kind));
+      }
+      assert.throws(() => assertFixtureHostToken({ ...result, actualCaptureRefusal: 'unexpected_error' }, kind));
+      assert.throws(() => assertFixtureHostToken({ ...result, observedToken: null }, kind));
+      for (const field of Object.keys(medium)) {
+        assert.throws(() => assertFixtureHostToken({ ...result, observedToken: { ...observedToken, [field]: 'unknown' } }, kind));
+      }
+    }
+  }
+});
+
+test('source-only token-aware fixtures retain the independent oracle and both exact capture outcomes', () => {
+  const oracle = source => source.match(/Add-Type -TypeDefinition @'\r?\n([\s\S]*?public static class ControlPeerFixtureTokenOracle[\s\S]*?)\r?\n'@ -ErrorAction Stop/)?.[1].replaceAll('\r\n', '\n');
+  const baseline = oracle(readFileSync(peerFixture, 'utf8'));
+  assert.ok(baseline);
+  for (const fixture of [peerProjectionFixture, entryFixture]) {
+    const source = readFileSync(fixture, 'utf8');
+    assert.equal(oracle(source), baseline, 'reuse the peer fixture independent token reader unchanged');
+    assert.match(source, /\[ControlPeerFixtureTokenOracle\]::Read\(\$identity\.Token\)/);
+    assert.match(source, /\$script:observedToken=Get-FixtureHostToken/);
+    assert.match(source, /if \(\$script:actualMediumObserved\)/);
+    assert.match(source, /actualNonMediumCaptureRefused=\$script:actualNonMediumCaptureRefused/);
+    assert.match(source, /actualCaptureRefusal=\$script:actualCaptureRefusal/);
+    assert.doesNotMatch(source, /Write-Output ['"]SKIP|\$script:actualMediumObserved=\$true/);
+  }
+  const projection = readFileSync(peerProjectionFixture, 'utf8');
+  assert.match(projection, /\$script:actualMediumObserved=\(\$script:observedToken\.integrity -eq 8192 -and -not \$script:observedToken\.elevated -and\s*-not \$script:observedToken\.administrator -and \$script:observedToken\.session -gt 0 -and \$script:observedToken\.selectedUserSid\)/);
+  assert.match(projection, /Case 'actual native request policy validates inputs independently of capture'/);
+  assert.ok(projection.indexOf('$script:nativePolicyValidated=$true') < projection.indexOf('$script:observedToken=Get-FixtureHostToken'));
+  const policyCase = projection.slice(projection.indexOf("Case 'actual native request policy validates inputs independently of capture'"),
+    projection.indexOf("Case 'actual host token requires exact medium capture or exact non-medium refusal'"));
+  assert.ok(policyCase.includes("foreach ($mode in @('control','fence','reconcile'))"));
+  assert.ok(policyCase.includes("foreach ($control in @('connect','resume-saved','revoke'))"));
+  assert.match(policyCase, /\$answer=\$policy\.Invoke\(\$null,\$arguments\)\s+Check \(\$null -eq \$answer\)/);
+  assert.ok(policyCase.includes('$invalid[7]=[uint32]0'));
+  assert.match(projection, /\$refusal -is \[InvalidOperationException\] -and \$refusal\.Message -ceq 'browser_peer_unavailable'/);
+  assert.match(projection, /repeated disposal cannot revive actual witness/);
+  const entry = readFileSync(entryFixture, 'utf8');
+  assert.match(entry, /\$script:actualMediumObserved=\(\$script:observedToken\.integrity -eq 8192 -and -not \$script:observedToken\.elevated -and\s*-not \$script:observedToken\.administrator -and \$script:observedToken\.session -gt 0\)/);
+  assert.match(entry, /\$refusal -is \[Management\.Automation\.RuntimeException\] -and \$refusal\.Message -ceq \$expectedRefusal/);
+  assert.match(entry, /\$held\.IsClosed/);
+});
 
 test('Windows administrator control ledger: scratch-only PS5.1 fixture (not protected acceptance)', windows, () => {
   const output = runFixture(ledgerFixture);
@@ -154,7 +368,7 @@ test('Windows stager binds peer source to held archive bytes and preserves compi
 test('Windows stager projects typed witnesses without null-target coercion or failed-witness leaks', windows, () => {
   const result = JSON.parse(runFixture(peerProjectionFixture).trim().split(/\r?\n/).at(-1));
   assert.equal(result.ok, true);
-  assert.equal(result.scope, 'typed-projection-with-fake-peer-and-actual-medium-refusal-not-high-proof');
+  assert.equal(result.scope, 'typed-projection-with-fake-peer-and-token-aware-capture-not-high-proof');
   assert.ok(Number.isSafeInteger(result.cases) && result.cases >= 66);
   assert.ok(Number.isSafeInteger(result.assertions) && result.assertions >= 213);
   assert.deepEqual(result.failures, []);
@@ -163,7 +377,7 @@ test('Windows stager projects typed witnesses without null-target coercion or fa
   assert.equal(result.actualHighPair, false);
   assert.equal(result.protectedAcceptance, false);
   assert.equal(result.nativeRequestPolicyValidated, true);
-  assert.equal(result.actualMediumAdmissionRefused, true);
+  assertFixtureHostToken(result, 'peer');
   for (const [field, source] of [
     ['stagerSha256', '../scripts/Stage-WindowsAdministratorBundle.ps1'],
     ['peerSourceSha256', '../native/desktop-commander/windows-browser-peer.cs'],
@@ -202,7 +416,7 @@ test('Windows fixed sealed entry and medium ACK waiter preserve identity, lifeti
   assert.deepEqual(result.failures, []);
   assert.equal(result.actualArchiveFileExclusion, true);
   assert.equal(result.bindingMetadataOracle, true);
-  assert.equal(result.actualMediumCallerObserved, true);
+  assertFixtureHostToken(result, 'entry');
   assert.deepEqual(result.fixtureSubstitutions, [
     'process-start-and-wait-handles', 'owner-identity-and-acl', 'registry-and-enrollment-oracle',
     'scheduler-task-and-startup', 'kernel-admission', 'orchestration-full-verifier', 'orchestration-sealed-binding',

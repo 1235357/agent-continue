@@ -22,6 +22,9 @@ foreach($name in $import){
     . ([scriptblock]::Create($node.Extent.Text))
 }
 $script:cases=0;$script:checks=0;$script:failures=[Collections.Generic.List[string]]::new()
+$script:observedToken=$null;$script:actualMediumObserved=$false
+$script:actualMediumCallerObserved=$false;$script:actualNonMediumCaptureRefused=$false
+$script:actualCaptureRefusal=$null
 $digest='a'*64;$id='b'*32;$sid='S-1-5-21-1-2-3-1001';$snapshot=('d'*32)+':idle'
 $root='C:\Program Files\AgentContinueAdmin\'+$digest.Substring(0,24)
 $binding=@{Root=$root;Digest=$digest;Sid=$sid;System='C:\Windows\System32';
@@ -67,15 +70,112 @@ function New-Handle([int]$Id=601){
     $h|Add-Member ScriptMethod WaitForExit {param($Milliseconds);$this.Waits++;return $this.HasExited}
     return $h
 }
-Case 'actual medium caller capture observes self only and holds exact process identity'{
-    $c=Get-AdministratorControlEndpointCaller ([Environment]::GetFolderPath([Environment+SpecialFolder]::System))
+function Get-FixtureHostToken {
+    # Independent primary-token oracle, identical to windows-admin-control-peer-tests.ps1.
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Globalization;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
+public static class ControlPeerFixtureTokenOracle {
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool GetTokenInformation(IntPtr token, int kind,
+        IntPtr buffer, int length, out int needed);
+    public sealed class Snapshot {
+        public int Integrity;
+        public bool Elevated;
+    }
+    public static Snapshot Read(IntPtr primaryToken) {
+        return new Snapshot {
+            Integrity = ReadIntegrity(primaryToken),
+            Elevated = ReadElevation(primaryToken)
+        };
+    }
+    private static bool ReadElevation(IntPtr token) {
+        IntPtr buffer = Marshal.AllocHGlobal(4);
+        try {
+            int size;
+            if (!GetTokenInformation(token, 20, buffer, 4, out size))
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            int value = Marshal.ReadInt32(buffer);
+            if (size != 4 || (value != 0 && value != 1))
+                throw new InvalidOperationException("Invalid fixture elevation result");
+            return value == 1;
+        } finally { Marshal.FreeHGlobal(buffer); }
+    }
+    private static int ReadIntegrity(IntPtr token) {
+        int size;
+        if (GetTokenInformation(token, 25, IntPtr.Zero, 0, out size) ||
+            Marshal.GetLastWin32Error() != 122 || size < IntPtr.Size || size > 65536)
+            throw new InvalidOperationException("Invalid fixture integrity size");
+        IntPtr buffer = Marshal.AllocHGlobal(size);
+        try {
+            int returned;
+            if (!GetTokenInformation(token, 25, buffer, size, out returned))
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            if (returned < IntPtr.Size || returned > size)
+                throw new InvalidOperationException("Invalid fixture integrity result");
+            string sid = new SecurityIdentifier(Marshal.ReadIntPtr(buffer)).Value;
+            const string prefix = "S-1-16-";
+            if (!sid.StartsWith(prefix, StringComparison.Ordinal))
+                throw new InvalidOperationException("Invalid fixture integrity SID");
+            int value;
+            if (!Int32.TryParse(sid.Substring(prefix.Length), NumberStyles.None,
+                CultureInfo.InvariantCulture, out value) || value < 0)
+                throw new InvalidOperationException("Invalid fixture integrity RID");
+            return value;
+        } finally { Marshal.FreeHGlobal(buffer); }
+    }
+}
+'@ -ErrorAction Stop
+    Check ($PSVersionTable.PSEdition -ceq 'Desktop' -and $PSVersionTable.PSVersion.Major -eq 5 -and
+        $PSVersionTable.PSVersion.Minor -eq 1 -and [Environment]::Is64BitProcess) 'actual x64 PS5.1 host'
+    $thread=[Security.Principal.WindowsIdentity]::GetCurrent($true)
+    try { Check ($null -eq $thread) 'actual host has no thread impersonation' }
+    finally { if ($null -ne $thread) { $thread.Dispose() } }
+    $self=[Diagnostics.Process]::GetCurrentProcess()
+    $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
+    try {
+        $image=[IO.Path]::Combine([Environment]::SystemDirectory,'WindowsPowerShell\v1.0\powershell.exe')
+        Check ([string]::Equals($self.MainModule.FileName,$image,[StringComparison]::OrdinalIgnoreCase)) 'actual System32 PS5.1 image'
+        $oracle=[ControlPeerFixtureTokenOracle]::Read($identity.Token)
+        $principal=[Security.Principal.WindowsPrincipal]::new($identity)
+        return [ordered]@{integrity=[int]$oracle.Integrity;elevated=[bool]$oracle.Elevated;
+            administrator=[bool]$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator);
+            session=[int]$self.SessionId;selectedUserSid=[bool][regex]::IsMatch($identity.User.Value,'\AS-1-(?:5-21|12-1)(?:-[0-9]{1,10}){4}\z')}
+    } finally { $identity.Dispose(); $self.Dispose() }
+}
+Case 'actual host token requires exact medium capture or exact non-medium refusal'{
+    $script:observedToken=Get-FixtureHostToken
+    # This low-level PS capture checks the token role, not the selected-user SID policy.
+    $script:actualMediumObserved=($script:observedToken.integrity -eq 8192 -and -not $script:observedToken.elevated -and
+        -not $script:observedToken.administrator -and $script:observedToken.session -gt 0)
     $self=[Diagnostics.Process]::GetCurrentProcess();$identity=[Security.Principal.WindowsIdentity]::GetCurrent()
+    $c=$null;$refusal=$null
     try{
-        Check ($c.Pid -eq $PID -and $c.Process -is [Diagnostics.Process] -and -not $c.Process.HasExited) 'actual_self_handle'
-        Check ($c.Started -ceq $self.StartTime.ToUniversalTime().Ticks.ToString([Globalization.CultureInfo]::InvariantCulture)) 'actual_self_utc_ticks'
-        Check ($c.SessionId -eq $self.SessionId -and $c.SessionId -gt 0 -and $c.Sid -ceq $identity.User.Value) 'independent_self_identity'
-        $script:actualMediumCallerObserved=$true
-    }finally{$c.Process.Dispose();$self.Dispose();$identity.Dispose()}
+        try{$c=Get-AdministratorControlEndpointCaller ([Environment]::GetFolderPath([Environment+SpecialFolder]::System))}
+        catch{$refusal=$_.Exception.GetBaseException()}
+        if ($script:actualMediumObserved) {
+            Check ($null -eq $refusal -and $null -ne $c) 'actual_medium_capture_succeeds'
+            Check ($c.Pid -eq $PID -and $c.Process -is [Diagnostics.Process] -and -not $c.Process.HasExited) 'actual_self_handle'
+            Check ($c.Started -cmatch '\A[1-9][0-9]{0,18}\z' -and
+                $c.Started -ceq $self.StartTime.ToUniversalTime().Ticks.ToString([Globalization.CultureInfo]::InvariantCulture)) 'actual_self_utc_ticks'
+            Check ($c.SessionId -eq $self.SessionId -and $c.SessionId -gt 0 -and $c.Sid -ceq $identity.User.Value) 'independent_self_identity'
+            $held=$c.Process.SafeHandle
+            Check (-not $held.IsClosed -and -not $held.IsInvalid) 'actual_self_handle_held'
+            $c.Process.Dispose();Check $held.IsClosed 'actual_self_handle_closed'
+            $c.Process.Dispose();Check $held.IsClosed 'actual_self_handle_stays_closed'
+            Check (-not $self.HasExited) 'capture_disposal_never_terminates_self'
+            $script:actualMediumCallerObserved=$true
+        } else {
+            $expectedRefusal=if($script:observedToken.administrator -or $script:observedToken.session -le 0){'identity'}else{'owner_control_caller'}
+            Check ($null -eq $c) 'non_medium_capture_has_no_handle'
+            Check ($refusal -is [Management.Automation.RuntimeException] -and $refusal.Message -ceq $expectedRefusal) 'non_medium_capture_refuses_exactly'
+            $script:actualCaptureRefusal=$refusal.Message
+            $script:actualNonMediumCaptureRefused=$true
+        }
+    }finally{if($null -ne $c){$c.Process.Dispose()};$self.Dispose();$identity.Dispose()}
 }
 foreach($v in $vectors){
     Case ('canonical envelope '+$v[0]+'/'+$v[1]){
@@ -444,6 +544,8 @@ ConvertTo-Json -Compress -Depth 5 ([ordered]@{ok=($script:failures.Count -eq 0);
     failures=$script:failures.ToArray();scope='ast-and-scratch-entry-with-owner-os-kernel-task-stubs-not-native-acceptance';
     actualArchiveFileExclusion=$true;positiveHighPairStub=$true;bindingMetadataOracle=$true;actualUac=$false;protectedAcceptance=$false;
     actualMediumCallerObserved=($script:actualMediumCallerObserved -eq $true);
+    observedToken=$script:observedToken;actualMediumObserved=$script:actualMediumObserved;
+    actualNonMediumCaptureRefused=$script:actualNonMediumCaptureRefused;actualCaptureRefusal=$script:actualCaptureRefusal;
     fixtureSubstitutions=@('process-start-and-wait-handles','owner-identity-and-acl','registry-and-enrollment-oracle',
         'scheduler-task-and-startup','kernel-admission','orchestration-full-verifier','orchestration-sealed-binding');
     stagerSha256=(Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()})

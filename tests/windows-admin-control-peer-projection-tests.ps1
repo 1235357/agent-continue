@@ -5,6 +5,9 @@ Set-StrictMode -Version Latest
 $script:cases=0; $script:checks=0
 $script:failures=[Collections.Generic.List[object]]::new()
 $script:nativePolicyValidated=$false; $script:mediumAdmissionRefused=$false
+$script:observedToken=$null; $script:actualMediumObserved=$false
+$script:actualMediumCallerObserved=$false; $script:actualNonMediumCaptureRefused=$false
+$script:actualCaptureRefusal=$null; $script:actual=$null
 function Check([bool]$Condition,[string]$Message) {
     $script:checks++
     if (-not $Condition) { throw ('ASSERT '+$Message) }
@@ -12,6 +15,82 @@ function Check([bool]$Condition,[string]$Message) {
 function Case([string]$Name,[scriptblock]$Body) {
     $script:cases++
     try { $null=& $Body } catch { $script:failures.Add(@{name=$Name;error=$_.Exception.GetBaseException().Message}) }
+}
+function Get-FixtureHostToken {
+    # Independent primary-token oracle, identical to windows-admin-control-peer-tests.ps1.
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Globalization;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
+public static class ControlPeerFixtureTokenOracle {
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool GetTokenInformation(IntPtr token, int kind,
+        IntPtr buffer, int length, out int needed);
+    public sealed class Snapshot {
+        public int Integrity;
+        public bool Elevated;
+    }
+    public static Snapshot Read(IntPtr primaryToken) {
+        return new Snapshot {
+            Integrity = ReadIntegrity(primaryToken),
+            Elevated = ReadElevation(primaryToken)
+        };
+    }
+    private static bool ReadElevation(IntPtr token) {
+        IntPtr buffer = Marshal.AllocHGlobal(4);
+        try {
+            int size;
+            if (!GetTokenInformation(token, 20, buffer, 4, out size))
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            int value = Marshal.ReadInt32(buffer);
+            if (size != 4 || (value != 0 && value != 1))
+                throw new InvalidOperationException("Invalid fixture elevation result");
+            return value == 1;
+        } finally { Marshal.FreeHGlobal(buffer); }
+    }
+    private static int ReadIntegrity(IntPtr token) {
+        int size;
+        if (GetTokenInformation(token, 25, IntPtr.Zero, 0, out size) ||
+            Marshal.GetLastWin32Error() != 122 || size < IntPtr.Size || size > 65536)
+            throw new InvalidOperationException("Invalid fixture integrity size");
+        IntPtr buffer = Marshal.AllocHGlobal(size);
+        try {
+            int returned;
+            if (!GetTokenInformation(token, 25, buffer, size, out returned))
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            if (returned < IntPtr.Size || returned > size)
+                throw new InvalidOperationException("Invalid fixture integrity result");
+            string sid = new SecurityIdentifier(Marshal.ReadIntPtr(buffer)).Value;
+            const string prefix = "S-1-16-";
+            if (!sid.StartsWith(prefix, StringComparison.Ordinal))
+                throw new InvalidOperationException("Invalid fixture integrity SID");
+            int value;
+            if (!Int32.TryParse(sid.Substring(prefix.Length), NumberStyles.None,
+                CultureInfo.InvariantCulture, out value) || value < 0)
+                throw new InvalidOperationException("Invalid fixture integrity RID");
+            return value;
+        } finally { Marshal.FreeHGlobal(buffer); }
+    }
+}
+'@ -ErrorAction Stop
+    Check ($PSVersionTable.PSEdition -ceq 'Desktop' -and $PSVersionTable.PSVersion.Major -eq 5 -and
+        $PSVersionTable.PSVersion.Minor -eq 1 -and [Environment]::Is64BitProcess) 'actual x64 PS5.1 host'
+    $thread=[Security.Principal.WindowsIdentity]::GetCurrent($true)
+    try { Check ($null -eq $thread) 'actual host has no thread impersonation' }
+    finally { if ($null -ne $thread) { $thread.Dispose() } }
+    $self=[Diagnostics.Process]::GetCurrentProcess()
+    $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
+    try {
+        $image=[IO.Path]::Combine([Environment]::SystemDirectory,'WindowsPowerShell\v1.0\powershell.exe')
+        Check ([string]::Equals($self.MainModule.FileName,$image,[StringComparison]::OrdinalIgnoreCase)) 'actual System32 PS5.1 image'
+        $oracle=[ControlPeerFixtureTokenOracle]::Read($identity.Token)
+        $principal=[Security.Principal.WindowsPrincipal]::new($identity)
+        return [ordered]@{integrity=[int]$oracle.Integrity;elevated=[bool]$oracle.Elevated;
+            administrator=[bool]$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator);
+            session=[int]$self.SessionId;selectedUserSid=[bool][regex]::IsMatch($identity.User.Value,'\AS-1-(?:5-21|12-1)(?:-[0-9]{1,10}){4}\z')}
+    } finally { $identity.Dispose(); $self.Dispose() }
 }
 $repo=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $stager=[IO.Path]::Combine($repo,'scripts\Stage-WindowsAdministratorBundle.ps1')
@@ -154,33 +233,76 @@ Case 'null return refused' {
     try { $null=Open-AdministratorControlKernelSession @parameters } catch { $thrown=$true }
     Check $thrown 'no witness no session'
 }
-Case 'actual current peer refuses high admission from this medium process' {
-    $actual=Get-AdministratorControlPeerType ([IO.File]::ReadAllBytes($peer)) $scratch
-    $self=$actual::CaptureControlCallerIdentity()
+Case 'actual native request policy validates inputs independently of capture' {
+    $script:actual=Get-AdministratorControlPeerType ([IO.File]::ReadAllBytes($peer)) $scratch
+    $policy=$script:actual.GetMethod('ValidateControlRequest',[Reflection.BindingFlags]'NonPublic,Static')
+    Check ($null -ne $policy -and $policy.IsPrivate -and $policy.IsStatic -and $policy.ReturnType -eq [void]) 'exact native request policy available'
+    foreach ($mode in @('control','fence','reconcile')) {
+        foreach ($control in @('connect','resume-saved','revoke')) {
+            # These are synthetic policy inputs, never observed process claims.
+            $parameters=Parameters $control $mode
+            $arguments=[object[]]@($parameters.BundleRoot,$parameters.Digest,$parameters.Origin,$parameters.Id,
+                $parameters.Control,$parameters.Mode,$parameters.Target,$parameters.CallerPid,$parameters.CallerStarted,
+                $parameters.SessionId,$parameters.Sid)
+            $answer=$policy.Invoke($null,$arguments)
+            Check ($null -eq $answer) ('canonical policy inputs return void '+$mode+'/'+$control)
+            $invalid=[object[]]$arguments.Clone(); $invalid[7]=[uint32]0
+            $refusal=$null
+            try { $null=$policy.Invoke($null,$invalid) } catch { $refusal=$_.Exception.GetBaseException() }
+            Check ($refusal -is [InvalidOperationException] -and $refusal.Message -ceq 'browser_peer_unavailable') 'invalid policy PID refused exactly'
+        }
+    }
+    $script:nativePolicyValidated=$true
+}
+Case 'actual host token requires exact medium capture or exact non-medium refusal' {
+    $script:observedToken=Get-FixtureHostToken
+    $script:actualMediumObserved=($script:observedToken.integrity -eq 8192 -and -not $script:observedToken.elevated -and
+        -not $script:observedToken.administrator -and $script:observedToken.session -gt 0 -and $script:observedToken.selectedUserSid)
+    Check ($null -ne $script:actual) 'actual peer source compiled before capture'
+    $process=[Diagnostics.Process]::GetCurrentProcess()
+    $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
+    $self=$null; $refusal=$null
     try {
-        Check $self.Alive 'actual medium self identity held'
-        $parameters=Parameters
-        $parameters.PeerType=$actual
-        $parameters.CallerPid=$self.ProcessId
-        $parameters.CallerStarted=$self.Started
-        $parameters.SessionId=$self.SessionId
-        $parameters.Sid=$self.UserSid
-        $policy=$actual.GetMethod('ValidateControlRequest',[Reflection.BindingFlags]'NonPublic,Static')
-        Check ($null -ne $policy) 'exact native request policy available'
-        $policyArguments=[object[]]@($parameters.BundleRoot,$parameters.Digest,$parameters.Origin,$parameters.Id,
-            $parameters.Control,$parameters.Mode,$parameters.Target,$parameters.CallerPid,$parameters.CallerStarted,
-            $parameters.SessionId,$parameters.Sid)
-        $null=$policy.Invoke($null,$policyArguments)
-        $script:nativePolicyValidated=$true
-        $refusal=$null; $unexpected=$null
-        try { $unexpected=Open-AdministratorControlKernelSession @parameters }
-        catch { $refusal=$_.Exception.GetBaseException() }
-        finally { if ($null -ne $unexpected) { $unexpected.Witness.Dispose() } }
-        Check ($null -eq $unexpected) 'medium never returns a high witness'
-        Check ($refusal -is [InvalidOperationException] -and $refusal.Message -ceq 'browser_peer_unavailable') 'exact native admission refusal after valid policy'
-        $script:mediumAdmissionRefused=$true
-    } finally { $self.Dispose() }
-    Check (-not $self.Alive) 'actual self witness disposed'
+        try { $self=$script:actual::CaptureControlCallerIdentity() } catch { $refusal=$_.Exception.GetBaseException() }
+        if ($script:actualMediumObserved) {
+            Check ($null -eq $refusal -and $null -ne $self -and $self -is [IDisposable]) 'actual medium capture succeeds'
+            Check ($self.ProcessId -eq [uint32]$PID -and $self.ProcessId -eq $process.Id) 'actual capture selects self only'
+            $started=$process.StartTime.ToUniversalTime().Ticks.ToString([Globalization.CultureInfo]::InvariantCulture)
+            Check ($self.Started -cmatch '\A[1-9][0-9]{0,18}\z' -and $self.Started -ceq $started) 'actual capture preserves exact UTC ticks'
+            Check ($self.SessionId -eq $process.SessionId -and $self.SessionId -gt 0 -and $self.UserSid -ceq $identity.User.Value) 'actual capture preserves independent session and SID'
+            Check $self.Alive 'actual medium self identity held'
+            $parameters=Parameters
+            $parameters.PeerType=$script:actual
+            $parameters.CallerPid=$self.ProcessId
+            $parameters.CallerStarted=$self.Started
+            $parameters.SessionId=$self.SessionId
+            $parameters.Sid=$self.UserSid
+            $policy=$script:actual.GetMethod('ValidateControlRequest',[Reflection.BindingFlags]'NonPublic,Static')
+            $arguments=[object[]]@($parameters.BundleRoot,$parameters.Digest,$parameters.Origin,$parameters.Id,
+                $parameters.Control,$parameters.Mode,$parameters.Target,$parameters.CallerPid,$parameters.CallerStarted,
+                $parameters.SessionId,$parameters.Sid)
+            $null=$policy.Invoke($null,$arguments)
+            $refusal=$null; $unexpected=$null
+            try { $unexpected=Open-AdministratorControlKernelSession @parameters }
+            catch { $refusal=$_.Exception.GetBaseException() }
+            finally { if ($null -ne $unexpected) { $unexpected.Witness.Dispose() } }
+            Check ($null -eq $unexpected) 'medium never returns a high witness'
+            Check ($refusal -is [InvalidOperationException] -and $refusal.Message -ceq 'browser_peer_unavailable') 'exact native admission refusal after valid policy'
+            $script:mediumAdmissionRefused=$true
+            $self.Dispose(); Check (-not $self.Alive) 'actual self witness disposed'
+            $self.Dispose(); Check (-not $self.Alive) 'repeated disposal cannot revive actual witness'
+            Check (-not $process.HasExited) 'disposing actual witness never terminates self'
+            $script:actualMediumCallerObserved=$true
+        } else {
+            Check ($null -eq $self) 'non-medium capture never returns a witness'
+            Check ($refusal -is [InvalidOperationException] -and $refusal.Message -ceq 'browser_peer_unavailable') 'non-medium capture refuses exactly'
+            $script:actualCaptureRefusal=$refusal.Message
+            $script:actualNonMediumCaptureRefused=$true
+        }
+    } finally {
+        if ($null -ne $self) { $self.Dispose() }
+        $identity.Dispose(); $process.Dispose()
+    }
 }
 function Hash([string]$File) {
     $hash=[Security.Cryptography.SHA256]::Create()
@@ -188,10 +310,13 @@ function Hash([string]$File) {
     finally { $hash.Dispose() }
 }
 [Console]::WriteLine((ConvertTo-Json -InputObject ([ordered]@{
-    ok=($script:failures.Count -eq 0);scope='typed-projection-with-fake-peer-and-actual-medium-refusal-not-high-proof';
+    ok=($script:failures.Count -eq 0);scope='typed-projection-with-fake-peer-and-token-aware-capture-not-high-proof';
     cases=$script:cases;assertions=$script:checks;failures=@($script:failures.ToArray());
     compilerAclStub=$true;fakeTypedPeerProjections=$true;actualHighPair=$false;protectedAcceptance=$false;
     nativeRequestPolicyValidated=$script:nativePolicyValidated;actualMediumAdmissionRefused=$script:mediumAdmissionRefused;
+    observedToken=$script:observedToken;actualMediumObserved=$script:actualMediumObserved;
+    actualMediumCallerObserved=$script:actualMediumCallerObserved;actualNonMediumCaptureRefused=$script:actualNonMediumCaptureRefused;
+    actualCaptureRefusal=$script:actualCaptureRefusal;
     stagerSha256=(Hash $stager);peerSourceSha256=(Hash $peer)
 }) -Depth 5 -Compress))
 if ($script:failures.Count) { exit 1 }

@@ -114,6 +114,21 @@ const catalog = {
   '此操作已请求。尚未核实实际效果；请查询同一编号的回执。': 'This action was requested. Actual effects are not verified; read the receipt for this same ID.',
   'Windows 请求已取消。仍可查询同一编号的回执。': 'The Windows request was cancelled. The same ID remains available for receipt readback.',
   '请求结果未确认。已保留记录；不会重试或生成新编号。': 'The request outcome is unconfirmed. Records are retained; no retry or new operation ID is generated.',
+  '无法核实管理员操作状态；新连接保持禁用。': 'Administrator operation status could not be verified; new connections stay disabled.',
+  '管理员请求仍在等待处理；新连接保持禁用。': 'Administrator request pending; new connections stay disabled.',
+  '管理员操作结果未确认；新连接保持禁用，不会自动重试。': 'Administrator outcome unknown; new connections stay disabled. No automatic retry.',
+  '管理员操作结果未确认；不会自动重试。': 'Administrator outcome unknown. No automatic retry.',
+  'Windows 授权已取消；操作结果仍未确认，不会自动重试。': 'Windows approval was cancelled; the outcome remains unknown. No automatic retry.',
+  '管理员请求已发送；尚未核实结果。': 'Administrator request sent; the outcome is not verified.',
+  '撤销已记录；尚未确认停止。': 'Revocation recorded; shutdown was not verified.',
+  '上次请求保留暂停；尚未确认停止。': 'The last request preserved Pause; shutdown was not verified.',
+  '上次请求已核实停止；不代表当前连接状态。': 'Shutdown was verified for the last request; this is not current connection status.',
+  '上次启动请求已记录；尚未核实当前就绪。': 'The last startup request was recorded; current readiness is not verified.',
+  '上次请求已被取代；不代表当前连接状态。': 'The last request was superseded; this is not current connection status.',
+  '上次请求被拒绝；不代表当前连接状态。': 'The last request was rejected; this is not current connection status.',
+  '上次请求已阻止再次接收；先前影响仍未确认。': 'The last request was fenced against future admission; earlier effects are not verified.',
+  '上次请求已放弃；未重放启动。': 'The last request was abandoned; startup was not replayed.',
+  '管理员操作仍未解决；新连接保持禁用。': 'An administrator operation remains unresolved; new connections stay disabled.',
   '原生支持或操作记录已变化。未发出请求；请重新核对。': 'Native support or operation records changed. No request was sent; check again.',
   '有未解决的管理员操作。新启动保持禁用；暂停和撤销不受此限制。': 'An administrator operation is unresolved. New startup remains disabled; Pause and Revoke are not blocked by startup.',
   '正在读取此编号的回执。': 'Reading the receipt for this ID.',
@@ -485,6 +500,21 @@ const adminControlOutcomeKeys = {
   cancelled: 'Windows 请求已取消。仍可查询同一编号的回执。',
   unconfirmed: '请求结果未确认。已保留记录；不会重试或生成新编号。',
 };
+const adminControlSummaryOutcomes = {
+  requested: '管理员请求已发送；尚未核实结果。',
+  cancelled: 'Windows 授权已取消；操作结果仍未确认，不会自动重试。',
+  unconfirmed: '管理员操作结果未确认；不会自动重试。',
+};
+const adminControlSummaryStates = {
+  'launch-requested': '上次启动请求已记录；尚未核实当前就绪。',
+  'revocation-recorded': '撤销已记录；尚未确认停止。',
+  'recovered-paused': '上次请求保留暂停；尚未确认停止。',
+  stopped: '上次请求已核实停止；不代表当前连接状态。',
+  superseded: '上次请求已被取代；不代表当前连接状态。',
+  rejected: '上次请求被拒绝；不代表当前连接状态。',
+  fenced: '上次请求已阻止再次接收；先前影响仍未确认。',
+  abandoned: '上次请求已放弃；未重放启动。',
+};
 const adminControlRiskKeys = {
   connect: '连接可能解除本机暂停并请求管理员运行端启动。确认后需要本机 Windows 授权；启动请求不代表已就绪，也不授予对话工具权限。',
   'resume-saved': '重连仅恢复已保存为运行且仍获授权的安装，不会解除暂停或撤销，也不会自动改为连接。确认后需要本机 Windows 授权。',
@@ -498,10 +528,18 @@ let adminControlRecords = [], adminControlJournalRevision = 0, adminControlSelec
 let adminControlSelected = '', adminControlReadBusy = false, adminControlReceipt;
 let adminControlOptionsSignature;
 let adminControlReview, adminControlNote, adminControlStartupUnknown = false;
+let adminControlSummaryNote;
 let adminRevokePreparing = false;
 const adminControlWrites = new Set();
 const adminControlKey = record => record ? record.bundleSha256 + ':' + record.operationId : '';
 const selectedAdminControl = () => adminControlRecords.find(record => adminControlKey(record) === adminControlSelected);
+// Progress polling does not supersede an attempt; changed operation identities or outcomes do.
+const administratorControlSummarySnapshot = () => JSON.stringify([adminControlJournalReady, adminControlRecords.map(record =>
+  [adminControlKey(record), record.control, record.target, record.createdAt, record.state, record.outcome])]);
+function setAdministratorControlNote(note, snapshot = administratorControlSummarySnapshot()) {
+  adminControlNote = note;
+  adminControlSummaryNote = note && snapshot === administratorControlSummarySnapshot() ? { note, snapshot } : undefined;
+}
 function administratorControlReference() {
   if (adminControlSelected !== 'manual') return selectedAdminControl();
   const bundleSha256 = $('administrator-control-reference-bundle').value;
@@ -526,6 +564,7 @@ function observeAdministratorControlJournal(saved, prefer) {
   const journal = administratorControlJournal(saved);
   adminControlJournalReady = Boolean(journal);
   adminControlRecords = journal?.operations ?? [];
+  if (adminControlSummaryNote?.snapshot !== administratorControlSummarySnapshot()) adminControlSummaryNote = undefined;
   const previous = adminControlSelected;
   if (prefer && adminControlRecords.some(record => adminControlKey(record) === prefer)) adminControlSelected = prefer;
   else if (adminControlSelected !== 'manual' && !selectedAdminControl()) adminControlSelected = adminControlKey(adminControlRecords.at(-1));
@@ -663,6 +702,20 @@ function renderAdministratorControls(state) {
         adminControlRecords.some(unsettledAdminControl) ? '有未解决的管理员操作。新启动保持禁用；暂停和撤销不受此限制。' :
           Object.keys(adminControlSupports).length ? '操作支持已核对；不代表当前就绪或对话授权。' : '尚未核对原生操作支持。');
   text('administrator-control-feedback', t(note));
+  const pending = adminControlRecords.find(unsettledAdminControl);
+  const latest = adminControlRecords.at(-1);
+  const attempt = adminControlSummaryNote?.snapshot === administratorControlSummarySnapshot() ? adminControlSummaryNote.note : undefined;
+  const outcome = Object.keys(adminControlOutcomeKeys).find(key => adminControlOutcomeKeys[key] === attempt);
+  const detail = attempt ? adminControlSummaryOutcomes[outcome] ?? attempt : adminControlSummaryStates[latest?.state] ??
+    (latest?.outcome === 'cancelled' ? adminControlSummaryOutcomes.cancelled : undefined);
+  const blocked = adminControlStartupUnknown || pending;
+  const summary = !adminControlJournalReady ? '无法核实管理员操作状态；新连接保持禁用。' :
+    adminControlWrites.size ? '正在等待 Windows 授权或本机接收。尚未核实结果。' :
+      detail ?? (blocked ? pending?.outcome === 'requested' && pending.state !== 'launch-unconfirmed'
+          ? '管理员请求仍在等待处理；新连接保持禁用。' : '管理员操作结果未确认；新连接保持禁用，不会自动重试。' :
+        adminControlSummaryOutcomes[latest?.outcome]);
+  const warning = adminControlJournalReady && !adminControlWrites.size && detail && blocked ? '管理员操作仍未解决；新连接保持禁用。' : undefined;
+  text('administrator-control-summary', [summary, warning].filter(Boolean).map(key => t(key)).join(' '));
   if (adminControlReview && (!administratorControlReviewCurrent(adminControlReview) ||
       (adminControlReview.record ? !sameAdminControl(adminControlReview.record, record) || !canRecoverAdministratorControl(record, state, adminControlReview.kind) :
         !canRequestAdministratorControl(adminControlReview.kind, state)))) closeAdministratorControlReview();
@@ -713,8 +766,9 @@ async function prepareAdministratorRevoke() {
   if (canRequestAdministratorControl('revoke')) return reviewAdministratorControl('revoke');
   if (!canPrepareAdministratorRevoke()) return;
   const revision = adminRevision;
+  const summarySnapshot = administratorControlSummarySnapshot();
   adminRevokePreparing = true;
-  adminControlNote = '正在核对撤销支持。尚未请求撤销。';
+  setAdministratorControlNote('正在核对撤销支持。尚未请求撤销。', summarySnapshot);
   render();
   let timer, expired = false;
   try {
@@ -729,7 +783,7 @@ async function prepareAdministratorRevoke() {
       }
       adminControlSupports.revoke = adminControlKnownRevoke = support;
       adminControlRevokeCached = false;
-      adminControlNote = support.eligible ? undefined : '原生支持已确认；当前不可请求此操作。';
+      setAdministratorControlNote(support.eligible ? undefined : '原生支持已确认；当前不可请求此操作。', summarySnapshot);
       if (canRequestAdministratorControl('revoke') && !$('administrator-pause-dialog').open && !$('administrator-control-dialog').open) {
         reviewAdministratorControl('revoke');
       }
@@ -739,7 +793,7 @@ async function prepareAdministratorRevoke() {
     clearTimeout(timer);
     adminRevokePreparing = false;
     if (adminControlNote === '正在核对撤销支持。尚未请求撤销。') {
-      adminControlNote = revision === adminRevision ? '未能核实撤销支持。未发出撤销请求；可重试检查。' : undefined;
+      setAdministratorControlNote(revision === adminRevision ? '未能核实撤销支持。未发出撤销请求；可重试检查。' : undefined, summarySnapshot);
     }
     render();
   }
@@ -831,8 +885,9 @@ async function confirmAdministratorControl() {
   const revision = adminRevision;
   const busyKey = review.record ? 'recovery' : review.kind;
   const previous = new Set(adminControlRecords.map(adminControlKey));
+  const summarySnapshot = administratorControlSummarySnapshot();
   adminControlWrites.add(busyKey);
-  adminControlNote = undefined;
+  setAdministratorControlNote(undefined);
   render();
   try {
     if (!await adminPausePermitted(revision)) return;
@@ -845,7 +900,7 @@ async function confirmAdministratorControl() {
       if (support?.state === 'supported' && adminControlKnownRevoke?.bundleSha256 !== support.bundleSha256) adminControlKnownRevoke = undefined;
       adminControlSupports = adminControlKnownRevoke ? { revoke: adminControlKnownRevoke } : {};
       adminControlRevokeCached = Boolean(adminControlKnownRevoke);
-      adminControlNote = '原生支持或操作记录已变化。未发出请求；请重新核对。';
+      setAdministratorControlNote('原生支持或操作记录已变化。未发出请求；请重新核对。', summarySnapshot);
       return;
     }
     // Persisted identity belongs to the worker; the page never manufactures or replays an ID.
@@ -869,7 +924,7 @@ async function confirmAdministratorControl() {
       adminControlReceipt = undefined;
       if (!review.record && review.kind !== 'revoke') adminControlStartupUnknown = false;
     }
-    adminControlNote = adminControlOutcomeKeys[matching ? reply.outcome : 'unconfirmed'];
+    setAdministratorControlNote(adminControlOutcomeKeys[matching ? reply.outcome : 'unconfirmed'], summarySnapshot);
     // A new startup needs a fresh explicit support check, but Revoke stays available during verification.
     if (!review.record) { delete adminControlSupports.connect; delete adminControlSupports['resume-saved']; }
   } finally { adminControlWrites.delete(busyKey); render(); }

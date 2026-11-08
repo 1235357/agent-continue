@@ -197,6 +197,289 @@ async function capture(page, name) {
 try {
   for (const width of [1100, 320]) {
     for (const uiLanguage of ['en', 'zh_CN']) {
+      for (const outcome of ['requested', 'cancelled', 'unconfirmed', 'predispatch']) {
+        const { page, context, errors, network } = await createPage({ granted: true, query: '?mode=browser-managed', width, uiLanguage });
+        try {
+          await page.evaluate(outcome => {
+            const mock = __deviceMock, original = chrome.runtime.sendMessage;
+            mock.summarySubmissions = [];
+            mock.summaryChanged = false;
+            chrome.runtime.sendMessage = async message => {
+              if (message.type === 'WINDOWS_ADMINISTRATOR_CONTROL_SUPPORT_V1') return {
+                control: message.control, state: 'supported', bundleSha256: 'e'.repeat(64),
+                target: message.control === 'revoke' ? null : 'f'.repeat(32) + ':idle',
+                ownerState: mock.summaryChanged && message.control === 'connect' ? 'paused' : 'running', eligible: true,
+              };
+              if (message.type === 'WINDOWS_ADMINISTRATOR_CONTROL_RECONCILE_V1') {
+                mock.summarySubmissions.push(structuredClone(message));
+                if (mock.summaryHold) await new Promise(resolve => { mock.releaseSummary = resolve; });
+                return { bundleSha256: message.bundleSha256, operationId: message.operationId, control: message.control,
+                  outcome: mock.summaryReplyOutcome ?? outcome };
+              }
+              return original(message);
+            };
+            return mock.save({ windowsAdministratorControlJournalV1: { version: 1, operations: [
+              { bundleSha256: 'e'.repeat(64), operationId: 'a'.repeat(32), control: 'connect', target: 'f'.repeat(32) + ':idle',
+                outcome: 'requested', state: 'reserved', progress: null, createdAt: Date.now() - 2000 },
+              { bundleSha256: 'e'.repeat(64), operationId: 'b'.repeat(32), control: 'revoke', target: null,
+                outcome: 'requested', state: ['unconfirmed', 'predispatch'].includes(outcome) ? 'revocation-recorded' : 'stopped',
+                progress: null, createdAt: Date.now() - 1000 },
+            ] } });
+          }, outcome);
+          await openAdvanced(page);
+          await page.locator('#administrator-control-operation').selectOption('e'.repeat(64) + ':' + 'a'.repeat(32));
+          await page.locator('#administrator-control-support-check').click();
+          await page.waitForFunction(() => !document.querySelector('#administrator-control-recover').disabled);
+          await page.locator('#administrator-control-recover').click();
+          if (outcome === 'predispatch') await page.evaluate(() => { __deviceMock.summaryChanged = true; });
+          await page.locator('#administrator-control-confirm').click();
+          const advancedNotes = {
+            requested: ['This action was requested. Actual effects are not verified; read the receipt for this same ID.', '此操作已请求。尚未核实实际效果；请查询同一编号的回执。'],
+            cancelled: ['The Windows request was cancelled. The same ID remains available for receipt readback.', 'Windows 请求已取消。仍可查询同一编号的回执。'],
+            unconfirmed: ['The request outcome is unconfirmed. Records are retained; no retry or new operation ID is generated.', '请求结果未确认。已保留记录；不会重试或生成新编号。'],
+            predispatch: ['Native support or operation records changed. No request was sent; check again.', '原生支持或操作记录已变化。未发出请求；请重新核对。'],
+          };
+          await page.waitForFunction(expected => document.querySelector('#administrator-control-feedback').textContent === expected,
+            advancedNotes[outcome][uiLanguage === 'en' ? 0 : 1]);
+          await page.locator('#device-advanced > summary').click();
+          const expected = {
+            requested: [/request sent.*not verified/i, /请求已发送.*未核实/],
+            cancelled: [/approval was cancelled.*unknown.*no automatic retry/i, /授权已取消.*未确认.*不会自动重试/],
+            unconfirmed: [/outcome unknown.*no automatic retry/i, /结果未确认.*不会自动重试/],
+            predispatch: [/changed.*no request was sent/i, /已变化.*未发出请求/],
+          }[outcome][uiLanguage === 'en' ? 0 : 1];
+          const summary = page.locator('#administrator-control-summary');
+          assert.match(await summary.innerText(), expected, `${outcome} must not be masked by an older terminal record`);
+          assert.doesNotMatch(await summary.innerText(), /shutdown was verified|revocation recorded|已核实停止|撤销已记录/i);
+          await capture(page, `windows-admin-attempt-${outcome}-${uiLanguage}-${width}.png`);
+          const attemptSummary = await summary.innerText();
+          await page.evaluate(() => __deviceMock.save({ windowsAdministratorControlJournalV1:
+            structuredClone(__deviceMock.data.windowsAdministratorControlJournalV1) }));
+          assert.equal(await summary.innerText(), attemptSummary, 'identical journal reads retain the latest attempt');
+          await page.evaluate(() => {
+            const journal = structuredClone(__deviceMock.data.windowsAdministratorControlJournalV1);
+            journal.operations[0].progress = { phase: 'verifying-full', verifiedFiles: 2, totalFiles: 4 };
+            return __deviceMock.save({ windowsAdministratorControlJournalV1: journal });
+          });
+          assert.equal(await summary.innerText(), attemptSummary, 'progress alone does not supersede an attempt outcome');
+          await page.evaluate(outcome => {
+            const journal = structuredClone(__deviceMock.data.windowsAdministratorControlJournalV1);
+            if (['unconfirmed', 'predispatch'].includes(outcome)) journal.operations[1].state = 'stopped';
+            else {
+              journal.operations[0].state = 'fenced';
+              journal.operations.push({ ...journal.operations[0], operationId: 'c'.repeat(32), state: 'launch-requested',
+                progress: null, createdAt: Date.now() });
+            }
+            return __deviceMock.save({ windowsAdministratorControlJournalV1: journal });
+          }, outcome);
+          assert.match(await summary.innerText(), uiLanguage === 'en'
+            ? ['unconfirmed', 'predispatch'].includes(outcome) ? /shutdown.*verified.*last request/i : /startup request.*recorded.*readiness.*not verified/i
+            : ['unconfirmed', 'predispatch'].includes(outcome) ? /上次请求.*已核实停止/ : /启动请求.*记录.*未.*就绪/);
+          assert.doesNotMatch(await summary.innerText(), /approval was cancelled|request sent|no request was sent|授权已取消|请求已发送|未发出请求/i,
+            'new records or terminal refinements supersede transient attempt notes');
+          const latestSummary = await summary.innerText();
+          await openAdvanced(page);
+          assert.equal(await page.locator('#administrator-control-id').innerText(), 'a'.repeat(32), 'the older selection is retained');
+          await page.locator('#administrator-control-operation').selectOption('e'.repeat(64) + ':' + 'b'.repeat(32));
+          assert.equal(await summary.innerText(), latestSummary, 'selection does not change the latest summary');
+          assert.equal(await page.locator('#administrator-pause').isDisabled(), false);
+          const messages = await page.evaluate(() => __deviceMock.summarySubmissions);
+          assert.deepEqual(messages, outcome === 'predispatch' ? [] : [{ type: 'WINDOWS_ADMINISTRATOR_CONTROL_RECONCILE_V1',
+            bundleSha256: 'e'.repeat(64), operationId: 'a'.repeat(32), control: 'connect' }]);
+          if (outcome === 'unconfirmed') {
+            await page.locator('#administrator-control-operation').selectOption('e'.repeat(64) + ':' + 'a'.repeat(32));
+            await page.evaluate(() => { __deviceMock.summaryHold = true; __deviceMock.summaryReplyOutcome = 'cancelled'; });
+            await page.locator('#administrator-control-recover').click();
+            await page.locator('#administrator-control-confirm').click();
+            await page.waitForFunction(() => typeof __deviceMock.releaseSummary === 'function');
+            await page.evaluate(async () => {
+              const journal = structuredClone(__deviceMock.data.windowsAdministratorControlJournalV1);
+              journal.operations[0].state = 'fenced';
+              journal.operations.push({ ...journal.operations[0], operationId: 'c'.repeat(32), state: 'launch-requested',
+                progress: null, createdAt: Date.now() });
+              await __deviceMock.save({ windowsAdministratorControlJournalV1: journal });
+              __deviceMock.releaseSummary();
+            });
+            await page.waitForFunction(expected => document.querySelector('#administrator-control-feedback').textContent === expected,
+              advancedNotes.cancelled[uiLanguage === 'en' ? 0 : 1]);
+            assert.match(await summary.innerText(), uiLanguage === 'en'
+              ? /startup request.*recorded.*readiness.*not verified/i : /启动请求.*记录.*未.*就绪/);
+            assert.doesNotMatch(await summary.innerText(), /cancelled|已取消/i, 'a late old reply cannot rebind its note to a newer snapshot');
+            assert.equal(await page.evaluate(() => __deviceMock.summarySubmissions.length), 2, 'only the two explicit same-ID recovery clicks were sent');
+          }
+          assert.deepEqual(await page.evaluate(() => ({ calls: __deviceMock.calls, scheduler: __deviceMock.schedulerCalls,
+            writes: __deviceMock.writes, permissions: __deviceMock.permissionRequests })),
+          { calls: [], scheduler: [], writes: [], permissions: [] });
+          await page.locator('#device-advanced > summary').click();
+          assert.doesNotMatch(await page.locator('main').innerText(), /receipt|operation ID|saved operation progress|回执|操作编号|已存操作进度/i);
+          await layout(page);
+          assert.deepEqual(errors, []);
+          assert.deepEqual(network, []);
+          pass(`latest ${outcome} attempt and journal supersession at ${width}px (${uiLanguage})`);
+        } finally { await context.close(); }
+      }
+    }
+  }
+  for (const uiLanguage of ['en', 'zh_CN']) {
+    const { page, context, errors, network } = await createPage({ granted: true, query: '?mode=browser-managed', width: 320, uiLanguage });
+    try {
+      await page.evaluate(() => {
+        const mock = __deviceMock, original = chrome.runtime.sendMessage;
+        mock.summarySubmissions = [];
+        chrome.runtime.sendMessage = async message => {
+          if (message.type === 'WINDOWS_ADMINISTRATOR_CONTROL_SUPPORT_V1') return {
+            control: message.control, state: 'supported', bundleSha256: 'e'.repeat(64), target: null, ownerState: 'paused', eligible: true,
+          };
+          if (message.type === 'WINDOWS_ADMINISTRATOR_CONTROL_V1') {
+            mock.summarySubmissions.push(structuredClone(message));
+            return null;
+          }
+          return original(message);
+        };
+        return mock.save({ windowsAdministratorControlJournalV1: { version: 1, operations: [
+          { bundleSha256: 'e'.repeat(64), operationId: 'a'.repeat(32), control: 'revoke', target: null,
+            outcome: 'requested', state: 'stopped', progress: null, createdAt: Date.now() - 1000 },
+        ] } });
+      });
+      await page.locator('#administrator-revoke').click();
+      await page.waitForFunction(() => document.querySelector('#administrator-control-dialog').open);
+      await page.locator('#administrator-control-confirm').click();
+      await page.waitForFunction(() => __deviceMock.summarySubmissions.length === 1 &&
+        /outcome is unconfirmed|请求结果未确认/.test(document.querySelector('#administrator-control-feedback').textContent));
+      assert.match(await page.locator('#administrator-control-summary').innerText(), uiLanguage === 'en'
+        ? /outcome unknown.*no automatic retry/i : /结果未确认.*不会自动重试/);
+      assert.doesNotMatch(await page.locator('#administrator-control-summary').innerText(), /shutdown was verified|已核实停止/i);
+      assert.equal(await page.locator('#device-advanced').evaluate(element => element.open), false);
+      await capture(page, `windows-admin-revoke-unconfirmed-${uiLanguage}-320.png`);
+      assert.deepEqual(await page.evaluate(() => __deviceMock.summarySubmissions),
+        [{ type: 'WINDOWS_ADMINISTRATOR_CONTROL_V1', control: 'revoke', bundleSha256: 'e'.repeat(64) }]);
+      assert.equal(await page.evaluate(() => __deviceMock.data.windowsAdministratorControlJournalV1.operations.length), 1);
+      assert.deepEqual(await page.evaluate(() => ({ calls: __deviceMock.calls, scheduler: __deviceMock.schedulerCalls,
+        writes: __deviceMock.writes, permissions: __deviceMock.permissionRequests })),
+      { calls: [], scheduler: [], writes: [], permissions: [] });
+      await layout(page);
+      assert.deepEqual(errors, []);
+      assert.deepEqual(network, []);
+      pass(`a fresh unconfirmed Revoke without a new journal row supersedes old stop evidence (${uiLanguage})`);
+    } finally { await context.close(); }
+  }
+  for (const uiLanguage of ['en', 'zh_CN']) {
+    const { page, context, errors, network } = await createPage({ granted: true, query: '?mode=browser-managed', uiLanguage });
+    try {
+      const states = [
+        ['launch-requested', /startup request.*recorded.*readiness.*not verified/i, /启动请求.*记录.*未.*就绪/],
+        ['revocation-recorded', /revocation.*recorded.*shutdown.*not verified/i, /撤销已记录.*未确认停止/],
+        ['stopped', /shutdown.*verified.*last request/i, /上次请求.*已核实停止/],
+        ['superseded', /last request.*superseded.*not current/i, /上次请求.*取代.*不代表当前/],
+        ['rejected', /last request.*rejected.*not current/i, /上次请求.*拒绝.*不代表当前/],
+        ['fenced', /last request.*fenced.*earlier effects.*not verified/i, /上次请求.*阻止再次接收.*先前影响.*未确认/],
+        ['abandoned', /last request.*abandoned.*not replayed/i, /上次请求.*放弃.*未重放/],
+        ['recovered-paused', /last request.*pause.*shutdown.*not verified/i, /上次请求.*暂停.*未确认停止/],
+      ];
+      for (const control of ['connect', 'resume-saved', 'revoke']) {
+        for (const [state, en, zh] of states) {
+          if (control === 'revoke' ? ['launch-requested', 'recovered-paused'].includes(state) :
+            ['revocation-recorded', 'stopped'].includes(state)) continue;
+          const record = { bundleSha256: 'e'.repeat(64), operationId: 'b'.repeat(32), control,
+            target: control === 'revoke' ? null : 'f'.repeat(32) + ':idle', outcome: 'requested', state,
+            progress: null, createdAt: Date.now() - 1000 };
+          await page.evaluate(record => __deviceMock.save({ windowsAdministratorControlJournalV1: { version: 1, operations: [record] } }), record);
+          await page.reload();
+          await page.waitForFunction(() => !document.querySelector('#language')?.disabled);
+          await page.locator('#account-administrator').check();
+          assert.equal(await page.locator('#device-advanced').evaluate(element => element.open), false);
+          assert.match(await page.locator('#administrator-control-summary').innerText(), uiLanguage === 'en' ? en : zh,
+            `${control}/${state} has a truthful terminal summary after reopening`);
+          const visible = await page.locator('main').innerText();
+          assert.doesNotMatch(visible, /receipt|operation ID|saved operation progress|回执|操作编号|已存操作进度/i);
+          assert.equal(visible.includes(record.operationId) || visible.includes(record.bundleSha256), false);
+          for (const width of [1100, 320]) {
+            await page.setViewportSize({ width, height: 820 });
+            await layout(page);
+            if (control === 'connect' && ['launch-requested', 'rejected'].includes(state) &&
+                (uiLanguage === 'en' && width === 1100 || uiLanguage === 'zh_CN' && width === 320)) {
+              await capture(page, `windows-admin-terminal-${state}-${uiLanguage}-${width}.png`);
+            }
+          }
+          assert.deepEqual(await page.evaluate(() => ({ calls: __deviceMock.calls, scheduler: __deviceMock.schedulerCalls,
+            writes: __deviceMock.writes, permissions: __deviceMock.permissionRequests })),
+          { calls: [], scheduler: [], writes: [], permissions: [] });
+        }
+      }
+      assert.deepEqual(errors, []);
+      assert.deepEqual(network, []);
+      pass(`all valid administrator terminal states survive reopening (${uiLanguage})`);
+    } finally { await context.close(); }
+  }
+  for (const width of [1100, 320]) {
+    for (const uiLanguage of ['en', 'zh_CN']) {
+      const fixture = await createPage({ granted: true, query: '?mode=browser-managed', width, uiLanguage });
+      const { page, context } = fixture;
+      try {
+        const cases = [
+          ['connect', 'reserved', 'requested', /pending.*new connections.*disabled/i, /等待.*新连接.*禁用/],
+          ['connect', 'unconfirmed', 'cancelled', /cancelled.*unknown.*no automatic retry/i, /已取消.*未确认.*不会自动重试/],
+          ['connect', 'launch-unconfirmed', 'unconfirmed', /unknown.*new connections.*disabled/i, /未确认.*新连接.*禁用/],
+          ['connect', 'recovered-paused', 'requested', /last request.*pause.*shutdown.*not verified/i, /上次请求.*暂停.*未确认停止/],
+          ['revoke', 'revocation-recorded', 'requested', /revocation.*recorded.*shutdown.*not verified/i, /撤销已记录.*未确认停止/],
+          ['revoke', 'stopped', 'requested', /shutdown.*verified.*last request/i, /上次请求.*已核实停止/],
+        ];
+        for (const [index, [control, state, outcome, en, zh]] of cases.entries()) {
+          const record = { bundleSha256: 'e'.repeat(64), operationId: (index + 1).toString(16).repeat(32), control,
+            target: control === 'revoke' ? null : 'f'.repeat(32) + ':idle', outcome, state,
+            progress: state === 'reserved' ? { phase: 'verifying-full', verifiedFiles: 2, totalFiles: 4 } : null,
+            createdAt: Date.now() - 1000 };
+          await page.evaluate(record => __deviceMock.save({ windowsAdministratorControlJournalV1: { version: 1, operations: [record] } }), record);
+          assert.equal(await page.locator('#device-advanced').evaluate(element => element.open), false);
+          for (const id of ['administrator-control-feedback', 'administrator-control-progress', 'administrator-control-id']) {
+            assert.equal(await page.locator('#' + id).isVisible(), false, id + ' stays in closed Advanced');
+          }
+          const summary = page.locator('#administrator-control-summary');
+          assert.equal(await summary.isVisible(), true);
+          assert.equal(await summary.getAttribute('role'), 'status');
+          assert.equal(await summary.getAttribute('aria-live'), 'polite');
+          assert.match(await summary.innerText(), uiLanguage === 'en' ? en : zh);
+          const visible = await page.locator('main').innerText();
+          assert.doesNotMatch(visible, /receipt|operation ID|saved operation progress|回执|操作编号|已存操作进度/i);
+          assert.equal(visible.includes(record.operationId) || visible.includes(record.bundleSha256), false);
+          assert.equal(await page.locator('#administrator-guided-connect').isDisabled(),
+            ['reserved', 'unconfirmed', 'launch-unconfirmed'].includes(state), 'existing terminal admission semantics are unchanged');
+          await openAdvanced(page);
+          assert.equal(await page.locator('#administrator-control-id').innerText(), record.operationId);
+          assert.equal(await page.locator('#administrator-control-bundle').innerText(), record.bundleSha256);
+          assert.notEqual(await page.locator('#administrator-control-outcome').innerText(), '');
+          assert.notEqual(await page.locator('#administrator-control-state').innerText(), '');
+          if (state === 'reserved') assert.match(await page.locator('#administrator-control-progress').innerText(), /2 \/ 4/);
+          if (outcome !== 'unconfirmed') assert.match(await page.locator('#administrator-control-outcome').innerText(), /receipt|回执/i);
+          await page.locator('#device-advanced > summary').click();
+        }
+        await page.evaluate(() => __deviceMock.save({ windowsAdministratorControlJournalV1: { version: 1, operations: [
+          { bundleSha256: 'e'.repeat(64), operationId: '6'.repeat(32), control: 'revoke', target: null,
+            outcome: 'requested', state: 'stopped', progress: null, createdAt: Date.now() - 2000 },
+          { bundleSha256: 'e'.repeat(64), operationId: '7'.repeat(32), control: 'revoke', target: null,
+            outcome: 'requested', state: 'revocation-recorded', progress: null, createdAt: Date.now() - 1000 },
+        ] } }));
+        assert.match(await page.locator('#administrator-control-summary').innerText(), uiLanguage === 'en'
+          ? /revocation.*recorded.*shutdown.*not verified/i : /撤销已记录.*未确认停止/);
+        assert.equal(await page.locator('#administrator-control-id').textContent(), '6'.repeat(32), 'Advanced retains its original selected identity');
+        await page.evaluate(() => __deviceMock.save({ windowsAdministratorControlJournalV1: { version: 1, operations: 'invalid' } }));
+        assert.match(await page.locator('#administrator-control-summary').innerText(), uiLanguage === 'en'
+          ? /could not be verified.*new connections.*disabled/i : /无法核实.*新连接.*禁用/);
+        assert.equal(await page.locator('#administrator-guided-connect').isDisabled(), true);
+        assert.deepEqual(await page.evaluate(() => {
+          const { calls, schedulerCalls, adminCalls, pauseCalls, reconcileCalls, permissionRequests, writes } = __deviceMock;
+          return { calls, schedulerCalls, adminCalls, pauseCalls, reconcileCalls, permissionRequests, writes };
+        }), { calls: [], schedulerCalls: [], adminCalls: [], pauseCalls: [], reconcileCalls: [], permissionRequests: [], writes: [] });
+        assert.deepEqual(fixture.errors, []);
+        assert.deepEqual(fixture.network, []);
+        await layout(page);
+        await capture(page, `windows-admin-summary-${uiLanguage}-${width}.png`);
+        pass(`concise administrator warnings and exact Advanced details at ${width}px (${uiLanguage})`);
+      } finally { await context.close(); }
+    }
+  }
+  for (const width of [1100, 320]) {
+    for (const uiLanguage of ['en', 'zh_CN']) {
       const { page, context, errors, network } = await createPage({ granted: true, query: '?mode=browser-managed', width, uiLanguage });
       try {
         const advanced = page.locator('#device-advanced');

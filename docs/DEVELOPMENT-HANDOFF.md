@@ -2,6 +2,50 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### ACL Gate Passed; Later Control Fixtures Classified (Checkpoint79)
+
+Native43 run42481716562, attempt2 Windows job128736015717, finished failed in
+6m36s on18fd15a. The protected bundle/ACL step passed in35s: settled-history
+readback, fresh immutable paused state and clean Node import fencing all emitted
+PASS. This establishes the token-default-owner fixture correction and supersedes
+checkpoint78's pending ACL result. The earlier uninstall negative case also
+passed without changing its8-second child budget. It does not establish that
+the whole native workflow passed.
+
+The later control-ledger step has four failures: a60-second scratch matrix
+timeout, two actual-medium-token assumptions on an elevated runner, and an
+observation helper returning unconfirmed around its3,200ms executor deadline.
+Saved raw failure section:
+.artifacts/ordinary-chat-acceptance-20261108/native43-attempt2-control-failures.txt.
+Read-only source review traced the two identity cases to deliberate production
+refusal of elevated/admin callers before medium capture. Tests must classify the
+actual token and assert the corresponding positive capture or exact refusal,
+without claiming unavailable medium evidence. The two timeouts still need fixed
+phase/completion diagnostics; do not raise budgets, skip cases or weaken guards.
+
+The Devices default-summary work is presentation-only. Independent review found
+that old terminal history could mask a newer unconfirmed attempt, and unmapped
+terminal states could show a blank or stale summary. Both were reproduced and
+corrected.65 rendered checks passed across English/Chinese and1100px/320px;
+the parent inspected actual fixture screenshots. Exact IDs and detailed progress
+remain in closed Advanced; a transient attempt cannot overwrite a newer journal
+snapshot. Parent71 packaging/site/release tests passed48.965s; nine pure token
+summary/diagnostic checks and four PS5.1 parse-only checks passed. Independent
+diagnostic review found no actionable issues and checked six additional mocked
+executor failures. These are not native fixture executions. Full final product
+regression and the next hosted native result remain separately tracked.
+
+Token-aware fixtures now distinguish the C# peer's valid-SID capture contract
+from the narrower PS caller helper, preserving exact refusal and lifetime checks.
+The3,200ms observation helper must actually complete before either positive or
+negative semantic assertions can pass; fixed markers expose swallowed executor
+failure. Ledger timeouts retain only bounded whitelisted phases/counts, without
+raw paths or errors. Original budgets, matrices and production code are intact.
+No installed preview or runtime has changed; the exact test installation remains revoked pending the
+existing unanswered same-installation reauthorization. In-app Store readback
+still shows Draft3.0.0 and Published2.1.0. No password/key file was read, no
+3.0.0 Release was published and no Store review submission was made.
+
 ### Inherited Fixture Owner Cause Identified (Checkpoint78)
 
 Native42 run42481191782 on c819ac1 proves state creation completed. Its actual

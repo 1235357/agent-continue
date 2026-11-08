@@ -1,5 +1,43 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Later Native43 Control Failures (Checkpoint79)
+
+- Attempt2 of run42481716562 (Windows job128736015717,18fd15a) failed in6m36s,
+  but protected bundle/ACL step13 passed in35s. Actual raw PASS lines cover
+  settled history, fresh paused immutable state and Node import isolation.
+  The previous owner-model correction is now hosted-step verified, not merely
+  source-verified; the full native workflow is still failed.
+- The earlier uninstall negative test passed in attempt2 without changing the
+  per-child8s deadline. No further same-source rerun was requested.
+- Later step17 failed a60s disk-backed6,144-case ledger matrix, two fixtures
+  expecting successful medium-token capture in an elevated runner, and a virtual
+  receipt helper at about3,233ms with an unchanged3,200ms subprocess deadline.
+  The identity cases reach intentional production refusal before capture;
+  token-aware tests must execute the appropriate assertions, not skip them.
+  Timeout causes remain unlocalized until bounded executor/phase evidence is
+  available. Evidence:
+  .artifacts/ordinary-chat-acceptance-20261108/native43-attempt2-control-failures.txt.
+- Devices presentation passed65 rendered checks after fixing two independent
+  findings: historical terminal evidence masking a newer attempt, and blank or
+  stale summaries for other terminal states after reopening. The parent visually
+  inspected English1100px and Chinese320px fixture screenshots. IDs, counters
+  and detailed feedback stay in closed Advanced; Pause/Revoke/control admission
+  are unchanged. Parent71 packaging/site/release tests passed48.965s, nine pure
+  token-summary/diagnostic checks and four PS5.1 parse-only checks passed.
+- Token fixtures now assert actual medium capture/lifetime or exact non-medium
+  refusal. The PS helper does not inherit the C# peer's selected-SID eligibility
+  condition. Both continue to report unavailable positive evidence as false.
+  The bridge asserts child completion outside the production catch, preventing
+  a timed-out negative fixture from masquerading as semantic success. Ledger
+  failures retain bounded fixed phases/counts. No production guard, deadline,
+  matrix size or cleanup rule changed; actual native rerun remains required.
+  Independent diagnostic review found no actionable issue and exercised six
+  mocked executor failures; these are not native/ACL executions. Full final
+  product regression is still tracked separately from these scoped results.
+- In-app Store readback remains Draft3.0.0 and Published2.1.0. Test installation
+  remains revoked. Reauthorization, whole-browser recovery, final-artifact
+  hosted gates, GitHub Release and Store review submission remain open.
+
 ## Confirmed Inherited Fixture Owner Mismatch (Checkpoint78)
 
 - Native42 run42481191782 on c819ac1 emitted state-write-complete, then located

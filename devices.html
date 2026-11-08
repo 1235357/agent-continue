@@ -62,8 +62,7 @@
       </div>
       <p id="administrator-pause-request-feedback" role="status" aria-live="polite" hidden></p>
       <p id="administrator-guided-feedback" class="feedback" role="status" aria-live="polite"></p>
-      <p id="administrator-control-feedback" class="feedback" role="status" aria-live="polite"></p>
-      <p id="administrator-control-progress" class="feedback" role="status" aria-live="polite"></p>
+      <p id="administrator-control-summary" class="feedback" role="status" aria-live="polite" aria-atomic="true"></p>
       <div class="actions secondary-actions">
         <button type="button" id="administrator-revoke" aria-haspopup="dialog" data-i18n="撤销此安装的管理员授权" disabled>Revoke administrator authorization for this installation</button>
       </div>
@@ -99,6 +98,8 @@
       </section>
       <section id="administrator-control-panel" aria-labelledby="administrator-advanced-title" hidden>
         <h2 id="administrator-advanced-title" data-i18n="管理员操作记录">Administrator operation record</h2>
+        <p id="administrator-control-feedback" class="feedback" role="status" aria-live="polite"></p>
+        <p id="administrator-control-progress" class="feedback" role="status" aria-live="polite"></p>
         <div class="actions">
           <button type="button" id="administrator-control-support-check" data-i18n="核对管理员操作支持" disabled>Check administrator control support</button>
           <button type="button" id="administrator-connect" aria-haspopup="dialog" data-i18n="连接管理员运行端" disabled>Connect administrator runtime</button>

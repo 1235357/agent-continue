@@ -131,7 +131,7 @@ test('only account-owned status and actions are grouped for visibility; permissi
 test('administrator guided connect, status, pause, revoke and live feedback stay primary', () => {
   for (const id of ['administrator-guided-connect', 'administrator-check', 'administrator-pause',
     'administrator-pause-request-feedback', 'administrator-guided-feedback', 'administrator-status',
-    'administrator-control-feedback', 'administrator-control-progress', 'administrator-revoke']) {
+    'administrator-control-summary', 'administrator-revoke']) {
     const element = byId(id);
     assert.ok(inside(element, 'administrator-controls'), `${id} stays in the administrator scope`);
     if (id !== 'administrator-pause-request-feedback') primary(element);
@@ -143,10 +143,13 @@ test('administrator guided connect, status, pause, revoke and live feedback stay
   const connect = byId('administrator-guided-connect');
   assert.equal(connect.attrs.type, 'button');
   assert.equal(connect.attrs['data-i18n'], '连接管理员运行端');
-  const feedback = byId('administrator-guided-feedback');
-  assert.equal(feedback.attrs.role, 'status');
-  assert.equal(feedback.attrs['aria-live'], 'polite');
-  assert.equal(Object.hasOwn(feedback.attrs, 'hidden'), false);
+  for (const id of ['administrator-guided-feedback', 'administrator-control-summary']) {
+    const feedback = byId(id);
+    assert.equal(feedback.attrs.role, 'status');
+    assert.equal(feedback.attrs['aria-live'], 'polite');
+    assert.equal(Object.hasOwn(feedback.attrs, 'hidden'), false);
+  }
+  assert.equal(byId('administrator-control-summary').attrs['aria-atomic'], 'true');
 });
 
 test('receipts, manual administrator controls and command setup are advanced only', () => {
@@ -154,6 +157,7 @@ test('receipts, manual administrator controls and command setup are advanced onl
     'administrator-control-support-check', 'administrator-connect', 'administrator-reconnect',
     'administrator-connect-support', 'administrator-reconnect-support', 'administrator-revoke-support',
     'administrator-control-operation', 'administrator-control-reference-fields', 'administrator-control-details',
+    'administrator-control-feedback', 'administrator-control-progress',
     'administrator-control-journal-check', 'administrator-control-receipt-check',
     'administrator-control-recover', 'administrator-control-fence', 'administrator-pause-receipt',
     'administrator-pause-feedback', 'administrator-pause-reconcile', 'administrator-pause-reconcile-feedback', 'prepared-controls', 'prepared-id', 'prepared-digest',

@@ -4,6 +4,14 @@ param()
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
+function Write-LedgerPhase(
+    [ValidateSet('entry','source-extracted','canonical-bytes','matrix-connect','matrix-resume-saved','matrix-revoke',
+        'matrix-complete','evidence-guards','publication-connect','publication-resume-saved','publication-revoke',
+        'publication-complete','input-guards','execution-guards','complete','cleanup')][string]$Phase,
+    [ValidateRange(0,6144)][int]$Count) {
+    [Console]::WriteLine(('DIAG control-ledger phase=' + $Phase + ' count=' + $Count))
+}
+Write-LedgerPhase 'entry' 0
 if ($PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -ne 1) {
     throw 'control_ledger_fixture_requires_windows_powershell_5_1'
 }
@@ -35,6 +43,7 @@ if ($missing.Count) { throw ('control_ledger_missing_functions: ' + ($missing -j
 foreach ($name in $names) {
     if ($definitions.ContainsKey($name)) { . ([scriptblock]::Create($definitions[$name].Extent.Text)) }
 }
+Write-LedgerPhase 'source-extracted' $definitions.Count
 
 $script:Assertions = 0
 $script:MatrixCases = 0
@@ -196,6 +205,7 @@ function Assert-PublishRefused([string]$Directory,[string]$Control,[string]$Stat
 }
 
 try {
+    Write-LedgerPhase 'canonical-bytes' 0
     foreach ($control in $controls) {
         foreach ($state in $states) {
             $legalForControl = $state -cin @('reserved','fenced') -or
@@ -212,10 +222,17 @@ try {
         }
     }
     Write-Output 'PASS canonical version/digest/ID/control/state bytes, LF, and action-specific enums'
+    Write-LedgerPhase 'canonical-bytes' ($controls.Count * $states.Count)
 
     # Gray-code enumeration changes one file at a time; expectations come from
     # the contract table above, never from the implementation's output.
     foreach ($control in $controls) {
+        $matrixPhase = switch ($control) {
+            'connect' { 'matrix-connect' }
+            'resume-saved' { 'matrix-resume-saved' }
+            'revoke' { 'matrix-revoke' }
+        }
+        Write-LedgerPhase $matrixPhase $script:MatrixCases
         $directory = New-FixtureDirectory
         $legal = Get-LegalReadStates $control
         $previous = 0
@@ -235,10 +252,13 @@ try {
             Assert-Receipt $directory $control $expected ($control + ' mask=' + $mask)
             $script:MatrixCases++
             $previous = $mask
+            if (($script:MatrixCases % 256) -eq 0) { Write-LedgerPhase $matrixPhase $script:MatrixCases }
         }
     }
     Write-Output ('PASS exhaustive read-state matrix: ' + $script:MatrixCases + ' combinations')
+    Write-LedgerPhase 'matrix-complete' $script:MatrixCases
 
+    Write-LedgerPhase 'evidence-guards' 0
     foreach ($control in $controls) {
         $directory = New-FixtureDirectory
         Assert-Receipt $directory $control 'unconfirmed' 'empty directory'
@@ -299,10 +319,17 @@ try {
     $null = [IO.Directory]::CreateDirectory((Get-ReceiptPath $directory 'reserved'))
     Assert-Receipt $directory 'connect' 'unconfirmed' 'directory cannot masquerade as record'
     Write-Output 'PASS corrupt/noncanonical/schema/identity/action/ACL/inaccessible evidence fails closed without repair'
+    Write-LedgerPhase 'evidence-guards' $controls.Count
 
     # Each row is a valid ordered prefix and its complete set of new appendable
     # states. Existing exact records may be read back or refused, never rewritten.
     foreach ($control in $controls) {
+        $publicationPhase = switch ($control) {
+            'connect' { 'publication-connect' }
+            'resume-saved' { 'publication-resume-saved' }
+            'revoke' { 'publication-revoke' }
+        }
+        Write-LedgerPhase $publicationPhase $script:PublicationCases
         $rows = @(
             @{History=@();Next=@('reserved','fenced')},
             @{History=@('fenced');Next=@()}
@@ -347,8 +374,10 @@ try {
                     Assert-PublishRefused $directory $control $state ($control + ': illegal/reversed append ' + ($row.History -join ',') + ' -> ' + $state)
                 }
                 $script:PublicationCases++
+                if (($script:PublicationCases % 33) -eq 0) { Write-LedgerPhase $publicationPhase $script:PublicationCases }
             }
         }
+        Write-LedgerPhase $publicationPhase $script:PublicationCases
     }
     foreach ($control in $controls) {
         $directory = New-FixtureDirectory
@@ -360,7 +389,9 @@ try {
         foreach ($state in $states) { Assert-PublishRefused $directory $control $state 'corrupt history cannot be extended or acknowledged' }
     }
     Write-Output ('PASS immutable publication transition matrix: ' + $script:PublicationCases + ' cases, plus damaged/contradictory histories')
+    Write-LedgerPhase 'publication-complete' $script:PublicationCases
 
+    Write-LedgerPhase 'input-guards' 0
     $directory = New-FixtureDirectory
     $script:NewFiles.Clear()
     $script:AclChecks.Clear()
@@ -404,7 +435,9 @@ try {
         Assert-PublishRefused $directory 'connect' $badState 'invalid publication state'
     }
     Write-Output 'PASS strict lowercase IDs/digests, closed controls/states, and invalid-input storage guards'
+    Write-LedgerPhase 'input-guards' $controls.Count
 
+    Write-LedgerPhase 'execution-guards' 0
     $vault = New-FixtureDirectory
     $lockPath = Join-Path $vault ('control-' + $id + '.execution.lock')
     $otherId = 'c' * 32
@@ -460,10 +493,13 @@ try {
     },$true))
     Assert-True ($flushes.Count -ge 1) 'execution function contains explicit Flush(true)'
     Write-Output 'PASS execution CreateNew/private-helper/Flush(true), same-ID busy, distinct-ID concurrency, exclusive stale-file reuse without deletion'
+    Write-LedgerPhase 'execution-guards' 1
     Write-Output ('PASS control ledger scratch-only fixture: assertions=' + $script:Assertions +
         '; readCombinations=' + $script:MatrixCases + '; publicationCases=' + $script:PublicationCases +
         '; protectedAcceptance=false')
+    Write-LedgerPhase 'complete' $script:MatrixCases
 } finally {
+    Write-LedgerPhase 'cleanup' 0
     $full = [IO.Path]::GetFullPath($script:Scratch)
     $parent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
     if (-not $full.StartsWith($parent,[StringComparison]::OrdinalIgnoreCase) -or
@@ -475,4 +511,5 @@ try {
         if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'control_ledger_cleanup_reparse_refused' }
     }
     Remove-Item -LiteralPath $full -Recurse -Force
+    Write-LedgerPhase 'cleanup' 1
 }
