@@ -130,7 +130,17 @@ export function bindInstallationPause(api,{timers=globalThis}={}) {
         // Manual denial must not depend on a fresh target or liveness sample.
         // Upgrades can retain an unassociated legacy LAST record. Probe current
         // stop capability before falling back; never rebind or replay that ID.
-        const support=installation??await request('control-support',{control:'revoke'},at);
+        const bound=await request('control-support',{control:'revoke'},at);
+        let support=installation??bound;
+        // Saved setup metadata survives a native-registration upgrade. A verified
+        // current binding may select the new stop contract, never rebind old IDs.
+        // If this read is unavailable, the saved installation can still receive
+        // its original denial; the native host validates that exact bundle.
+        if(installation&&bound?.state==='supported'&&bound.bundleSha256!==installation.bundleSha256) {
+          const stop=await stopSupport(bound.bundleSha256,at);
+          if(stop?.state!=='supported')return null;
+          support=bound;
+        }
         if(!installation) {
           // Unknown is not legacy-only: only an explicit closed unsupported reply
           // permits fallback, and never for an installation-associated history.

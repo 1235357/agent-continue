@@ -2,6 +2,39 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Current Binding Upgrade And Live Pause (Checkpoint71)
+
+Main6bcbb23 was pushed. IAB r13 reload and same-popup Devices navigation were
+actually verified, superseding the pending-install statement below. Read-only
+DevTools Application storage then showed the saved setup installation still
+pointed at ec7 while the registered native host pointed at r8/7e174a. No storage
+was cleared or edited. This was a second upgrade case, not the unassociated
+legacy-LAST case tested at checkpoint70.
+
+The repair probes the current correlated binding before using stale setup
+metadata. A different binding requires verified stop support; original Pause IDs
+remain routed to their original installations. A missing binding read can still
+deny the saved installation through its exact native-validated bundle, without a
+legacy-protocol downgrade. The two upgrade regressions failed before the patch;
+the five-suite run then passed544 tests. Fresh independent review passed356
+repository tests plus53 separate in-memory fault checks with no actionable finding.
+
+Scratch r14 was copied247/247 and explicitly reloaded in IAB only. Store ZIP
+SHA256:d84a1f87eb59555540f58206a57c9d13aa5e613cfc9ed87a0f1a13162eec3c8d.
+One GUI Pause produced operation7f53192a5ef04ae28cf667c71091524a. Its protected
+receipt and independent native readback both returned stopped; current owner
+projection was paused and its previous broker/root PIDs were absent. The GUI
+also showed the operation-specific verified-not-running message. This is not
+a current connectivity claim, full browser reopen proof, or release approval.
+The subsequent GUI Connect is being checked; do not blindly replay it.
+
+Windows recovery fixture now avoids implicit Management discovery caused by
+Join-Path before Import-Module, retaining the same Utility manifest. A new
+pre-import milestone and discovery-disabled regression distinguish those phases.
+Local recovery38/38 and all three existing selectors passed. The hosted hang
+was not reproduced locally; this is not a claimed CI cure. No timeout/security
+policy was relaxed. No3.0.0 Release or Store review submission yet.
+
 ### Live Ordinary-Chat Acceptance And Upgrade Pause Repair (Checkpoint70)
 
 Follow-up: both independent Pause findings below were repaired. Parent's five-suite

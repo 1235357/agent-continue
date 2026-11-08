@@ -114,19 +114,21 @@ test('durable stopped receipt is bound to original installation, not current sup
   assert.deepEqual(await control.observe(operationId),{operationId,state:'stopped'});
   assert.equal(f.calls.length,1);assert.equal(f.calls[0].bundleSha256,digest);
 });
-test('Pause during or after admitted Connect needs no fresh target or support observation',async()=>{
+test('admitted installation Pause survives an unavailable binding read and needs no fresh target',async()=>{
   const f=fixture({[ADMIN_CONTROL_SETUP_INSTALLATION]:{version:1,setupId:'e'.repeat(32),bundleSha256:digest}});
   f.handle(async m=>{assert.equal(m.action,'pause-installation');return {...m,state:'requested'};});
   const result=await f.bind().pause();
-  assert.equal(result.outcome,'requested');assert.equal(f.calls.length,1);
-  assert.equal(f.calls[0].bundleSha256,digest);assert.equal(Object.hasOwn(f.calls[0],'target'),false);
+  assert.equal(result.outcome,'requested');assert.equal(f.calls.length,2);
+  assert.equal(f.calls[0].action,'control-support');
+  assert.equal(f.calls[1].bundleSha256,digest);assert.equal(Object.hasOwn(f.calls[1],'target'),false);
 });
 for(const outcome of ['cancelled','requested','unconfirmed'])test('known installation does not downgrade for legacy '+outcome,async()=>{
   const f=fixture({[ADMIN_BROWSER_PAUSE_LAST]:{operationId,outcome},
     [ADMIN_CONTROL_SETUP_INSTALLATION]:{version:1,setupId:'e'.repeat(32),bundleSha256:digest}});
   f.handle(async m=>{assert.equal(m.action,'pause-installation');return {...m,state:'requested'};});
   assert.equal((await f.bind().pause()).outcome,'requested');
-  assert.equal(f.calls.length,1);assert.notEqual(f.calls[0].operationId,operationId);
+  assert.equal(f.calls.length,2);assert.equal(f.calls[0].action,'control-support');
+  assert.notEqual(f.calls[1].operationId,operationId);
 });
 test('unresolved installation A does not block a distinct known installation B denial',async()=>{
   const other='f'.repeat(64),f=fixture({[ADMIN_BROWSER_PAUSE_LAST]:{operationId,outcome:'unconfirmed'},
@@ -158,7 +160,7 @@ test('archived original ID cannot downgrade to legacy or be replaced on an unkno
     [ADMIN_CONTROL_SETUP_INSTALLATION]:{version:1,setupId:'e'.repeat(32),bundleSha256:digest}}),control=f.bind();
   f.handle(async m=>{assert.equal(m.action,'pause-installation-status');return {...m,state:'unconfirmed'};});
   assert.deepEqual(await control.pause(),{operationId,outcome:'unconfirmed'});
-  assert.equal(f.calls.length,1);
+  assert.deepEqual(f.calls.map(m=>m.action),['control-support','pause-installation-status']);
 });
 test('A unknown then B Pause then A Pause retains A original operation without a second mutation',async()=>{
   const other='f'.repeat(64),f=fixture({[INSTALLATION_PAUSE_ASSOCIATIONS]:{[operationId]:digest},
@@ -172,6 +174,32 @@ test('A unknown then B Pause then A Pause retains A original operation without a
 });
 
 const currentId='c'.repeat(32), legacyArchive=INSTALLATION_PAUSE_ASSOCIATIONS+':legacy:'+operationId;
+
+test('registration upgrade overrides stale setup installation without rebinding its unknown Pause',async()=>{
+  const old='f'.repeat(64),prior={operationId,outcome:'requested'};
+  const setup={version:1,setupId:'e'.repeat(32),bundleSha256:old};
+  const f=fixture({[ADMIN_BROWSER_PAUSE_LAST]:prior,[INSTALLATION_PAUSE_ASSOCIATIONS]:{[operationId]:old},
+    [ADMIN_CONTROL_SETUP_INSTALLATION]:setup});
+  const result=await f.bind().pause();
+  assert.equal(result.outcome,'requested');assert.notEqual(result.operationId,operationId);
+  assert.equal(f.calls.filter(m=>m.action==='pause-installation').length,1);
+  assert.equal(f.calls.find(m=>m.action==='pause-installation').bundleSha256,digest);
+  assert.equal(f.calls.some(m=>m.operationId===operationId),false);
+  assert.equal(f.data[INSTALLATION_PAUSE_ASSOCIATIONS][operationId],old);
+  assert.deepEqual(f.data[ADMIN_CONTROL_SETUP_INSTALLATION],setup);
+  assert.deepEqual(await f.bind().pause(),result);
+  assert.equal(f.calls.filter(m=>m.action==='pause-installation').length,1);
+});
+
+test('upgrade capability without verified stop support cannot replace a saved installation',async()=>{
+  const old='f'.repeat(64),prior={operationId,outcome:'requested'};
+  const f=fixture({[ADMIN_BROWSER_PAUSE_LAST]:prior,[INSTALLATION_PAUSE_ASSOCIATIONS]:{[operationId]:old},
+    [ADMIN_CONTROL_SETUP_INSTALLATION]:{version:1,setupId:'e'.repeat(32),bundleSha256:old}});
+  f.handle(m=>m.action==='pause-installation-support'?null:nativeReply(m));
+  assert.equal(await f.bind().pause(),null);
+  assert.deepEqual(f.data[ADMIN_BROWSER_PAUSE_LAST],prior);
+  assert.equal(f.calls.some(m=>m.action==='pause-installation'),false);
+});
 for(const known of [false,true])for(const outcome of ['cancelled','requested','unconfirmed'])
   for(const status of ['unconfirmed','null','throw'])
 test(`unknown associated Pause preserves legacy ${outcome}, ${status} status, known=${known}`,async()=>{

@@ -57,7 +57,7 @@ function pinFixtureEntry(root) {
   fs.writeFileSync(path.join(root, 'SHA256SUMS.txt'), `${digest}  bin.mjs\n`);
 }
 
-async function runPowerShell(t, root, body, phase = 'fixture') {
+async function runPowerShell(t, root, body, phase = 'fixture', prelude = '') {
   t.signal.throwIfAborted();
   const children = activePowerShell.get(root);
   assert.ok(children, 'fixture must remain open until its PowerShell child closes');
@@ -70,7 +70,11 @@ function Write-FixtureMilestone([string]$Name) {
     [IO.File]::AppendAllText(${quote(milestones)}, ($Name + '=' + $fixtureClock.ElapsedMilliseconds + [Environment]::NewLine))
 }
 Write-FixtureMilestone 'entry'
-Import-Module (Join-Path $PSHOME 'Modules\\Microsoft.PowerShell.Utility\\Microsoft.PowerShell.Utility.psd1')
+${prelude}
+# Join-Path would trigger implicit Management discovery before the explicit import.
+$utilityModule = [IO.Path]::Combine($PSHOME, 'Modules\\Microsoft.PowerShell.Utility\\Microsoft.PowerShell.Utility.psd1')
+Write-FixtureMilestone 'utility-import-start'
+Import-Module $utilityModule
 Write-FixtureMilestone 'utility-imported'
 $env:PROCESSOR_ARCHITECTURE = 'AMD64'
 $env:PROCESSOR_ARCHITEW6432 = ''
@@ -112,6 +116,28 @@ ${body}`, 'utf8');
   t.signal.throwIfAborted();
   return result;
 }
+
+test('installer fixture imports the complete Utility module without implicit module discovery', windows, async t => {
+  const root = fixture(t);
+  const result = await runPowerShell(t, root, `
+$stream = [IO.MemoryStream]::new([Text.Encoding]::UTF8.GetBytes('fixture'))
+try { $hash = (Microsoft.PowerShell.Utility\\Get-FileHash -InputStream $stream -Algorithm SHA256).Hash }
+finally { $stream.Dispose() }
+[Console]::WriteLine((@{
+    managementLoaded = [bool](Get-Module Microsoft.PowerShell.Management)
+    autoload = $PSModuleAutoLoadingPreference
+    hash = $hash
+} | ConvertTo-Json -Compress))`, 'module-bootstrap', "$PSModuleAutoLoadingPreference = 'None'");
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, '');
+  assert.deepEqual(JSON.parse(result.stdout), {
+    managementLoaded: false, autoload: 'None',
+    hash: createHash('sha256').update('fixture').digest('hex').toUpperCase(),
+  });
+  const milestones = fs.readFileSync(path.join(root, 'milestones.txt'), 'utf8').trim().split(/\r?\n/);
+  assert.deepEqual(milestones.map(line => line.split('=')[0]), ['entry', 'utility-import-start', 'utility-imported']);
+  assert.ok(milestones.every(line => /^[a-z-]+=\d+$/.test(line)));
+});
 
 function loadFunctions(names) {
   return `

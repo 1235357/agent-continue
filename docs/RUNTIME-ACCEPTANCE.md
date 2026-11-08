@@ -1,5 +1,22 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Installed r14 Upgrade Pause (Checkpoint71)
+
+- r13 same-popup Devices navigation and its exact reload were verified live.
+- Application storage readback identified stale saved setup ec7 versus current
+  registered7e174a. No runtime/credential/storage deletion was used to repair it.
+- r14 copied247/247, reloaded only the IAB candidate; Store ZIP SHA256
+  d84a1f87eb59555540f58206a57c9d13aa5e613cfc9ed87a0f1a13162eec3c8d.
+- GUI Pause operation7f53192a5ef04ae28cf667c71091524a returned protected and
+  independent native stopped receipts. Owner projection paused; old broker/root
+  PIDs absent. GUI showed operation-specific verified-not-running feedback.
+- Current-binding repair: red/green upgrade regressions and five-suite544/544.
+  Independent review passed356 repository and53 separate fault checks with no
+  actionable finding. Subsequent GUI Connect not yet established.
+- Recovery fixture38/38 local, three CI selectors passed locally. New milestone
+  distinguishes pre-import discovery from actual Utility import; hosted CI still
+  needs a fresh run. No security checks/timeouts weakened. No release/submission.
+
 ## Actual Ordinary Hosted Tools And Remaining Controls (Checkpoint70)
 
 - Follow-up Pause repair: parent five-suite537/537 passed; independent review

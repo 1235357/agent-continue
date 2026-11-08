@@ -42,7 +42,7 @@ test('all real worker modules let installation Pause override a dispatched Conne
   const before=calls.length;
   const result=await browser.handleMessage({type:ADMIN_BROWSER_PAUSE},devices);
   assert.equal(result.outcome,'requested');
-  assert.deepEqual(calls.slice(before).map(m=>m.action),['pause-installation']);
+  assert.deepEqual(calls.slice(before).map(m=>m.action),['control-support','pause-installation']);
   assert.equal(Object.hasOwn(calls.at(-1),'target'),false);
   release();assert.equal((await connect).state,'cancelled');
   assert.deepEqual(await browser.handleMessage({type:ADMIN_BROWSER_PAUSE_STATUS,operationId:result.operationId},devices),
