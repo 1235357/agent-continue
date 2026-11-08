@@ -8,7 +8,7 @@ $tokens = $null; $parseErrors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($source, [ref]$tokens, [ref]$parseErrors)
 if ($parseErrors.Count) { throw 'installer_parse_failed' }
 $definitions = @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] }, $true))
-foreach ($name in @('Assert-Payload', 'Assert-FileDigest', 'Get-InstallFailureCode')) {
+foreach ($name in @('Assert-Payload', 'Assert-FileDigest', 'Assert-SetupChecksumList', 'Get-InstallFailureCode')) {
     $definition = @($definitions | Where-Object Name -CEQ $name)
     if ($definition.Count -ne 1) { throw ('installer_boundary_missing_' + $name) }
     . ([scriptblock]::Create($definition[0].Extent.Text))
@@ -35,11 +35,19 @@ $archiveGate = @($resolver[0].FindAll({ param($n)
     $n.Clauses[0].Item1.Extent.Text -match 'Assert-FileDigest \$archive \$sums \$archiveName'
 }, $true))
 $expansion = @($resolver[0].FindAll({ param($n)
-    $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -ceq 'Expand-Archive'
+    $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -ceq 'Expand-VerifiedSetupArchive'
 }, $true))
-if ($archiveGate.Count -ne 1 -or $expansion.Count -ne 1 -or
-    $archiveGate[0].Extent.EndOffset -ge $expansion[0].Extent.StartOffset) { throw 'archive_gate_not_before_expansion' }
+if ($archiveGate.Count -ne 1 -or $expansion.Count -ne 2 -or
+    $archiveGate[0].Extent.EndOffset -ge $expansion[1].Extent.StartOffset) { throw 'archive_gate_not_before_expansion' }
 $archiveCheck = [scriptblock]::Create($archiveGate[0].Extent.Text)
+$sumsGate = @($main[0].Body.Statements | Where-Object {
+    $_ -is [Management.Automation.Language.IfStatementAst] -and
+    $_.Clauses[0].Item1.Extent.Text -match "ContainsKey\('ExpectedSumsSha256'\)"
+})
+if ($sumsGate.Count -ne 1 -or $sumsGate[0].Extent.EndOffset -ge $moduleGate[0].Extent.StartOffset) {
+    throw 'checksum_pin_guard_missing'
+}
+$checkSumsArgument = [scriptblock]::Create('param([string]$ExpectedSumsSha256)' + "`n" + $sumsGate[0].Extent.Text)
 
 $script:checks = 0
 $script:failures = @()
@@ -213,6 +221,43 @@ try {
     Test-Case 'integrity-error-remains-bounded' {
         if ((Get-InstallFailureCode 'payload_integrity_unverified') -cne 'payload_integrity_unverified') {
             throw 'integrity_error_lost'
+        }
+    }
+    Test-Case 'checksum-list-pin-verifies-entire-file-before-use' {
+        $ExpectedSumsSha256 = (Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash.ToLowerInvariant()
+        Assert-SetupChecksumList $manifest
+        $ExpectedSumsSha256 = '0' * 64
+        Assert-Code { Assert-SetupChecksumList $manifest } 'payload_digest_mismatch'
+        $ExpectedSumsSha256 = ''
+        Assert-SetupChecksumList $manifest
+    }
+    foreach ($mode in @('current-account','administrator')) {
+        foreach ($damage in @('none','uppercase','empty','source','override','environment','bypass','no-prompt','wrong-scope')) {
+            Test-Case ('checksum-pin-closed-' + $mode + '-' + $damage) {
+                $ExpectedSumsSha256 = 'a' * 64
+                $script:acReleaseTag = 'v3.0.0'
+                $PayloadBase = ''
+                $AllowUnverifiedPayload = $false
+                $PromptForConnection = $true
+                $Administrator = $mode -ceq 'administrator'
+                $InstallLocal = $BrowserManaged = -not $Administrator
+                $prior = $env:AGENT_CONTINUE_PAYLOAD_BASE
+                try {
+                    $env:AGENT_CONTINUE_PAYLOAD_BASE = $null
+                    switch ($damage) {
+                        uppercase { $ExpectedSumsSha256 = 'A' * 64 }
+                        empty { $ExpectedSumsSha256 = '' }
+                        source { $script:acReleaseTag = '' }
+                        override { $PayloadBase = 'https://unapproved.invalid' }
+                        environment { $env:AGENT_CONTINUE_PAYLOAD_BASE = 'https://unapproved.invalid' }
+                        bypass { $AllowUnverifiedPayload = $true }
+                        no-prompt { $PromptForConnection = $false }
+                        wrong-scope { $Administrator = $InstallLocal = $BrowserManaged = $false }
+                    }
+                    if ($damage -ceq 'none') { & $checkSumsArgument -ExpectedSumsSha256 $ExpectedSumsSha256 }
+                    else { Assert-Code { & $checkSumsArgument -ExpectedSumsSha256 $ExpectedSumsSha256 } 'payload_integrity_unverified' }
+                } finally { $env:AGENT_CONTINUE_PAYLOAD_BASE = $prior }
+            }
         }
     }
 } finally {

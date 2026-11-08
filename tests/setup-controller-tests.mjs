@@ -146,3 +146,77 @@ test('document cancellation stays cancellation even after a late valid journal r
   const value=await result;assert.equal(value.state,'cancelled');
   assert.deepEqual(value.operation,record);
 });
+
+function currentFixture(t, options = {}) {
+  const proof = { setupId:id, state:'installed', scope:'current-account', extensionId:extension, bindingSha256:digest };
+  const operation = { setupId:id, scope:'current-account', extensionId:extension, bindingSha256:digest,
+    operationId:'12345678-1234-4234-8234-123456789abc', action:'reconnect', outcome:'requested' };
+  const calls = [];
+  const removed = event();
+  let allowed = true;
+  const currentAccount = { captureStartupPermit:()=>()=>allowed,
+    observe:options.observe??(async()=>proof), checkStopSupport:async()=>true,
+    prepareObserver:async()=>true,
+    async connectFromSetup(value, admit) { calls.push(value); return admit()?operation:null; }, ...options.adapter };
+  const api = { runtime:{id:extension,getURL:name=>`chrome-extension://${extension}/${name}`},
+    permissions:{contains:options.contains??(async()=>true),onRemoved:removed},tabs:{onRemoved:event(),onUpdated:event()} };
+  const controls = { captureStartupPermit:()=>()=>true, connectFromSetup:()=>assert.fail('administrator dispatch') };
+  const controller = source.bindSetupInstallation(api,{controls,currentAccount:options.missing?undefined:currentAccount});
+  t.after(()=>controller?.dispose());
+  const send = (type, scope='current-account') => controller.handleMessage({type,setupId:id,scope},sender);
+  return { send, controller, currentAccount, calls, proof, operation, removed, api, pause:()=>{allowed=false;} };
+}
+
+test('current-account Begin requires a dedicated complete adapter and never borrows administrator authority',async t=>{
+  const missing=currentFixture(t,{missing:true});
+  assert.equal(await missing.send(source.SETUP_BEGIN),null);
+  const f=currentFixture(t);
+  const begun=await f.send(source.SETUP_BEGIN);
+  assert.equal(begun?.state,'waiting');assert.equal(begun.scope,'current-account');
+  assert.equal((await f.send(source.SETUP_OBSERVE)).state,'installed');
+  const result=await f.send(source.SETUP_CONNECT);
+  assert.equal(result.state,'submitted');assert.deepEqual(result.operation,f.operation);
+  assert.deepEqual(f.calls,[{setupId:id,scope:'current-account',extensionId:extension,bindingSha256:digest}]);
+  assert.deepEqual(await f.send(source.SETUP_CONNECT),result);assert.equal(f.calls.length,1);
+});
+
+test('current-account setup cannot adopt an administrator proof or switch scope after Begin',async t=>{
+  const f=currentFixture(t,{observe:async()=>receipt});
+  assert.equal((await f.send(source.SETUP_BEGIN))?.state,'waiting');
+  assert.equal(await f.send(source.SETUP_CONNECT,'administrator'),null);
+  assert.equal((await f.send(source.SETUP_CONNECT)).state,'unconfirmed');assert.equal(f.calls.length,0);
+});
+
+test('Pause cancels current-account pending observation and uncertain Connect remains consumed',async t=>{
+  const pending=Promise.withResolvers();let observing=false;
+  const f=currentFixture(t,{observe:async()=>{observing=true;return pending.promise;}});
+  assert.equal((await f.send(source.SETUP_BEGIN))?.state,'waiting');
+  const connecting=f.send(source.SETUP_CONNECT);
+  for(let i=0;i<30&&!observing;i++)await turn();
+  f.pause();pending.resolve(f.proof);
+  assert.equal((await connecting).state,'cancelled');assert.equal(f.calls.length,0);
+  const g=currentFixture(t,{adapter:{async connectFromSetup(value){g.calls.push(value);return null;}}});
+  await g.send(source.SETUP_BEGIN);
+  assert.equal((await g.send(source.SETUP_CONNECT)).state,'unconfirmed');
+  await g.send(source.SETUP_CONNECT);assert.equal(g.calls.length,1);
+});
+
+test('permission removal is latched across a grant while current-account observer preparation is pending',async t=>{
+  const pending=Promise.withResolvers();let entered=false;
+  const f=currentFixture(t,{adapter:{prepareObserver:async()=>{entered=true;return pending.promise;}}});
+  await f.send(source.SETUP_BEGIN);const work=f.send(source.SETUP_CONNECT);
+  for(let i=0;i<30&&!entered;i++)await turn();assert.equal(entered,true);
+  f.removed.emit({permissions:['nativeMessaging']});pending.resolve(true);
+  assert.equal((await work).state,'cancelled');assert.equal(f.calls.length,0);
+  assert.equal((await f.send(source.SETUP_CONNECT)).state,'cancelled');
+});
+
+test('a receipt is snapshotted before subsequent asynchronous permission checks',async t=>{
+  let reads=0;
+  const f=currentFixture(t,{contains:async()=>{
+    if(++reads===4)f.proof.bindingSha256='f'.repeat(64);
+    return true;
+  }});
+  await f.send(source.SETUP_BEGIN);await f.send(source.SETUP_CONNECT);
+  assert.equal(f.calls.length,1);assert.equal(f.calls[0].bindingSha256,digest);
+});

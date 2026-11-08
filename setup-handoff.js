@@ -7,6 +7,43 @@ const exact = (value, keys) => value && typeof value === 'object' && !Array.isAr
 const hex = (value, length) => typeof value === 'string' && value.length === length && /^[a-f0-9]+$/.test(value);
 const validTarget = value => typeof value === 'string' && [37,65].includes(value.length) &&
   /^[a-f0-9]{32}:(?:[a-f0-9]{32}|idle)$/.test(value);
+const validExtension = value => typeof value === 'string' && value.length === 32 && /^[a-p]{32}$/.test(value);
+
+export function validCurrentAccountSetupReceipt(value, setupId, extensionId) {
+  if (!hex(setupId,32) || !validExtension(extensionId) ||
+      !exact(value,['setupId','state','scope','extensionId','bindingSha256']) ||
+      value.setupId !== setupId || value.scope !== 'current-account' || value.extensionId !== extensionId) return false;
+  return value.state === 'installed' ? hex(value.bindingSha256,64) :
+    value.state === 'unconfirmed' && value.bindingSha256 === null;
+}
+
+// This projection is not an adoption receipt or permission to start an owner.
+// The dedicated adapter must also enforce fresh-only native admission and receipts.
+export async function readCurrentAccountSetupStatus(api, setupId) {
+  const extensionId = api?.runtime?.id;
+  if (!hex(setupId,32) || !validExtension(extensionId) || !api?.permissions?.contains ||
+      !api?.runtime?.sendNativeMessage) return null;
+  let timer, expired = false;
+  try {
+    return await Promise.race([
+      new Promise(resolve => { timer = setTimeout(() => { expired = true; resolve(null); },5000); }),
+      (async () => {
+        if (!await api.permissions.contains({permissions:['nativeMessaging']}) || expired) return null;
+        const id = crypto.randomUUID();
+        const request = {version:1,id,action:'current-account-setup-status',scope:'current-account',extensionId,setupId};
+        const value = await api.runtime.sendNativeMessage('com.agentcontinue.device_wake',request);
+        if (expired || !exact(value,[...Object.keys(request),'state','bindingSha256']) ||
+            Object.keys(request).some(key => value[key] !== request[key])) return null;
+        const receipt = {setupId:value.setupId,state:value.state,scope:value.scope,
+          extensionId:value.extensionId,bindingSha256:value.bindingSha256};
+        if (!validCurrentAccountSetupReceipt(receipt,setupId,extensionId) ||
+            !await api.permissions.contains({permissions:['nativeMessaging']}) || expired) return null;
+        return receipt;
+      })(),
+    ]);
+  } catch { return null; }
+  finally { expired = true; clearTimeout(timer); }
+}
 
 export function validSetupReceipt(value, setupId) {
   if (!hex(setupId,32) || !exact(value,['setupId','state','bundleSha256','target']) || value.setupId !== setupId) return false;

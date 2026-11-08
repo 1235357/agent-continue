@@ -69,7 +69,7 @@ $script:root = 'C:\ac-observation-in-memory\' + $digest.Substring(0,24)
 $script:bound = @('Action','Archive','ExpectedSha256','ControlKind','ControlOperationId')
 $script:secret = 'PRIVATE-OBSERVATION-SENTINEL'
 $legacyActions = @('Plan','Stage','Verify','PrepareState','VerifyState','ProbeLocal','AcceptLocal','InstallBrowserOwner',
-    'BindHosted','VerifyHosted','RunHostedWindow','StopHostedWindow','AuthorizeHostedOwner',
+    'BindHosted','VerifyHosted','RunHostedWindow','StopHostedWindow','AuthorizeHostedOwner','ReauthorizeHostedOwner',
     'RevokeHostedOwner','StartHostedOwner','ObserveHostedOwner','EnrollBrowserOwner','UnenrollBrowserOwner',
     'InspectFailedBrowserOwner','RetireFailedBrowserOwner','ConnectHostedOwner','PauseHostedOwner',
     'ObserveHostedOwnerPause','CheckBrowserHostedOwnerPause','RequestBrowserHostedOwnerPause',
@@ -192,9 +192,30 @@ Run-Case 'source_action_set_and_parameters_remain_closed' {
         'ObserveBrowserSetup' + $installationPauseActions)
     Check ($actual.Count -eq $expected.Count) 'only_fixed_control_readonly_setup_and_installation_pause_actions'
     foreach ($value in $expected) { Check ([Array]::IndexOf($actual,$value) -ge 0) ('action_' + $value) }
-    foreach ($name in @('ControlKind','ControlOperationId')) {
+    foreach ($name in @('ControlKind','ControlOperationId','PreviousRevocationId','ReauthorizationId')) {
         $parameter = @($ast.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -ceq $name })
         Check ($parameter.Count -eq 1 -and $parameter[0].StaticType -eq [string]) ('string_parameter_' + $name)
+    }
+    $main = @($ast.EndBlock.Statements | Where-Object { $_ -is [Management.Automation.Language.TryStatementAst] })
+    Check ($main.Count -eq 1) 'reauthorization_main_unique'
+    $reauthorization = @($main[0].Body.Statements | Where-Object {
+        $_ -is [Management.Automation.Language.IfStatementAst] -and
+        $_.Clauses[0].Item1.Extent.Text -ceq '$reauthorizeHostedOwner'
+    })
+    $allowed = @(foreach ($branch in $reauthorization) {
+        $branch.Clauses[0].Item2.Statements | Where-Object {
+            $_ -is [Management.Automation.Language.AssignmentStatementAst] -and $_.Left.Extent.Text -ceq '$allowed'
+        }
+    })
+    Check ($allowed.Count -eq 1) 'reauthorization_allowed_parameters_unique'
+    $actualParameters = @($allowed[0].Right.FindAll({param($n)
+        $n -is [Management.Automation.Language.StringConstantExpressionAst]
+    },$true) | ForEach-Object { $_.Value })
+    $expectedParameters = @('Action','Archive','ExpectedSha256','ExpectedUserSid','HostedTunnelId','BrowserExtensionId',
+        'ExpectedStagerSha256','PreviousRevocationId','ReauthorizationId','Consent')
+    Check ($actualParameters.Count -eq $expectedParameters.Count) 'reauthorization_parameters_closed'
+    foreach ($name in $expectedParameters) {
+        Check ([Array]::IndexOf($actualParameters,$name) -ge 0) ('reauthorization_parameter_' + $name)
     }
 }
 Run-Case 'source_early_parameter_guard_before_pause_and_main_dispatch' {
@@ -337,7 +358,8 @@ foreach ($key in $bound) {
     Run-Case ('duplicate_extra_' + $key) { Refuse-Status @($bound + $key) }
 }
 foreach ($key in @('Consent','ExpectedUserSid','PauseOperationId','BrowserPauseTarget','BrowserWake',
-    'OperationReceiptId','RuntimeKeyFile','Verbose','ErrorAction','Verify','Root','Sid','Unused','controlkind',
+    'OperationReceiptId','RuntimeKeyFile','PreviousRevocationId','ReauthorizationId',
+    'Verbose','ErrorAction','Verify','Root','Sid','Unused','controlkind',
     'BrowserControlTarget','ControlCallerPid','ControlCallerCreated','ExpectedSessionId',
     ('Control' + [char]0x00ad + 'Kind'),([string][char]0xfeff + 'ControlKind'))) {
     Run-Case ('extra_bound_' + $key) {

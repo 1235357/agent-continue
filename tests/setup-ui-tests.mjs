@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { buildWindowsSetupCommand } from '../setup-entry.js';
 
 const root = path.resolve(process.env.EXTENSION_ROOT || path.dirname(path.dirname(fileURLToPath(import.meta.url))));
 const origin = 'https://setup-fixture.invalid';
@@ -9,9 +10,15 @@ const extensionId = 'abcdefghijklmnopabcdefghijklmnop';
 const otherExtensionId = 'ponmlkjihgfedcbaponmlkjihgfedcba';
 const storeId = 'jpioilmpbolfokedaefmbfbjeaahfdkl';
 const guidedCommand = id => String.raw`.\install.ps1 -InstallLocal -Consent accept-install -PromptForConnection -ExtensionId '${id}'`;
-const administratorCommand = id => String.raw`.\install.ps1 -Administrator -Apply -Consent accept-administrator-browser-installation -PromptForConnection -ExtensionId '${id}'`;
+const entryMetadata = { format: 'agent-continue-windows-setup-entry', version: 1, releaseTag: 'v3.0.0',
+  entryUrl: 'https://github.com/1235357/agent-continue/releases/download/v3.0.0/install.ps1',
+  entrySha256: 'a'.repeat(64), sumsSha256: 'b'.repeat(64) };
+const browserCommand = (id, scope = 'current-account', shell = 'browserPowerShell', setupId = undefined) =>
+  buildWindowsSetupCommand({ extensionId: id, scope, shell, setupId, version: '3.0.0', entryMetadata });
+const administratorCommand = (id, setupId) => browserCommand(id, 'administrator', 'browserPowerShell', setupId);
 const targets = ['windows', 'macos', 'linux', 'linux-server'];
 const resources = new Set(['setup.html', 'setup.js', 'setup-client.js', 'setup-handoff.js', 'setup-model.js', 'setup.css', 'devices.css',
+  'setup-entry.js', 'setup-entry-release.js',
   'i18n.js', 'device-control.js', 'browser-wake.js', 'icons/icon-32.png', 'native/bootstrap/registration-status-view.mjs',
   'native/bootstrap/install-plan.mjs']);
 const officialLinks = new Set([
@@ -76,7 +83,9 @@ async function createFixture(options = {}) {
     try {
       const contentType = name.endsWith('.html') ? 'text/html' : name.endsWith('.css') ? 'text/css'
         : name.endsWith('.png') ? 'image/png' : 'application/javascript';
-      await route.fulfill({ status: 200, contentType, body: await fs.readFile(path.join(root, name)) });
+      await route.fulfill({ status: 200, contentType, body: name === 'setup-entry-release.js'
+        ? `export const SETUP_ENTRY_RELEASE = Object.freeze(${JSON.stringify(options.noEntryMetadata ? null : entryMetadata)});`
+        : await fs.readFile(path.join(root, name)) });
     } catch (error) {
       fixture.errors.push(`Cannot serve ${name}: ${error.message}`);
       await route.abort();
@@ -105,6 +114,7 @@ async function createFixture(options = {}) {
     const allowedStorageKeys = keys => Array.isArray(keys) && keys.length > 0
       && keys.every(key => ['uiLanguage', 'installConsent'].includes(key));
     const runtime = {
+      getManifest: () => ({ version: '3.0.0' }),
       async sendMessage(message) {
         const { type, setupId } = message ?? {};
         if (Object.keys(message ?? {}).sort().join(',') !== 'setupId,type' ||
@@ -611,7 +621,7 @@ try {
       assert.equal(await page.locator('#windowsBrowserRecovery').isVisible(), false, 'current-account recovery is not administrator recovery');
       await page.locator('#installConsent').check();
       assert.equal(await page.locator('#windowsBrowserPowerShell').textContent(), administratorCommand(extensionId));
-      assert.equal(await page.locator('#windowsBrowserCmd').textContent(), 'install.cmd guided-administrator ' + extensionId);
+      assert.equal(await page.locator('#windowsBrowserCmd').textContent(), browserCommand(extensionId, 'administrator', 'browserCmd'));
       assert.equal(await page.evaluate(() => __setupMock.data.installConsent), false, 'administrator consent is never saved as standard consent');
       assert.equal((await clipboardWrites(page)).length, 1, 'scope, language and consent changes never copy a command');
       const beforeCopy = await effects(fixture);
@@ -637,7 +647,7 @@ try {
       assert.equal(await page.locator('#windowsBrowserCmdFeedback').textContent(), '');
       assert.equal(await page.locator('#windowsBrowserPowerShellFeedback').textContent(), '');
       await page.locator('#installConsent').check();
-      assert.equal(await page.locator('#windowsBrowserPowerShell').textContent(), guidedCommand(extensionId).replace('-InstallLocal ', '-InstallLocal -BrowserManaged '));
+      assert.equal(await page.locator('#windowsBrowserPowerShell').textContent(), browserCommand(extensionId));
       assert.equal(await page.locator('#windowsGuidedCommand').textContent(), guidedCommand(extensionId));
       assert.deepEqual(await page.locator('#windowsNodeCommand, #windowsPowerShellCommand, #windowsCmdCommand').allTextContents(), unchangedCommands);
       await scope.selectOption('administrator');
@@ -710,7 +720,7 @@ try {
       assert.deepEqual(messages.map(value => value.type), ['BEGIN', 'OBSERVE', 'CONNECT'].map(name => `WINDOWS_INSTALLATION_${name}_V1`));
       const setupId = messages[0].setupId;
       assert.ok(messages.every(value => value.setupId === setupId));
-      assert.deepEqual(await clipboardWrites(page), [{ text: administratorCommand(extensionId) + ` -BrowserSetupId ${setupId}`, active: true }]);
+      assert.deepEqual(await clipboardWrites(page), [{ text: administratorCommand(extensionId, setupId), active: true }]);
       assert.equal(await page.evaluate(() => __setupMock.permissionRequests.length), granted ? 0 : 1);
       assert.deepEqual(await page.evaluate(() => __setupMock.nativeCalls), [], 'the page only sends the worker protocol, never native directly');
       assert.equal(await page.locator('#copyWindowsBrowserPowerShell').isDisabled(), true);
@@ -819,7 +829,7 @@ try {
     await openDetails(page, 'windowsBrowserCmdDetails');
     await page.locator('#copyWindowsBrowserCmd').click();
     await page.waitForFunction(() => /does not support automatic connection/.test(document.getElementById('installFeedback').textContent));
-    assert.deepEqual(await clipboardWrites(page), [{ text: 'install.cmd guided-administrator ' + extensionId, active: true }]);
+    assert.deepEqual(await clipboardWrites(page), [{ text: browserCommand(extensionId, 'administrator', 'browserCmd'), active: true }]);
     assert.deepEqual(await page.evaluate(() => __setupMock.setupMessages.map(value => value.type)),
       ['WINDOWS_INSTALLATION_BEGIN_V1', 'WINDOWS_INSTALLATION_CANCEL_V1']);
     assert.deepEqual(await page.evaluate(() => __setupMock.permissionRequests), []);
@@ -930,7 +940,7 @@ try {
           await assertPrimarySetupFlow(page);
           assert.equal(await page.locator('#installDetection').textContent(), initialResult, 'standard copying never invents installation progress');
           assert.deepEqual((await clipboardWrites(page)).at(-1), {
-            text: guidedCommand(extensionId).replace('-InstallLocal ', '-InstallLocal -BrowserManaged '), active: true,
+            text: browserCommand(extensionId), active: true,
           });
           await page.locator('#windowsAccessScope').selectOption('administrator');
           assert.equal(await page.locator('#installConsent').isChecked(), false);
@@ -1027,15 +1037,15 @@ try {
   await withFixture({ clipboardMode: 'allowed' }, async fixture => {
     const { page } = fixture;
     await chooseTarget(fixture, 'windows');
-    const browserCommand = page.locator('#windowsBrowserPowerShell');
+    const browserCommandElement = page.locator('#windowsBrowserPowerShell');
     const standalone = page.locator('#windowsStandaloneInstall');
     const existingDevice = page.locator('#openBrowserManagedDevices');
-    assert.equal(await browserCommand.textContent(), '', 'consent is required');
+    assert.equal(await browserCommandElement.textContent(), '', 'consent is required');
     assert.equal(await existingDevice.isVisible(), true, 'existing devices do not need install consent');
     assert.equal(await existingDevice.innerText(), 'Already installed? Open Devices');
     assert.equal(await existingDevice.getAttribute('href'), 'devices.html?mode=browser-managed');
     await page.locator('#installConsent').check();
-    assert.equal(await browserCommand.isVisible(), false, 'command preview is advanced, not required for copying');
+    assert.equal(await browserCommandElement.isVisible(), false, 'command preview is advanced, not required for copying');
     assert.equal(await standalone.locator('#windowsGuidedCommand').isVisible(), false);
     assert.equal(await standalone.locator('#windowsNodeCommand').isVisible(), false);
     assert.equal(await page.locator('#windowsSetupSteps').isVisible(), false);
@@ -1046,11 +1056,11 @@ try {
     const before = await effects(fixture);
     await page.locator('#copyWindowsBrowserPowerShell').click();
     assert.deepEqual(await clipboardWrites(page), [{
-      text: guidedCommand(extensionId).replace('-InstallLocal ', '-InstallLocal -BrowserManaged '), active: true,
+      text: browserCommand(extensionId), active: true,
     }]);
     await page.locator('#windowsBrowserCmdDetails > summary').click();
     await page.locator('#copyWindowsBrowserCmd').click();
-    assert.deepEqual((await clipboardWrites(page)).at(-1), { text: 'install.cmd guided-browser ' + extensionId, active: true });
+    assert.deepEqual((await clipboardWrites(page)).at(-1), { text: browserCommand(extensionId, 'current-account', 'browserCmd'), active: true });
     assert.deepEqual(await effects(fixture), before, 'copy does not start setup or request a browser permission');
     await standalone.locator(':scope > summary').click();
     assert.equal(await standalone.locator('#windowsGuidedCommand').isVisible(), true);
@@ -1147,8 +1157,8 @@ try {
     assert.equal(await copy.innerText(), 'Copy PowerShell command');
     assert.equal(await preview.innerText(), guidedCommand(extensionId));
     assert.equal(await page.locator('#windowsBrowserPowerShell').textContent(),
-      guidedCommand(extensionId).replace('-InstallLocal ', '-InstallLocal -BrowserManaged '));
-    assert.equal(await page.locator('#windowsBrowserCmd').textContent(), 'install.cmd guided-browser ' + extensionId);
+      browserCommand(extensionId));
+    assert.equal(await page.locator('#windowsBrowserCmd').textContent(), browserCommand(extensionId, 'current-account', 'browserCmd'));
     await page.locator('#windowsBrowserRecovery > summary').click();
     const browserInstallStatus = await page.locator('#windowsBrowserInstallerStatusCommand').innerText();
     assert.match(browserInstallStatus, /^\.\\install\.ps1 -DeviceAction browser-installer-status -InstallDir /);
@@ -1282,7 +1292,7 @@ try {
               : 'Automatic copy failed; select the command text and copy it manually.';
           await page.waitForFunction(text => document.getElementById('windowsBrowserPowerShellFeedback').textContent === text, message);
           const command = scope === 'administrator' ? administratorCommand(extensionId)
-            : guidedCommand(extensionId).replace('-InstallLocal ', '-InstallLocal -BrowserManaged ');
+            : browserCommand(extensionId);
           assert.equal(await page.locator('#windowsBrowserPowerShell').innerText(), command);
           assert.equal(await page.locator('#windowsBrowserPowerShell').isVisible(), true, 'copy failure reveals the command for manual copying');
           assert.equal(await page.locator('#windowsSetupSteps').isVisible(), true, 'copy failure also reveals manual prerequisites');
@@ -1649,6 +1659,22 @@ try {
         pass(`${uiLanguage} ${colorScheme} ${viewport.width}x${viewport.height}: all targets and review fit without overlap or overflow`);
       }
     }
+  }
+  for (const uiLanguage of ['en', 'zh_CN']) {
+    await withFixture({ uiLanguage, noEntryMetadata: true }, async ({ page }) => {
+      await page.locator('#installConsent').check();
+      for (const scope of ['current-account', 'administrator']) {
+        await page.locator('#windowsAccessScope').selectOption(scope);
+        await page.locator('#installConsent').check();
+        assert.equal(await page.locator('#copyWindowsBrowserPowerShell').isDisabled(), true);
+        assert.equal(await page.locator('#copyWindowsBrowserCmd').isDisabled(), true);
+        assert.match(await page.locator('#installFeedback').innerText(), uiLanguage === 'en' ? /no verified release entry/ : /未包含已核验/);
+      }
+      assert.deepEqual(await clipboardWrites(page), []);
+      assert.deepEqual(await page.evaluate(() => __setupMock.setupMessages), []);
+      assert.deepEqual(await page.evaluate(() => __setupMock.permissionRequests), []);
+    });
+    pass(`${uiLanguage}: absent entry metadata disables remote setup before permission, BEGIN or copy`);
   }
   await probeQueuedCloseRace();
   console.log(`Setup UI: ${checks}/${checks} checks passed (synthetic only; no real websites, accounts, installed extension, installer or native host).`);

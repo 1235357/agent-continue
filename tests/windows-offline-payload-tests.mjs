@@ -205,7 +205,7 @@ $tokens=$null; $errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseFile(${quote(installer)},[ref]$tokens,[ref]$errors)
 if($errors.Count) { throw 'installer_parse_failed' }
 Write-FixtureMilestone 'source-parsed'
-$names=@('Assert-FileDigest','Get-AdjacentSetupArchive','Get-AdjacentAdministratorParameters','Expand-VerifiedSetupArchive','Resolve-Payload','Assert-Payload')
+$names=@('Assert-FileDigest','Assert-SetupChecksumList','Get-AdjacentSetupArchive','Get-AdjacentAdministratorParameters','Expand-VerifiedSetupArchive','Resolve-Payload','Assert-Payload')
 $definitions=@()
 foreach($fn in $ast.FindAll({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst]},$true)) {
   if($fn.Name -cin $names) { $definitions+=$fn.Extent.Text }

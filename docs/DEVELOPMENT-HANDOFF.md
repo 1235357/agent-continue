@@ -2,6 +2,61 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Pinned Command Acquisition Candidate (Checkpoint83)
+
+The exact r8 reauthorization in Checkpoint82 is settled. It remains authorized,
+paused and idle, with no new Connect or browser-reopen acceptance. Do not replay
+maintenance f616edca28d34cff9c053ecc0844a8cb or the old stopped Revoke.
+
+The extension now consumes the completed six-field release-entry projection.
+The release workflow injects identical metadata into both distribution ZIPs
+after verifying the completed combined asset closure; checked-in metadata stays
+null. Missing/invalid metadata fails before permission, BEGIN or copying. The
+new fixed PowerShell/CMD command pins exact version, entry bytes and the entire
+checksum list, bounds acquisition to90s/4MiB and validates each HTTPS redirect.
+It holds the verified entry read handle through a separate OS -File child.
+The installer pins the checksum list before using its ZIP digest and reuses the
+strict archive extractor. There is no downloaded-source evaluation or policy
+bypass. A generated URL is not proof that the release assets are published.
+
+Independent source review found three bootstrap defects: nonexclusive directory
+creation, cleanup that could mask the child exit, and a hardcoded Windows drive.
+A new regression failed before correction. Source now uses fixed CreateDirectoryW
+with the restrictive descriptor, verifies owner/protected DACL/rules, catches
+disposal errors and derives the OS launcher. Complete CMD lengths are6934/6915
+characters, below8191. Seven focused tests pass, including actual PS5.1 parsing,
+fixed P/Invoke declaration compilation, mocked acquisition/hash/stamp cases and
+a throwing-disposal exit-code check. No P/Invoke filesystem call, real ACL/race,
+entry launch or network acquisition is established by those tests.
+
+Current-account client/controller/receipt contracts now have explicit scope and
+combined consent, isolated from administrator transport. This is source groundwork
+only: the native continuation adapter is NOT wired. The current-account UI stays
+install-only; do not advertise one-action automatic connection for that scope.
+
+Parent verified packaging34/34, rendered Setup65/65, offline payload29/29 and
+installer integrity166/166 checks. Observation bridge12/12 checks passed, with
+the exact7-function closure and10s/3200ms/30s budgets unchanged. The final full
+npm test after the storage refinement exited0, including Setup65, ordinary22,
+Dot48, keyboard12, import16, UI34, MV313 and ProseMirror5 scenarios. Output is in
+.artifacts/ordinary-chat-acceptance-20261108/checkpoint83-npm-test.txt.
+Review/testing does not certify live deployment.
+
+Actual f4a0dde CI: Extension104 succeeded; Native46 Windows failed32/35 in the
+control step, while Ubuntu/macOS and Pages passed. Raw diagnostic phases show
+both timed-out preparation children reached payload-written, disproving source
+discovery as the remaining stalled stage. OS Utility is now imported explicitly
+and fixed hash/JSON milestones added. A shadow-module fixture reproduces a
+post-write exit1, NOT the original CI timeout. Hosted root cause and clearance
+remain unproven until a new normal run; do not relax budgets or rerun stale code.
+
+Browser-native interaction is still constrained by concurrent foreground input;
+do not fight input protection, alter other chats or substitute CLI for browser
+acceptance. No installed preview, production VPN/MCP/IDE/research or external
+Chrome original scheduler was changed by this candidate. Current-account native
+continuation, real new-entry acceptance, whole-browser recovery, actual ordinary
+ChatGPT/Dot lifecycle checks, final Release and Store submission remain open.
+
 ### Same-Installation Authorization Restored (Checkpoint82)
 
 The owner explicitly answered the exact r8 same-installation reauthorization

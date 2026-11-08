@@ -44,6 +44,7 @@ param(
     [string]$DeviceAction = '',
     [string]$OperationId = '',
     [string]$PayloadBase = '',
+    [string]$ExpectedSumsSha256 = '',
     [switch]$Apply,
     [switch]$InstallLocal,
     [switch]$Administrator,
@@ -74,6 +75,13 @@ function Get-DefaultPayloadBase {
         return ('https://github.com/1235357/agent-continue/releases/download/' + $script:acReleaseTag)
     }
     return 'https://github.com/1235357/agent-continue/releases/latest/download'
+}
+
+function Assert-SetupChecksumList([string]$File) {
+    if ($ExpectedSumsSha256 -and
+        (Get-FileHash -LiteralPath $File -Algorithm SHA256).Hash.ToLowerInvariant() -cne $ExpectedSumsSha256) {
+        throw 'payload_digest_mismatch'
+    }
 }
 
 function Test-UnverifiedPayloadInspection {
@@ -407,6 +415,13 @@ try {
 
     # Reject bypass before guided input, Node execution or payload acquisition.
     if ($AllowUnverifiedPayload -and -not (Test-UnverifiedPayloadInspection)) { throw 'payload_integrity_unverified' }
+    if ($PSBoundParameters.ContainsKey('ExpectedSumsSha256') -and
+        ($ExpectedSumsSha256 -cnotmatch '\A[a-f0-9]{64}\z' -or
+         $script:acReleaseTag -cnotmatch '\Av(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\z' -or
+         $PayloadBase -or $env:AGENT_CONTINUE_PAYLOAD_BASE -or $AllowUnverifiedPayload -or
+         -not $PromptForConnection -or (-not $Administrator -and (-not $InstallLocal -or -not $BrowserManaged)))) {
+        throw 'payload_integrity_unverified'
+    }
 
     # Node/Python parents can pass a PowerShell 7 PSModulePath to PS5.1.
     # Resolve the OS-supplied hashing/archive modules explicitly, not by PATH.
@@ -445,7 +460,8 @@ try {
             if (-not $script:acExistingBrowserInstall) {
             if ($Host.Name -cne 'ConsoleHost' -or [Console]::IsInputRedirected) { throw 'interactive_terminal_required' }
             if (-not (Get-AdjacentSetupArchive) -and
-                -not (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'bin.mjs') -PathType Leaf)) { throw 'payload_incomplete' }
+                -not (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'bin.mjs') -PathType Leaf) -and
+                -not ($script:acReleaseTag -and $ExpectedSumsSha256)) { throw 'payload_incomplete' }
             if (-not $InstallDir) { $InstallDir = Join-Path $env:LOCALAPPDATA 'AgentContinue' }
             if ($InstallDir -cnotmatch '\A[A-Za-z]:\\[^\\]' -or -not [IO.Path]::IsPathRooted($InstallDir)) { throw 'invalid_install_root' }
             if (Test-Path -LiteralPath $InstallDir) { throw 'destination_exists' }
@@ -657,11 +673,15 @@ try {
             $sums = Join-Path $script:acTemp 'SHA256SUMS.txt'
             Copy-Item -LiteralPath $adjacent.Archive -Destination $archive
             Copy-Item -LiteralPath $adjacent.Sums -Destination $sums
+            Assert-SetupChecksumList $sums
             $expanded = Join-Path $script:acTemp 'payload'
             Expand-VerifiedSetupArchive $archive $sums $expanded
             return $expanded
         }
-        if ($local -and (Test-Path -LiteralPath $local)) { return $PSScriptRoot }
+        if ($local -and (Test-Path -LiteralPath $local)) {
+            Assert-SetupChecksumList (Join-Path $PSScriptRoot 'SHA256SUMS.txt')
+            return $PSScriptRoot
+        }
         # The remote one-liner only downloaded this script. Fetch the payload,
         # pin it to SHA256SUMS.txt, and let `finally` delete the temp directory.
         $archiveName = 'agent-continue-setup.zip'
@@ -673,15 +693,12 @@ try {
         $sums = Join-Path $script:acTemp 'SHA256SUMS.txt'
         Invoke-WebRequest -UseBasicParsing -Uri ($PayloadBase + '/' + $archiveName) -OutFile $archive
         Invoke-WebRequest -UseBasicParsing -Uri ($PayloadBase + '/SHA256SUMS.txt') -OutFile $sums
+        Assert-SetupChecksumList $sums
         if (-not (Assert-FileDigest $archive $sums $archiveName)) {
             throw 'payload_integrity_unverified'
         }
         $expanded = Join-Path $script:acTemp 'payload'
-        Expand-Archive -LiteralPath $archive -DestinationPath $expanded -Force
-        if (-not (Test-Path -LiteralPath (Join-Path $expanded 'bin.mjs'))) { throw 'payload_incomplete' }
-        # Assert-Payload reads the digest list from the payload root, so keep a
-        # copy of the verified release list beside the expanded files.
-        Copy-Item -LiteralPath $sums -Destination (Join-Path $expanded 'SHA256SUMS.txt') -Force
+        Expand-VerifiedSetupArchive $archive $sums $expanded
         return $expanded
     }
 

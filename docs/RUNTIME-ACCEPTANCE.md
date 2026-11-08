@@ -1,5 +1,41 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Pinned Entry Candidate And CI46 (Checkpoint83)
+
+- Checkpoint82 authorization is settled and remains paused/idle. No new browser
+  Connect was executed and no settled maintenance/revocation ID was replayed.
+- Implemented fixed acquisition command + extension-only release descriptor
+  consumption, exact version/entry/list pins, bounded HTTPS redirects, held
+  verified entry handle, separate interactive OS PowerShell -File child and
+  strict remote archive extraction. Missing descriptors cannot trigger copy,
+  browser permission or BEGIN. Current-account native continuation is not wired.
+- Independent review findings were corrected after a new failing regression:
+  exclusive native directory creation with protected descriptor/readback,
+  non-masking held-handle cleanup and drive-independent launcher. Final focused
+  entry7/7 passes. The fixed C# declaration compiles in PS5.1; its filesystem
+  primitive was NOT invoked. Mocked network/hash/stamp/cleanup and source checks
+  are not real download, ACL/race, child-launch or clean-machine acceptance.
+- Parent packaging34/34, Setup65/65, offline payload29/29, installer integrity
+  166/166 and observation bridge12/12 passed. Final full npm test after the
+  storage refinement exited0; output is in the local ignored artifact
+  checkpoint83-npm-test.txt, including the13 MV3 and5 ProseMirror cases.
+- Actual Native46 Windows job128761336147, run42490414877:32/35 control tests
+  passed. Both10s preparation failures reported source-parsed, source-indexed,
+  payload-written before SIGTERM. Thus parser/discovery is not the remaining
+  observed timeout stage. Exact action fixture omitted ReauthorizeHostedOwner;
+  its closed action/parameter assertions are now updated without widening the
+  read-only dispatch. Ledger read54.837s and publication6.632s passed.
+- New test-only OS Utility import and hash/JSON milestones preserve budgets.
+  The shadow5.1/7.0 module fixture passes locally in1025/865ms, but reproduces
+  a post-write exit1 before the fix, not the original hosted timeout. Keep that
+  distinction. Actual Extension104 run42490414907 succeeded on f4a0dde;
+  Native46 Ubuntu/macOS and documentation Pages also succeeded.
+- No production connection, original external scheduler or installed candidate
+  was replaced. Browser-native actions stopped on input protection; the target
+  Devices tab is absent. Do not force foreground control or claim CLI as browser
+  lifecycle proof. New ordinary ChatGPT/Dot lifecycle and reopen remain open.
+- This is a source candidate, not a new GitHub Release or Store review receipt.
+
 ## Same-Installation Reauthorization (Checkpoint82)
 
 - User explicitly approved the exact r8 reauthorization, same IAB extension and

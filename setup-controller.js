@@ -1,4 +1,5 @@
-import { readSetupStatus, validSetupReceipt } from './setup-handoff.js';
+import { readSetupStatus, validSetupReceipt, readCurrentAccountSetupStatus,
+  validCurrentAccountSetupReceipt } from './setup-handoff.js';
 import { administratorControlRecord } from './admin-control.js';
 
 export const SETUP_BEGIN = 'WINDOWS_INSTALLATION_BEGIN_V1';
@@ -14,6 +15,7 @@ const validId = value => typeof value === 'string' && value.length===32 && /^[a-
 // No URL or stored receipt can create an intent here.
 export function bindSetupInstallation(api,{controls,observe=readSetupStatus,checkStopSupport=async()=>false,
   prepareObserver=async()=>false,
+  currentAccount=null,
   now=()=>performance.now()}={}) {
   const {runtime,permissions,tabs}=api??{};
   if (api?.extension?.inIncognitoContext || !runtime?.id || !runtime.getURL || !permissions?.contains ||
@@ -33,7 +35,8 @@ export function bindSetupInstallation(api,{controls,observe=readSetupStatus,chec
     return Number.isFinite(at) && at>=intent.createdAt && at<intent.deadline;
   }
   const inactiveState=intent=>!intent.cancelled && !disposed && now()>=intent.deadline?'expired':'cancelled';
-  const result=(intent,state,receipt=null)=>({setupId:intent.setupId,state,receipt,operation:intent.operation??null});
+  const result=(intent,state,receipt=null)=>({setupId:intent.setupId,state,receipt,operation:intent.operation??null,
+    ...(intent.explicitScope?{scope:intent.scope}:{})});
   async function permitted() {
     let timer;
     try {
@@ -47,12 +50,20 @@ export function bindSetupInstallation(api,{controls,observe=readSetupStatus,chec
   async function proof(intent) {
     if (!current(intent) || !await permitted() || !current(intent)) return null;
     let value;
-    try { value=await observe(api,intent.setupId); } catch { return null; }
-    if (!current(intent) || !validSetupReceipt(value,intent.setupId) || value.state!=='installed' ||
+    try { value=Object.freeze({...await intent.observe(api,intent.setupId)}); } catch { return null; }
+    const valid=intent.scope==='current-account'?
+      validCurrentAccountSetupReceipt(value,intent.setupId,runtime.id):validSetupReceipt(value,intent.setupId);
+    if (!current(intent) || !valid || value.state!=='installed' ||
         !await permitted() || !current(intent)) return null;
     return value;
   }
-  function matchesOperation(value,receipt) {
+  function matchesOperation(value,receipt,intent) {
+    if (intent.scope==='current-account') return exact(value,['setupId','scope','extensionId','bindingSha256',
+      'operationId','action','outcome']) && value.setupId===intent.setupId && value.scope==='current-account' &&
+      value.extensionId===runtime.id && value.bindingSha256===receipt.bindingSha256 &&
+      typeof value.operationId==='string' && value.operationId.length===36 &&
+      /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value.operationId) &&
+      value.action==='reconnect' && ['requested','unconfirmed'].includes(value.outcome);
     return administratorControlRecord(value) && value.control==='connect' &&
       value.bundleSha256===receipt.bundleSha256 && value.target===receipt.target;
   }
@@ -64,15 +75,18 @@ export function bindSetupInstallation(api,{controls,observe=readSetupStatus,chec
       const receipt=await proof(intent);
       if (!current(intent)) return result(intent,inactiveState(intent));
       if (!receipt) return result(intent,'unconfirmed');
-      const canStop=await checkStopSupport(receipt.bundleSha256);
+      const canStop=await intent.checkStopSupport(intent.scope==='current-account'?receipt:receipt.bundleSha256);
       if (!current(intent)) return result(intent,inactiveState(intent));
       if (canStop!==true) return result(intent,'unconfirmed');
-      const observer=await prepareObserver(()=>current(intent));
+      const observer=await intent.prepareObserver(()=>current(intent));
       if (!current(intent)) return result(intent,inactiveState(intent));
       if (observer!==true) return result(intent,'unconfirmed');
-      const value=await controls.connectFromSetup({setupId:intent.setupId,bundleSha256:receipt.bundleSha256,
-        target:receipt.target},()=>current(intent));
-      if (matchesOperation(value,receipt)) intent.operation=value;
+      if (!await permitted() || !current(intent)) {cancel(intent);return result(intent,inactiveState(intent));}
+      const setup=intent.scope==='current-account'?{setupId:intent.setupId,scope:intent.scope,
+        extensionId:runtime.id,bindingSha256:receipt.bindingSha256}:
+        {setupId:intent.setupId,bundleSha256:receipt.bundleSha256,target:receipt.target};
+      const value=await intent.controls.connectFromSetup(setup,()=>current(intent));
+      if (matchesOperation(value,receipt,intent)) intent.operation=Object.freeze({...value});
       if (!current(intent)) return result(intent,inactiveState(intent));
       const submitted=intent.operation && (intent.operation.outcome==='requested' || intent.operation.state==='launch-requested');
       return result(intent,submitted?'submitted':'unconfirmed');
@@ -82,27 +96,41 @@ export function bindSetupInstallation(api,{controls,observe=readSetupStatus,chec
   const cancelTab=tabId=>{for(const intent of intents.values())if(intent.tabId===tabId)cancel(intent);};
   tabs.onRemoved.addListener(cancelTab);
   tabs.onUpdated.addListener((tabId,change)=>{if(change?.status==='loading'||Object.hasOwn(change??{},'url'))cancelTab(tabId);});
+  permissions.onRemoved?.addListener?.(change=>{
+    if(change?.permissions?.includes('nativeMessaging'))for(const intent of intents.values())cancel(intent);
+  });
   return Object.freeze({
     cancelAll(){for(const intent of intents.values())cancel(intent);},
     dispose(){disposed=true;for(const intent of intents.values())cancel(intent);},
     async handleMessage(message,sender) {
-      if (disposed || !senderAllowed(sender) || !exact(message,['type','setupId']) ||
+      const explicitScope=Object.hasOwn(message??{},'scope');
+      if (disposed || !senderAllowed(sender) || !exact(message,explicitScope?['type','setupId','scope']:['type','setupId']) ||
+          explicitScope && !['administrator','current-account'].includes(message.scope) ||
           !SETUP_MESSAGES.includes(message.type) || !validId(message.setupId)) return null;
       const {setupId}=message;
+      const scope=explicitScope?message.scope:'administrator';
       if (message.type===SETUP_BEGIN) {
         if (intents.has(setupId) || intents.size>=32) return null;
+        // Current account never inherits administrator transport or stop support.
+        if (scope==='current-account' && (!currentAccount || ['captureStartupPermit','connectFromSetup',
+          'checkStopSupport','prepareObserver'].some(key=>typeof currentAccount[key]!=='function'))) return null;
+        const adapter=scope==='current-account'?currentAccount:controls;
         // Cancel this document's older copy attempt, not another user's connection.
         cancelTab(sender.tab.id);
-        const createdAt=now(),permit=controls.captureStartupPermit();
+        const createdAt=now(),permit=adapter.captureStartupPermit();
         if (!Number.isFinite(createdAt) || typeof permit!=='function' || !permit()) return null;
-        const intent={setupId,tabId:sender.tab.id,documentId:sender.documentId,createdAt,
+        const intent={setupId,scope,explicitScope,controls:adapter,
+          observe:scope==='current-account'?(currentAccount.observe??readCurrentAccountSetupStatus):observe,
+          checkStopSupport:scope==='current-account'?currentAccount.checkStopSupport:checkStopSupport,
+          prepareObserver:scope==='current-account'?currentAccount.prepareObserver:prepareObserver,
+          tabId:sender.tab.id,documentId:sender.documentId,createdAt,
           deadline:createdAt+900000,permit,cancelled:false,consumed:false,operation:null,work:null};
         intents.set(setupId,intent);
         if (!await permitted() || !current(intent)) {cancel(intent);return result(intent,'cancelled');}
         return {...result(intent,'waiting'),automaticConnect:true};
       }
       const intent=intents.get(setupId);
-      if (!intent || !sameDocument(intent,sender)) return null;
+      if (!intent || intent.scope!==scope || !sameDocument(intent,sender)) return null;
       if (message.type===SETUP_CANCEL) {cancel(intent);return result(intent,'cancelled');}
       if (!current(intent)) return result(intent,inactiveState(intent));
       if (!await permitted() || !current(intent)) {cancel(intent);return result(intent,'cancelled');}

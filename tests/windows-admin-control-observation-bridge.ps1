@@ -11,6 +11,12 @@ param(
     [Parameter(ParameterSetName='Semantic')][ValidateSet('receipt','absent','corrupt','mismatch','extra','bad-progress')][string]$Fixture='receipt'
 )
 $ErrorActionPreference='Stop'
+if ($Prepare) {
+    [Console]::Error.WriteLine('OBSERVATION_FIXTURE prepare-entry')
+    [Console]::Error.WriteLine('OBSERVATION_FIXTURE utility-import-start')
+}
+Import-Module ([IO.Path]::Combine($PSHOME,'Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1')) -ErrorAction Stop
+if ($Prepare) { [Console]::Error.WriteLine('OBSERVATION_FIXTURE utility-import-complete') }
 function Get-FixtureHash([byte[]]$Bytes) {
     $hash=[Security.Cryptography.SHA256]::Create()
     try { return [BitConverter]::ToString($hash.ComputeHash($Bytes)).Replace('-','').ToLowerInvariant() }
@@ -35,9 +41,9 @@ $names=@('Test-AdministratorControlFields','Assert-AdministratorControlIdentity'
     'Get-AdministratorControlReceiptBytes','Get-AdministratorControlProgressBytes',
     'Assert-AdministratorControlObservationParameters','Read-AdministratorBrowserControlStatus')
 if ($Prepare) {
-    [Console]::Error.WriteLine('OBSERVATION_FIXTURE prepare-entry')
     $sourceBytes=[IO.File]::ReadAllBytes($stager)
     $text=[Text.UTF8Encoding]::new($false,$true).GetString($sourceBytes).TrimStart([char]0xfeff)
+    [Console]::Error.WriteLine('OBSERVATION_FIXTURE source-read')
     $tokens=$errorsFound=$null
     $ast=[Management.Automation.Language.Parser]::ParseInput($text,[ref]$tokens,[ref]$errorsFound)
     if ($errorsFound.Count) { throw 'stager_parse' }
@@ -48,6 +54,7 @@ if ($Prepare) {
         [Func[Management.Automation.Language.Ast,bool]],
         [Linq.Expressions.Expression]::TypeIs($node,[Management.Automation.Language.FunctionDefinitionAst]),
         [Linq.Expressions.ParameterExpression[]]@($node)).Compile()
+    [Console]::Error.WriteLine('OBSERVATION_FIXTURE source-predicate-ready')
     $definitions=[Collections.Generic.Dictionary[string,Management.Automation.Language.FunctionDefinitionAst]]::new([StringComparer]::Ordinal)
     foreach ($definition in $ast.FindAll($predicate,$true)) {
         if ($names -ccontains $definition.Name) {
@@ -55,6 +62,7 @@ if ($Prepare) {
             $definitions.Add($definition.Name,$definition)
         }
     }
+    [Console]::Error.WriteLine('OBSERVATION_FIXTURE source-discovered')
     $parts=@(); $functions=@()
     foreach ($name in $names) {
         if (-not $definitions.ContainsKey($name)) { throw 'fixture_function' }
@@ -68,8 +76,17 @@ if ($Prepare) {
     $stream=[IO.File]::Open($payloadFile,'CreateNew','Write','None')
     try { $stream.Write($payload,0,$payload.Length); $stream.Flush($true) } finally { $stream.Dispose() }
     [Console]::Error.WriteLine('OBSERVATION_FIXTURE payload-written')
-    $manifest=@{version=1;sourceSha256=(Get-FixtureHash $sourceBytes);payloadSha256=(Get-FixtureHash $payload);functions=$functions}
-    [Console]::WriteLine((ConvertTo-Json -InputObject $manifest -Depth 5 -Compress))
+    [Console]::Error.WriteLine('OBSERVATION_FIXTURE source-hash-start')
+    $sourceHash=Get-FixtureHash $sourceBytes
+    [Console]::Error.WriteLine('OBSERVATION_FIXTURE source-hash-complete')
+    [Console]::Error.WriteLine('OBSERVATION_FIXTURE payload-hash-start')
+    $payloadHash=Get-FixtureHash $payload
+    [Console]::Error.WriteLine('OBSERVATION_FIXTURE payload-hash-complete')
+    $manifest=@{version=1;sourceSha256=$sourceHash;payloadSha256=$payloadHash;functions=$functions}
+    [Console]::Error.WriteLine('OBSERVATION_FIXTURE json-start')
+    $json=ConvertTo-Json -InputObject $manifest -Depth 5 -Compress
+    [Console]::Error.WriteLine('OBSERVATION_FIXTURE json-complete')
+    [Console]::WriteLine($json)
     [Console]::Error.WriteLine('OBSERVATION_FIXTURE prepare-complete')
     return
 }

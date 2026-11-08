@@ -39,6 +39,41 @@ test('installation proof requires exact setup identity and bounded fields', () =
   }
   assert.equal(source.validSetupReceipt({setupId:id,state:'unconfirmed',bundleSha256:null,target:null}, id), true);
 });
+
+const extensionId = 'd'.repeat(32);
+const currentReceipt = { setupId: id, state: 'installed', scope: 'current-account', extensionId,
+  bindingSha256: digest };
+
+test('current-account proof has a separate exact scope and extension-bound schema', () => {
+  assert.equal(typeof source.validCurrentAccountSetupReceipt, 'function');
+  assert.equal(source.validCurrentAccountSetupReceipt(currentReceipt, id, extensionId), true);
+  assert.equal(source.validSetupReceipt(currentReceipt, id), false);
+  for (const change of [{ scope: 'administrator' }, { setupId: 'e'.repeat(32) },
+    { extensionId: 'e'.repeat(32) }, { bindingSha256: digest.toUpperCase() },
+    { state: 'existing-matched' }, { state: 'ready' }, { extra: true }]) {
+    assert.equal(source.validCurrentAccountSetupReceipt({ ...currentReceipt, ...change }, id, extensionId), false);
+  }
+  assert.equal(source.validCurrentAccountSetupReceipt(receipt, id, extensionId), false);
+});
+
+test('current-account status uses only its own host and action with exact response correlation', async () => {
+  assert.equal(typeof source.readCurrentAccountSetupStatus, 'function');
+  const calls = [];
+  const api = { runtime: { id: extensionId, async sendNativeMessage(host, request) {
+    calls.push({ host, request }); return { ...request, ...currentReceipt };
+  } }, permissions: { contains: async () => true } };
+  assert.deepEqual(await source.readCurrentAccountSetupStatus(api, id), currentReceipt);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].host, 'com.agentcontinue.device_wake');
+  assert.equal(calls[0].request.action, 'current-account-setup-status');
+  assert.equal(calls[0].request.scope, 'current-account');
+  assert.equal(calls[0].request.extensionId, extensionId);
+  for (const change of [{ id: 'wrong' }, { action: 'setup-status' }, { extensionId: 'e'.repeat(32) },
+    { scope: 'administrator' }, { extra: true }]) {
+    api.runtime.sendNativeMessage = async (_, request) => ({ ...request, ...currentReceipt, ...change });
+    assert.equal(await source.readCurrentAccountSetupStatus(api, id), null);
+  }
+});
 test('status is one read-only correlated native request, not a permission request or control', async () => {
   const calls = [];
   const api = {permissions:{async contains(){return true;},request(){assert.fail('permission request');}},

@@ -256,6 +256,36 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(output.name, "agent-continue-3.0.0-store.zip")
         package.verify_distribution_pair(output.with_name("agent-continue-3.0.0.zip"), output, "3.0.0")
 
+    def test_setup_entry_projection_is_identical_in_both_archives_without_source_writes(self):
+        self.prepare_windows_release()
+        original = (self.root / "setup-entry-release.js").read_bytes()
+        descriptor = {"format": "agent-continue-windows-setup-entry", "version": 1,
+                      "releaseTag": "v3.0.0", "entryUrl": package.SOURCE_REPOSITORY + "/releases/download/v3.0.0/install.ps1",
+                      "entrySha256": "a" * 64, "sumsSha256": "b" * 64}
+        result = type("Result", (), {"returncode": 0, "stderr": b"", "stdout": json.dumps(descriptor).encode()})()
+        with patch.object(package.shutil, "which", return_value="node"), \
+                patch.object(package.subprocess, "run", return_value=result) as run:
+            github = package.package_release(self.root, windows_release=True,
+                setup_release_dir=self.root / "sidecars", setup_release_receipt=self.root / "receipt.json")
+        self.assertIn("--setup-entry-json", run.call_args.args[0])
+        self.assertEqual(run.call_args.kwargs["timeout"], 45)
+        with zipfile.ZipFile(github) as archive, zipfile.ZipFile(github.with_name("agent-continue-3.0.0-store.zip")) as store:
+            projected = archive.read("AgentContinue/setup-entry-release.js")
+            self.assertEqual(projected, store.read("setup-entry-release.js"))
+            self.assertIn(b"Object.freeze", projected)
+            self.assertIn(descriptor["entrySha256"].encode(), projected)
+        self.assertEqual((self.root / "setup-entry-release.js").read_bytes(), original)
+
+    def test_setup_entry_projection_refuses_invalid_child_results_and_incomplete_options(self):
+        for kwargs in ({"setup_release_dir": self.root}, {"setup_release_receipt": self.root / "receipt.json"}):
+            with self.subTest(kwargs=kwargs), self.assertRaises(package.PackageError):
+                package.package_release(self.root, **kwargs)
+        for output, status, errors in ((b"{}", 0, b""), (b"not-json", 0, b""), (b"{}", 1, b"bad")):
+            result = type("Result", (), {"returncode": status, "stderr": errors, "stdout": output})()
+            with patch.object(package.shutil, "which", return_value="node"), \
+                    patch.object(package.subprocess, "run", return_value=result), self.assertRaises(package.PackageError):
+                package.project_setup_entry(self.root, self.root / "receipt.json", "3.0.0")
+
     def test_windows_release_requires_new_identity_and_preserves_scheduler_assets(self):
         output_dir = self.root / "outputs"
         output_dir.mkdir()

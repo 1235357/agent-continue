@@ -12,6 +12,8 @@ import json
 import os
 import re
 import stat
+import shutil
+import subprocess
 import tempfile
 import zipfile
 
@@ -36,6 +38,7 @@ RUNTIME_FILES = (
     "support.html", "support.css", "support.js", "support-info.js", "activity-export.js",
     "devices.html", "devices.css", "devices.js", "device-control.js",
     "setup.html", "setup.css", "setup.js", "setup-model.js", "setup-handoff.js", "setup-controller.js", "setup-client.js",
+    "setup-entry.js", "setup-entry-release.js",
     "native/bootstrap/install-plan.mjs", "native/bootstrap/registration-status-view.mjs",
     "_locales/en/messages.json", "_locales/zh_CN/messages.json",
     "LICENSE", "CHANGELOG.md", "PRIVACY.md", "VALIDATION.md", "ALTERNATIVES.md",
@@ -308,8 +311,34 @@ def verify_distribution_pair(github_archive, store_archive, version):
         raise PackageError("Cannot verify both distribution ZIPs.") from error
 
 
+def project_setup_entry(directory, receipt, version):
+    node = shutil.which("node")
+    if not node:
+        raise PackageError("Node is required to verify the combined Windows setup closure.")
+    try:
+        result = subprocess.run([node, str(ROOT / "scripts/prepare-npm-payload.mjs"), "--setup-entry-json",
+                                 "--combined-release-dir", str(Path(directory).resolve()),
+                                 "--combined-release-receipt", str(Path(receipt).resolve())],
+                                capture_output=True, timeout=45, check=False)
+        value = json.loads(result.stdout)
+        fields = {"format", "version", "releaseTag", "entryUrl", "entrySha256", "sumsSha256"}
+        if (result.returncode != 0 or result.stderr or len(result.stdout) > 4096
+                or not isinstance(value, dict) or set(value) != fields
+                or value["format"] != "agent-continue-windows-setup-entry" or type(value["version"]) is not int
+                or value["version"] != 1 or value["releaseTag"] != f"v{version}"
+                or value["entryUrl"] != f"{SOURCE_REPOSITORY}/releases/download/v{version}/install.ps1"
+                or any(not isinstance(value[key], str) or not re.fullmatch(r"[a-f0-9]{64}", value[key])
+                       for key in ("entrySha256", "sumsSha256"))):
+            raise ValueError("invalid_entry_projection")
+    except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, TypeError):
+        raise PackageError("The combined Windows setup entry could not be verified.") from None
+    return ("export const SETUP_ENTRY_RELEASE = Object.freeze(" +
+            json.dumps(value, separators=(",", ":"), ensure_ascii=True) + ");\n").encode("ascii")
+
+
 def package_release(root, include_source=False, store=False, output_directory=None, *,
-                    windows_preview=False, windows_release=False, source_revision=None):
+                    windows_preview=False, windows_release=False, source_revision=None,
+                    setup_release_dir=None, setup_release_receipt=None):
     """Return the requested ZIP; public Windows mode always builds a verified runtime pair.
 
     With --source, the additional GitHub source ZIP is extension-scoped; the
@@ -329,6 +358,12 @@ def package_release(root, include_source=False, store=False, output_directory=No
         raise PackageError("The project root must be a regular directory, not a symlink.")
     cache = {}
     version = validate_release(root, cache)
+    if (setup_release_dir is None) != (setup_release_receipt is None):
+        raise PackageError("Both combined setup release inputs are required.")
+    if setup_release_dir is not None:
+        if not (windows_release or windows_preview):
+            raise PackageError("Setup entry projection requires an explicit Windows package mode.")
+        cache["setup-entry-release.js"] = project_setup_entry(setup_release_dir, setup_release_receipt, version)
     manifest = read_json(root, "manifest.json", cache)
     if windows_release:
         validate_windows_release(manifest, version)
@@ -456,12 +491,15 @@ def main():
     modes.add_argument("--windows-preview", action="store_true", help="Build the unpacked Windows device preview (not a Store ZIP)")
     modes.add_argument("--windows-release", action="store_true", help="Build and verify paired public Windows GitHub/Store ZIPs locally; does not publish")
     parser.add_argument("--source-revision", help="Reviewed full repository commit (40 lowercase hex characters); required for Windows --source")
+    parser.add_argument("--setup-release-dir", type=Path, help="Completed combined Windows setup asset directory")
+    parser.add_argument("--setup-release-receipt", type=Path, help="Matching completed combined build receipt")
     parser.add_argument("--output-dir", type=Path, help="Write to this directory instead of the project dist directory")
     args = parser.parse_args()
     try:
         output = package_release(ROOT, include_source=args.source, store=args.store, output_directory=args.output_dir,
                                  windows_preview=args.windows_preview, windows_release=args.windows_release,
-                                 source_revision=args.source_revision)
+                                 source_revision=args.source_revision, setup_release_dir=args.setup_release_dir,
+                                 setup_release_receipt=args.setup_release_receipt)
     except (PackageError, OSError, UnicodeError) as error:
         parser.exit(1, f"Public packaging failed: {error}\n")
     if args.windows_release:

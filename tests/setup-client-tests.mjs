@@ -17,6 +17,12 @@ const receipt = { setupId, state: 'installed', bundleSha256: 'b'.repeat(64), tar
 const reply = (state, extra = {}) => ({ setupId, state, receipt: null, operation: null, ...extra });
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => Promise.withResolvers();
+const localCommand = ({ extensionId, shell, setupId, scope }) => {
+  if (scope === 'administrator') return source.administratorSetupCommand(extensionId, shell, setupId);
+  if (scope !== 'current-account' || !['browserPowerShell','browserCmd'].includes(shell)) return '';
+  return `.\\install.ps1 -InstallLocal -BrowserManaged -Consent accept-install -PromptForConnection -ExtensionId '${extensionId}'` +
+    (setupId === undefined ? '' : ` -BrowserSetupId ${setupId}`);
+};
 function event() {
   const listeners = [];
   return { addListener: fn => listeners.push(fn), emit: value => listeners.forEach(fn => fn(value)) };
@@ -39,6 +45,7 @@ function fixture(options = {}) {
   assert.equal(typeof source.createSetupClient, 'function', 'setup client must exist');
   const timers = clock(), removed = event(), hidden = event();
   const context = { os: 'windows', scope: 'administrator', consent: true, epoch: 1, extensionId };
+  Object.assign(context, options.context);
   const calls = [], copies = [], states = [];
   let granted = options.granted ?? true, requests = 0, generated = 0;
   const api = { permissions: {
@@ -53,12 +60,13 @@ function fixture(options = {}) {
     return Promise.resolve(reply(message.type === types.CONNECT ? 'submitted' : 'cancelled'));
   } } };
   const client = source.createSetupClient({ api, getContext: () => ({ ...context }),
+    ...(options.defaultBuilder ? {} : { buildCommand: options.buildCommand ?? localCommand }),
     permissionGranted: () => granted,
     clipboard: { async writeText(command) { copies.push(command); return options.copy?.(command); } },
     crypto: { getRandomValues(bytes) { generated++; bytes.fill(0xaa); return bytes; } },
     page: { addEventListener(name, fn) { assert.equal(name, 'pagehide'); hidden.addListener(fn); } },
     timers, now: timers.now, maxMs: options.maxMs ?? 60000, callTimeoutMs: 5000,
-    onChange: state => states.push(structuredClone(state)),
+    onChange: state => { states.push(structuredClone(state)); options.onChange?.(state); },
   });
   return { client, api, context, calls, copies, states, timers, removed, hidden,
     get requests() { return requests; }, get generated() { return generated; },
@@ -87,7 +95,7 @@ test('one trusted administrator copy binds one ID, copies it, observes and reque
   assert.equal(f.count('CONNECT'), 1); assert.equal(f.generated, 1); assert.equal(f.copies.length, 1);
 });
 
-test('untrusted, standard, non-Windows, missing consent or invalid extension cannot begin or copy', async () => {
+test('untrusted, old current-account install consent, non-Windows or invalid extension cannot begin or copy', async () => {
   for (const change of [{ scope: 'current-account' }, { os: 'linux' }, { consent: false }, { extensionId: 'invalid' }, {}]) {
     const f = fixture(); Object.assign(f.context, change);
     await f.click('browserPowerShell', Object.keys(change).length > 0);
@@ -95,6 +103,89 @@ test('untrusted, standard, non-Windows, missing consent or invalid extension can
   }
   const f = fixture(); await f.click('cmd');
   assert.equal(f.calls.length, 0); assert.equal(f.requests, 0);
+});
+
+test('missing release metadata or a rejecting builder prevents permission, Begin, random IDs and clipboard', async () => {
+  for (const options of [{ defaultBuilder:true }, { buildCommand:()=>'' },
+    { buildCommand:()=>{throw Error('invalid release');} }]) {
+    const f=fixture({...options,granted:false});await f.click();
+    assert.equal(f.calls.length,0);assert.equal(f.copies.length,0);
+    assert.equal(f.requests,0);assert.equal(f.generated,0);
+  }
+});
+
+test('current-account fresh connection consent uses its own scope and exact command precomputed before Begin',async()=>{
+  const observed=[];
+  const currentProof={setupId,state:'installed',scope:'current-account',extensionId,bindingSha256:'b'.repeat(64)};
+  const f=fixture({context:{scope:'current-account',connectionConsent:true,version:'2.3.4'},
+    buildCommand:context=>{observed.push({...context});return localCommand(context);},
+    send:async message=>{
+      assert.equal(observed.at(-1).setupId,setupId,'bound command exists before Begin');
+      return {...reply(message.type===types.BEGIN?'waiting':message.type===types.OBSERVE?'installed':'submitted',
+        {automaticConnect:true,receipt:currentProof}),scope:'current-account'};
+    }});
+  await f.click();
+  assert.equal(f.client.getState().state,'requested');assert.equal(f.count('CONNECT'),1);
+  assert.match(f.copies[0],/-InstallLocal -BrowserManaged/);assert.match(f.copies[0],new RegExp(`-BrowserSetupId ${setupId}$`));
+  for(const message of f.calls)assert.equal(message.scope,'current-account');
+  assert.equal(observed.at(-1).version,'2.3.4');
+  assert.equal(observed.at(-1).scope,'current-account');
+});
+
+test('current-account cannot use an administrator capability or proof and cannot silently fall back',async()=>{
+  for(const stage of ['BEGIN','OBSERVE']){
+    const f=fixture({context:{scope:'current-account',connectionConsent:true},send:async message=>{
+      const state=message.type===types.BEGIN?'waiting':'installed';
+      return {...reply(state,{automaticConnect:true,receipt}),
+        ...(message.type===types[stage]?{}:{scope:'current-account'})};
+    }});
+    await f.click();assert.equal(f.count('CONNECT'),0);
+    assert.equal(f.client.getState().state,'unconfirmed');
+    if(stage==='BEGIN')assert.equal(f.copies.length,0);
+  }
+});
+
+test('scope or fresh connection consent changes cancel current-account before a late observation',async()=>{
+  for(const change of [{scope:'administrator'},{connectionConsent:false}]){
+    const pending=deferred();
+    const f=fixture({context:{scope:'current-account',connectionConsent:true},send:async message=>
+      message.type===types.BEGIN?{...reply('waiting',{automaticConnect:true}),scope:'current-account'}:pending.promise});
+    const work=f.click();for(let i=0;i<15&&f.count('OBSERVE')===0;i++)await tick();
+    assert.equal(f.count('OBSERVE'),1);Object.assign(f.context,change);
+    pending.resolve({...reply('installed',{receipt}),scope:'current-account'});await work;
+    assert.equal(f.client.getState().state,'cancelled');assert.equal(f.count('CONNECT'),0);
+    assert.equal(f.count('CANCEL'),1);
+  }
+});
+
+test('current-account timeout invalidates future worker admission without replay or claiming rollback',async()=>{
+  const pending=deferred();
+  const currentProof={setupId,state:'installed',scope:'current-account',extensionId,bindingSha256:'b'.repeat(64)};
+  const f=fixture({maxMs:300000,context:{scope:'current-account',connectionConsent:true},
+    send:async message=>message.type===types.CONNECT?pending.promise:
+      {...reply(message.type===types.BEGIN?'waiting':'installed',{automaticConnect:true,receipt:currentProof}),scope:'current-account'}});
+  const work=f.click();for(let i=0;i<30&&f.count('CONNECT')===0;i++)await tick();
+  assert.equal(f.count('CONNECT'),1);await f.timers.advance(120000);await work;
+  assert.equal(f.client.getState().state,'unconfirmed');assert.equal(f.count('CANCEL'),1);
+  pending.resolve({...reply('submitted'),scope:'current-account'});await tick();await f.click();
+  assert.equal(f.client.getState().state,'unconfirmed');assert.equal(f.count('CONNECT'),1);
+});
+
+test('a matching unconfirmed current-account response closes its admission permit without replay',async()=>{
+  const currentProof={setupId,state:'installed',scope:'current-account',extensionId,bindingSha256:'b'.repeat(64)};
+  const f=fixture({context:{scope:'current-account',connectionConsent:true},send:async message=>
+    ({...reply(message.type===types.BEGIN?'waiting':message.type===types.OBSERVE?'installed':'unconfirmed',
+      {automaticConnect:true,receipt:currentProof}),scope:'current-account'})});
+  await f.click();
+  assert.equal(f.client.getState().state,'unconfirmed');assert.equal(f.count('CANCEL'),1);
+  await f.click();assert.equal(f.count('CONNECT'),1);assert.equal(f.generated,1);
+});
+
+test('synchronous rendering cancellation cannot leave a new deadline timer or request permission',async()=>{
+  const f=fixture({granted:false,onChange:state=>{if(state.state==='preparing')f.client.cancel();}});
+  await f.click();
+  assert.equal(f.client.getState().state,'cancelled');assert.equal(f.timers.jobs.size,0);
+  assert.equal(f.requests,0);assert.equal(f.calls.length,0);
 });
 
 test('permission request starts synchronously in the trusted gesture and is read back before Begin', async () => {
@@ -348,8 +439,10 @@ async function setupPage(options = {}) {
   const script = fs.readFileSync(new URL('../setup.js', import.meta.url), 'utf8').replace(/^import .+ from '.+';\r?$/gm, '');
   const context = {
     createSetupClient: options => source.createSetupClient({ ...options, api: context.chrome,
+      buildCommand:localCommand,
       clipboard: context.navigator.clipboard, crypto: context.crypto, page: context }),
     administratorSetupCommand: source.administratorSetupCommand,
+    buildWindowsSetupCommand: localCommand,
     buildSetupRequest, serializeSetupRequest, describeTarget, resolveStatusView, buildInstallPlan,
     createTranslator: catalog => text => language === 'en' ? catalog[text] ?? text : text,
     initializeLanguage: async () => {}, subscribeLanguage() {}, getLanguage: () => language,

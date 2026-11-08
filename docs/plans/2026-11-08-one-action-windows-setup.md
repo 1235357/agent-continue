@@ -42,6 +42,16 @@ goal with a UI-only milestone.
 
 ## Work Log
 
+Checkpoint83 acquisition review refinement: use the fixed Win32 CreateDirectoryW
+primitive with the prebuilt restrictive security descriptor, and reject an
+already existing directory rather than reuse it. Read back owner/protected DACL,
+the exact three allowed SIDs and FullControl rules before creating the entry.
+The small fixed P/Invoke declaration is compiled in this child only; it is not
+a downloaded program or a custom EXE installer. Parser/source checks do not
+establish real ACL/race behavior: native disposable acceptance remains required.
+Make held-handle cleanup non-masking and derive the OS launcher from the system
+directory rather than assume the Windows drive. Preserve all acquisition bounds.
+
 Checkpoint77 independent source audit of24dd3b3 found three still-open delivery
 gaps. Earlier fresh-install acceptance does not close these combined-flow gates:
 
@@ -72,9 +82,9 @@ These are product-imposed steps to simplify, unlike mandatory nativeMessaging,
 Windows UAC and chat-platform approvals. No changed live installation or complete
 one-action delivery is claimed by this source review.
 
-## Entry Bootstrap Design (Projection Implemented; Acquisition Pending)
+## Entry Bootstrap Design (Source Candidate; Native Acceptance Pending)
 
-Checkpoint81 implements only setupEntryMetadata and the read-only
+Checkpoint81 implemented setupEntryMetadata and the read-only
 prepare-npm-payload.mjs --setup-entry-json mode. It verifies the completed
 six-asset closure before emitting the six-field entry/list-hash descriptor.
 Parent observed the missing-feature RED (18 failures), then81/81 entry/release
@@ -82,9 +92,13 @@ checks passed after implementation and review fixes. The new22 entry tests are
 included in test:setup. The regression now requires build-order markers to exist
 before comparing their positions; malformed/invalid CLI receipts produce no
 partial success output. Generated input files may be absent in a clean checkout.
-This does not yet inject metadata into extension packages, download or launch an
-entry script, pin the resolver's remote checksum list, continue Current account
-setup or establish public asset availability.
+Checkpoint83 adds the extension command builder, package-time identical
+descriptor injection and installer checksum-list pin/strict remote expansion.
+It has source, parser, mocked acquisition and packaging tests; actual entry
+download/protected storage/launch from arbitrary working directories remains
+unverified. Current-account source-side scoped contracts exist but the native
+continuation adapter/UI connection is not wired. No public asset availability
+or complete clean-machine behavior is established.
 
 ### Problem
 
@@ -183,10 +197,11 @@ localization, cancellation, scope and rendered layout regressions.
 
 No verified published tuple exists at this checkpoint. The candidate release
 availability/validation sequence needs an explicit reviewed plan before this
-flow can be called public clean-machine delivery. Apart from the bounded
-projection/read-only CLI slice above, the bootstrap is not implemented. No
+flow can be called public clean-machine delivery. The fixed bootstrap is now a
+reviewed source candidate, not a natively accepted or published installer. No
 installation, public asset publication or live connection was performed by this
-design and source work.
+acquisition-source work. The separate explicitly approved same-r8 maintenance
+restored authorization only; it did not start a tunnel.
 
 Checkpoint66: main synchronization through41d79c4 is real, but the second hosted
 Windows verification still failed a later test admission/effect race. Same-PID

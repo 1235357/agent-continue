@@ -3,7 +3,8 @@ import { buildSetupRequest, serializeSetupRequest, describeTarget, parseLocalPai
 import { resolveStatusView } from './native/bootstrap/registration-status-view.mjs';
 import { buildInstallPlan } from './native/bootstrap/install-plan.mjs';
 import { controlDevice } from './device-control.js';
-import { createSetupClient, administratorSetupCommand } from './setup-client.js';
+import { createSetupClient } from './setup-client.js';
+import { buildWindowsSetupCommand } from './setup-entry.js';
 
 const catalog = {
   'Windows 访问权限': 'Windows access',
@@ -31,7 +32,8 @@ const catalog = {
   '复制不安装、不连接、不授予权限。浏览器及 ChatGPT / Dot 授权仍需分别完成；手动暂停会保留。': 'Copying does not install, connect or grant access. Browser and ChatGPT / Dot approvals remain separate; a manual pause stays in effect.',
   '我理解并同意上述访问范围。': 'I understand and agree to this access.',
   '准备源码与隧道。': 'Prepare the source and tunnel.',
-  '仅限全新安装：先取得已审阅并解压的安装源码包、官方隧道 ID 和本机密钥文件路径；命令须在该源码包目录运行。': "Fresh installations only: obtain the reviewed, extracted setup source bundle, official tunnel ID and local key-file path. Run the command from that bundle's directory.",
+  '仅限全新安装：命令自动下载并核验本版本的安装源码。准备官方隧道 ID 和本机密钥文件路径；无需预先下载或解压安装包。': 'Fresh installations only: the command downloads and verifies this exact version of the setup source. Prepare the official tunnel ID and local key-file path; no manual bundle download or extraction is needed.',
+  '此源码预览未包含已核验的发布安装入口，不能复制远程安装命令。请使用完整的已发布版本；已解压安装包的备用命令位于高级选项中。': 'This source preview has no verified release entry, so remote setup commands are unavailable. Use a complete published release; extracted-bundle fallback commands are in Advanced.',
   '在 PowerShell 中运行。': 'Run in PowerShell.',
   '粘贴命令，按提示输入隧道 ID 和密钥文件路径，再输入 REGISTER 注册桥接；留空取消。无需 JSON，不要粘贴密钥内容；此步骤不启动隧道。': 'Paste the command, supply the tunnel ID and key-file path when prompted, then type REGISTER to register the bridge; leave it blank to cancel. No JSON is needed. Never paste the key itself. This step does not start the tunnel.',
   '在设备页连接。': 'Connect in Devices.',
@@ -483,7 +485,10 @@ function renderInstall() {
       ? t(ADMINISTRATOR_SETUP_FEEDBACK[administratorState.state] ?? '')
       : command && windowsCopyAttempt?.command === command ? t(windowsCopyAttempt.feedbackKey) : '';
   }
-  const setupFeedback = ADMINISTRATOR_SETUP_FEEDBACK[administratorState?.state] ?? installFeedbackKey;
+  const setupFeedback = ADMINISTRATOR_SETUP_FEEDBACK[administratorState?.state] ??
+    (installConsent && !windowsGuidedCommand(plan, 'browserPowerShell')
+      ? '此源码预览未包含已核验的发布安装入口，不能复制远程安装命令。请使用完整的已发布版本；已解压安装包的备用命令位于高级选项中。'
+      : installFeedbackKey);
   $('installFeedback').hidden = installOs !== 'windows' || (installConsent && !setupFeedback);
   $('installFeedback').textContent = t(setupFeedback ?? '勾选同意后可复制命令。');
   $('windowsInstallCheck').hidden = installOs !== 'windows';
@@ -527,10 +532,12 @@ function windowsGuidedCommand(plan, shell) {
   if (windowsAccessScope === 'administrator') {
     const state = administratorSetupClient?.getState();
     if (state?.extensionId === plan.extensionId && state.shell === shell && state.command) return state.command;
-    return administratorSetupCommand(plan.extensionId, shell);
+    return buildWindowsSetupCommand({ extensionId: plan.extensionId, scope: 'administrator', shell,
+      version: globalThis.chrome?.runtime?.getManifest?.()?.version });
   }
-  if (shell === 'browserPowerShell') return `.\\install.ps1 -InstallLocal -BrowserManaged -Consent accept-install -PromptForConnection -ExtensionId '${plan.extensionId}'`;
-  if (shell === 'browserCmd') return 'install.cmd guided-browser ' + plan.extensionId;
+  if (shell === 'browserPowerShell' || shell === 'browserCmd') return buildWindowsSetupCommand({
+    extensionId: plan.extensionId, scope: 'current-account', shell,
+    version: globalThis.chrome?.runtime?.getManifest?.()?.version });
   return shell === 'cmd' ? plan.entry.cmd : plan.entry.local;
 }
 
@@ -778,7 +785,8 @@ async function copyWindowsGuidedCommand(event, shell) {
   if (windowsAccessScope === 'administrator') {
     administratorSetupClient ??= createSetupClient({
       getContext: () => ({ os: installOs, scope: windowsAccessScope, consent: installConsent,
-        epoch: installConsentEpoch, extensionId: globalThis.chrome?.runtime?.id }),
+        epoch: installConsentEpoch, extensionId: globalThis.chrome?.runtime?.id,
+        version: globalThis.chrome?.runtime?.getManifest?.()?.version }),
       permissionGranted: () => permission === 'granted',
       onChange(state) {
         if (state.state === 'copy-failed') $('windowsCommandDetails').open = true;

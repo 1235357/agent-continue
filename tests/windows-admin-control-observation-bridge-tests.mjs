@@ -112,7 +112,10 @@ async function prepareObservation(t, execute = runFile) {
         env: { SystemRoot: path.win32.dirname(system), WINDIR: path.win32.dirname(system), PATH: system } }, execute);
     execution = fixtureEvidence({ state: 'completed', started, stderr: result.stderr });
   } catch (error) { execution = fixtureEvidence({ state: 'failed', started, error, stderr: error.stderr }); }
-  assertObservationCompletion(execution, ['prepare-entry', 'source-parsed', 'source-indexed', 'payload-written', 'prepare-complete']);
+  assertObservationCompletion(execution, ['prepare-entry', 'utility-import-start', 'utility-import-complete',
+    'source-read', 'source-parsed', 'source-predicate-ready', 'source-discovered', 'source-indexed', 'payload-written',
+    'source-hash-start', 'source-hash-complete', 'payload-hash-start', 'payload-hash-complete',
+    'json-start', 'json-complete', 'prepare-complete']);
   try { prepared.manifest = JSON.parse(result.stdout); } catch { assert.fail('fixture_manifest_json'); }
   loadPrepared(prepared);
   return prepared;
@@ -124,8 +127,8 @@ function fixtureEvidence({ state, started, error, stderr = '' }) {
       ['ETIMEDOUT', 'ENOENT', 'EACCES', 'EPERM'].includes(error?.code) ? error.code : null,
     killed: error?.killed === true,
     signal: ['SIGTERM', 'SIGKILL', 'SIGINT'].includes(error?.signal) ? error.signal : null,
-    phases: [...stderr.matchAll(/^OBSERVATION_FIXTURE (entry|prepare-entry|source-parsed|source-indexed|payload-written|prepare-complete|source-verified|prepared-source-loaded|receipt-read|complete)\r?$/gm)]
-      .map(match => match[1]).slice(-8) };
+    phases: [...stderr.matchAll(/^OBSERVATION_FIXTURE (entry|prepare-entry|utility-import-start|utility-import-complete|source-read|source-parsed|source-predicate-ready|source-discovered|source-indexed|payload-written|source-hash-start|source-hash-complete|payload-hash-start|payload-hash-complete|json-start|json-complete|prepare-complete|source-verified|prepared-source-loaded|receipt-read|complete)\r?$/gm)]
+      .map(match => match[1]).slice(-16) };
 }
 
 test('fixture diagnostics keep fixed completion evidence without raw errors or private paths', () => {
@@ -185,7 +188,10 @@ test('source-only observation rejects enlarged overlapping definitions even with
 
 test('source-only observation preparation requires bounded child success and a verified manifest before semantic calls', async () => {
   const { manifest, source, payload } = manifestExample();
-  const phases = ['prepare-entry', 'source-parsed', 'source-indexed', 'payload-written', 'prepare-complete']
+  const phases = ['prepare-entry', 'utility-import-start', 'utility-import-complete',
+    'source-read', 'source-parsed', 'source-predicate-ready', 'source-discovered', 'source-indexed', 'payload-written',
+    'source-hash-start', 'source-hash-complete', 'payload-hash-start', 'payload-hash-complete',
+    'json-start', 'json-complete', 'prepare-complete']
     .map(phase => 'OBSERVATION_FIXTURE ' + phase).join('\n');
   const make = () => {
     const prepared = { root: 'C:\\fixture', parent: 'C:\\temp', active: new Set() };
@@ -210,7 +216,9 @@ test('source-only observation preparation requires bounded child success and a v
     async () => { throw Object.assign(Error('private-path'), { code: 'ETIMEDOUT', killed: true,
       stdout: JSON.stringify(manifest), stderr: phases }); },
     async () => ({ stdout: JSON.stringify(manifest), stderr: 'OBSERVATION_FIXTURE prepare-entry' }),
-    ...['source-indexed', 'payload-written'].map(phase => async () => ({ stdout: JSON.stringify(manifest),
+    ...['utility-import-start', 'utility-import-complete', 'source-read', 'source-predicate-ready', 'source-discovered',
+      'source-indexed', 'payload-written', 'source-hash-start', 'source-hash-complete', 'payload-hash-start',
+      'payload-hash-complete', 'json-start', 'json-complete'].map(phase => async () => ({ stdout: JSON.stringify(manifest),
       stderr: phases.replace('OBSERVATION_FIXTURE ' + phase, '') })),
     async () => ({ stdout: 'not-json', stderr: phases }),
     async () => ({ stdout: JSON.stringify({ ...manifest, sourceSha256: '0'.repeat(64) }), stderr: phases }),
@@ -288,8 +296,32 @@ test('source-only observation preparation indexes the exact recursive AST closur
   assert.match(prepare, /if \(\$definitions\.ContainsKey\(\$definition\.Name\)\) \{ throw 'fixture_function' \}/);
   assert.match(prepare, /if \(-not \$definitions\.ContainsKey\(\$name\)\) \{ throw 'fixture_function' \}/);
   assert.match(prepare, /\$extent=\$definitions\[\$name\]\.Extent/);
+  for (const [marker, before, after] of [
+    ['source-read', '$text=', '$ast='],
+    ['source-predicate-ready', ').Compile()', '$definitions='],
+    ['source-discovered', '$definitions.Add(', '$parts=@()'],
+  ]) {
+    const start = prepare.indexOf(before), phase = prepare.indexOf(`'OBSERVATION_FIXTURE ${marker}'`), end = prepare.indexOf(after);
+    assert.ok(start >= 0 && phase > start && end > phase, `preparation milestone: ${marker}`);
+  }
   assert.match(prepare, /OBSERVATION_FIXTURE source-indexed/);
   assert.match(prepare, /OBSERVATION_FIXTURE payload-written/);
+});
+
+test('source-only preparation pins OS Utility before extraction and brackets manifest hashing and JSON', () => {
+  const source = readFileSync(fixture, 'utf8').replaceAll('\r\n', '\n');
+  const module = "Import-Module ([IO.Path]::Combine($PSHOME,'Modules\\Microsoft.PowerShell.Utility\\Microsoft.PowerShell.Utility.psd1')) -ErrorAction Stop";
+  const imported = source.indexOf(module);
+  assert.ok(imported > source.indexOf("'OBSERVATION_FIXTURE utility-import-start'"));
+  assert.ok(imported < source.indexOf("'OBSERVATION_FIXTURE utility-import-complete'"));
+  assert.ok(imported < source.indexOf('Assert-PreparedRoot\n'));
+  for (const [phase, work] of [['source-hash', '$sourceHash=Get-FixtureHash $sourceBytes'],
+    ['payload-hash', '$payloadHash=Get-FixtureHash $payload'],
+    ['json', '$json=ConvertTo-Json -InputObject $manifest -Depth 5 -Compress']]) {
+    const start = source.indexOf(`'OBSERVATION_FIXTURE ${phase}-start'`), body = source.indexOf(work),
+      end = source.indexOf(`'OBSERVATION_FIXTURE ${phase}-complete'`);
+    assert.ok(start >= 0 && start < body && body < end, `manifest milestone: ${phase}`);
+  }
 });
 
 test('source-only semantic source guard rejects both parser APIs and source discovery mutations', () => {
@@ -300,6 +332,36 @@ test('source-only semantic source guard rejects both parser APIs and source disc
     '[Management.Automation.Language.Parser] :: parseinput($source)',
     '$ast.FindAll({})', 'Join-Path $root $source']) {
     assert.throws(() => assertPreparedSemanticSource(clean + '\n' + mutation));
+  }
+});
+
+test('prepare-only source extraction ignores an inherited incompatible Utility module path', windows, async t => {
+  const parent = fs.realpathSync.native(os.tmpdir());
+  const root = fs.mkdtempSync(path.join(parent, 'ac-observation-module-'));
+  const module = path.join(root, 'Microsoft.PowerShell.Utility');
+  fs.mkdirSync(module);
+  const manifest = path.join(module, 'Microsoft.PowerShell.Utility.psd1');
+  const script = path.join(module, 'UtilityTrap.psm1');
+  t.after(() => {
+    assert.equal(path.dirname(root), parent);
+    assert.match(path.basename(root), /^ac-observation-module-[A-Za-z0-9]+$/);
+    assert.equal(fs.realpathSync.native(root), root);
+    assert.deepEqual(fs.readdirSync(root), ['Microsoft.PowerShell.Utility']);
+    assert.deepEqual(fs.readdirSync(module).sort(), ['Microsoft.PowerShell.Utility.psd1', 'UtilityTrap.psm1']);
+    for (const file of [root, module, manifest, script]) assert.equal(fs.lstatSync(file).isSymbolicLink(), false);
+    fs.rmSync(root, { recursive: true, force: false });
+  });
+  fs.writeFileSync(script, "function ConvertTo-Json { throw 'fixture_wrong_utility_autoload' }\nExport-ModuleMember -Function ConvertTo-Json\n");
+  for (const version of ['5.1', '7.0']) {
+    fs.writeFileSync(manifest, `@{ RootModule='UtilityTrap.psm1'; ModuleVersion='1.0.0'; PowerShellVersion='${version}'; FunctionsToExport=@('ConvertTo-Json'); CmdletsToExport=@(); AliasesToExport=@() }\n`);
+    const prepared = await prepareObservation(t, async (exe, args, options) => {
+      const started = performance.now();
+      const result = await runFile(exe, args, { ...options, env: { ...options.env, PSModulePath: root } });
+      t.diagnostic(JSON.stringify({ moduleVersion: version,
+        ...fixtureEvidence({ state: 'completed', started, stderr: result.stderr }) }));
+      return result;
+    });
+    assert.equal(prepared.manifest.functions.length, observationNames.length);
   }
 });
 

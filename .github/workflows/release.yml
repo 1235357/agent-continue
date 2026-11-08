@@ -372,7 +372,7 @@ jobs:
 
       - name: Package the loadable extension
         run: |
-          python3 scripts/package.py --windows-release
+          python3 scripts/package.py --windows-release --setup-release-dir dist/native-setup --setup-release-receipt dist/build-receipts/agent-continue-setup-build-receipt.json
           python3 -m unittest discover -s tests -p test_package.py
 
       - name: Check GitHub and Store payloads are byte-identical
