@@ -2,6 +2,18 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Full Windows Delivery Verification Passed (Checkpoint106)
+
+Manual verification10/run42530851995, Windows job128884487996, completed
+successfully in5m46s on canonical main0a8a721. The actual ordinary-token build,
+smoke tests, exact six-sidecar inventory and original build/source receipts
+passed. This is a build receipt, not a public Release or Store submission.
+The complete local root npm test also passed on3.0.1; after public-copy cleanup,
+33 focused support/documentation checks passed. Public copy now distinguishes
+source behavior from platform state without a permanently stale candidate
+label. The next action is a new immutablev3.0.1 tag and matching Release assets;
+the failedv3.0.0 tag remains untouched. The r11 installation stays revoked.
+
 ### Unpublished Tag Retained; Patch Release Prepared (Checkpoint105)
 
 Tagv3.0.0 names main1bc39f6 and is retained unchanged. Release workflow11,

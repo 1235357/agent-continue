@@ -1,5 +1,15 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Full Windows Delivery Verified Before Tagging (Checkpoint106)
+
+Manual Windows delivery10/run42530851995, job128884487996, succeeded in5m46s
+on main0a8a721: the real standard-token build/smoke path, all six sidecars and
+original source/build receipts passed. Full local root npm tests on3.0.1 and
+33 subsequent support/documentation checks passed. No Release or Store receipt
+is implied. Proceed with a newv3.0.1 tag, then inspect the actual downloaded
+assets before Store upload. The failedv3.0.0 tag is not rewritten; r11 remains
+revoked/not running, and its settled control operations must not be replayed.
+
 ## Release Build Stopped Before Publication (Checkpoint105)
 
 Release11/run42530336455 on tagv3.0.0 failed two CI-adapter test path checks
