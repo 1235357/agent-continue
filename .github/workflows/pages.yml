@@ -1,0 +1,60 @@
+name: Public documentation Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'PRIVACY.md'
+      - 'README.md'
+      - 'docs/**'
+      - 'scripts/build-public-site.py'
+      - 'tests/test_public_site.py'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Test public site contracts
+        run: python3 -B -m unittest discover -s tests -p test_public_site.py
+      - name: Build public site
+        run: python3 -B scripts/build-public-site.py --output dist/public-site
+      - name: Upload only the public site
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist/public-site
+
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Read Pages configuration without enabling it
+        uses: actions/configure-pages@v5
+        with:
+          enablement: false
+      - name: Deploy the generated artifact
+        id: deployment
+        uses: actions/deploy-pages@v4
