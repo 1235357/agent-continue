@@ -38,6 +38,12 @@ Record browserOwnerId only for that mode. Ordinary channel formats remain valid;
 an attach request requires the new exact association. Responses are bounded
 metadata tied to the original request, not proof of chat authorization.
 
+Frozen API: sendExistingBrowserControl(binding, ownerId, request, { timeoutMs })
+returns the original v1 control response. It verifies browserOwnerId on the same
+pinned channel snapshot used to send/authenticate, with no replacement adoption.
+The host success envelope is exactly {version:2, action:'attach-control', ownerId,
+response}. Failure is sanitized unavailable and never falls back to startup.
+
 The original long port and unresolved command remain correlated. Read-only
 status and a separate priority Pause can use the new single-shot route while
 that port is occupied, or after worker/port loss using the persisted owner ID.
@@ -91,3 +97,40 @@ Native fixtures use deferred promises and disposable state, not real tunnels or
 registry. Browser fixtures use fake time and exact messages before any real UI
 acceptance. Existing scheduler and administrator-control semantics are outside
 this change. Review findings and actual passes must be recorded separately.
+
+## Readiness Clarifications
+
+Independent design criticism found no need for a general multiplexed protocol
+provided these interfaces remain fixed. This is design readiness, not acceptance.
+beginQuiesce synchronously latches shutdown and starts non-persisting stop before
+its first await, immediately on browser lifetime loss rather than after a hung
+request finally block. Authenticated status/Pause remain admitted while quiescing;
+only finalization closes them after drain and positive stop proof. An unresolved
+active request can retain that restricted owner and lease indefinitely.
+
+canPause is separate from primary eligibility, paused-state certainty and busy
+status checks. It still requires permission, healthy journaling, the shared lock
+and exact owner identity. Any unresolved Pause forbids another Pause. A status
+action has one14.5s total UI budget, at most two original-ID queries, at most5s
+per attach (or the remaining budget), and at most1s native state observation.
+Revalidate each record; retiring the first must not invalidate an exact second
+receipt. No lock may be held over IPC. These details govern the bounded workers.
+
+## Checkpoint68 Progress
+
+1. Page controller/UI:60 controller and41 rendered synthetic cases pass. The
+   independently reproduced two-page terminal-quarantine resurrection is fixed.
+2. Worker: same-owner attach and dual records implemented. Rejected retirement
+   before/after commit now reconciles exact live/durable proof; independent fix
+   re-review found no remaining P1/P2. No generic error clears an uncertain record.
+3. Native: pinned association, attach and immediate quiescence implemented. The
+   late positively verified exit reports stopped during quiescence without
+   changing saved-running intent; arbitrary failed state still cannot finalize.
+4. Integration: first full product and269/4skip native runs passed; later focused
+   repairs passed133 controller/worker/source and23 native cases. Final full
+   product rerun/build in progress; installed candidate unchanged.
+5. CI: earlier512bd875 Windows delivery and extension suites passed; native
+   Windows recovery step timed out. Async diagnostics and disjoint35-case groups
+   passed locally without relaxed case/child/step bounds. New source requires
+   fresh hosted checks; the older passes do not cover these bytes.
+6. Release/Store: not tagged, published or submitted for the new version.

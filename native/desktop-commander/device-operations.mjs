@@ -153,14 +153,18 @@ export function openDeviceOperations(root, controller) {
   }
 
   async function observe() {
+    let timer;
     try {
       owned();
-      const value = await controller.status();
+      const value = await Promise.race([Promise.resolve().then(() => controller.status()), new Promise(resolve => {
+        timer = setTimeout(() => resolve(null), 1000);
+      })]);
       owned();
       if (typeof value?.paused !== 'boolean' || typeof value.ready !== 'boolean' ||
           !['stopped', 'failed', 'running', 'unknown', 'starting', 'stopping'].includes(value.runtime)) return null;
       return value;
     } catch { return null; }
+    finally { clearTimeout(timer); }
   }
 
   function response(request, observed, row) {

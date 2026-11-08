@@ -67,7 +67,7 @@ async function fixture({ query = '?mode=browser-managed', restore, granted = tru
     createTranslator: catalog => key => language === 'zh_CN' ? key : catalog[key] ?? key,
     initializeLanguage: async () => {}, subscribeLanguage() {}, getLanguage: () => language,
     setLanguage: async value => { effects.push(['language-write']); language = value; },
-    deviceScope: () => '', HOST: 'fixture', BROWSER_WAKE_HOST: 'fixture', PENDING_KEY: 'pending', REVISION_KEY: 'revision',
+    deviceScope: () => '', HOST: 'fixture', BROWSER_WAKE_HOST: 'fixture', PENDING_KEY: 'pending', PRIORITY_PAUSE_KEY: 'priorityPause', REVISION_KEY: 'revision',
     validPreparedReference: () => false, controlPrepared: async () => { effects.push(['prepared']); },
     createDeviceController: ({ onChange }) => ({ getState: () => state,
       async initialize() { effects.push(['initialize']); onChange(); },

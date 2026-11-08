@@ -1132,3 +1132,218 @@ test('permission request exception and non-consent never imply a granted permiss
   assert.equal(f.controller.getState().feedback, 'permission-unavailable');
   assert.equal(f.calls.length, 0);
 });
+
+function browserFixture(options = {}) {
+  const f = fixture({ timeoutMs: 200, ...options });
+  const messages = [];
+  let handler = request => reply(request);
+  const runtime = {
+    sendNativeMessage() { assert.fail('browser-managed control must never use the legacy host'); },
+    async sendMessage(value) {
+      messages.push(structuredClone(value));
+      return { ownerId: value.ownerId || 'browser-owner', response: await handler(value.request) };
+    },
+  };
+  const dependencies = { ...f.dependencies, runtime, browserManaged: true };
+  return { ...f, dependencies, messages, controller: createDeviceController(dependencies),
+    handle(next) { handler = next; } };
+}
+
+test('browser Pause remains available during a pending Reconnect and a busy status read', async () => {
+  const f = browserFixture();
+  await f.controller.initialize(); await f.controller.run('status');
+  const releases = [];
+  f.handle(request => new Promise(resolve => releases.push(() => resolve(reply(request)))));
+  const reconnect = f.controller.run('reconnect');
+  while (!f.messages.some(value => value.request.action === 'reconnect')) await new Promise(setImmediate);
+  const primary = structuredClone(f.controller.getState().pending);
+  const status = f.controller.run('status');
+  while (f.messages.filter(value => value.request.action === 'status').length < 2) await new Promise(setImmediate);
+  assert.equal(f.controller.getState().canPause, true);
+  const pause = f.controller.run('disconnect-and-pause');
+  while (!f.messages.some(value => value.request.action === 'disconnect-and-pause')) await new Promise(setImmediate);
+  assert.deepEqual(f.controller.getState().pending, primary);
+  const secondary = f.controller.getState().priorityPause;
+  assert.equal(secondary.action, 'disconnect-and-pause');
+  assert.equal(secondary.ownerId, 'browser-owner');
+  assert.notEqual(secondary.id, primary.id);
+  assert.deepEqual(f.data[client.PRIORITY_PAUSE_KEY + ':browser-managed'], secondary);
+  assert.equal(f.controller.getState().canPause, false);
+  await f.controller.run('disconnect-and-pause');
+  assert.equal(f.messages.filter(value => value.request.action === 'disconnect-and-pause').length, 1);
+  for (const release of releases) release();
+  await Promise.all([reconnect, status, pause]);
+});
+
+test('two browser receipts settle only their own slots using original IDs without a mutation retry', async () => {
+  const f = browserFixture();
+  await f.controller.initialize(); await f.controller.run('status');
+  f.handle(request => reply(request, { paused: null, connection: 'unknown', operation: operation(request.id, request.action) }));
+  await f.controller.run('reconnect');
+  const primary = structuredClone(f.controller.getState().pending);
+  assert.equal(f.controller.getState().canPause, true, 'unknown paused-state does not disable emergency Pause');
+  await f.controller.run('disconnect-and-pause');
+  const secondary = structuredClone(f.controller.getState().priorityPause);
+  assert.ok(secondary);
+  const before = f.messages.length;
+  f.handle(request => reply(request, { paused: true, connection: 'disconnected',
+    operation: operation(request.id, request.id === secondary.id ? secondary.action : primary.action, 'settled') }));
+  await f.controller.run('status');
+  assert.deepEqual(f.messages.slice(before).map(value => [value.request.action, value.request.id]),
+    [['status', secondary.id], ['status', primary.id]]);
+  assert.equal(f.controller.getState().priorityPause, null);
+  assert.equal(f.controller.getState().pending, null);
+  assert.equal(f.controller.getState().canMutate, true);
+  assert.equal(f.messages.filter(value => value.request.action !== 'status').length, 2);
+});
+
+test('browser generic negative and unrelated receipts cannot clear either mutation slot', async () => {
+  const f = browserFixture();
+  await f.controller.initialize(); await f.controller.run('status');
+  f.handle(request => reply(request));
+  await f.controller.run('reconnect'); await f.controller.run('disconnect-and-pause');
+  const { pending, priorityPause } = f.controller.getState();
+  assert.ok(pending); assert.ok(priorityPause);
+  for (const handler of [request => ({ ...request, ok: false }), request => reply(request, {
+    paused: true, connection: 'disconnected', operation: operation('unrelated', 'disconnect-and-pause', 'settled') })]) {
+    f.handle(handler); await f.controller.run('status');
+    assert.deepEqual(f.controller.getState().pending, pending);
+    assert.deepEqual(f.controller.getState().priorityPause, priorityPause);
+    assert.equal(f.controller.getState().canPause, false);
+  }
+});
+
+test('browser pending owner identity survives reload and a transport timeout, but not permission loss', async () => {
+  const f = browserFixture({ timeoutMs: 5 });
+  await f.controller.initialize(); await f.controller.run('status');
+  f.handle(() => new Promise(() => {})); await f.controller.run('reconnect');
+  assert.equal(f.controller.getState().canPause, true);
+  assert.equal(f.controller.getState().pending.ownerId, 'browser-owner');
+  const reload = browserFixture({ data: f.data, timeoutMs: 5 });
+  await reload.controller.initialize();
+  assert.equal(reload.controller.getState().canPause, true);
+  reload.handle(() => new Promise(() => {})); await reload.controller.run('status');
+  assert.equal(reload.controller.getState().canPause, true);
+  reload.revoke(); await reload.controller.initialize();
+  assert.equal(reload.controller.getState().canPause, false);
+  const count = reload.messages.length;
+  await reload.controller.run('disconnect-and-pause');
+  assert.equal(reload.messages.length, count);
+});
+
+test('an ambiguous priority Pause write never dispatches or erases the primary intent', async () => {
+  for (const commitFirst of [false, true]) {
+    const f = browserFixture();
+    await f.controller.initialize(); await f.controller.run('status');
+    await f.controller.run('reconnect');
+    const primary = structuredClone(f.controller.getState().pending);
+    const key = client.PRIORITY_PAUSE_KEY + ':browser-managed';
+    const set = f.dependencies.storage.set;
+    let fail = true;
+    f.dependencies.storage.set = async values => {
+      if (fail && Object.hasOwn(values, key)) {
+        fail = false; if (commitFirst) await set(values); throw Error('ambiguous synthetic pause write');
+      }
+      return set(values);
+    };
+    await f.controller.run('disconnect-and-pause');
+    assert.equal(f.messages.filter(value => value.request.action === 'disconnect-and-pause').length, 0);
+    assert.deepEqual(f.controller.getState().pending, primary);
+    assert.equal(f.controller.getState().journalHealthy, false);
+    await f.controller.refreshPending();
+    assert.equal(f.data[key] ?? null, null);
+    assert.deepEqual(f.controller.getState().pending, primary);
+  }
+});
+
+test('two browser pages share a single priority Pause reservation without holding a lock over IPC', async () => {
+  const f = browserFixture();
+  await f.controller.initialize(); await f.controller.run('status'); await f.controller.run('reconnect');
+  const other = createDeviceController(f.dependencies); await other.initialize();
+  f.handle(() => new Promise(() => {}));
+  const first = f.controller.run('disconnect-and-pause');
+  while (!f.messages.some(value => value.request.action === 'disconnect-and-pause')) await new Promise(setImmediate);
+  assert.equal(other.getState().canPause, true, 'the second page initially has a stale empty priority slot');
+  await other.run('disconnect-and-pause');
+  assert.equal(other.getState().canPause, false);
+  assert.equal(f.messages.filter(value => value.request.action === 'disconnect-and-pause').length, 1);
+  await first;
+});
+
+test('a reply from a replacement browser owner cannot retire the old owner operation', async () => {
+  const f = browserFixture();
+  await f.controller.initialize(); await f.controller.run('status'); await f.controller.run('reconnect');
+  const retained = structuredClone(f.controller.getState().pending);
+  f.dependencies.runtime.sendMessage = async value => ({ ownerId: 'replacement-owner', response: reply(value.request, {
+    paused: true, connection: 'disconnected', operation: operation(retained.id, retained.action, 'not-executed') }) });
+  await f.controller.run('status');
+  assert.deepEqual(f.controller.getState().pending, retained);
+  assert.equal(f.controller.getState().ownerId, 'browser-owner');
+  assert.equal(f.controller.getState().canMutate, false);
+});
+
+test('browser priority Pause journals reject missing or conflicting owner identity', async () => {
+  for (const secondary of [
+    { version: 1, id: 'pause', action: 'disconnect-and-pause' },
+    { version: 1, id: 'pause', action: 'disconnect-and-pause', ownerId: 'other-owner' },
+    { version: 1, id: 'pause', action: 'reconnect', ownerId: 'browser-owner' },
+  ]) {
+    const f = browserFixture({ data: {
+      [PENDING_KEY + ':browser-managed']: { version: 1, id: 'primary', action: 'reconnect', ownerId: 'browser-owner' },
+      [client.PRIORITY_PAUSE_KEY + ':browser-managed']: secondary,
+    } });
+    await f.controller.initialize(); await f.controller.run('disconnect-and-pause');
+    assert.equal(f.controller.getState().journalHealthy, false);
+    assert.equal(f.controller.getState().canPause, false);
+    assert.deepEqual(f.messages, []);
+  }
+});
+
+test('a newer Pause observation cannot be overwritten by a late ready Reconnect snapshot', async () => {
+  const f = browserFixture();
+  await f.controller.initialize(); await f.controller.run('status');
+  let release;
+  f.handle(request => request.action === 'reconnect' ? new Promise(resolve => {
+    release = () => resolve(reply(request, { paused: false, connection: 'ready',
+      operation: operation(request.id, request.action, 'settled') }));
+  }) : reply(request, { paused: true, connection: 'disconnected', operation: operation(request.id, request.action, 'settled') }));
+  const reconnect = f.controller.run('reconnect');
+  while (!release) await new Promise(setImmediate);
+  const primary = structuredClone(f.controller.getState().pending);
+  await f.controller.run('disconnect-and-pause');
+  assert.equal(f.controller.getState().observation.paused, true);
+  release(); await reconnect;
+  assert.equal(f.controller.getState().observation.paused, true);
+  assert.deepEqual(f.controller.getState().pending, primary, 'only a fresh exact read may reconcile the superseded reconnect');
+});
+
+test('a browser terminal-clear quarantine cannot resurrect an old Pause after another page completed a newer Pause', async () => {
+  for (const commitFirst of [false, true]) {
+    const primaryKey = PENDING_KEY + ':browser-managed', pauseKey = client.PRIORITY_PAUSE_KEY + ':browser-managed';
+    const primary = { version: 1, id: 'unresolved-primary', action: 'reconnect', ownerId: 'browser-owner' };
+    const oldPause = { version: 1, id: 'settled-old-pause', action: 'disconnect-and-pause', ownerId: 'browser-owner' };
+    const f = browserFixture({ data: { [primaryKey]: primary, [pauseKey]: oldPause } });
+    f.handle(request => reply(request, { paused: true, connection: 'disconnected', operation: operation(request.id,
+      request.id === primary.id ? 'reconnect' : 'disconnect-and-pause', request.id === primary.id ? 'unknown-running' : 'settled') }));
+    const set = f.dependencies.storage.set;
+    let fail = true;
+    f.dependencies.storage.set = async values => {
+      if (fail && values[pauseKey] === null) {
+        fail = false; if (commitFirst) await set(values); throw Error('ambiguous terminal clear');
+      }
+      return set(values);
+    };
+    await f.controller.initialize(); await f.controller.run('status');
+    assert.equal(f.controller.getState().journalHealthy, false);
+    const other = createDeviceController(f.dependencies);
+    await other.initialize(); await other.run('status');
+    await other.run('disconnect-and-pause');
+    assert.equal(f.data[pauseKey], null);
+    await f.controller.refreshPending(); await other.refreshPending();
+    assert.equal(f.data[pauseKey], null, 'an already-proved terminal record cannot be restored over completed later progress');
+    assert.deepEqual(f.data[primaryKey], primary);
+    assert.equal(f.controller.getState().canPause, true);
+    assert.equal(other.getState().canPause, true);
+    assert.equal(f.messages.filter(value => value.request.action === 'disconnect-and-pause').length, 1);
+  }
+});

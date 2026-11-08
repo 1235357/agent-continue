@@ -20,8 +20,8 @@ const event = () => {
 const request = { version: 1, action: 'wake', id: 'fixture-1' };
 const origin = 'chrome-extension://' + 'a'.repeat(32) + '/';
 
-function extension({ granted = true, os = 'win' } = {}) {
-  const attempts = [], messages = [], stored = {}, results = [];
+function extension({ granted = true, os = 'win', attach = false, pauseAttach = false } = {}) {
+  const attempts = [], messages = [], requests = [], stored = {}, results = [], attachments = [];
   const startup = event(), removed = event(), added = event(), alarmEvent = event();
   const alarms = new Map(), ports = [];
   let disconnected = 0;
@@ -30,17 +30,27 @@ function extension({ granted = true, os = 'win' } = {}) {
       connectNative(host) {
         const port = { onMessage: event(), onDisconnect: event(),
           disconnect() { disconnected++; },
-          postMessage(message) { messages.push(message); } };
+          postMessage(message) { messages.push(message); requests.push(message); } };
         attempts.push(host); ports.push(port); return port;
+      },
+      sendNativeMessage(host, frame) {
+        return new Promise((resolve, reject) => {
+          attachments.push({ host, frame, resolve, reject });
+          requests.push(frame.request);
+          // Legacy unavailable-owner cases still forbid a fresh wake; successful attach is tested explicitly.
+          if (!attach && !(pauseAttach && frame.request.action === 'disconnect-and-pause')) reject(new Error('synthetic-owner-unavailable'));
+        });
       } },
-    storage: { session: { async get(key) { return { [key]: structuredClone(stored[key]) }; },
+    storage: { session: { async get(key) {
+      return Object.fromEntries((Array.isArray(key) ? key : [key]).map(name => [name, structuredClone(stored[name])]));
+    },
       async set(values) { Object.assign(stored, structuredClone(values)); },
       async remove(key) { delete stored[key]; } } },
     alarms: { onAlarm: alarmEvent, async create(name, options) { alarms.set(name, options); },
       async clear(name) { return alarms.delete(name); } },
     permissions: { contains: async () => granted, onRemoved: removed, onAdded: added },
   };
-  return { api, attempts, messages, results, get native() { return ports.at(-1); }, ports, alarms, startup, removed, added,
+  return { api, attempts, messages, requests, results, attachments, get native() { return ports.at(-1); }, ports, alarms, startup, removed, added,
     alarm(name) { alarms.delete(name); alarmEvent.emit({ name }); },
     rebind() { alarmEvent.reset(); startup.reset(); removed.reset(); added.reset(); return bindBrowserWake(api); },
     setGrant(value) { granted = value; }, get disconnected() { return disconnected; } };
@@ -51,10 +61,416 @@ const statusMessage = (id = 'install-status') => ({ type: BROWSER_DEVICE_MESSAGE
   request: { version: 1, id, action: 'status' } });
 const OWNER = 'deviceBrowserWakeOwnerV1';
 const MUTATION = 'deviceBrowserWakeMutationV1';
+const PRIORITY_PAUSE = 'deviceBrowserWakePriorityPauseV1';
 const mutationMessage = (f, request) => ({ type: BROWSER_DEVICE_MESSAGE, ownerId: f.messages[0].id, request });
 const operationReply = (request, status, action = request.action) => ({ ...request, ok: true,
   state: { paused: status === 'settled' ? true : null, connection: 'disconnected',
     operation: { id: request.id, action, status } } });
+const attachedReply = (call, status, action = call.frame.request.action) => ({ version: 2,
+  action: 'attach-control', ownerId: call.frame.ownerId, response: operationReply(call.frame.request, status, action) });
+// Pause moved to one-shot attach; keep receipt/fence assertions while targeting its new reply channel.
+function replyControl(f, response) {
+  const call = f.attachments.findLast(call => call.frame.request.id === response.id && call.frame.request.action === response.action);
+  if (call) call.resolve({ version: 2, action: 'attach-control', ownerId: call.frame.ownerId, response });
+  else f.native.onMessage.emit(response);
+}
+
+async function pendingReconnect(t, options = {}) {
+  const f = extension({ attach: true, ...options }), wake = bindBrowserWake(f.api);
+  t.after(() => f.native?.onDisconnect.emit());
+  await tick(); f.native.onMessage.emit({ ...f.messages[0], ok: true });
+  const request = { version: 1, id: 'primary-reconnect', action: 'reconnect' };
+  const primary = wake.handleMessage(mutationMessage(f, request), devicesSender(f)); await tick();
+  return { f, wake, request, primary, ownerId: f.messages[0].id };
+}
+
+test('independent status attaches to the same owner before and after a never-returning Reconnect deadline', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { f, wake, request, primary, ownerId } = await pendingReconnect(t);
+  for (const afterDeadline of [false, true]) {
+    if (afterDeadline) { t.mock.timers.tick(14500); assert.equal(await primary, null); }
+    const message = statusMessage(request.id), status = wake.handleMessage(message, devicesSender(f)); await tick();
+    const call = f.attachments.at(-1);
+    assert.ok(call, 'status cannot wait for the occupied long-port command');
+    assert.equal(call.host, BROWSER_WAKE_HOST);
+    assert.deepEqual(call.frame, { version: 2, action: 'attach-control', ownerId, request: message.request });
+    const response = attachedReply(call, 'unknown-running', 'reconnect'); call.resolve(response);
+    assert.deepEqual(await status, { ownerId, response: response.response });
+    assert.deepEqual((await f.api.storage.session.get(MUTATION))[MUTATION], { ownerId, ...request });
+  }
+  assert.deepEqual(f.messages.map(message => message.action), ['wake', 'reconnect']);
+  assert.equal(f.attempts.length, 1);
+});
+
+test('priority Pause persists separately before attach, rejects duplicates, and never waits for status IPC', async t => {
+  const { f, wake, request, ownerId } = await pendingReconnect(t);
+  const status = wake.handleMessage(statusMessage(request.id), devicesSender(f)); await tick();
+  const pause = { version: 1, id: 'priority-pause', action: 'disconnect-and-pause' };
+  const pending = wake.handleMessage(mutationMessage(f, pause), devicesSender(f)); await tick();
+  assert.equal(f.attachments.length, 2, 'the status IPC does not hold the admission queue');
+  const call = f.attachments[1], record = { ownerId, ...pause };
+  assert.deepEqual(call.frame, { version: 2, action: 'attach-control', ownerId, request: pause });
+  assert.deepEqual((await f.api.storage.session.get(PRIORITY_PAUSE))[PRIORITY_PAUSE], record);
+  assert.deepEqual((await f.api.storage.session.get(MUTATION))[MUTATION], { ownerId, ...request });
+  assert.equal(await wake.handleMessage(mutationMessage(f, { ...pause, id: 'duplicate-pause' }), devicesSender(f)), null);
+  call.resolve({ version: 2, action: 'attach-control', ownerId, response: { ...pause, ok: false } });
+  assert.ok(await pending);
+  assert.deepEqual((await f.api.storage.session.get(PRIORITY_PAUSE))[PRIORITY_PAUSE], record);
+  assert.equal(await wake.handleMessage(mutationMessage(f, { ...pause, id: 'another-pause' }), devicesSender(f)), null);
+  f.attachments[0].resolve(attachedReply(f.attachments[0], 'unknown-running', 'reconnect')); assert.ok(await status);
+  assert.equal(f.attachments.length, 2);
+  assert.deepEqual(f.messages.map(message => message.action), ['wake', 'reconnect']);
+});
+
+for (const first of ['primary', 'pause']) {
+  test(`independent receipts settle only their own fence when ${first} finishes first`, async t => {
+    const { f, wake, request, primary, ownerId } = await pendingReconnect(t);
+    const pause = { version: 1, id: 'priority-pause', action: 'disconnect-and-pause' };
+    const pending = wake.handleMessage(mutationMessage(f, pause), devicesSender(f)); await tick();
+    const call = f.attachments[0]; assert.ok(call);
+    if (first === 'primary') {
+      f.native.onMessage.emit(operationReply(request, 'settled')); assert.ok(await primary);
+      assert.equal((await f.api.storage.session.get(MUTATION))[MUTATION], false);
+      assert.deepEqual((await f.api.storage.session.get(PRIORITY_PAUSE))[PRIORITY_PAUSE], { ownerId, ...pause });
+      assert.equal(await wake.handleMessage(mutationMessage(f, { ...request, id: 'new-reconnect' }), devicesSender(f)), null);
+      f.native.onDisconnect.emit(); await tick();
+      assert.equal((await f.api.storage.session.get(OWNER))[OWNER], ownerId);
+      assert.equal(f.alarms.size, 0);
+      call.resolve(attachedReply(call, 'settled')); assert.ok(await pending);
+      assert.equal((await f.api.storage.session.get(PRIORITY_PAUSE))[PRIORITY_PAUSE], false);
+    } else {
+      call.resolve(attachedReply(call, 'settled')); assert.ok(await pending);
+      assert.equal((await f.api.storage.session.get(PRIORITY_PAUSE))[PRIORITY_PAUSE], false);
+      assert.deepEqual((await f.api.storage.session.get(MUTATION))[MUTATION], { ownerId, ...request });
+      f.native.onMessage.emit(operationReply(request, 'settled')); assert.ok(await primary);
+      assert.equal((await f.api.storage.session.get(MUTATION))[MUTATION], false);
+    }
+    assert.equal(f.attempts.length, 1);
+  });
+}
+
+test('worker restart reads two exact original IDs using attach only without unsolicited startup or IPC', async t => {
+  const f = extension({ attach: true }), ownerId = 'retained-browser-owner';
+  const primary = { ownerId, version: 1, id: 'retained-reconnect', action: 'reconnect' };
+  const pause = { ownerId, version: 1, id: 'retained-pause', action: 'disconnect-and-pause' };
+  await f.api.storage.session.set({ [OWNER]: ownerId, [MUTATION]: primary, [PRIORITY_PAUSE]: pause });
+  const wake = bindBrowserWake(f.api); await tick(); f.startup.emit(); await tick();
+  assert.equal(f.attempts.length, 0); assert.equal(f.attachments.length, 0);
+  const one = wake.handleMessage(statusMessage(primary.id), devicesSender(f)); await tick();
+  const two = wake.handleMessage(statusMessage(pause.id), devicesSender(f)); await tick();
+  assert.equal(f.attachments.length, 2);
+  for (const [index, action] of [[0, 'reconnect'], [1, 'disconnect-and-pause']]) {
+    const call = f.attachments[index]; assert.equal(call.frame.ownerId, ownerId);
+    call.resolve(attachedReply(call, 'settled', action));
+  }
+  assert.ok(await one); assert.ok(await two);
+  assert.equal((await f.api.storage.session.get(MUTATION))[MUTATION], false);
+  assert.equal((await f.api.storage.session.get(PRIORITY_PAUSE))[PRIORITY_PAUSE], false);
+  assert.equal((await f.api.storage.session.get(OWNER))[OWNER], ownerId, 'receipt settlement is not owner-death proof');
+  assert.equal(f.attempts.length, 0);
+  assert.equal(f.alarms.size, 0);
+});
+
+test('priority Pause survives a primary receipt reconciled by attach and its late original port reply', async t => {
+  const { f, wake, request, primary, ownerId } = await pendingReconnect(t);
+  const pause = { version: 1, id: 'priority-pause', action: 'disconnect-and-pause' };
+  const pending = wake.handleMessage(mutationMessage(f, pause), devicesSender(f)); await tick();
+  assert.ok(f.attachments[0]);
+  f.attachments[0].resolve(attachedReply(f.attachments[0], 'unknown-running')); assert.ok(await pending);
+  const status = wake.handleMessage(statusMessage(request.id), devicesSender(f)); await tick();
+  const call = f.attachments[1]; assert.ok(call); call.resolve(attachedReply(call, 'settled', 'reconnect')); assert.ok(await status);
+  assert.equal((await f.api.storage.session.get(MUTATION))[MUTATION], false);
+  f.native.onMessage.emit(operationReply(request, 'settled')); assert.ok(await primary);
+  assert.deepEqual((await f.api.storage.session.get(PRIORITY_PAUSE))[PRIORITY_PAUSE], { ownerId, ...pause });
+  assert.equal(await wake.handleMessage(mutationMessage(f, { ...request, id: 'new-reconnect' }), devicesSender(f)), null);
+  assert.equal(f.attempts.length, 1);
+});
+
+test('attach is bounded to five seconds and late receipts cannot retire a timed-out fence or start another owner', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { f, wake, request, ownerId } = await pendingReconnect(t);
+  const status = wake.handleMessage(statusMessage(request.id), devicesSender(f)); await tick();
+  assert.equal(f.attachments.length, 1);
+  t.mock.timers.tick(5000); assert.equal(await status, null);
+  f.attachments[0].resolve(attachedReply(f.attachments[0], 'settled', 'reconnect')); await tick();
+  assert.deepEqual((await f.api.storage.session.get(MUTATION))[MUTATION], { ownerId, ...request });
+  assert.equal(f.attempts.length, 1); assert.equal(f.disconnected, 0); assert.equal(f.alarms.size, 0);
+});
+
+test('an attach started near the total status deadline releases its waiter at the remaining budget', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const scheduled = t.mock.method(globalThis, 'setTimeout'), cleared = t.mock.method(globalThis, 'clearTimeout');
+  const { f, wake, request } = await pendingReconnect(t);
+  const get = f.api.storage.session.get; let release;
+  f.api.storage.session.get = async keys => {
+    if (!release && Array.isArray(keys) && keys.includes(OWNER)) await new Promise(resolve => { release = resolve; });
+    return get(keys);
+  };
+  const status = wake.handleMessage(statusMessage(request.id), devicesSender(f)); await tick();
+  assert.equal(typeof release, 'function');
+  t.mock.timers.tick(14000); release(); await tick(); assert.equal(f.attachments.length, 1);
+  const timer = scheduled.mock.calls.find(call => call.arguments[1] === 5000)?.result;
+  assert.notEqual(timer, undefined);
+  t.mock.timers.tick(500); assert.equal(await status, null); await tick();
+  assert.ok(cleared.mock.calls.some(call => call.arguments[0] === timer), 'attach waiter must not outlive the total status budget');
+});
+
+test('malformed attach envelopes and mismatched receipts fail closed without fallback or fence retirement', async t => {
+  for (const corrupt of [reply => ({ ...reply, ownerId: 'foreign-owner' }), reply => ({ ...reply, version: 1 }),
+    reply => ({ ...reply, extra: true }), reply => ({ ...reply, response: { ...reply.response, id: 'foreign-id' } }),
+    reply => ({ ...reply, response: { ...reply.response, action: 'disconnect-and-pause' } })]) {
+    const { f, wake, request, ownerId } = await pendingReconnect(t);
+    const status = wake.handleMessage(statusMessage(request.id), devicesSender(f)); await tick();
+    const call = f.attachments[0]; assert.ok(call); call.resolve(corrupt(attachedReply(call, 'settled', 'reconnect')));
+    assert.equal(await status, null);
+    assert.deepEqual((await f.api.storage.session.get(MUTATION))[MUTATION], { ownerId, ...request });
+    assert.equal(f.attempts.length, 1); assert.equal(f.disconnected, 0);
+  }
+});
+
+test('permission epoch or persisted owner changes invalidate an attached terminal reply', async t => {
+  for (const changed of ['permission', 'owner', 'record']) {
+    const { f, wake, request, ownerId } = await pendingReconnect(t);
+    const status = wake.handleMessage(statusMessage(request.id), devicesSender(f)); await tick();
+    const call = f.attachments[0]; assert.ok(call);
+    const record = { ownerId, ...request };
+    if (changed === 'permission') {
+      f.setGrant(false); f.removed.emit({ permissions: ['nativeMessaging'] });
+      f.setGrant(true); f.added.emit({ permissions: ['nativeMessaging'] });
+    } else if (changed === 'owner') await f.api.storage.session.set({ [OWNER]: 'replacement-owner' });
+    else await f.api.storage.session.set({ [MUTATION]: { ...record, id: 'replacement-operation' } });
+    call.resolve(attachedReply(call, 'settled', 'reconnect')); assert.equal(await status, null);
+    assert.deepEqual((await f.api.storage.session.get(MUTATION))[MUTATION],
+      changed === 'record' ? { ...record, id: 'replacement-operation' } : record);
+    assert.equal(f.attempts.length, 1);
+  }
+});
+
+test('a cancelled priority admission never posts after its total request deadline', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { f, wake, ownerId } = await pendingReconnect(t);
+  const set = f.api.storage.session.set; let release;
+  f.api.storage.session.set = async values => {
+    if (values[PRIORITY_PAUSE]) await new Promise(resolve => { release = resolve; });
+    return set(values);
+  };
+  const pause = { version: 1, id: 'slow-priority-pause', action: 'disconnect-and-pause' };
+  const pending = wake.handleMessage(mutationMessage(f, pause), devicesSender(f)); await tick();
+  assert.equal(typeof release, 'function');
+  t.mock.timers.tick(14500); assert.equal(await pending, null);
+  release(); await tick();
+  assert.equal(f.attachments.length, 0);
+  assert.deepEqual((await f.api.storage.session.get(PRIORITY_PAUSE))[PRIORITY_PAUSE], { ownerId, ...pause });
+  assert.equal(f.attempts.length, 1);
+});
+
+test('ambiguous priority admission writes never send Pause or erase the primary fence', async t => {
+  for (const applied of [false, true]) {
+    const { f, wake, request, ownerId } = await pendingReconnect(t);
+    const set = f.api.storage.session.set;
+    let writes = 0;
+    f.api.storage.session.set = async values => {
+      if (values[PRIORITY_PAUSE]) {
+        writes++;
+        if (applied) await set(values);
+        throw new Error('ambiguous-priority-admission');
+      }
+      return set(values);
+    };
+    const pause = { version: 1, id: 'uncertain-priority-pause', action: 'disconnect-and-pause' };
+    assert.equal(await wake.handleMessage(mutationMessage(f, pause), devicesSender(f)), null);
+    assert.equal(writes, 1, 'the failed admission must actually reach the durable write boundary');
+    assert.equal(f.attachments.length, 0);
+    assert.deepEqual((await f.api.storage.session.get(MUTATION))[MUTATION], { ownerId, ...request });
+    assert.equal((await f.api.storage.session.get(OWNER))[OWNER], ownerId);
+    assert.equal(f.attempts.length, 1);
+  }
+});
+
+test('known-owner status uses attach even on an idle port and never adopts a different or absent owner', async t => {
+  const f = extension({ attach: true }), wake = bindBrowserWake(f.api);
+  t.after(() => f.native?.onDisconnect.emit());
+  await tick(); f.native.onMessage.emit({ ...f.messages[0], ok: true });
+  const ownerId = f.messages[0].id;
+  const message = { ...statusMessage('known-owner-status'), ownerId };
+  const pending = wake.handleMessage(message, devicesSender(f)); await tick();
+  assert.equal(f.attachments.length, 1);
+  const call = f.attachments[0];
+  call.resolve({ version: 2, action: 'attach-control', ownerId,
+    response: { ...message.request, ok: true, state: { paused: true, connection: 'disconnected' } } });
+  assert.ok(await pending);
+  assert.deepEqual(f.messages.map(message => message.action), ['wake']);
+  for (const owner of ['different-owner', '', '../invalid']) {
+    assert.equal(await wake.handleMessage({ ...message, ownerId: owner }, devicesSender(f)), null);
+  }
+  const absent = extension({ attach: true, granted: false }), other = bindBrowserWake(absent.api); await tick();
+  absent.setGrant(true);
+  assert.equal(await other.handleMessage(message, devicesSender(absent)), null);
+  assert.equal(absent.attempts.length, 0); assert.equal(absent.attachments.length, 0);
+});
+
+test('ordinary known-owner Pause uses the primary slot and attach even while a read-only port command is busy', async t => {
+  for (const busy of [false, true]) {
+    const f = extension({ attach: true }), wake = bindBrowserWake(f.api);
+    t.after(() => f.native?.onDisconnect.emit());
+    await tick(); f.native.onMessage.emit({ ...f.messages[0], ok: true });
+    const ownerId = f.messages[0].id;
+    const status = busy ? wake.handleMessage(statusMessage(), devicesSender(f)) : null; await tick();
+    const request = { version: 1, id: 'ordinary-pause', action: 'disconnect-and-pause' };
+    const pending = wake.handleMessage(mutationMessage(f, request), devicesSender(f)); await tick();
+    assert.equal(f.attachments.length, 1);
+    assert.deepEqual((await f.api.storage.session.get(MUTATION))[MUTATION], { ownerId, ...request });
+    assert.equal((await f.api.storage.session.get(PRIORITY_PAUSE))[PRIORITY_PAUSE], undefined);
+    assert.equal(f.messages.some(message => message.action === 'disconnect-and-pause'), false);
+    const call = f.attachments[0]; call.resolve(attachedReply(call, 'settled')); assert.ok(await pending);
+    assert.equal((await f.api.storage.session.get(MUTATION))[MUTATION], false);
+    if (busy) {
+      f.native.onMessage.emit({ ...statusMessage().request, ok: true, state: { paused: true, connection: 'disconnected' } });
+      assert.ok(await status);
+    }
+  }
+});
+
+test('priority Pause may attach after port loss and worker restart but only over the retained Reconnect', async t => {
+  const { f, request, primary, ownerId } = await pendingReconnect(t);
+  f.native.onDisconnect.emit(); assert.equal(await primary, null); await tick();
+  const wake = f.rebind(); await tick();
+  const pause = { version: 1, id: 'restored-priority-pause', action: 'disconnect-and-pause' };
+  const pending = wake.handleMessage({ type: BROWSER_DEVICE_MESSAGE, ownerId, request: pause }, devicesSender(f)); await tick();
+  const call = f.attachments[0]; assert.ok(call);
+  assert.deepEqual(call.frame, { version: 2, action: 'attach-control', ownerId, request: pause });
+  call.resolve(attachedReply(call, 'settled')); assert.ok(await pending);
+  assert.equal((await f.api.storage.session.get(PRIORITY_PAUSE))[PRIORITY_PAUSE], false);
+  assert.deepEqual((await f.api.storage.session.get(MUTATION))[MUTATION], { ownerId, ...request });
+  assert.equal(f.attempts.length, 1); assert.equal(f.alarms.size, 0);
+});
+
+test('priority Pause timeout keeps its exact record and a late attach result cannot release it', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { f, wake, ownerId } = await pendingReconnect(t);
+  const pause = { version: 1, id: 'timed-out-priority-pause', action: 'disconnect-and-pause' };
+  const pending = wake.handleMessage(mutationMessage(f, pause), devicesSender(f)); await tick();
+  assert.equal(f.attachments.length, 1);
+  t.mock.timers.tick(5000); assert.equal(await pending, null);
+  f.attachments[0].resolve(attachedReply(f.attachments[0], 'settled')); await tick();
+  assert.deepEqual((await f.api.storage.session.get(PRIORITY_PAUSE))[PRIORITY_PAUSE], { ownerId, ...pause });
+  assert.equal(await wake.handleMessage(mutationMessage(f, { ...pause, id: 'duplicate' }), devicesSender(f)), null);
+  assert.equal(f.attachments.length, 1);
+});
+
+test('no permission or foreign persisted records deny attach and priority admission without any wake fallback', async t => {
+  for (const invalid of ['permission', 'primary-owner', 'pause-owner', 'same-id', 'platform']) {
+    const { f, wake, request, ownerId } = await pendingReconnect(t);
+    const primary = { ownerId, ...request };
+    if (invalid === 'permission') f.setGrant(false);
+    else if (invalid === 'primary-owner') await f.api.storage.session.set({ [MUTATION]: { ...primary, ownerId: 'foreign' } });
+    else if (invalid === 'pause-owner') await f.api.storage.session.set({ [PRIORITY_PAUSE]:
+      { ownerId: 'foreign', version: 1, id: 'foreign-pause', action: 'disconnect-and-pause' } });
+    else if (invalid === 'platform') f.api.runtime.getPlatformInfo = async () => ({ os: 'linux' });
+    const pause = { version: 1, id: invalid === 'same-id' ? request.id : 'new-pause', action: 'disconnect-and-pause' };
+    assert.equal(await wake.handleMessage(mutationMessage(f, pause), devicesSender(f)), null);
+    if (invalid !== 'same-id') assert.equal(await wake.handleMessage(statusMessage(request.id), devicesSender(f)), null);
+    assert.equal(f.attachments.length, 0); assert.equal(f.attempts.length, 1);
+  }
+});
+
+test('a priority-only fence prevents startup and a late receipt cannot erase its replacement', async t => {
+  const isolated = extension(), isolatedWake = bindBrowserWake(isolated.api);
+  await tick(); isolated.native.onDisconnect.emit(); await tick();
+  await isolated.api.storage.session.set({ [PRIORITY_PAUSE]: { ownerId: 'retained-owner', version: 1,
+    id: 'retained-pause', action: 'disconnect-and-pause' } });
+  assert.equal(await isolatedWake.handleMessage(statusMessage(), devicesSender(isolated)), null);
+  assert.equal(isolated.attempts.length, 1);
+  const { f, wake, ownerId } = await pendingReconnect(t);
+  const pause = { version: 1, id: 'old-priority-pause', action: 'disconnect-and-pause' };
+  const pending = wake.handleMessage(mutationMessage(f, pause), devicesSender(f)); await tick();
+  const replacement = { ownerId, ...pause, id: 'replacement-pause' };
+  await f.api.storage.session.set({ [PRIORITY_PAUSE]: replacement });
+  const call = f.attachments[0]; assert.ok(call); call.resolve(attachedReply(call, 'settled'));
+  assert.equal(await pending, null);
+  assert.deepEqual((await f.api.storage.session.get(PRIORITY_PAUSE))[PRIORITY_PAUSE], replacement);
+});
+
+test('ambiguous priority retirement retains owner and never clears an unresolved primary', async t => {
+  for (const applied of [false, true]) {
+    const { f, wake, request, ownerId } = await pendingReconnect(t);
+    const pause = { version: 1, id: 'priority-pause', action: 'disconnect-and-pause' };
+    const pending = wake.handleMessage(mutationMessage(f, pause), devicesSender(f)); await tick();
+    const set = f.api.storage.session.set;
+    f.api.storage.session.set = async values => {
+      if (values[PRIORITY_PAUSE] === false) {
+        if (applied) await set(values);
+        throw new Error('ambiguous-priority-retirement');
+      }
+      return set(values);
+    };
+    const call = f.attachments[0]; assert.ok(call); call.resolve(attachedReply(call, 'settled'));
+    assert.equal(await pending, null);
+    assert.deepEqual((await f.api.storage.session.get(MUTATION))[MUTATION], { ownerId, ...request });
+    assert.equal((await f.api.storage.session.get(OWNER))[OWNER], ownerId);
+    assert.equal(await wake.handleMessage(mutationMessage(f, { ...pause, id: 'duplicate' }), devicesSender(f)), null);
+    assert.equal(f.attachments.length, 1);
+  }
+});
+
+test('a long-port terminal receipt cannot retire a primary after its persisted owner changes', async t => {
+  const { f, request, primary, ownerId } = await pendingReconnect(t);
+  await f.api.storage.session.set({ [OWNER]: 'replacement-owner' });
+  f.native.onMessage.emit(operationReply(request, 'settled'));
+  assert.equal(await primary, null);
+  assert.deepEqual((await f.api.storage.session.get(MUTATION))[MUTATION], { ownerId, ...request });
+  assert.equal((await f.api.storage.session.get(OWNER))[OWNER], 'replacement-owner');
+  assert.equal(f.alarms.size, 0);
+});
+
+test('an exact terminal status repairs priority retirement rejected before or after commit on the same live owner', async t => {
+  for (const applied of [false, true]) {
+    const { f, wake, request, ownerId } = await pendingReconnect(t);
+    const pause = { version: 1, id: 'retirement-recovery-pause', action: 'disconnect-and-pause' };
+    const pending = wake.handleMessage(mutationMessage(f, pause), devicesSender(f)); await tick();
+    const set = f.api.storage.session.set;
+    f.api.storage.session.set = async values => {
+      if (values[PRIORITY_PAUSE] === false) {
+        if (applied) await set(values);
+        throw new Error('retirement-rejected');
+      }
+      return set(values);
+    };
+    f.attachments[0].resolve(attachedReply(f.attachments[0], 'settled'));
+    assert.equal(await pending, null);
+    f.api.storage.session.set = set;
+    const observed = wake.handleMessage(statusMessage(pause.id), devicesSender(f)); await tick();
+    const statusCall = f.attachments.at(-1);
+    statusCall.resolve(attachedReply(statusCall, 'settled', 'disconnect-and-pause'));
+    assert.ok(await observed);
+    assert.equal((await f.api.storage.session.get(PRIORITY_PAUSE))[PRIORITY_PAUSE], false);
+    const nextPause = { ...pause, id: 'next-explicit-pause' };
+    const next = wake.handleMessage(mutationMessage(f, nextPause), devicesSender(f)); await tick();
+    const nextCall = f.attachments.at(-1);
+    assert.equal(nextCall.frame.request.id, nextPause.id, 'terminal proof must retire the in-memory fence too');
+    nextCall.resolve(attachedReply(nextCall, 'settled')); assert.ok(await next);
+    assert.deepEqual((await f.api.storage.session.get(MUTATION))[MUTATION], { ownerId, ...request });
+    assert.deepEqual(f.messages.map(value => value.action), ['wake', 'reconnect']);
+  }
+});
+
+test('permission removal during priority persistence cancels transport but preserves both records', async t => {
+  const { f, wake, request, ownerId } = await pendingReconnect(t);
+  const set = f.api.storage.session.set; let release;
+  f.api.storage.session.set = async values => {
+    if (values[PRIORITY_PAUSE]) await new Promise(resolve => { release = resolve; });
+    return set(values);
+  };
+  const pause = { version: 1, id: 'revoked-priority-pause', action: 'disconnect-and-pause' };
+  const pending = wake.handleMessage(mutationMessage(f, pause), devicesSender(f)); await tick();
+  assert.equal(typeof release, 'function');
+  f.setGrant(false); f.removed.emit({ permissions: ['nativeMessaging'] }); release();
+  assert.equal(await pending, null); await tick();
+  assert.equal(f.attachments.length, 0);
+  assert.deepEqual((await f.api.storage.session.get(MUTATION))[MUTATION], { ownerId, ...request });
+  assert.deepEqual((await f.api.storage.session.get(PRIORITY_PAUSE))[PRIORITY_PAUSE], { ownerId, ...pause });
+  assert.equal((await f.api.storage.session.get(OWNER))[OWNER], ownerId);
+});
 
 test('local disconnect retires a certain owner after permission removal and regrant', async t => {
   const f = extension(), wake = bindBrowserWake(f.api);
@@ -188,29 +604,29 @@ test('status deadline also bounds a slow acknowledgement and never posts an expi
 });
 
 test('mutation admission persists its operation identity before posting and rejects unrelated mutations', async t => {
-  const f = extension(), wake = bindBrowserWake(f.api);
+  const f = extension({ pauseAttach: true }), wake = bindBrowserWake(f.api);
   t.after(() => f.native?.onDisconnect.emit());
   await tick(); f.native.onMessage.emit({ ...f.messages[0], ok: true });
   const request = { version: 1, id: 'unknown-pause', action: 'disconnect-and-pause' };
-  const post = f.native.postMessage;
+  const post = f.api.runtime.sendNativeMessage;
   let persisted;
-  f.native.postMessage = message => {
-    if (message.action === request.action) persisted = f.api.storage.session.get(MUTATION);
-    post(message);
+  f.api.runtime.sendNativeMessage = (host, frame) => {
+    if (frame.request.action === request.action) persisted = f.api.storage.session.get(MUTATION);
+    return post(host, frame);
   };
   const mutation = wake.handleMessage(mutationMessage(f, request), devicesSender(f)); await tick();
   const record = (await persisted)[MUTATION];
   assert.deepEqual(record, { ownerId: f.messages[0].id, ...request });
-  f.native.onMessage.emit(operationReply(request, 'unknown-running')); assert.ok(await mutation);
+  replyControl(f, operationReply(request, 'unknown-running')); assert.ok(await mutation);
   const other = { version: 1, id: 'other', action: 'reconnect' };
   assert.equal(await wake.handleMessage(mutationMessage(f, other), devicesSender(f)), null);
-  assert.deepEqual(f.messages.at(-1), request);
+  assert.deepEqual(f.requests.at(-1), request);
   assert.deepEqual((await f.api.storage.session.get(MUTATION))[MUTATION], record);
 });
 
 for (const action of ['reconnect', 'disconnect-and-pause', 'prepared-revoke']) {
   test(`generic ${action} rejection preserves its mutation fence across disconnect and worker restart`, async t => {
-    const f = extension(), wake = bindBrowserWake(f.api);
+    const f = extension({ pauseAttach: true }), wake = bindBrowserWake(f.api);
     t.after(() => f.native?.onDisconnect.emit());
     await tick(); f.native.onMessage.emit({ ...f.messages[0], ok: true });
     const request = { version: 1, id: 'rejected-mutation', action,
@@ -218,12 +634,12 @@ for (const action of ['reconnect', 'disconnect-and-pause', 'prepared-revoke']) {
     const pending = wake.handleMessage(mutationMessage(f, request), devicesSender(f)); await tick();
     const record = { ownerId: f.messages[0].id, ...request };
     const response = { version: 1, id: request.id, action, ok: false };
-    f.native.onMessage.emit(response);
+    replyControl(f, response);
     assert.deepEqual(await pending, { ownerId: record.ownerId, response });
     assert.deepEqual((await f.api.storage.session.get(MUTATION))[MUTATION], record);
     assert.equal(await wake.handleMessage(mutationMessage(f,
       { version: 1, id: 'unrelated-reconnect', action: 'reconnect' }), devicesSender(f)), null);
-    assert.deepEqual(f.messages.at(-1), request);
+    assert.deepEqual(f.requests.at(-1), request);
     f.native.onDisconnect.emit(); await tick();
     assert.equal((await f.api.storage.session.get(OWNER))[OWNER], record.ownerId);
     assert.equal(f.alarms.size, 0);
@@ -233,20 +649,20 @@ for (const action of ['reconnect', 'disconnect-and-pause', 'prepared-revoke']) {
     assert.equal(await next.handleMessage(statusMessage(), devicesSender(f)), null);
     assert.deepEqual((await f.api.storage.session.get(MUTATION))[MUTATION], record);
     assert.equal(f.attempts.length, 1);
-    assert.equal(f.messages.filter(message => message.action === action).length, 1);
+    assert.equal(f.requests.filter(message => message.action === action).length, 1);
     assert.equal(f.alarms.size, 0);
   });
 }
 
 test('a generic mutation rejection remains reconcilable only through its matching terminal receipt', async t => {
   for (const action of ['reconnect', 'disconnect-and-pause', 'prepared-revoke']) {
-    const f = extension(), wake = bindBrowserWake(f.api);
+    const f = extension({ pauseAttach: true }), wake = bindBrowserWake(f.api);
     t.after(() => f.native?.onDisconnect.emit());
     await tick(); f.native.onMessage.emit({ ...f.messages[0], ok: true });
     const request = { version: 1, id: 'rejected-mutation', action,
       ...(action === 'prepared-revoke' ? { operationId: 'ae900800-b673-4eee-abe5-e7267e0d46b1', sha256: 'a'.repeat(64) } : {}) };
     const pending = wake.handleMessage(mutationMessage(f, request), devicesSender(f)); await tick();
-    f.native.onMessage.emit({ version: 1, id: request.id, action, ok: false }); assert.ok(await pending);
+    replyControl(f, { version: 1, id: request.id, action, ok: false }); assert.ok(await pending);
     assert.deepEqual((await f.api.storage.session.get(MUTATION))[MUTATION], { ownerId: f.messages[0].id, ...request });
     const message = action === 'prepared-revoke' ?
       mutationMessage(f, { ...request, id: 'matching-review', action: 'prepared-review' }) : statusMessage(request.id);
@@ -256,7 +672,7 @@ test('a generic mutation rejection remains reconcilable only through its matchin
       operationReply(message.request, 'not-executed', action);
     f.native.onMessage.emit(response); assert.ok(await readback);
     assert.equal((await f.api.storage.session.get(MUTATION))[MUTATION], false);
-    assert.equal(f.messages.filter(message => message.action === action).length, 1);
+    assert.equal(f.requests.filter(message => message.action === action).length, 1);
     f.native.onDisconnect.emit(); await tick();
     assert.equal((await f.api.storage.session.get(OWNER))[OWNER], null);
     assert.equal(f.alarms.size, 1);
@@ -318,12 +734,12 @@ test('blocked-by-local-control review settles only the exact unresolved prepared
 
 test('only an exact matching terminal status receipt clears a lifecycle mutation fence', async t => {
   for (const terminal of ['settled', 'not-executed']) {
-    const f = extension(), wake = bindBrowserWake(f.api);
+    const f = extension({ pauseAttach: true }), wake = bindBrowserWake(f.api);
     t.after(() => f.native?.onDisconnect.emit());
     await tick(); f.native.onMessage.emit({ ...f.messages[0], ok: true });
     const request = { version: 1, id: 'unknown-pause', action: 'disconnect-and-pause' };
     const mutation = wake.handleMessage(mutationMessage(f, request), devicesSender(f)); await tick();
-    f.native.onMessage.emit(operationReply(request, 'unknown-running')); await mutation;
+    replyControl(f, operationReply(request, 'unknown-running')); await mutation;
     const record = (await f.api.storage.session.get(MUTATION))[MUTATION];
     for (const [id, response] of [
       ['unrelated', { version: 1, id: 'unrelated', action: 'status', ok: false }],
@@ -346,18 +762,18 @@ test('only an exact matching terminal status receipt clears a lifecycle mutation
 });
 
 test('unrelated lifecycle and prepared mutations cannot replace or retire an unresolved Pause', async t => {
-  const f = extension(), wake = bindBrowserWake(f.api);
+  const f = extension({ pauseAttach: true }), wake = bindBrowserWake(f.api);
   t.after(() => f.native?.onDisconnect.emit());
   await tick(); f.native.onMessage.emit({ ...f.messages[0], ok: true });
   const request = { version: 1, id: 'unresolved-pause', action: 'disconnect-and-pause' };
   const pause = wake.handleMessage(mutationMessage(f, request), devicesSender(f)); await tick();
-  f.native.onMessage.emit(operationReply(request, 'unknown-running')); await pause;
+  replyControl(f, operationReply(request, 'unknown-running')); await pause;
   const record = (await f.api.storage.session.get(MUTATION))[MUTATION];
   for (const other of [{ version: 1, id: 'other', action: 'reconnect' },
     { version: 1, id: 'other-revoke', action: 'prepared-revoke',
       operationId: 'ae900800-b673-4eee-abe5-e7267e0d46b1', sha256: 'a'.repeat(64) }]) {
     const pending = wake.handleMessage(mutationMessage(f, other), devicesSender(f)); await tick();
-    assert.deepEqual(f.messages.at(-1), request, 'an unrelated mutation must not reach transport');
+    assert.deepEqual(f.requests.at(-1), request, 'an unrelated mutation must not reach transport');
     assert.equal(await pending, null);
     assert.deepEqual((await f.api.storage.session.get(MUTATION))[MUTATION], record);
   }
@@ -422,11 +838,11 @@ test('legacy and unknown stored mutation fences never authorize a new owner', as
 
 test('read-only timeout with an unresolved mutation preserves owner and mutation across worker restart', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
-  const f = extension(), wake = bindBrowserWake(f.api);
+  const f = extension({ pauseAttach: true }), wake = bindBrowserWake(f.api);
   await tick(); f.native.onMessage.emit({ ...f.messages[0], ok: true });
   const request = { version: 1, id: 'unknown-pause', action: 'disconnect-and-pause' };
   const mutation = wake.handleMessage(mutationMessage(f, request), devicesSender(f)); await tick();
-  f.native.onMessage.emit(operationReply(request, 'unknown-running')); await mutation;
+  replyControl(f, operationReply(request, 'unknown-running')); await mutation;
   const record = (await f.api.storage.session.get(MUTATION))[MUTATION];
   const status = wake.handleMessage(statusMessage(request.id), devicesSender(f)); await tick();
   t.mock.timers.tick(14500); assert.equal(await status, null); await tick();
@@ -460,7 +876,8 @@ test('a late exact mutation reply can settle its timed-out slot without replay',
   const f = extension(), wake = bindBrowserWake(f.api);
   t.after(() => f.native?.onDisconnect.emit());
   await tick(); f.native.onMessage.emit({ ...f.messages[0], ok: true });
-  const request = { version: 1, id: 'late-pause', action: 'disconnect-and-pause' };
+  // Only Reconnect retains the long-port slot now; late one-shot Pause replies stay unconfirmed.
+  const request = { version: 1, id: 'late-reconnect', action: 'reconnect' };
   const pause = wake.handleMessage(mutationMessage(f, request), devicesSender(f)); await tick();
   t.mock.timers.tick(14500); assert.equal(await pause, null);
   assert.equal(await wake.handleMessage(mutationMessage(f, { ...request, id: 'other' }), devicesSender(f)), null);
@@ -473,7 +890,7 @@ test('a late exact mutation reply can settle its timed-out slot without replay',
 
 test('ambiguous admission or retirement writes keep the owner fenced across worker restart', async () => {
   for (const stage of ['admission', 'retirement']) for (const applied of [false, true]) {
-    const f = extension(), wake = bindBrowserWake(f.api);
+    const f = extension({ pauseAttach: true }), wake = bindBrowserWake(f.api);
     await tick(); f.native.onMessage.emit({ ...f.messages[0], ok: true });
     const set = f.api.storage.session.set;
     f.api.storage.session.set = async values => {
@@ -485,10 +902,10 @@ test('ambiguous admission or retirement writes keep the owner fenced across work
     };
     const request = { version: 1, id: 'ambiguous-pause', action: 'disconnect-and-pause' };
     const pause = wake.handleMessage(mutationMessage(f, request), devicesSender(f)); await tick();
-    if (stage === 'retirement') { f.native.onMessage.emit(operationReply(request, 'settled')); await tick(); }
+    if (stage === 'retirement') { replyControl(f, operationReply(request, 'settled')); await tick(); }
     assert.equal(await pause, null);
     assert.equal((await f.api.storage.session.get(OWNER))[OWNER], f.messages[0].id);
-    assert.equal(f.messages.filter(message => message.action === request.action).length, stage === 'admission' ? 0 : 1);
+    assert.equal(f.requests.filter(message => message.action === request.action).length, stage === 'admission' ? 0 : 1);
     f.api.storage.session.set = set;
     const next = f.rebind(); await tick();
     assert.equal(await next.handleMessage(statusMessage(), devicesSender(f)), null);
@@ -498,7 +915,7 @@ test('ambiguous admission or retirement writes keep the owner fenced across work
 });
 
 test('disconnect during terminal receipt persistence retires only after the exact proof commits', async () => {
-  const f = extension(), wake = bindBrowserWake(f.api);
+  const f = extension({ pauseAttach: true }), wake = bindBrowserWake(f.api);
   await tick(); f.native.onMessage.emit({ ...f.messages[0], ok: true });
   const request = { version: 1, id: 'settling-pause', action: 'disconnect-and-pause' };
   const pause = wake.handleMessage(mutationMessage(f, request), devicesSender(f)); await tick();
@@ -508,11 +925,12 @@ test('disconnect during terminal receipt persistence retires only after the exac
     if (values[MUTATION] === false) await new Promise(resolve => { release = resolve; });
     return set(values);
   };
-  f.native.onMessage.emit(operationReply(request, 'settled')); await tick();
-  f.native.onDisconnect.emit(); assert.equal(await pause, null);
+  replyControl(f, operationReply(request, 'settled')); await tick();
+  // Losing the long port does not cancel this already-validated independent receipt.
+  f.native.onDisconnect.emit();
   assert.equal((await f.api.storage.session.get(OWNER))[OWNER], f.messages[0].id);
   assert.equal(f.attempts.length, 1);
-  release(); await tick();
+  release(); assert.ok(await pause); await tick();
   assert.equal((await f.api.storage.session.get(MUTATION))[MUTATION], false);
   assert.equal((await f.api.storage.session.get(OWNER))[OWNER], null);
   const retry = wake.handleMessage(statusMessage(), devicesSender(f)); await tick();
@@ -632,7 +1050,7 @@ test('a worker restart does not reattach around a possibly still-owned native po
 
 test('lost mutation replies block status reattachment and permission grants across worker restart', async () => {
   for (const action of ['reconnect', 'disconnect-and-pause', 'prepared-revoke']) {
-    const f = extension(), wake = bindBrowserWake(f.api);
+    const f = extension({ pauseAttach: true }), wake = bindBrowserWake(f.api);
     await tick();
     const handshake = f.messages[0];
     f.native.onMessage.emit({ ...handshake, ok: true });
@@ -640,7 +1058,9 @@ test('lost mutation replies block status reattachment and permission grants acro
       ...(action === 'prepared-revoke' ? { operationId: 'ae900800-b673-4eee-abe5-e7267e0d46b1', sha256: 'a'.repeat(64) } : {}) };
     const mutation = wake.handleMessage({ type: BROWSER_DEVICE_MESSAGE, ownerId: handshake.id, request }, devicesSender(f));
     await tick();
-    assert.deepEqual(f.messages.at(-1), request);
+    assert.deepEqual(f.requests.at(-1), request);
+    // Simulate loss of both transports; long-port closure alone cannot cancel an independent Pause.
+    if (action === 'disconnect-and-pause') f.attachments.at(-1).reject(new Error('synthetic-reply-lost'));
     f.native.onDisconnect.emit();
     assert.equal(await mutation, null);
     assert.equal(await wake.handleMessage(statusMessage(), devicesSender(f)), null);
@@ -650,14 +1070,14 @@ test('lost mutation replies block status reattachment and permission grants acro
     assert.equal(await nextWorker.handleMessage(statusMessage(), devicesSender(f)), null);
     assert.equal(f.attempts.length, 1, action);
     assert.equal(f.alarms.size, 0);
-    assert.equal(f.messages.filter(message => message.action === action).length, 1, 'never replay the mutation');
+    assert.equal(f.requests.filter(message => message.action === action).length, 1, 'never replay the mutation');
   }
 });
 
 test('mutation timeout or malformed/uncertain reply never authorizes another owner', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   for (const outcome of ['timeout', 'malformed', 'unknown-running']) {
-    const f = extension(), wake = bindBrowserWake(f.api);
+    const f = extension({ pauseAttach: true }), wake = bindBrowserWake(f.api);
     await tick(); f.native.onMessage.emit({ ...f.messages[0], ok: true });
     const request = { version: 1, id: 'uncertain-pause', action: 'disconnect-and-pause' };
     const pending = wake.handleMessage({ type: BROWSER_DEVICE_MESSAGE, ownerId: f.messages[0].id, request }, devicesSender(f));
@@ -665,9 +1085,11 @@ test('mutation timeout or malformed/uncertain reply never authorizes another own
     if (outcome === 'timeout') {
       t.mock.timers.tick(14500);
       assert.equal(await pending, null);
-      assert.equal(await wake.handleMessage(statusMessage(), devicesSender(f)), null, 'the mutation slot stays reserved');
+      // A fresh status is allowed through attach, but this fixture's status endpoint is unavailable.
+      assert.equal(await wake.handleMessage({ ...statusMessage(), ownerId: f.messages[0].id }, devicesSender(f)), null,
+        'the unresolved mutation fence stays reserved');
     } else {
-      f.native.onMessage.emit(outcome === 'malformed' ? { ...request, ok: true } :
+      replyControl(f, outcome === 'malformed' ? { ...request, ok: true } :
         { ...request, ok: true, state: { paused: null, connection: 'unknown',
           operation: { id: request.id, action: request.action, status: 'unknown-running' } } });
     }
@@ -680,12 +1102,12 @@ test('mutation timeout or malformed/uncertain reply never authorizes another own
 });
 
 test('confirmed settled mutation still permits the original once-only recovery', async () => {
-  const f = extension(), wake = bindBrowserWake(f.api);
+  const f = extension({ pauseAttach: true }), wake = bindBrowserWake(f.api);
   await tick(); f.native.onMessage.emit({ ...f.messages[0], ok: true });
   const request = { version: 1, id: 'settled-pause', action: 'disconnect-and-pause' };
   const pending = wake.handleMessage({ type: BROWSER_DEVICE_MESSAGE, ownerId: f.messages[0].id, request }, devicesSender(f));
   await tick();
-  f.native.onMessage.emit({ ...request, ok: true, state: { paused: true, connection: 'disconnected',
+  replyControl(f, { ...request, ok: true, state: { paused: true, connection: 'disconnected',
     operation: { id: request.id, action: request.action, status: 'settled' } } });
   assert.ok(await pending);
   f.native.onDisconnect.emit(); await tick();

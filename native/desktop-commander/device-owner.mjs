@@ -13,6 +13,7 @@ const encode = value => JSON.stringify(value) + '\n';
 const fail = code => { throw new Error(code); };
 const same = (a, b) => a.dev === b.dev && a.ino === b.ino;
 const hex = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+const ownerIdOK = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,64}$/.test(value);
 const privateMode = info => process.platform === 'win32' || info.uid === BigInt(process.getuid()) && (info.mode & 0o077n) === 0n;
 const frameLimit = 4096;
 
@@ -178,7 +179,10 @@ const channelPath = binding => path.join(binding.root, 'device-channel.json');
 
 function checkChannel(binding, record) {
   const value = record.value;
-  if (!exact(value, ['format', 'version', 'extensionId', 'endpoint', 'secret']) ||
+  const keys = ['format', 'version', 'extensionId', 'endpoint', 'secret'];
+  const browserOwned = Object.hasOwn(value || {}, 'browserOwnerId');
+  if (!exact(value, browserOwned ? [...keys, 'browserOwnerId'] : keys) ||
+      browserOwned && (!ownerIdOK(value.browserOwnerId) || binding.extensionId === null) ||
       value.format !== 'agent-continue-device-channel' || value.version !== 1 || value.extensionId !== binding.extensionId ||
       typeof value.endpoint !== 'string' || !hex(value.secret)) fail('invalid_device_channel');
   if (process.platform === 'win32' ? !/^\\\\\.\\pipe\\agentcontinue-device-[a-f0-9]{32}$/.test(value.endpoint) :
@@ -215,11 +219,23 @@ export function pinDeviceChannel(binding) {
 }
 
 export async function sendDeviceRequest(binding, value, options = {}) {
+  return sendPinnedRequest(binding, value, options);
+}
+
+export async function sendExistingBrowserControl(binding, ownerId, value, options = {}) {
+  const request = validateDeviceRequest(value);
+  if (!ownerIdOK(ownerId) || !['status', 'disconnect-and-pause'].includes(request.action)) fail('invalid_browser_control');
+  return sendPinnedRequest(binding, request, options, ownerId);
+}
+
+async function sendPinnedRequest(binding, value, options, browserOwnerId) {
   if ((!exact(options, []) && !exact(options, ['timeoutMs'])) ||
       (Object.hasOwn(options, 'timeoutMs') && (!Number.isInteger(options.timeoutMs) || options.timeoutMs < 1 || options.timeoutMs > 30000))) fail('invalid_device_request_options');
   const request = validateDeviceRequest(value);
   binding.assertCurrent();
   const retained = privateRecord(channelPath(binding)), channel = checkChannel(binding, retained);
+  // Association is checked on the exact snapshot used for endpoint and MAC, never a second adoption read.
+  if (browserOwnerId !== undefined && channel.browserOwnerId !== browserOwnerId) fail('device_browser_owner_mismatch');
   const current = () => {
     binding.assertCurrent();
     const record = privateRecord(channelPath(binding));
@@ -260,20 +276,23 @@ export async function startServerOwner(root, options = {}) {
 
 async function startOwner(binding, options) {
   if (!options || typeof options !== 'object' || Array.isArray(options) ||
-      Object.keys(options).some(key => !['controller', 'resumeOnLogin', 'signal', 'expectedOrigin'].includes(key)) ||
+      Object.keys(options).some(key => !['controller', 'resumeOnLogin', 'signal', 'expectedOrigin', 'browserOwnerId'].includes(key)) ||
       Object.hasOwn(options, 'resumeOnLogin') && typeof options.resumeOnLogin !== 'boolean' ||
       Object.hasOwn(options, 'signal') && !(options.signal instanceof AbortSignal) ||
-      Object.hasOwn(options, 'expectedOrigin') && options.expectedOrigin !== binding.origin) fail('invalid_device_owner_options');
+      Object.hasOwn(options, 'expectedOrigin') && options.expectedOrigin !== binding.origin ||
+      Object.hasOwn(options, 'browserOwnerId') && (!ownerIdOK(options.browserOwnerId) || binding.extensionId === null ||
+        options.expectedOrigin !== binding.origin || options.resumeOnLogin === true)) fail('invalid_device_owner_options');
   const signal = options.signal;
   if (signal?.aborted) fail('device_owner_unavailable');
   binding.assertCurrent();
   const file = channelPath(binding);
-  let fd, controller, operations, server, socketIdentity, retained, closing = false, closePromise;
+  let fd, controller, operations, server, socketIdentity, retained, closing = false, finalizing = false, closePromise, quiescence;
   const clients = new Set(), active = new Set();
   const id = crypto.randomBytes(16).toString('hex');
   const channel = { format: 'agent-continue-device-channel', version: 1, extensionId: binding.extensionId,
     endpoint: process.platform === 'win32' ? '\\\\.\\pipe\\agentcontinue-device-' + id : path.join(binding.root, 'device-' + id + '.sock'),
-    secret: crypto.randomBytes(32).toString('hex') };
+    secret: crypto.randomBytes(32).toString('hex'),
+    ...(Object.hasOwn(options, 'browserOwnerId') ? { browserOwnerId: options.browserOwnerId } : {}) };
   const bytes = encode(channel);
   function owned(checkSocket = true) {
     binding.assertCurrent();
@@ -287,7 +306,7 @@ async function startOwner(binding, options) {
   async function requestOwned(value) {
     const request = validateDeviceRequest(value);
     owned();
-    if (closing) fail('device_owner_closing');
+    if (finalizing || closing && request.action === 'reconnect') fail('device_owner_closing');
     const task = operations.handle(request); active.add(task);
     let response;
     try { response = await task; } finally { active.delete(task); }
@@ -297,7 +316,7 @@ async function startOwner(binding, options) {
   }
   async function serve(socket) {
     socket.on('error', () => {});
-    if (closing || clients.size >= 32) { socket.destroy(); return; }
+    if (finalizing || clients.size >= 32) { socket.destroy(); return; }
     clients.add(socket); socket.once('close', () => clients.delete(socket));
     try {
       owned();
@@ -317,8 +336,11 @@ async function startOwner(binding, options) {
     fd = fs.openSync(file, 'wx+', 0o600);
     fs.writeFileSync(fd, bytes); fs.fsyncSync(fd); retained = privateRecord(file);
     controller = options.controller || (await import('./lifecycle.mjs')).openController(binding.root, { deferStartup: true });
-    if (typeof controller?.dispose !== 'function') fail('invalid_device_controller');
+    if (typeof controller?.dispose !== 'function' || Object.hasOwn(options, 'browserOwnerId') &&
+        typeof controller.beginQuiesce !== 'function') fail('invalid_device_controller');
     operations = openDeviceOperations(binding.root, controller);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) { onAbort(); fail('device_owner_unavailable'); }
     if (options.resumeOnLogin === true && operations.canRestoreSavedIntent()) {
       const state = await controller.status();
       owned(false);
@@ -333,19 +355,22 @@ async function startOwner(binding, options) {
       const error = () => reject(new Error('device_channel_unavailable'));
       server.once('error', error); server.listen(channel.endpoint, () => { server.off('error', error); resolve(); });
     });
-    server.on('error', () => { closing = true; for (const socket of clients) socket.destroy(); });
+    server.on('error', () => { onAbort(); for (const socket of clients) socket.destroy(); });
     if (process.platform !== 'win32') {
       fs.chmodSync(channel.endpoint, 0o600); socketIdentity = fs.lstatSync(channel.endpoint, { bigint: true });
     }
     owned();
     if (signal?.aborted) fail('device_owner_unavailable');
     // An unfinished receipt or a changed journal must not trigger a fresh connection.
-    void controller.startSavedIntent?.(() => {
+    const startup = Promise.resolve(controller.startSavedIntent?.(() => {
       if (closing || signal?.aborted) return false;
       try { owned(); } catch { return false; }
       return operations.canRestoreSavedIntent();
-    });
+    }));
+    active.add(startup);
+    void startup.then(() => active.delete(startup), () => active.delete(startup));
   } catch {
+    signal?.removeEventListener('abort', onAbort);
     for (const socket of clients) socket.destroy();
     if (server?.listening) await new Promise(resolve => server.close(resolve));
     let clean = true;
@@ -356,13 +381,42 @@ async function startOwner(binding, options) {
     }
     fail('device_owner_unavailable');
   }
+  function beginQuiesce() {
+    if (closing) return quiescence;
+    closing = true;
+    // Admission is latched before calling a potentially reentrant lifecycle stop.
+    let resolve, reject;
+    quiescence = new Promise((yes, no) => { resolve = yes; reject = no; });
+    try { Promise.resolve(controller.beginQuiesce?.()).then(resolve, reject); }
+    catch (error) { reject(error); }
+    void quiescence.catch(() => {});
+    return quiescence;
+  }
+  function onAbort() { void beginQuiesce(); }
+  async function confirmQuiescence() {
+    const result = await quiescence;
+    // Legacy injected controllers retain their dispose contract; native lifecycle owners supply stop proof.
+    if (typeof controller.beginQuiesce !== 'function') return;
+    const confirmed = value => value?.runtime === 'stopped' && value.ready === false && typeof value.paused === 'boolean';
+    if (confirmed(result)) return;
+    let timer;
+    try {
+      const observed = await Promise.race([Promise.resolve().then(() => controller.status()), new Promise(resolve => {
+        timer = setTimeout(() => resolve(null), 1000);
+      })]);
+      if (!confirmed(observed)) fail('stop_unconfirmed');
+    } finally { clearTimeout(timer); }
+  }
   function close() {
     if (closePromise) return closePromise;
-    closing = true;
+    beginQuiesce();
     closePromise = (async () => {
+      await confirmQuiescence();
+      // Keep authenticated observation/Pause alive while any admitted operation is unresolved.
+      while (active.size) await Promise.allSettled(Array.from(active));
+      finalizing = true;
       const stopped = new Promise(resolve => server.close(resolve));
       for (const socket of clients) socket.destroy();
-      await Promise.allSettled(Array.from(active));
       await stopped;
       try {
         // Stop only this owner's controller even when the IPC descriptor lost ownership.
@@ -371,11 +425,14 @@ async function startOwner(binding, options) {
         owned(false);
         operations.close();
         owned(false); fs.unlinkSync(file);
-      } finally { fs.closeSync(fd); }
-    })();
+      } finally { signal?.removeEventListener('abort', onAbort); fs.closeSync(fd); }
+    })().catch(error => {
+      if (!finalizing) closePromise = undefined;
+      throw error;
+    });
     return closePromise;
   }
-  return Object.freeze({ close, request: requestOwned });
+  return Object.freeze({ close, beginQuiesce, request: requestOwned });
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

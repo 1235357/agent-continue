@@ -739,6 +739,29 @@ try {
   }
   pass('reconciliation confirmation fails closed when permission or the persisted latest operation changes');
 
+  const priorityPause = await createPage({ granted: true, query: '?mode=browser-managed',
+    standardBrowser: true, account: 'current' });
+  try {
+    const { page } = priorityPause;
+    await check(page);
+    await page.evaluate(async () => {
+      await __deviceMock.save({ 'deviceControlPendingV1:browser-managed': {
+        version: 1, id: 'waiting-reconnect', action: 'reconnect', ownerId: 'standard-fixture-owner',
+      }, 'deviceControlRevisionV1:browser-managed': crypto.randomUUID() });
+    });
+    await page.waitForFunction(() => document.querySelector('[data-action="reconnect"]').disabled);
+    assert.equal(await page.locator('[data-action="disconnect-and-pause"]').isDisabled(), false);
+    assert.match(await page.locator('#lockNotice').textContent(), /pause.*available/i);
+    await page.locator('[data-action="disconnect-and-pause"]').click();
+    assert.equal(await page.locator('#operationDialog').isVisible(), true);
+    await page.locator('#confirmOperation').click();
+    await page.waitForFunction(() => __deviceMock.standardBrowserCalls.some(value => value.request.action === 'disconnect-and-pause'));
+    assert.equal(await page.evaluate(() => __deviceMock.data['deviceControlPendingV1:browser-managed'].id), 'waiting-reconnect');
+    assert.equal(await page.locator('[data-action="reconnect"]').isDisabled(), true);
+    assert.deepEqual(priorityPause.errors, []);
+    pass('browser-managed Pause remains actionable over an unresolved Reconnect without replacing its record');
+  } finally { await priorityPause.context.close(); }
+
   const admin = await createPage({ granted: true, query: '?mode=browser-managed', width: 390,
     adminObservation: { state: 'ready', generation: 'a'.repeat(32) }, standardBrowser: true });
   try {

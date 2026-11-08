@@ -1,5 +1,5 @@
 import { createTranslator, initializeLanguage, subscribeLanguage, setLanguage, getLanguage } from './i18n.js';
-import { createDeviceController, deviceScope, HOST, PENDING_KEY, REVISION_KEY } from './device-control.js';
+import { createDeviceController, deviceScope, HOST, PENDING_KEY, PRIORITY_PAUSE_KEY, REVISION_KEY } from './device-control.js';
 import { BROWSER_WAKE_HOST, controlPrepared, validPreparedReference } from './browser-wake.js';
 import { ADMIN_BROWSER_MESSAGE, ADMIN_BROWSER_PAUSE, ADMIN_BROWSER_PAUSE_LAST, ADMIN_BROWSER_PAUSE_RECONCILE, ADMIN_BROWSER_PAUSE_STATUS, ADMIN_BROWSER_RESTORE, adminBrowserObservation, adminBrowserPauseRecord } from './admin-browser.js';
 import { ADMIN_CONTROL_SUPPORT, ADMIN_CONTROL, ADMIN_CONTROL_STATUS, ADMIN_CONTROL_FENCE, ADMIN_CONTROL_RECONCILE, ADMIN_CONTROL_JOURNAL, administratorControlRecord, administratorControlJournal, administratorControlSupport, administratorControlStatus } from './admin-control.js';
@@ -207,6 +207,7 @@ const catalog = {
   '未执行': 'Not executed',
   '结果未确认': 'Outcome unconfirmed',
   '设备操作待完成或结果未确认。只可检查状态；普通状态回执不会解除锁定。': 'A device operation is pending or unconfirmed. Only status checks are available; a generic status receipt will not release the lock.',
+  '连接操作待确认。暂停仍可使用；不会重试连接或清除原操作记录。': 'A connection operation is unconfirmed. Pause remains available; reconnect will not be retried and the original record is retained.',
   '本机操作记录不可用。控制保持锁定，请在本机核实。': 'The local operation record is unavailable. Controls remain locked; verify locally.',
   '安全的多页面锁定不可用。只可检查状态。': 'Safe multi-page locking is unavailable. Only status checks are available.',
   '已获得浏览器权限。尚未检查原生控制桥；权限不代表安装成功。': 'Browser permission granted. The native bridge has not been checked; permission is not proof of installation.',
@@ -984,25 +985,27 @@ function render() {
   text('connection', t(s.observation ? { ready: '已就绪', disconnected: '已断开', unknown: '未知' }[s.observation.connection] :
     s.registration === 'unchecked' ? '尚未检查' : '未知'));
   text('pause', t(s.observation?.paused == null ? '未知' : s.observation.paused ? '已暂停' : '未暂停'));
-  const op = s.observation?.operation;
-  text('operation', t(s.pending ? (op?.id === s.pending.id && op.action === s.pending.action ? operationKeys[op.status] : '结果未确认') :
+  const op = s.observation?.operation, pending = s.priorityPause || s.pending;
+  text('operation', t(pending ? (op?.id === pending.id && op.action === pending.action ? operationKeys[op.status] : '结果未确认') :
     op ? operationKeys[op.status] : '尚无回执'));
-  text('operation-id', s.pending?.id || op?.id || t('无'));
+  text('operation-id', pending?.id || op?.id || t('无'));
   text('observed', s.observedAt ? new Intl.DateTimeFormat(getLanguage() === 'zh_CN' ? 'zh-CN' : 'en', { dateStyle: 'medium', timeStyle: 'medium' }).format(s.observedAt) : t('尚无观测'));
   text('feedback', t(languageError ? '语言设置保存失败。' : feedbackKeys[s.feedback]));
   const lockKey = !s.journalHealthy ? '本机操作记录不可用。控制保持锁定，请在本机核实。' :
-    s.pending ? '设备操作待完成或结果未确认。只可检查状态；普通状态回执不会解除锁定。' :
+    pending ? (browserManaged && s.canPause ? '连接操作待确认。暂停仍可使用；不会重试连接或清除原操作记录。' :
+      '设备操作待完成或结果未确认。只可检查状态；普通状态回执不会解除锁定。') :
       !navigator.locks?.request ? '安全的多页面锁定不可用。只可检查状态。' : null;
   $('lockNotice').hidden = !lockKey;
   text('lockNotice', lockKey ? t(lockKey) : '');
   for (const button of document.querySelectorAll('[data-action]')) {
     if (browserManaged) button.textContent = t(browserManagedActionKeys[button.dataset.action]);
-    button.disabled = !validSelection || (button.dataset.action === 'status' ? !s.initialized || s.statusBusy || s.requestingPermission : !s.canMutate || adminPermissionUnverified);
+    button.disabled = !validSelection || (button.dataset.action === 'status' ? !s.initialized || s.statusBusy || s.requestingPermission :
+      !actionPermitted(s, button.dataset.action) || adminPermissionUnverified);
   }
-  $('grantPermission').disabled = !s.initialized || !s.journalHealthy || Boolean(s.pending) ||
-    s.permission === 'granted' || !$('riskConsent').checked || s.requestingPermission || s.statusBusy || s.mutationBusy || adminPermissionRefreshing;
+  $('grantPermission').disabled = !s.initialized || !s.journalHealthy || Boolean(pending) ||
+    s.permission === 'granted' || !$('riskConsent').checked || s.requestingPermission || s.statusBusy || s.mutationBusy || s.pauseBusy || adminPermissionRefreshing;
   text('grantPermission', t(s.permission === 'granted' ? '浏览器权限已授权' : '允许本机控制桥访问'));
-  $('permission-check').disabled = !s.initialized || s.requestingPermission || s.statusBusy || s.mutationBusy || adminPermissionRefreshing;
+  $('permission-check').disabled = !s.initialized || s.requestingPermission || s.statusBusy || s.mutationBusy || s.pauseBusy || adminPermissionRefreshing;
   const permissionFeedback = !s.initialized || adminPermissionRefreshing ? '正在读取浏览器权限。不会发起设备连接。' :
     s.requestingPermission ? '正在等待浏览器权限结果；尚未连接设备。' :
       adminPermissionUnverified ? '无法核实浏览器权限。尚未联系本机桥接；可只读重新核对权限。' :
@@ -1011,8 +1014,8 @@ function render() {
           '浏览器权限请求不可用。请检查此浏览器是否支持可选的原生消息权限。' :
           '无法核实浏览器权限。尚未联系本机桥接；可只读重新核对权限。') :
         !s.journalHealthy ? '本机操作记录不可用，权限请求暂时禁用；可只读重新核对浏览器权限。' :
-          s.pending ? '现有设备操作结果未确认，权限请求暂时禁用；可只读重新核对权限和原操作回执。' :
-            s.statusBusy || s.mutationBusy ? '设备检查或操作尚未结束，权限请求暂时禁用。' :
+          pending ? '现有设备操作结果未确认，权限请求暂时禁用；可只读重新核对权限和原操作回执。' :
+            s.statusBusy || s.mutationBusy || s.pauseBusy ? '设备检查或操作尚未结束，权限请求暂时禁用。' :
               s.feedback === 'permission-unavailable' ? '浏览器权限请求不可用。请检查此浏览器是否支持可选的原生消息权限。' :
                 s.feedback === 'permission-denied' ? '浏览器未批准权限。可重新点击允许；勾选风险确认不会自行授予权限。' :
                   $('riskConsent').checked ? '风险确认已勾选，但浏览器权限尚未授予。请点击允许并完成浏览器弹窗。' :
@@ -1027,7 +1030,7 @@ function render() {
       pendingAction === 'reconnect' ? '重新连接会恢复选定设备 MCP 的远程访问。此操作不会更改 Dot 或普通对话的工具授权。是否继续？' :
       '断开并暂停会中断选定设备 MCP 的远程访问并保留手动暂停。此操作不会暂停提示词调度或更改对话授权。是否继续？';
     text('dialog-risk', t(risk));
-    if (!s.canMutate || adminPermissionUnverified) $('operationDialog').close();
+    if (!actionPermitted(s, pendingAction) || adminPermissionUnverified) $('operationDialog').close();
   }
 }
 
@@ -1254,10 +1257,13 @@ if (browserManaged) {
   });
 }
 
+function actionPermitted(state, action) {
+  return browserManaged && action === 'disconnect-and-pause' ? state.canPause : state.canMutate;
+}
 for (const button of document.querySelectorAll('[data-action]')) button.addEventListener('click', () => {
   const action = button.dataset.action;
   if (action === 'status') { void controller.run('status'); return; }
-  if (!controller.getState().canMutate || adminPermissionUnverified) return;
+  if (!actionPermitted(controller.getState(), action) || adminPermissionUnverified) return;
   pendingAction = action;
   render();
   $('operationDialog').showModal();
@@ -1276,7 +1282,7 @@ $('confirmOperation').addEventListener('click', () => {
   const action = pendingAction;
   pendingAction = null;
   $('operationDialog').close();
-  if (controller.getState().canMutate && !adminPermissionUnverified) void controller.run(action);
+  if (actionPermitted(controller.getState(), action) && !adminPermissionUnverified) void controller.run(action);
 });
 $('riskConsent').addEventListener('change', () => {
   if (!$('riskConsent').checked && adminGuidedBusy) {
@@ -1288,7 +1294,7 @@ $('riskConsent').addEventListener('change', () => {
 $('grantPermission').addEventListener('click', () => { void controller.requestPermission($('riskConsent').checked); });
 $('permission-check').addEventListener('click', () => {
   const state = controller.getState();
-  if (!state.initialized || adminPermissionRefreshing || state.requestingPermission || state.statusBusy || state.mutationBusy) return;
+  if (!state.initialized || adminPermissionRefreshing || state.requestingPermission || state.statusBusy || state.mutationBusy || state.pauseBusy) return;
   void refreshBrowserPermission(true);
 });
 $('language').addEventListener('change', async event => {
@@ -1319,7 +1325,7 @@ globalThis.chrome?.storage?.onChanged?.addListener((changes, area) => {
     observeAdministratorControlJournal(changes[ADMIN_CONTROL_JOURNAL].newValue);
     render();
   }
-  if (area === 'local' && [PENDING_KEY, REVISION_KEY].some(key => Object.hasOwn(changes, key + scope))) {
+  if (area === 'local' && [PENDING_KEY, PRIORITY_PAUSE_KEY, REVISION_KEY].some(key => Object.hasOwn(changes, key + scope))) {
     cancelAdministratorPauseFollowup();
     void controller.refreshPending();
   }

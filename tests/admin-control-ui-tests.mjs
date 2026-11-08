@@ -266,7 +266,7 @@ async function fixture({ query = '?mode=browser-managed', granted = true, journa
       createElement: () => new Element() }, navigator: { locks: { request() {} } },
     createTranslator: catalog => { uiCatalog = catalog; return key => language === 'zh_CN' ? key : catalog[key] ?? key; },
     initializeLanguage: async () => {}, subscribeLanguage() {}, setLanguage: async value => { language = value; }, getLanguage: () => language,
-    deviceScope: () => '', HOST: 'fixture', PENDING_KEY: 'pending', REVISION_KEY: 'revision', BROWSER_WAKE_HOST: 'fixture',
+    deviceScope: () => '', HOST: 'fixture', PENDING_KEY: 'pending', PRIORITY_PAUSE_KEY: 'priorityPause', REVISION_KEY: 'revision', BROWSER_WAKE_HOST: 'fixture',
     ADMIN_BROWSER_RESTORE: 'restore', ADMIN_BROWSER_PAUSE_LAST: 'pause', ADMIN_BROWSER_MESSAGE: 'administrator-status',
     ADMIN_BROWSER_PAUSE: 'administrator-pause', ADMIN_BROWSER_PAUSE_RECONCILE: 'administrator-pause-reconcile',
     ADMIN_BROWSER_PAUSE_STATUS: 'administrator-pause-status', adminBrowserPauseRecord, adminBrowserObservation,

@@ -175,11 +175,25 @@ jobs:
         # The one public-tarball case requires the original verified Windows
         # closure and receipt. release.yml runs it without this exclusion.
         run: node --test --test-skip-pattern "^actual root npm tarball contains verified payload and a runnable CLI$" tests/npm-package-tests.mjs
-      - name: Verify Windows read-only installer recovery and bounded diagnostics
+      # These disjoint top-level prefix groups cover all recovery cases (10/13/12)
+      # without sharing one 3-minute PowerShell startup budget. Each group retains
+      # that limit; every case/child retains its 20s/15s bound. Use positive prefixes
+      # because Node also matches test-name patterns against the synthetic root.
+      - name: Verify Windows installer diagnostics and closed observation dispatch
         if: runner.os == 'Windows'
         working-directory: .
         timeout-minutes: 3
-        run: node --test tests/windows-installer-recovery-tests.mjs
+        run: node --test --test-reporter=tap '--test-name-pattern=^(?:installer |standalone portable |browser-managed installer )' tests/windows-installer-recovery-tests.mjs
+      - name: Verify Windows read-only installer Verify recovery and entry integrity
+        if: runner.os == 'Windows'
+        working-directory: .
+        timeout-minutes: 3
+        run: node --test --test-reporter=tap '--test-name-pattern=^(?:Verify |read-only installer )' tests/windows-installer-recovery-tests.mjs
+      - name: Verify Windows read-only installer Uninstall recovery
+        if: runner.os == 'Windows'
+        working-directory: .
+        timeout-minutes: 3
+        run: node --test --test-reporter=tap '--test-name-pattern=^Uninstall ' tests/windows-installer-recovery-tests.mjs
       - name: Verify adjacent Windows source and administrator handoff without installation
         if: runner.os == 'Windows'
         working-directory: .

@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { setImmediate as tick } from 'node:timers/promises';
 import { BROWSER_WAKE_HOST, validPreparedReference } from '../browser-wake.js';
 import { ADMIN_BROWSER_MESSAGE, ADMIN_BROWSER_RESTORE, adminBrowserObservation } from '../admin-browser.js';
-import { deviceScope, HOST, PENDING_KEY, REVISION_KEY } from '../device-control.js';
+import { deviceScope, HOST, PENDING_KEY, PRIORITY_PAUSE_KEY, REVISION_KEY } from '../device-control.js';
 
 const source = await fs.readFile(new URL('../devices.js', import.meta.url), 'utf8');
 const executable = source.replace(/^import .*;\r?\n/gm, '');
@@ -60,7 +60,7 @@ async function fixture({ browserManaged = false, controlPrepared } = {}) {
     createTranslator: () => key => key,
     initializeLanguage: async () => {},
     subscribeLanguage() {}, setLanguage: async () => {}, getLanguage: () => 'en',
-    deviceScope, HOST, PENDING_KEY, REVISION_KEY, BROWSER_WAKE_HOST, validPreparedReference, controlPrepared,
+    deviceScope, HOST, PENDING_KEY, PRIORITY_PAUSE_KEY, REVISION_KEY, BROWSER_WAKE_HOST, validPreparedReference, controlPrepared,
     ADMIN_BROWSER_MESSAGE, ADMIN_BROWSER_RESTORE, adminBrowserObservation,
     createDeviceController: ({ onChange }) => ({
       getState: () => structuredClone(state),

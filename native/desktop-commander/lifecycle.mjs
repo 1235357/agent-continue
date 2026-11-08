@@ -129,6 +129,7 @@ export function openController(root, options = {}) {
   let saved = intent(root), paused = saved.paused, disposed = false, phase = 'stopped', ready = false;
   let current = null, starting = null, pausing = null, disposing = null, generation = 0;
   let startupChecked = false;
+  let quiescing = false, quiescence = null;
   let restarts = 0, configured = null;
   const lease = path.join(root, 'controller.lease');
   const leaseBytes = encode({ format: 'agent-continue-controller', version: 1, token: crypto.randomUUID() });
@@ -142,12 +143,12 @@ export function openController(root, options = {}) {
     if (startupChecked) return Promise.resolve();
     startupChecked = true;
     owned();
-    const allowed = () => !paused && authorize();
+    const allowed = () => !quiescing && !paused && authorize();
     if (!allowed()) return Promise.resolve();
     const startup = requestStart(null, allowed, true);
     const startupGeneration = generation;
     return startup.catch(error => {
-      if (disposed || disposing || startupGeneration !== generation) return;
+      if (disposed || disposing || quiescing || startupGeneration !== generation) return;
       try { owned(); } catch { return; }
       if (!allowed()) return;
       if (error?.message === 'tunnel_not_configured' || error?.message === 'tunnel_credentials_incomplete') {
@@ -207,7 +208,7 @@ export function openController(root, options = {}) {
     chatAuthorization: 'not-observed' });
 
   function canObserve(run, attempt) {
-    return !disposed && !disposing && !paused && current === run && attempt === generation &&
+    return !disposed && !disposing && !quiescing && !paused && current === run && attempt === generation &&
       !run.exited && !run.cancel.signal.aborted && phase !== 'unknown' && phase !== 'stopping';
   }
 
@@ -261,7 +262,8 @@ export function openController(root, options = {}) {
     if (run?.exited) {
       const confirmed = await stopped(run);
       if (run === current && observedGeneration === generation) {
-        phase = confirmed ? (paused ? 'stopped' : 'failed') : 'unknown'; ready = false;
+        // Quiescence stops the runtime without changing the saved running intent.
+        phase = confirmed ? (paused || quiescing ? 'stopped' : 'failed') : 'unknown'; ready = false;
       }
     } else if (run && phase !== 'stopping' && phase !== 'unknown') {
       const observedReady = Boolean(run.core) && await probe(run, observedGeneration);
@@ -292,6 +294,7 @@ export function openController(root, options = {}) {
 
   function requestStart(pausedAtLogin = null, authorize = null, restoreRunning = false) {
     if (starting || pausing || disposing) return Promise.reject(new Error('operation_busy'));
+    if (quiescing) return Promise.reject(new Error('stop_unconfirmed'));
     const requestedGeneration = current && !current.exited ? generation : ++generation;
     let resolve, reject;
     const pending = new Promise((yes, no) => { resolve = yes; reject = no; });
@@ -302,6 +305,7 @@ export function openController(root, options = {}) {
 
   async function connect(requestedGeneration, pausedAtLogin = null, authorize = null, restoreRunning = false) {
     owned();
+    if (quiescing) return snapshot();
     if (authorize && !authorize()) return snapshot();
     if (pausedAtLogin !== null && !mayResume(pausedAtLogin)) return snapshot();
     if (current && !current.exited) {
@@ -309,7 +313,7 @@ export function openController(root, options = {}) {
       return status();
     }
     if (current && !await stopped(current)) fail('stop_unconfirmed');
-    if (requestedGeneration !== generation) return snapshot();
+    if (requestedGeneration !== generation || quiescing) return snapshot();
     if (pausedAtLogin !== null) {
       owned();
       if (!mayResume(pausedAtLogin)) return snapshot();
@@ -320,7 +324,7 @@ export function openController(root, options = {}) {
     let launch = io.launch(root);
     if (launch && typeof launch.then === 'function') launch = await launch;
     owned();
-    if (requestedGeneration !== generation || disposing || disposed ||
+    if (requestedGeneration !== generation || disposing || disposed || quiescing ||
         restoreRunning && paused || pausedAtLogin !== null && !mayResume(pausedAtLogin) ||
         authorize && !authorize()) return snapshot();
     if (!launch.configured) { configured = false; phase = 'stopped'; ready = false; fail(launch.reason || 'tunnel_not_configured'); }
@@ -365,14 +369,14 @@ export function openController(root, options = {}) {
   }
 
   function scheduleRestart(run) {
-    if (run !== current || paused || disposed || phase === 'stopping' || phase === 'unknown' || !run.configured || !run.wasReady) return;
+    if (run !== current || paused || disposed || quiescing || phase === 'stopping' || phase === 'unknown' || !run.configured || !run.wasReady) return;
     ready = false;
     if (restarts >= io.maxRestarts) { phase = 'failed'; return; }
     restarts += 1;
     const attempt = ++generation;
     void (async () => {
       await delay(io.restartBackoffMs);
-      const ownsAttempt = () => !disposed && !disposing && !paused && attempt === generation && current === run;
+      const ownsAttempt = () => !disposed && !disposing && !quiescing && !paused && attempt === generation && current === run;
       const deadline = performance.now() + io.stopTimeoutMs;
       // On Windows the launcher can exit before its stdio provider sees EOF.
       // Wait for positive exit evidence, not merely a dead launcher or pipe.
@@ -467,10 +471,22 @@ export function openController(root, options = {}) {
     return pending.finally(() => { disposing = null; });
   }
 
+  function beginQuiesce() {
+    if (disposed) return Promise.resolve();
+    if (quiescing) return quiescence;
+    quiescing = true;
+    // Reserve shutdown before stopRuntime can signal a child or reenter this controller.
+    let resolve, reject;
+    quiescence = new Promise((yes, no) => { resolve = yes; reject = no; });
+    void stopRuntime(true).then(resolve, reject);
+    void quiescence.catch(() => {});
+    return quiescence;
+  }
+
   async function closeRuntime() {
     // Stop through the retained child handle even if intent or exit
     // observation is broken. Unknown state still prevents lease release.
-    await stopRuntime(true);
+    await beginQuiesce();
     if (!await stopped(current)) fail('stop_unconfirmed');
     if (starting) await starting;
     owned();
@@ -480,5 +496,5 @@ export function openController(root, options = {}) {
   }
 
   if (!io.deferStartup) void startSavedIntent();
-  return Object.freeze({ reconnect, pause, pauseUntilLogin, resumeAfterInteractiveLogin, status, dispose, startSavedIntent });
+  return Object.freeze({ reconnect, pause, pauseUntilLogin, resumeAfterInteractiveLogin, status, dispose, beginQuiesce, startSavedIntent });
 }

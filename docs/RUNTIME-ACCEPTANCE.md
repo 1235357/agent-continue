@@ -1,6 +1,72 @@
 # Runtime Acceptance Pre-Check (read-only)
 
-## Hosted Readback And Receipt Follow-Up (Checkpoint67 In Progress)
+## Browser Control Integration And Actual CI (Checkpoint68 In Progress)
+
+Actual main512bd875 verification was read in the authenticated IAB:
+- Verify Windows delivery4, run42462329376, Success5m59s, two artifacts.
+- Extension checks82, run42462309737, Success4m32s.
+- Native checks30, run42462309731, Failure4m53s: Windows read-only recovery
+  step hit its3-minute deadline. Ubuntu core and macOS bootstrap passed. The
+  timeout is not a proven product-install failure and is still being diagnosed;
+  no timeout was raised or case skipped to declare success.
+
+Screenshot: .artifacts/windows-one-command-setup-20261108/
+checkpoint68-windows-delivery-success.jpg. Artifact download was attempted, but
+its browser download event did not complete; local artifact bytes are not yet
+claimed as downloaded/verified. The known raw-log/fixture Plan failure is now
+resolved in that hosted delivery run, not just locally.
+
+Parent full npm test completed exit0 before the new progress implementation,
+including13/13 MV3 and5/5 official ProseMirror scenarios. The new page-control
+slice first failed five regression cases, then passed59/59 controller cases.
+It records priority Pause separately, retains exact owner and mutation IDs,
+does not hold the cross-page lock over transport, and permits explicit Pause
+while a Reconnect/status call is waiting. The new rendered case first failed
+on the disabled Pause button; the repaired UI then passed41/41 synthetic checks.
+Related controller/dialog/account/admin/Pause fixture regression passed280/280
+before four further controller cases were added. These counts overlap.
+
+Source integration follow-up: parent ran149 page/worker/native focused cases,
+full product npm test exit0 (including13 MV3 and5 official ProseMirror scenarios),
+and full native npm test269pass/0fail/4 existing platform skips. Full native first
+exposed a legacy close-test deadlock: it expected the server to kill its client
+before draining. The test now explicitly disconnects its exact admitted client,
+waits for quiescence admission, checks Status/rejection of new Reconnect, releases
+in finally, and verifies exact receipt/fence cleanup. It passed individually and
+in the full native rerun; no source safety check was removed for that test.
+
+Independent read-only critique then reproduced two actual P2s: a priority Pause
+retirement committing before a rejected storage promise left a stale live fence;
+and positive late exit during quiescence was mislabeled failed with saved-running
+intent. Both were reproduced red before repair. Exact terminal readback now
+reconciles only the matching live/durable record; foreign records/generic errors
+cannot clear it. Positively verified captured-process exit reports stopped only
+during quiescence; arbitrary failed or unconfirmed exit cannot release ownership.
+Parent latest133 controller/worker/source and23 focused native tests pass. The
+bounded worker fix was independently reviewed with no remaining P1/P2 finding.
+A final complete product rerun is in progress; these counts overlap.
+
+Parent Windows recovery rerun35/35passed in68.7s. The fixture now uses async
+execFile and fixed case/phase timing diagnostics; child15s and case20s bounds
+remain. CI runs all35 cases in disjoint10/13/12 positive-prefix groups, each with
+the original3-minute step limit. This addresses confirmed event-loop/reporting
+blocking, not an invented diagnosis of the hosted-specific PowerShell slowdown.
+New hosted CI is still required. Manual verification workflow contracts25/25pass.
+
+Official Node ZIP downloaded through IAB matched CBC74B5E0982C9DBB41525FD8FB5DCD3
+2FBEE237863F7829072F4639A1CE5F20. Local closure-r7 built/Plan passed but is superseded
+because its payload predates the final native repair; closure-r8 rebuild is in
+progress. Extension-r9 is a newly packaged source candidate only. The npm suite
+attempt lacking combined-release environment failed its required tarball gate;
+repeat against the exact new six-file closure and original builder receipt.
+
+Native IAB UI confirmed installed preview2.2.1 and IDhjnopijiekcbgiljjfiekeiepkebhido.
+No reload, registration, protected cutover or live command occurred. Installed
+candidate adoption, browser reopen/revocation, final artifacts and Release/Store
+review receipts remain unverified. Production connections and external task
+remain unchanged. Store is authenticated and the supplied password file unread.
+
+## Hosted Readback And Receipt Follow-Up (Checkpoint67 Historical)
 
 Canonical main was pushed and read back as7a734ba25211f479f4144c419518e672a593cbea.
 The parent complete product test exited0, including13 MV3 integration scenarios

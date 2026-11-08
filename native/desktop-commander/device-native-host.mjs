@@ -32,11 +32,21 @@ export function createPreparedControl(binding, { openPreparedProcesses, operatio
   };
 }
 
-export async function serveBrowserWake({ input, output, origin, args, startOwner, handlePrepared }) {
+export async function serveBrowserWake({ input, output, origin, args, startOwner, handlePrepared, binding }) {
   if (!matchesOrigin(args, origin)) throw new Error('invalid_browser_wake');
-  const { readFrame, writeFrame } = await import('./device-owner.mjs');
+  const { readFrame, writeFrame, sendExistingBrowserControl } = await import('./device-owner.mjs');
   const { validateDeviceRequest } = await import('./device-operations.mjs');
   const request = await readFrame(input);
+  if (request?.version === 2 || request?.action === 'attach-control') {
+    try {
+      if (!request || Array.isArray(request) || Object.keys(request).length !== 4 ||
+          request.version !== 2 || request.action !== 'attach-control' ||
+          !binding || binding.origin !== origin) throw new Error('invalid_browser_control');
+      const response = await sendExistingBrowserControl(binding, request.ownerId, request.request, { timeoutMs: 5000 });
+      await writeFrame(output, { version: 2, action: 'attach-control', ownerId: request.ownerId, response });
+      return;
+    } catch { throw new Error('device_bridge_unavailable'); }
+  }
   if (!request || Object.keys(request).length !== 3 || request.version !== 1 ||
       request.action !== 'wake' || typeof request.id !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(request.id)) {
     throw new Error('invalid_browser_wake');
@@ -44,7 +54,7 @@ export async function serveBrowserWake({ input, output, origin, args, startOwner
   const lifetime = new AbortController();
   let owner, finish;
   const disconnected = new Promise(resolve => { finish = resolve; });
-  const stop = () => { lifetime.abort(); finish(); };
+  const stop = () => { lifetime.abort(); owner?.beginQuiesce?.(); finish(); };
   const inputEvents = ['end', 'close', 'error', 'data'];
   const outputEvents = ['close', 'error'];
   for (const event of inputEvents) input.on(event, stop);
@@ -53,7 +63,8 @@ export async function serveBrowserWake({ input, output, origin, args, startOwner
   try {
     if (input.readableEnded || input.destroyed || output.destroyed) stop();
     if (lifetime.signal.aborted) return;
-    owner = await startOwner(lifetime.signal);
+    owner = await startOwner(lifetime.signal, request.id);
+    if (lifetime.signal.aborted) owner?.beginQuiesce?.();
     if (!lifetime.signal.aborted) {
       if (typeof owner.request === 'function') {
         input.pause();
@@ -100,10 +111,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     // Only a separately installed local wrapper may select the browser-owned mode.
     if (process.platform === 'win32' && args[0] === '--browser-wake') {
       const prepared = await import('./prepared-process.mjs');
-      await serveBrowserWake({ input: process.stdin, output: process.stdout, origin: binding.origin,
-        args: args.slice(1), handlePrepared: createPreparedControl(binding, prepared), startOwner(signal) {
+      await serveBrowserWake({ input: process.stdin, output: process.stdout, origin: binding.origin, binding,
+        args: args.slice(1), handlePrepared: createPreparedControl(binding, prepared), startOwner(signal, browserOwnerId) {
           binding.assertCurrent();
-          return startDeviceOwner(bindingFile, { signal, expectedOrigin: binding.origin });
+          return startDeviceOwner(bindingFile, { signal, expectedOrigin: binding.origin, browserOwnerId });
         } });
     } else {
       if (!matchesOrigin(args, binding.origin)) throw new Error('invalid_device_origin');

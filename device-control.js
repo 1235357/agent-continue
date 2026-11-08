@@ -2,6 +2,7 @@ import { BROWSER_DEVICE_MESSAGE } from './browser-wake.js';
 
 export const HOST = 'com.agentcontinue.device_control';
 export const PENDING_KEY = 'deviceControlPendingV1';
+export const PRIORITY_PAUSE_KEY = 'deviceControlPriorityPauseV1';
 export const REVISION_KEY = 'deviceControlRevisionV1';
 const LOCK = 'agent-continue-device-control-v1';
 const browserScope = ':browser-managed';
@@ -11,8 +12,9 @@ const mutations = new Set(['disconnect-and-pause', 'reconnect']);
 const validID = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,64}$/.test(value);
 const exactKeys = (value, required, optional = []) => value !== null && typeof value === 'object' && !Array.isArray(value) &&
   required.every(key => Object.hasOwn(value, key)) && Object.keys(value).every(key => required.includes(key) || optional.includes(key));
-const validPending = value => exactKeys(value, ['version', 'id', 'action']) &&
-  value.version === 1 && validID(value.id) && mutations.has(value.action);
+const validPending = (value, browserManaged) => exactKeys(value, ['version', 'id', 'action'], browserManaged ? ['ownerId'] : []) &&
+  value.version === 1 && validID(value.id) && mutations.has(value.action) &&
+  (!Object.hasOwn(value, 'ownerId') || validID(value.ownerId));
 
 export function decodeResponse(value, id, action, target = null) {
   const invalid = () => { throw new Error('invalid_response'); };
@@ -66,7 +68,7 @@ async function browserControl(runtime, action, id, ownerId, timeoutMs) {
       new Promise(resolve => { timer = setTimeout(() => resolve(null), timeoutMs); }),
     ]);
     if (!exactKeys(reply, ['ownerId', 'response']) || !validID(reply.ownerId) ||
-        (action !== 'status' && reply.ownerId !== ownerId)) return unavailable;
+        (ownerId !== null && reply.ownerId !== ownerId)) return unavailable;
     try { return { ...decodeResponse(reply.response, id, action), ownerId: reply.ownerId }; }
     catch { return { kind: 'unavailable', reason: 'invalid-response' }; }
   } catch { return unavailable; }
@@ -82,74 +84,105 @@ export function createDeviceController({ runtime, permissions, storage, locks, t
   timeoutMs = 15000, onChange = () => {} }) {
   const scope = deviceScope(target, browserManaged);
   const pendingKey = PENDING_KEY + scope;
+  const priorityKey = PRIORITY_PAUSE_KEY + scope;
   const revisionKey = REVISION_KEY + scope;
   const lock = LOCK + scope;
   const state = {
     target, initialized: false, permission: 'unknown', registration: 'unchecked', observation: null, observedAt: null,
-    pending: null, journalHealthy: false, statusBusy: false, mutationBusy: false, requestingPermission: false,
+    pending: null, priorityPause: null, ownerId: null, journalHealthy: false, statusBusy: false,
+    mutationBusy: false, pauseBusy: false, requestingPermission: false,
     feedback: 'not-checked',
   };
   let sequence = 0, applied = 0, revision = null, observedRevision;
   let permissionRevision = 0, permissionEpoch = 0;
-  let quarantinedPending = null;
+  const quarantines = { pending: null, priorityPause: null };
+  const slots = browserManaged ? ['pending', 'priorityPause'] : ['pending'];
+  const keyFor = slot => slot === 'priorityPause' ? priorityKey : pendingKey;
   const known = () => state.permission === 'granted' && state.registration === 'reachable' &&
     typeof state.observation?.paused === 'boolean' && (!browserManaged || validID(state.observation.ownerId));
   const eligible = () => state.initialized && known() && observedRevision === revision &&
-    state.journalHealthy && !state.pending && Boolean(locks?.request);
+    state.journalHealthy && !state.pending && !state.priorityPause && Boolean(locks?.request);
+  const pauseEligible = () => browserManaged && state.initialized && state.permission === 'granted' &&
+    state.journalHealthy && validID(state.ownerId) && Boolean(locks?.request) &&
+    !state.priorityPause && state.pending?.action !== 'disconnect-and-pause';
   const getState = () => structuredClone({ ...state,
-    canMutate: eligible() && !state.statusBusy && !state.mutationBusy && !state.requestingPermission,
+    canMutate: eligible() && !state.statusBusy && !state.mutationBusy && !state.pauseBusy && !state.requestingPermission,
+    canPause: browserManaged ? pauseEligible() && !state.pauseBusy && !state.requestingPermission :
+      eligible() && !state.statusBusy && !state.mutationBusy && !state.requestingPermission,
   });
   const notify = () => onChange(getState());
   const exclusive = callback => locks?.request ? locks.request(lock, callback) : callback();
 
   async function readPending() {
     try {
-      const values = await storage.get([pendingKey, revisionKey]);
-      const value = values[pendingKey];
+      const values = await storage.get([pendingKey, revisionKey, ...(browserManaged ? [priorityKey] : [])]);
       const storedRevision = values[revisionKey] ?? null;
-      if (value != null && !validPending(value)) throw new Error('invalid_journal');
+      for (const slot of slots) {
+        const value = values[keyFor(slot)];
+        if (value != null && (!validPending(value, browserManaged) ||
+            slot === 'priorityPause' && (value.action !== 'disconnect-and-pause' || !validID(value.ownerId)))) throw new Error('invalid_journal');
+      }
       if (storedRevision !== null && (typeof storedRevision !== 'string' || storedRevision.length !== 36 ||
           !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(storedRevision))) throw new Error('invalid_journal');
       revision = storedRevision;
-      // A later shared transition supersedes this page's ambiguous write.
-      if (quarantinedPending && ![quarantinedPending.before, quarantinedPending.attempt].includes(revision)) {
-        quarantinedPending = null;
+      for (const slot of slots) {
+        const value = values[keyFor(slot)];
+        let quarantinedPending = quarantines[slot];
+        // A transition of the other browser slot does not settle this intent.
+        const replacement = value && quarantinedPending &&
+          (value.id !== quarantinedPending.pending.id || value.action !== quarantinedPending.pending.action ||
+            value.ownerId !== quarantinedPending.pending.ownerId);
+        if (quarantinedPending && ![quarantinedPending.before, quarantinedPending.attempt].includes(revision) &&
+            (!browserManaged || replacement)) {
+          quarantines[slot] = quarantinedPending = null;
+        }
+        if (browserManaged && quarantinedPending?.terminalProof) {
+          // The exact terminal host receipt was validated before the failed
+          // metadata clear. Preserve a replacement, never restore settled work.
+          const pending = quarantinedPending.pending;
+          state[slot] = value ? structuredClone(value) : null;
+          observedRevision = undefined;
+          if (value && value.id === pending.id && value.action === pending.action && value.ownerId === pending.ownerId) {
+            await writePending(null, false, slot, true);
+          }
+          quarantines[slot] = null;
+        } else if (quarantinedPending?.knownUnsent) {
+          // Only source-known unsent metadata can retire without a host receipt.
+          const pending = quarantinedPending.pending;
+          state[slot] = value ? structuredClone(value) : null;
+          observedRevision = undefined;
+          if (value && value.id === pending.id && value.action === pending.action && value.ownerId === pending.ownerId) await writePending(null, true, slot);
+          quarantines[slot] = null;
+        } else if (quarantinedPending) {
+          const pending = quarantinedPending.pending;
+          state[slot] = pending;
+          if (value && (value.id !== pending.id || value.action !== pending.action || value.ownerId !== pending.ownerId)) throw new Error('journal_conflict');
+          if (!value) await writePending(pending, false, slot);
+          quarantines[slot] = null;
+        } else state[slot] = value ? structuredClone(value) : null;
       }
-      if (quarantinedPending?.knownUnsent) {
-        // Failed admission never reached transport. Only its own metadata may
-        // be retired without a host receipt; a foreign intent is left intact.
-        const pending = quarantinedPending.pending;
-        state.pending = value ? { version: 1, id: value.id, action: value.action } : null;
-        observedRevision = undefined;
-        if (value && value.id === pending.id && value.action === pending.action) await writePending(null, true);
-        quarantinedPending = null;
-      } else if (quarantinedPending) {
-        // A missing key cannot erase an intent whose write failed. Never
-        // overwrite a different page's durable intent to repair this one.
-        const pending = quarantinedPending.pending;
-        state.pending = pending;
-        if (value && (value.id !== pending.id || value.action !== pending.action)) throw new Error('journal_conflict');
-        if (!value) await writePending(pending);
-        quarantinedPending = null;
-      } else state.pending = value ? { version: 1, id: value.id, action: value.action } : null;
+      const owners = new Set(slots.map(slot => state[slot]?.ownerId).filter(Boolean));
+      if (owners.size > 1) throw new Error('journal_conflict');
+      if (browserManaged && owners.size) state.ownerId = owners.values().next().value;
       state.journalHealthy = true;
     } catch { state.journalHealthy = false; }
   }
-  async function writePending(value, knownUnsent = false) {
+  async function writePending(value, knownUnsent = false, slot = 'pending', terminalProof = false) {
     // Failed writes may have committed. Unsent evidence is local to failed
     // admission; it is never persisted or inferred from a transport failure.
     const nextRevision = crypto.randomUUID();
-    const pending = value || state.pending;
-    quarantinedPending = { pending, before: revision, attempt: nextRevision, knownUnsent };
-    state.pending = pending;
+    const pending = value || state[slot];
+    quarantines[slot] = { pending, before: revision, attempt: nextRevision, knownUnsent,
+      terminalProof: browserManaged && value === null && terminalProof === true };
+    state[slot] = pending;
     try {
       // Fence old replies before changing the pending key. These are separate
       // awaited writes: no multi-key transaction or storage-event ordering assumed.
       await storage.set({ [revisionKey]: nextRevision });
       revision = nextRevision;
-      await storage.set({ [pendingKey]: value });
-      state.pending = value;
-      quarantinedPending = null;
+      await storage.set({ [keyFor(slot)]: value });
+      state[slot] = value;
+      quarantines[slot] = null;
     } catch { state.journalHealthy = false; throw new Error('journal_unavailable'); }
   }
   function applyPermission(permission) {
@@ -159,6 +192,7 @@ export function createDeviceController({ runtime, permissions, storage, locks, t
       state.observation = null;
       state.observedAt = null;
       state.registration = 'unchecked';
+      state.ownerId = null;
       observedRevision = undefined;
     }
   }
@@ -184,8 +218,8 @@ export function createDeviceController({ runtime, permissions, storage, locks, t
     notify();
   }
   async function requestPermission(consented) {
-    if (consented !== true || !state.initialized || state.pending || !state.journalHealthy ||
-        state.requestingPermission || state.statusBusy || state.mutationBusy) return;
+    if (consented !== true || !state.initialized || state.pending || state.priorityPause || !state.journalHealthy ||
+        state.requestingPermission || state.statusBusy || state.mutationBusy || state.pauseBusy) return;
     state.requestingPermission = true;
     const current = ++permissionRevision;
     try {
@@ -226,16 +260,20 @@ export function createDeviceController({ runtime, permissions, storage, locks, t
       state.registration = result.kind === 'observed' || result.kind === 'rejected' ? 'reachable' :
         result.reason === 'host-absent' ? 'absent' : 'unknown';
       state.observation = result.kind === 'observed' ? result : null;
+      if (browserManaged && result.kind === 'observed') state.ownerId = result.ownerId;
       state.observedAt = result.kind === 'observed' ? Date.now() : null;
       observedRevision = requestRevision;
       state.feedback = result.kind === 'observed' ? 'observed' : result.kind === 'rejected' ? 'rejected' : result.reason;
       if (!state.journalHealthy || result.kind !== 'observed') return;
       const op = result.operation;
-      const matching = op && state.pending && op.id === state.pending.id && op.action === state.pending.action;
+      const matchingSlot = op && slots.find(slot => state[slot] && op.id === state[slot].id && op.action === state[slot].action &&
+        (!state[slot].ownerId || state[slot].ownerId === result.ownerId));
       // A generic healthy status or an unrelated receipt never releases an unknown mutation.
-      if (matching && ['settled', 'not-executed'].includes(op.status)) await writePending(null);
-      else if (!state.pending && op && !['settled', 'not-executed'].includes(op.status)) {
-        await writePending({ version: 1, id: op.id, action: op.action });
+      if (matchingSlot && ['settled', 'not-executed'].includes(op.status)) await writePending(null, false, matchingSlot, true);
+      else if (!matchingSlot && op && !['settled', 'not-executed'].includes(op.status)) {
+        const slot = browserManaged && op.action === 'disconnect-and-pause' && state.pending ? 'priorityPause' : 'pending';
+        if (!state[slot]) await writePending({ version: 1, id: op.id, action: op.action,
+          ...(browserManaged ? { ownerId: result.ownerId } : {}) }, false, slot);
       }
       observedRevision = revision;
       if (action !== 'status' && (!op || op.id !== id || op.action !== action)) state.feedback = 'unconfirmed';
@@ -244,33 +282,49 @@ export function createDeviceController({ runtime, permissions, storage, locks, t
   async function run(action) {
     if (!actions.has(action)) throw new Error('invalid_action');
     const mutation = action !== 'status';
-    if (!state.initialized || state.requestingPermission || (mutation ? !getState().canMutate : state.statusBusy)) return;
-    const busyKey = mutation ? 'mutationBusy' : 'statusBusy';
+    const priorityAction = browserManaged && action === 'disconnect-and-pause';
+    if (!state.initialized || state.requestingPermission || (mutation ?
+      !(priorityAction ? getState().canPause : getState().canMutate) : state.statusBusy)) return;
+    const busyKey = priorityAction ? 'pauseBusy' : mutation ? 'mutationBusy' : 'statusBusy';
     state[busyKey] = true;
     state.feedback = mutation ? 'requesting-mutation' : 'checking';
-    const order = ++sequence;
     notify();
     try {
-      let id = crypto.randomUUID();
-      let send = false, requestRevision, requestPermissionEpoch, ownerId = null;
-      await exclusive(async () => {
-        await readPending();
-        if (!await readPermission()) { state.feedback = 'permission-required'; return; }
-        requestPermissionEpoch = permissionEpoch;
-        if (mutation) {
-          if (!eligible()) { state.feedback = state.pending ? 'unconfirmed' : 'not-checked'; return; }
-          if (browserManaged) ownerId = state.observation.ownerId;
-          // Transport is reached only after both admission writes succeed.
-          await writePending({ version: 1, id, action }, true);
-        } else if (state.pending) id = state.pending.id;
-        requestRevision = revision;
-        send = true;
-      });
-      notify();
-      if (send) {
-        const result = browserManaged ? await browserControl(runtime, action, id, ownerId, timeoutMs) :
-          await controlDevice(runtime, action, id, timeoutMs, target);
-        await observe(result, id, action, order, requestRevision, requestPermissionEpoch);
+      const queried = new Set();
+      const deadline = Date.now() + Math.min(timeoutMs, 14500);
+      const maxReads = browserManaged && !mutation ? 2 : 1;
+      for (let read = 0; read < maxReads; read++) {
+        const order = ++sequence;
+        let id = crypto.randomUUID();
+        let send = false, requestRevision, requestPermissionEpoch, ownerId = null;
+        await exclusive(async () => {
+          await readPending();
+          if (!await readPermission()) { state.feedback = 'permission-required'; return; }
+          requestPermissionEpoch = permissionEpoch;
+          if (mutation) {
+            if (!(priorityAction ? pauseEligible() : eligible())) { state.feedback = state.pending ? 'unconfirmed' : 'not-checked'; return; }
+            if (browserManaged) ownerId = state.ownerId;
+            // Transport is reached only after both admission writes succeed.
+            await writePending({ version: 1, id, action, ...(browserManaged ? { ownerId } : {}) }, true,
+              priorityAction && state.pending ? 'priorityPause' : 'pending');
+          } else {
+            const pending = [state.priorityPause, state.pending].find(value => value && !queried.has(value.id));
+            if (read && !pending) return;
+            if (pending) id = pending.id;
+            if (browserManaged) ownerId = pending?.ownerId || state.ownerId;
+            if (Date.now() >= deadline) return;
+          }
+          requestRevision = revision;
+          send = true;
+        });
+        notify();
+        if (send) {
+          queried.add(id);
+          const result = browserManaged ? await browserControl(runtime, action, id, ownerId,
+            mutation ? timeoutMs : Math.max(1, Math.min(5000, deadline - Date.now()))) :
+            await controlDevice(runtime, action, id, timeoutMs, target);
+          await observe(result, id, action, order, requestRevision, requestPermissionEpoch);
+        } else break;
       }
     } catch { state.journalHealthy = false; state.feedback = 'local-unavailable'; }
     finally { state[busyKey] = false; notify(); }

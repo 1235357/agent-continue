@@ -2,7 +2,44 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
-### Current Hosted Results (Checkpoint67 In Progress)
+### Current Control Integration (Checkpoint68 In Progress)
+
+Canonical remote main is512bd875, actually verified in IAB. Windows delivery4
+(42462329376) succeeded5m59s and Extension checks82(42462309737) succeeded4m32s.
+Native checks30(42462309731) still timed out at the Windows read-only recovery
+step after3minutes; Ubuntu/macOS passed. Do not claim every CI job is green.
+
+The page/controller, worker and native slices are now source-integrated. Pause
+uses an authenticated same-owner attach rather than waiting behind Reconnect;
+primary and priority Pause retain separate durable records. A full product run
+passed, including13 MV3 and5 official ProseMirror scenarios. Native full suite
+passed269 with4 existing platform skips. Independent critique then reproduced
+two narrower retirement/late-exit defects; their repairs passed133 parent-run
+controller/worker/source cases and23 focused native cases. A second final full
+product run is in progress. Counts overlap, and none establishes installed-host
+acceptance. The legacy graceful-close test now disconnects its exact client
+before shutdown and asserts Status remains reachable/new Reconnect is denied.
+
+Windows recovery35/35 passed locally with asynchronous child diagnostics and
+the original15s child/20s case limits. CI now splits all35 distinct cases into
+10/13/12 positive-prefix groups, each retaining the3-minute step limit; hosted
+verification of this source is still required. The actual Windows-only slowdown
+was not identified by the old buffered log. No production defect is inferred.
+
+Official Node22.23.4 ZIP was downloaded through IAB and matched the pinned digest.
+Local closure-r7 built/Plan passed but predates the final late-exit repair; it is
+superseded, not a release input. closure-r8 rebuild is in progress. Extension-r9
+contains the final worker repair and is a candidate only. An attempted npm
+package run without the required combined-closure environment failed exactly at
+that prerequisite; rerun with the new original build receipt, not a bypass.
+
+IAB native UI verified installed2.2.1 preview IDhjnopijiekcbgiljjfiekeiepkebhido;
+no preview reload or native cutover occurred. External Chrome and production
+VPN/MCP/research remain untouched. Final installed lifecycle/Revoke, exact new
+artifacts, Release and Store submission are still open. Google password file
+remains unread and unnecessary; authenticated Store is Published-public2.1.0.
+
+### Previous Hosted Results (Checkpoint67 Historical)
 
 Remote main matches7a734ba. Full local product regression passed, but actual
 hosted verification is not green: manual run42460884036 passed ordinary-token

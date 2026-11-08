@@ -173,7 +173,7 @@ try {
   ${failAdmission ? "if(value==='restore-durability'){fs.fsyncSync=originalSync;process.send({durabilityRestored:true});}" : ''}
   if(value==='release'){release?.();}
   if(value==='calls'){process.send({calls});}
-  if(value==='close'){try{await owner.close();process.send({closed:true});process.disconnect();}catch{process.send({closed:false});process.disconnect();}}
+  if(value==='close'){owner.beginQuiesce();process.send({quiescing:true});try{await owner.close();process.send({closed:true});process.disconnect();}catch{process.send({closed:false});process.disconnect();}}
  });
  process.send({listening:true});
 }catch{process.send({listening:false});process.disconnect();process.exitCode=1;}
@@ -514,11 +514,20 @@ check('graceful close stops admission and drains an already admitted disconnecte
   const f = await fixture(t, { hold: true }), intent = request('drained-connect', 'reconnect');
   const effect = message(f.owner, value => value.effect === 'reconnect');
   const bridge = f.bridge(frame(intent)); await effect;
+  // Disconnect this exact client; shutdown now retains authenticated status/Pause until drain.
+  bridge.child.kill();
+  const lost = await bridge.done; assert.notEqual(lost.code, 0); assert.equal(lost.out.length, 0);
+  const quiescing = message(f.owner, value => value.quiescing === true);
   const closing = f.close();
-  const lost = await bridge.done; assert.equal(lost.code, 1); assert.equal(lost.out.length, 0);
-  assert.equal(fs.existsSync(path.join(f.root, 'device-operations.lease')), true);
-  assert.equal(JSON.parse(fs.readFileSync(f.journal, 'utf8').trim().split('\n').at(-1)).status, 'in-progress');
-  f.owner.send('release'); await closing;
+  try {
+    await quiescing;
+    const refused = await f.ask(request('late-connect', 'reconnect'));
+    assert.equal(refused.code, 1); assert.equal(refused.out.length, 0);
+    const observed = decode((await f.ask(request(intent.id))).out);
+    assert.equal(observed.state.operation.status, 'in-progress');
+    assert.equal(fs.existsSync(path.join(f.root, 'device-operations.lease')), true);
+    assert.equal(JSON.parse(fs.readFileSync(f.journal, 'utf8').trim().split('\n').at(-1)).status, 'in-progress');
+  } finally { f.owner.send('release'); await closing; }
   assert.equal(JSON.parse(fs.readFileSync(f.journal, 'utf8').trim().split('\n').at(-1)).status, 'settled');
   assert.equal(fs.existsSync(f.channel), false);
   assert.equal(fs.existsSync(path.join(f.root, 'device-operations.lease')), false);

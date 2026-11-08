@@ -5,6 +5,7 @@ const ATTEMPT = 'deviceBrowserWakeAttemptV1';
 const RECOVERY = 'deviceBrowserWakeRecoveryV1';
 const OWNER = 'deviceBrowserWakeOwnerV1';
 const MUTATION = 'deviceBrowserWakeMutationV1';
+const PRIORITY_PAUSE = 'deviceBrowserWakePriorityPauseV1';
 const RECOVERY_PREFIX = 'agent-continue-native-recovery-';
 const NATIVE_PERMISSION = { permissions: ['nativeMessaging'] };
 const actions = new Set(['status', 'reconnect', 'disconnect-and-pause']);
@@ -27,6 +28,13 @@ const sameRecord = (value, expected) => exact(value, Object.keys(expected)) &&
 const terminalOperation = status => ['settled', 'not-executed'].includes(status);
 const terminalPrepared = status => ['owner-revoked', 'provider-reported-result', 'provider-reported-error',
   'blocked-by-local-control'].includes(status);
+const emptyFence = value => value === undefined || value === false;
+function validFence(value, ownerId, priority = false) {
+  if (emptyFence(value)) return true;
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value.ownerId !== ownerId) return false;
+  const { ownerId: ignored, ...request } = value;
+  return validRequest(request) && !readOnly(request.action) && (!priority || request.action === 'disconnect-and-pause');
+}
 
 function settlesMutation(mutation, request, reply) {
   // A generic rejection does not prove that the mutation was never admitted.
@@ -97,8 +105,97 @@ export function bindBrowserWake(api, { host = BROWSER_WAKE_HOST, onResult = () =
   let current, revision = 0, pending = Promise.resolve(), statuses = Promise.resolve();
   const nativeChanged = change => change?.permissions?.includes('nativeMessaging');
   const enqueue = work => (pending = pending.then(work).catch(() => { onResult('unavailable'); return null; }));
+  const live = (requested, allowed) => requested === revision && allowed();
+  async function ownerRecords() {
+    const values = await session.get([OWNER, MUTATION, PRIORITY_PAUSE]);
+    const ownerId = values[OWNER];
+    // A rejected retirement can have committed. Retain its live record until exact terminal proof is reread.
+    const mutation = emptyFence(values[MUTATION]) && current?.id === ownerId && current.mutation ?
+      current.mutation : values[MUTATION];
+    const priorityPause = emptyFence(values[PRIORITY_PAUSE]) && current?.id === ownerId && current.priorityPause ?
+      current.priorityPause : values[PRIORITY_PAUSE];
+    if (!validId(ownerId) || current && current.id !== ownerId || !validFence(mutation, ownerId) ||
+        !validFence(priorityPause, ownerId, true) ||
+        !emptyFence(mutation) && !emptyFence(priorityPause) && mutation.id === priorityPause.id) return null;
+    return { ownerId, mutation, priorityPause };
+  }
+  async function permittedOwner(ownerId, requested, allowed) {
+    if (!live(requested, allowed) || !await permissions.contains(NATIVE_PERMISSION) || !live(requested, allowed)) return null;
+    const records = await ownerRecords();
+    return live(requested, allowed) && records?.ownerId === ownerId ? records : null;
+  }
   async function retireOwner(id) {
-    if ((await session.get(OWNER))[OWNER] === id) await session.set({ [OWNER]: null });
+    const values = await session.get([OWNER, MUTATION, PRIORITY_PAUSE]);
+    if (values[OWNER] === id && emptyFence(values[MUTATION]) && emptyFence(values[PRIORITY_PAUSE])) {
+      await session.set({ [OWNER]: null });
+    }
+  }
+  async function retireMutation(key, mutation, request, reply, attempt, allowed = () => true) {
+    if (!settlesMutation(mutation, request, reply)) return true;
+    if (!allowed()) return false;
+    const values = await session.get([OWNER, key]);
+    const field = key === MUTATION ? 'mutation' : 'priorityPause';
+    if (values[OWNER] !== mutation.ownerId || !allowed()) return false;
+    if (sameRecord(values[key], mutation)) await session.set({ [key]: false });
+    else if (!emptyFence(values[key]) || !sameRecord(attempt?.[field], mutation)) return false;
+    if (attempt && sameRecord(attempt[field], mutation)) attempt[field] = null;
+    if (attempt?.closed && !attempt.mutation && !attempt.priorityPause) await retireOwner(attempt.id);
+    return true;
+  }
+  function bounded(work) {
+    const requested = revision;
+    let timer, expired = false;
+    const allowed = () => !expired && requested === revision;
+    const deadline = new Promise(resolve => { timer = setTimeout(() => { expired = true; resolve(null); }, 14500); });
+    return Promise.race([Promise.resolve().then(() => work(requested, allowed, deadline)), deadline])
+      .catch(() => null).finally(() => { expired = true; clearTimeout(timer); });
+  }
+  async function attachControl(message, records, requested, allowed, deadline, pause = false) {
+    if (!runtime.sendNativeMessage || !live(requested, allowed)) return null;
+    const { ownerId } = records, request = message.request;
+    const mutationKey = records.mutation?.action === 'reconnect' ? PRIORITY_PAUSE : MUTATION;
+    const field = mutationKey === MUTATION ? 'mutation' : 'priorityPause';
+    let mutation, timer, expired = false;
+    const active = () => !expired && live(requested, allowed);
+    try {
+      if ((await runtime.getPlatformInfo()).os !== 'win' || !active()) return null;
+      if (pause) {
+        mutation = await enqueue(async () => {
+          const fresh = await permittedOwner(ownerId, requested, active);
+          if (!fresh || message.ownerId !== ownerId || current && !current.acknowledged ||
+              !emptyFence(fresh.priorityPause) || current?.priorityPause ||
+              (mutationKey === MUTATION ? !emptyFence(fresh.mutation) || current?.mutation :
+                fresh.mutation?.action !== 'reconnect' || request.id === fresh.mutation.id)) return null;
+          const record = { ownerId, ...request };
+          if (current?.id === ownerId) current[field] = record;
+          await session.set({ [mutationKey]: record });
+          return record;
+        });
+        if (!mutation) return null;
+      }
+      const fresh = await permittedOwner(ownerId, requested, active);
+      if (!fresh || pause && !sameRecord(fresh[field], mutation) || !active()) return null;
+      const result = await Promise.race([
+        runtime.sendNativeMessage(host, { version: 2, action: 'attach-control', ownerId, request }),
+        new Promise(resolve => { timer = setTimeout(() => { expired = true; resolve(null); }, 5000); }),
+        deadline,
+      ]);
+      if (!active() || !exact(result, ['version', 'action', 'ownerId', 'response']) || result.version !== 2 ||
+          result.action !== 'attach-control' || result.ownerId !== ownerId || !validControlReply(result.response, request) ||
+          !await permittedOwner(ownerId, requested, active)) return null;
+      const settled = await enqueue(async () => {
+        if (!await permittedOwner(ownerId, requested, active)) return false;
+        const attempt = current?.id === ownerId ? current : null;
+        // A receipt may settle only its captured record, never the other lane.
+        for (const [key, record] of [[MUTATION, pause && mutationKey === MUTATION ? mutation : records.mutation],
+          [PRIORITY_PAUSE, pause && mutationKey === PRIORITY_PAUSE ? mutation : records.priorityPause]]) {
+          if (!emptyFence(record) && !await retireMutation(key, record, request, result.response, attempt, active)) return false;
+        }
+        return active();
+      });
+      return settled && active() ? { ownerId, response: result.response } : null;
+    } catch { return null; }
+    finally { expired = true; clearTimeout(timer); }
   }
   function end(attempt, disconnect) {
     clearTimeout(attempt.timer);
@@ -113,7 +210,7 @@ export function bindBrowserWake(api, { host = BROWSER_WAKE_HOST, onResult = () =
       try { attempt.port.disconnect(); attempt.closed = true; } catch { /* Closure is unconfirmed. */ }
     } else attempt.closed = true;
     // Local Port.disconnect does not emit this port's onDisconnect event.
-    if (attempt.closed && !attempt.mutation) enqueue(() => retireOwner(attempt.id));
+    if (attempt.closed && !attempt.mutation && !attempt.priorityPause) enqueue(() => retireOwner(attempt.id));
   }
   function scheduleRecovery(id) {
     if (!alarms?.create || !alarms.onAlarm?.addListener) return;
@@ -121,6 +218,8 @@ export function bindBrowserWake(api, { host = BROWSER_WAKE_HOST, onResult = () =
     enqueue(async () => {
       if (current || requested !== revision || !await permissions.contains(NATIVE_PERMISSION) ||
           (await session.get(RECOVERY))[RECOVERY] !== undefined || requested !== revision) return;
+      const fences = await session.get([MUTATION, PRIORITY_PAUSE]);
+      if (!emptyFence(fences[MUTATION]) || !emptyFence(fences[PRIORITY_PAUSE])) return;
       const name = RECOVERY_PREFIX + id;
       // One recovery budget per browser session, even if the service worker sleeps.
       await session.set({ [RECOVERY]: name });
@@ -134,7 +233,8 @@ export function bindBrowserWake(api, { host = BROWSER_WAKE_HOST, onResult = () =
       if (current) return mode === 'status' ? current : null;
       if ((await runtime.getPlatformInfo()).os !== 'win' || !await permissions.contains(NATIVE_PERMISSION)) return;
       if ((await session.get(OWNER))[OWNER] != null ||
-          ![undefined, false].includes((await session.get(MUTATION))[MUTATION])) return null;
+          !emptyFence((await session.get(MUTATION))[MUTATION]) ||
+          !emptyFence((await session.get(PRIORITY_PAUSE))[PRIORITY_PAUSE])) return null;
       if (mode === 'recovery') {
         if ((await session.get(RECOVERY))[RECOVERY] !== alarmName || requested !== revision) return;
         await session.set({ [RECOVERY]: true });
@@ -154,13 +254,13 @@ export function bindBrowserWake(api, { host = BROWSER_WAKE_HOST, onResult = () =
       let resolveReady;
       const ready = new Promise(resolve => { resolveReady = resolve; });
       const attempt = { id, port, acknowledged: false, command: null,
-        ready, resolveReady, mutation: null, closed: false };
+        ready, resolveReady, mutation: null, priorityPause: null, closed: false };
       current = attempt;
       const unavailable = () => { end(attempt, true); onResult('unavailable'); };
       attempt.port.onDisconnect.addListener(() => {
         void runtime.lastError;
         const owned = current === attempt;
-        const safeToWake = owned && attempt.acknowledged && !attempt.mutation;
+        const safeToWake = owned && attempt.acknowledged && !attempt.mutation && !attempt.priorityPause;
         end(attempt, false);
         if (!owned) return;
         if (!attempt.acknowledged) onResult('unavailable');
@@ -189,10 +289,7 @@ export function bindBrowserWake(api, { host = BROWSER_WAKE_HOST, onResult = () =
           if (settlesMutation(mutation, command.request, message)) {
             enqueue(async () => {
               try {
-                if (!sameRecord((await session.get(MUTATION))[MUTATION], mutation)) { unavailable(); return; }
-                await session.set({ [MUTATION]: false });
-                attempt.mutation = null;
-                if (attempt.closed) await retireOwner(id);
+                if (!await retireMutation(MUTATION, mutation, command.request, message, attempt)) { unavailable(); return; }
                 finish();
               }
               catch { unavailable(); }
@@ -218,7 +315,7 @@ export function bindBrowserWake(api, { host = BROWSER_WAKE_HOST, onResult = () =
     const requested = revision;
     if (!await permissions.contains(NATIVE_PERMISSION) || requested !== revision || current !== attempt ||
         !allowed() || !attempt?.acknowledged || attempt.command ||
-        (!readOnly(message.request.action) && attempt.mutation) ||
+        (!readOnly(message.request.action) && (attempt.mutation || attempt.priorityPause)) ||
         (message.request.action === 'status' ? message.ownerId !== null : message.ownerId !== attempt.id)) return null;
     return new Promise(resolve => {
       const command = { request: message.request, resolve, allowed, timer: null };
@@ -238,7 +335,9 @@ export function bindBrowserWake(api, { host = BROWSER_WAKE_HOST, onResult = () =
         attempt.mutation = { ownerId: attempt.id, ...command.request };
         enqueue(async () => {
           try {
-            if (![undefined, false].includes((await session.get(MUTATION))[MUTATION])) { end(attempt, true); return; }
+            const fences = await session.get([OWNER, MUTATION, PRIORITY_PAUSE]);
+            if (fences[OWNER] !== attempt.id || !emptyFence(fences[MUTATION]) ||
+                !emptyFence(fences[PRIORITY_PAUSE])) { end(attempt, true); return; }
             await session.set({ [MUTATION]: attempt.mutation });
             if (!await permissions.contains(NATIVE_PERMISSION)) { end(attempt, true); return; }
             post();
@@ -272,8 +371,12 @@ export function bindBrowserWake(api, { host = BROWSER_WAKE_HOST, onResult = () =
           typeof sender.url !== 'string' || sender.url.split('#', 1)[0] !== runtime.getURL(BROWSER_DEVICE_PAGE) ||
           !exact(message, ['type', 'ownerId', 'request']) || message.type !== BROWSER_DEVICE_MESSAGE ||
           !validRequest(message.request)) return null;
+      if (message.request.action === 'disconnect-and-pause') return bounded(async (requested, allowed, deadline) => {
+        const records = await enqueue(() => ownerRecords());
+        return records ? attachControl(message, records, requested, allowed, deadline, true) : null;
+      });
       if (message.request.action !== 'status') return current ? dispatch(message, current) : null;
-      if (message.ownerId !== null) return null;
+      if (message.ownerId !== null && !validId(message.ownerId)) return null;
       let timer, attempt, expired = false;
       const allowed = () => !expired;
       const deadline = new Promise(resolve => {
@@ -286,6 +389,13 @@ export function bindBrowserWake(api, { host = BROWSER_WAKE_HOST, onResult = () =
       try {
         return await Promise.race([
           (async () => {
+            if (message.ownerId !== null || !current || current.command) {
+              const requested = revision;
+              const records = await enqueue(() => ownerRecords());
+              if (records) return message.ownerId === null || message.ownerId === records.ownerId ?
+                attachControl(message, records, requested, allowed, deadline) : null;
+              if (message.ownerId !== null || current || expired) return null;
+            }
             attempt = current ?? await wake('status', undefined, allowed);
             if (!attempt || !await attempt.ready || expired) return null;
             const status = statuses.then(() => dispatch(message, attempt, allowed));
