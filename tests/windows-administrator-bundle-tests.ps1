@@ -356,6 +356,23 @@ function Test-FixtureStateDiagnosticRoot {
     Write-Output ('PASS diagnostic path normalization and scope: ' + $cases.Count + ' pure cases')
 }
 
+function Get-FixtureFailureFrames([string]$Stack) {
+    $allowed = @('Assert-PathType','New-SealedAcl','Assert-SealedAcl','Assert-InheritedPrivateAcl',
+        'Ensure-SealedDirectory','Open-SealedNewFile','Write-AdministratorState','Assert-FreshAdministratorState',
+        'Read-PriorReadOnlyWindow','Assert-ReadOnlyProviderConfig','Open-LocalProbeReceipt',
+        'Publish-LocalProbeReceipt','Request-HostedWindowStop')
+    $remaining = 16
+    foreach ($row in @($Stack -split '\r?\n' | Select-Object -First 32)) {
+        $frame = [regex]::Match($row, '\Aat (?<name>[^,\r\n]+),[^\r\n]*: line (?<line>[0-9]{1,9})\z')
+        if (-not $frame.Success) { continue }
+        $name = $frame.Groups['name'].Value
+        if ($name -ceq '<ScriptBlock>') { $name = 'fixture-body' }
+        elseif ($allowed -cnotcontains $name) { continue }
+        if ($remaining-- -le 0) { break }
+        @{function=$name; line=[int]$frame.Groups['line'].Value}
+    }
+}
+
 function Write-FixtureStateAclDiagnostic([string]$StateRoot) {
     [Console]::WriteLine('DIAG fixture-state-acl {"status":"started"}')
     $phase = 'scratch-attributes'
@@ -377,7 +394,7 @@ function Write-FixtureStateAclDiagnostic([string]$StateRoot) {
         $expected = [Security.AccessControl.RawSecurityDescriptor]::new($baseline.GetSecurityDescriptorBinaryForm(),0)
         $pending = [Collections.Generic.Stack[string]]::new()
         $pending.Push($root)
-        $remaining = 16
+        $remaining = 16 # Directory metadata only; no file content or unbounded traversal.
         while ($pending.Count -and $remaining-- -gt 0) {
             $phase = 'member-path'
             $member = [IO.Path]::GetFullPath($pending.Pop())
@@ -434,6 +451,7 @@ function Write-FixtureStateAclDiagnostic([string]$StateRoot) {
     }
 }
 
+$stateAfterWindow = $null
 try {
     Test-FixtureStateDiagnosticRoot
     if ($NodeArchive) {
@@ -684,8 +702,8 @@ try {
     Write-Output 'PASS stop is private, idempotent, and bound to the same hosted window receipt'
     $stateAfterWindow = $bundle + '.state'
     $stateSpec = Get-AdministratorStateLayout $probeDigest $fixtureSid
-    try { Write-AdministratorState $stateAfterWindow $stateSpec }
-    catch { Write-FixtureStateAclDiagnostic $stateAfterWindow; throw }
+    Write-AdministratorState $stateAfterWindow $stateSpec
+    Write-Output 'DIAG fixture-phase state-write-complete'
     $workStem = Join-Path $stateAfterWindow ('work\acceptance-' + $windowId)
     $stepId = 'f' * 32
     $planBody = '[{"id":"' + $stepId + '","name":"read_file","arguments":{}}]'
@@ -718,6 +736,7 @@ try {
     catch { if ($_.Exception.GetBaseException() -isnot [IO.FileNotFoundException]) { throw } }
     [IO.File]::WriteAllText((Join-Path $priorReceipts ($stepId + '.provider-replied')),'')
     $prior = Read-PriorReadOnlyWindow $bundle $stateAfterWindow $probeDigest $windowId
+    Write-Output 'DIAG fixture-phase before-fresh-state-after-read'
     Assert-FreshAdministratorState $stateAfterWindow $stateSpec $prior
     [IO.File]::WriteAllText($providerPath,$providerBody.Replace('"telemetryEnabled":false','"telemetryEnabled":true'))
     try { Assert-FreshAdministratorState $stateAfterWindow $stateSpec $prior; throw 'accepted_changed_provider_policy' }
@@ -1520,6 +1539,18 @@ console.log('AC_PROTECTED_IMPORTS_PASS');
             $stderr.GetAwaiter().GetResult()) { throw "boot fixture failed: $($stderr.GetAwaiter().GetResult())" }
     } finally { $child.Dispose() }
     Write-Output 'PASS native clean environment and Node import fencing, including an ambient ancestor package'
+} catch {
+    try {
+        [Console]::WriteLine('DIAG fixture-failure {"status":"started"}')
+        foreach ($frame in @(Get-FixtureFailureFrames $_.ScriptStackTrace)) {
+            [Console]::WriteLine(('DIAG fixture-failure ' + ($frame | ConvertTo-Json -Compress)))
+        }
+        if ($stateAfterWindow) { Write-FixtureStateAclDiagnostic $stateAfterWindow }
+        else { [Console]::WriteLine('DIAG fixture-failure {"status":"state-not-created"}') }
+    } catch {
+        [Console]::WriteLine('DIAG fixture-failure {"status":"diagnostic-failed"}')
+    }
+    throw
 } finally {
     $actual = [IO.Path]::GetFullPath($scratch)
     if ([IO.Path]::GetDirectoryName($actual) -ine $tmp.TrimEnd('\') -or

@@ -42,6 +42,25 @@ goal with a UI-only milestone.
 
 ## Work Log
 
+Checkpoint77 independent source audit of24dd3b3 found three still-open delivery
+gaps. Earlier fresh-install acceptance does not close these combined-flow gates:
+
+- [ ] Bootstrap the setup bundle itself from exact trusted release URL/hash
+  metadata. Current copied commands are relative to an already extracted bundle;
+  Node provisioning alone is not clean-machine setup. Verify arbitrary working
+  directories and checksum/metadata rejection before execution.
+- [ ] Add a current-account-specific consented installation/connection continuation.
+  It currently copies the command without the administrator coordinator. Preserve
+  fresh-install-only admission, Pause, withdrawn consent, exact identity and
+  no-replay behavior; do not remove the administrator scope guard as a shortcut.
+- [ ] Keep detailed receipt/recovery outcomes inside closed Advanced, with concise
+  default pending/unknown/connection feedback and visible actionable warnings.
+  Test requested, cancelled and unconfirmed outcomes with Advanced closed.
+
+These are product-imposed steps to simplify, unlike mandatory nativeMessaging,
+Windows UAC and chat-platform approvals. No changed live installation or complete
+one-action delivery is claimed by this source review.
+
 Checkpoint66: main synchronization through41d79c4 is real, but the second hosted
 Windows verification still failed a later test admission/effect race. Same-PID
 observation now handles that race without repeating Start. Mobile fallback-font

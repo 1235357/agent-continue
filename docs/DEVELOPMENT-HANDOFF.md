@@ -14,6 +14,17 @@ markers even when collection skips or fails, while preserving the original
 assertion. No product ACL, installed runtime or registration changed. Its next
 cloud run is still needed to identify the actual permission difference.
 
+Follow-up native41 run42480333204 on24dd3b3 passed the8-case path regression,
+then failed after the same stop assertion with no collection-start marker. Thus
+the earlier creation-only attribution is not established. Collection now runs
+from the outer test failure handler, including later history/state assertions;
+only whitelisted function names and integer line numbers are added to its stack
+output. Fixed phase markers separate completed state creation from later reads.
+The original error and cleanup remain intact. Fourteen worker pure checks and
+the parent's separate path/frame-redaction checks passed; this is not an actual
+ACL filesystem result. The next hosted result is required before any SID or ACL
+policy change. Three remaining one-action UX gaps are recorded in the setup plan.
+
 The installation remains revoked pending the unanswered same-installation
 reauthorization question. Actual whole-browser reopen recovery, remaining hosted
 acceptance, GitHub3.0.0 Release and Store review submission remain open. The r17

@@ -12,6 +12,14 @@
 - Added fixed bounded start/skip/failure-phase markers. The original sealed_acl
   assertion still fails closed; no runtime ACL or production state changed.
   Actual ACL mismatch and the hosted result of this correction remain pending.
+- Native41 run42480333204 on24dd3b3 then passed the path regression but again
+  emitted no collection-start marker. Failure in Write-AdministratorState is
+  therefore not established; later history/state checks were outside that catch.
+  Moved collection to the outer failure handler, with fixed phase markers and
+  bounded whitelisted function/line-only stack output. Worker14 pure checks and
+  parent path/frame-redaction checks passed. Original error/cleanup and product
+  ACL rules are unchanged; actual mismatch still requires the next hosted run.
+  Evidence: .artifacts/ordinary-chat-acceptance-20261108/native41-bundle-failure.txt.
 - Full goal remains active. The exact test installation remains revoked;
   same-installation reauthorization is unanswered. No3.0.0 Release or Store
   review receipt is established by the existing r17 draft upload.
