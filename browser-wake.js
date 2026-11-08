@@ -10,7 +10,7 @@ const NATIVE_PERMISSION = { permissions: ['nativeMessaging'] };
 const actions = new Set(['status', 'reconnect', 'disconnect-and-pause']);
 const preparedActions = new Set(['prepared-review', 'prepared-revoke']);
 const preparedStatuses = new Set(['staged', 'expired', 'owner-revoked', 'admitted-outcome-unconfirmed',
-  'provider-reported-result', 'provider-reported-error', 'receipt-unavailable']);
+  'provider-reported-result', 'provider-reported-error', 'blocked-by-local-control', 'receipt-unavailable']);
 const exact = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) &&
   Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
 const baseKeys = ['version', 'id', 'action'];
@@ -25,16 +25,17 @@ const readOnly = action => action === 'status' || action === 'prepared-review';
 const sameRecord = (value, expected) => exact(value, Object.keys(expected)) &&
   Object.keys(expected).every(key => value[key] === expected[key]);
 const terminalOperation = status => ['settled', 'not-executed'].includes(status);
-const terminalPrepared = status => ['owner-revoked', 'provider-reported-result', 'provider-reported-error'].includes(status);
+const terminalPrepared = status => ['owner-revoked', 'provider-reported-result', 'provider-reported-error',
+  'blocked-by-local-control'].includes(status);
 
 function settlesMutation(mutation, request, reply) {
-  if (!mutation) return false;
+  // A generic rejection does not prove that the mutation was never admitted.
+  if (!mutation || reply.ok !== true) return false;
   if (!readOnly(request.action)) {
     if (!sameRecord(mutation, { ownerId: mutation.ownerId, ...request })) return false;
-    return reply.ok === false || (request.action === 'prepared-revoke' ?
-      terminalPrepared(reply.status) : terminalOperation(reply.state.operation.status));
+    return request.action === 'prepared-revoke' ?
+      terminalPrepared(reply.status) : terminalOperation(reply.state.operation.status);
   }
-  if (!reply.ok) return false;
   if (request.action === 'status') {
     const operation = reply.state.operation;
     return request.id === mutation.id && operation?.id === mutation.id &&

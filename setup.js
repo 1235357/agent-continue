@@ -8,7 +8,7 @@ import { createSetupClient, administratorSetupCommand } from './setup-client.js'
 const catalog = {
   'Windows 访问权限': 'Windows access',
   '当前账户': 'Current account',
-  '管理员（Windows 批准）': 'Administrator (Windows approval)',
+  '管理员': 'Administrator',
   '授权后，MCP 可按当前账户权限修改文件、执行命令和控制进程。无需管理员批准。': 'Authorized MCP can modify files, run commands and control processes as your current account. No administrator approval is requested.',
   '授权后，MCP 可按 Windows 管理员权限操作文件、终端和进程。安装和连接可能分别请求 Windows 批准（UAC）。': 'Windows administrator access: files, PowerShell and processes; installation and connection may require separate Windows approvals (UAC).',
   '同意并复制后，运行命令允许本页在安装完成后请求一次连接。离开本页或撤回同意会取消；ChatGPT / Dot 授权仍需分别完成。': 'Run the command to request one connection after installation. Closing this page or withdrawing consent cancels pending steps. Authorize ChatGPT / Dot separately.',

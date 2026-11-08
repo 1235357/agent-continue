@@ -234,6 +234,18 @@ def verify_administrator_bundle(archive_path, payload, repo):
     return len(members)
 
 
+def administrator_plan_error(code, result, receipt):
+    """Expose only the data-only Plan vocabulary, never raw process output or paths."""
+    phase = diagnostic = "unavailable"
+    if receipt is not None:
+        value = receipt.get("phase")
+        phase = value if value in ("input", "anchor", "archive", "layout", "complete") else "unrecognized"
+        diagnostic = "none" if receipt.get("diagnostic") == "none" else "unrecognized"
+    details = {"returncode": result.returncode, "phase": phase, "diagnostic": diagnostic,
+               "receipt": "invalid" if receipt is None else "valid", "stderrPresent": bool(result.stderr)}
+    return ValueError(code + ": " + json.dumps(details, separators=(",", ":")))
+
+
 def run_administrator_plan(stager, archive, digest, files):
     # Plan is the repository stager's data-only path, never Stage/AcceptLocal/InstallBrowserOwner.
     if not WINDOWS:
@@ -241,20 +253,30 @@ def run_administrator_plan(stager, archive, digest, files):
     shell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
     if not shell.is_file():
         raise ValueError("administrator_plan_shell_unavailable")
-    result = subprocess.run([str(shell), "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(stager),
-                             "-Action", "Plan", "-Archive", str(archive), "-ExpectedSha256", digest],
-                            capture_output=True, text=True, timeout=180,
-                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    if result.returncode != 0 or result.stderr:
-        raise ValueError("administrator_stager_plan_failed")
-    receipt = metadata(result.stdout.encode("utf-8"))
+    regular_input(archive, ADMIN_ARCHIVE_LIMIT)
+    # PS5.1 GetFullPath expands 8.3 aliases; Python TEMP may still contain one.
+    # Reject redirects before resolving, then keep the stager's canonical-path assertion intact.
+    archive = archive.resolve(strict=True)
+    try:
+        result = subprocess.run([str(shell), "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(stager),
+                                 "-Action", "Plan", "-Archive", str(archive), "-ExpectedSha256", digest],
+                                capture_output=True, text=True, timeout=180,
+                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except subprocess.TimeoutExpired:
+        raise ValueError("administrator_stager_plan_timeout") from None
+    try:
+        receipt = metadata(result.stdout.encode("utf-8"))
+    except ValueError:
+        receipt = None
+    if result.returncode != 0 or result.stderr or receipt is None:
+        raise administrator_plan_error("administrator_stager_plan_failed", result, receipt)
     false_flags = ("protectedFilesVerified", "administratorStateVerified", "cleanLaunchPlanVerified",
                    "administratorChildVerified", "hostedBindingPrepared", "hostedLaunchPlanVerified",
                    "activated", "registrationChanged", "tunnelStarted")
     if (receipt.get("ok") is not True or receipt.get("phase") != "complete"
             or type(receipt.get("files")) is not int or receipt["files"] != files
             or any(receipt.get(flag) is not False for flag in false_flags)):
-        raise ValueError("administrator_stager_plan_receipt")
+        raise administrator_plan_error("administrator_stager_plan_receipt", result, receipt)
     return True
 
 

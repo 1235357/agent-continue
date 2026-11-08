@@ -110,6 +110,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Manual Windows verification workflow contracts failed' }
           python -B -m unittest discover -s tests -p test_windows_release_ci_runner.py -k CiWorkflowRoute
           if ($LASTEXITCODE -ne 0) { throw 'Windows CI workflow route contracts failed' }
+          python -B -m unittest discover -s tests -p test_setup_release_plan.py
+          if ($LASTEXITCODE -ne 0) { throw 'Setup release Plan diagnostics contracts failed' }
 
       - name: Acquire the pinned official tunnel archive
         run: ./native/desktop-commander/test-fixtures/fetch-ci-tunnel.ps1

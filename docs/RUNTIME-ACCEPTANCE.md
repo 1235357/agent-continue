@@ -1,5 +1,59 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Hosted Readback And Receipt Follow-Up (Checkpoint67 In Progress)
+
+Canonical main was pushed and read back as7a734ba25211f479f4144c419518e672a593cbea.
+The parent complete product test exited0, including13 MV3 integration scenarios
+and5 official ProseMirror scenarios. This does not make the hosted checks green.
+
+Actual manual Windows verification run42460884036 passed the ordinary-token
+build and smoke, then failed the combined setup stager Plan after3m21s. No
+sidecars were uploaded. The sanitized builder error did not preserve the Plan
+phase, so its underlying cause is still under investigation; it must not be
+described as another process-output failure or waived by skipping Plan.
+
+Automatic native run42460845490 passed Ubuntu core and macOS bootstrap. Windows
+core passed its initial native tests, but the read-only installer recovery step
+was cancelled at the workflow's three-minute limit. A separate local reproduction
+completed34 cases in62 seconds:17 passed and17 failed because synthetic bin.mjs
+fixtures had no digest list. Adding real SHA256SUMS entries made the same34 cases
+pass in61 seconds. A new changed-entry negative case also passed separately,
+proving the fixture repair does not bypass payload verification. No installer
+integrity assertion was relaxed. A fresh hosted Windows run remains required.
+
+Automatic extension run42460844687 exposed additional Linux font-width variation:
+the administrator Copy bottom was612.34375px in a320x600 viewport, despite the
+earlier Windows render pass. Another compact-layout correction is in progress;
+do not describe checkpoint66 as cross-platform visual acceptance.
+
+An independent40-case wake review reproduced two additional inherited defects:
+an undifferentiated negative reply could prematurely retire its mutation fence,
+and a legitimate blocked-by-local-control prepared receipt was not recognized.
+Narrow regression fixes are in progress. The separate no-reply availability
+limitation remains unresolved. No candidate worker or protected runtime was
+reloaded during this follow-up; no Release or Store submission was made.
+
+Checkpoint67 source follow-up: the parent reran202 focused wake/device/Pause
+checks, including46 wake cases, with no failures or skips. Generic ok:false now
+retains its exact fence; blocked-by-local-control is recognized only for the
+proper prepared reference. The new compact layout passed63 rendered checks with
+an actually loaded105-percent wider fallback face; the parent visually inspected
+the administrator320x600 fixture. The selected Administrator label was shortened
+after that inspection to avoid native-select truncation; full UAC disclosure
+remains below it. This is not installed or hosted Linux UI acceptance.
+
+The Plan wrapper now preserves bounded phase/exit/stderr-presence diagnostics and
+canonicalizes the Archive path only after redirect/type checks. A real existing
+8.3 alias was rejected at input by the unchanged stager; its canonical equivalent
+reached the intended archive/hash rejection. The fixed wrapper now reaches the
+same archive rejection through that alias. Native inert-ZIP LF/CRLF checks passed;
+the17-case Plan suite passed15 with two TEMP-alias cases skipped. This proves a
+local short-path defect, not that Run3 used an alias. Its underlying phase was
+lost in the old log and remains unproved until another hosted run.
+
+The separate control-progress design is proposed in the dated plan. It is not
+implemented or accepted by these narrow repairs, and cannot be a release waiver.
+
 ## Main Synchronization And Hosted CI Repairs (Checkpoint66 In Progress)
 
 2026-11-08 UTC. Canonical main now includes41d79c4407c9b9b678bc2f8e1c77e3da131372f9,

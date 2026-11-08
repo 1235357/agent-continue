@@ -474,10 +474,10 @@ async function layout(page, colorScheme) {
   assert.ok(colorScheme === 'dark' ? brightness < 100 : brightness > 180, `${colorScheme} theme background: ${result.bg}`);
 }
 
-async function capture(page, name) {
+async function capture(page, name, fullPage = true) {
   if (!screenshotDir) return;
   await fs.mkdir(screenshotDir, { recursive: true });
-  await page.screenshot({ path: path.join(screenshotDir, name), fullPage: true });
+  await page.screenshot({ path: path.join(screenshotDir, name), fullPage });
 }
 
 async function probeQueuedCloseRace() {
@@ -587,7 +587,7 @@ try {
       assert.equal(await scope.inputValue(), 'current-account');
       assert.equal(await scope.getAttribute('aria-describedby'), 'setupRisk setupGrantBoundary');
       assert.deepEqual(await scope.locator('option').allTextContents(), chinese
-        ? ['当前账户', '管理员（Windows 批准）'] : ['Current account', 'Administrator (Windows approval)']);
+        ? ['当前账户', '管理员'] : ['Current account', 'Administrator']);
       const permissionChecks = await page.evaluate(() => __setupMock.permissionChecks.length);
       const unchangedCommands = await page.locator('#windowsNodeCommand, #windowsPowerShellCommand, #windowsCmdCommand').allTextContents();
       await page.locator('#copyWindowsBrowserPowerShell').click();
@@ -825,33 +825,70 @@ try {
     assert.deepEqual(await page.evaluate(() => __setupMock.permissionRequests), []);
     pass('legacy worker waiting without capability copies a manual CMD command without polling or Connect');
   });
-  await withFixture({ uiLanguage: 'en', viewport: { width: 320, height: 600 }, granted: true, nativeStatus: true }, async ({ page }) => {
-    // Reproduce the wider fallback-font wrapping seen in Linux Chromium on Windows too.
-    await page.addStyleTag({ content: ':root { font-family: monospace; }' });
-    for (const scope of ['current-account', 'administrator']) {
-      await page.locator('#windowsAccessScope').selectOption(scope);
-      await assertPrimarySetupFlow(page);
-      assert.equal(await page.locator('#setupAdvanced').evaluate(element => element.open), false);
-      const screen = await page.evaluate(() => ({
-        width: innerWidth, height: innerHeight, scrollY,
-        bounds: ['setupRisk', 'setupGrantBoundary', 'installConsentLabel', 'copyWindowsBrowserPowerShell'].map(id => {
-          const { top, bottom, left, right, height } = document.getElementById(id).getBoundingClientRect();
-          return { id, top, bottom, left, right, height };
-        }),
-      }));
-      assert.equal(screen.scrollY, 0, 'the compact flow fits without scrolling');
-      for (const [index, bounds] of screen.bounds.entries()) {
-        assert.ok(bounds.height > 0 && bounds.top >= 0 && bounds.bottom <= screen.height &&
-          bounds.left >= 0 && bounds.right <= screen.width,
-        `${scope}: complete risk, boundary, consent and Copy fit with fallback typography: ${JSON.stringify(screen)}`);
-        if (index > 0) assert.ok(screen.bounds[index - 1].bottom <= bounds.top, 'consent-first content never overlaps');
+  for (const uiLanguage of ['en', 'zh_CN']) {
+    for (const colorScheme of ['light', 'dark']) {
+      for (const typography of ['monospace', 'wide-fallback']) {
+        await withFixture({ uiLanguage, colorScheme, viewport: { width: 320, height: 600 }, granted: true, nativeStatus: true }, async ({ page }) => {
+          // Load an actual wider face so Windows also exercises Linux-like extra wrapping.
+          await page.addStyleTag({ content: typography === 'monospace' ? ':root { font-family: monospace; }' : `
+            @font-face {
+              font-family: "Setup wide fallback";
+              src: local("DejaVu Sans Mono"), local("Liberation Mono"), local("Courier New");
+              size-adjust: 105%;
+            }
+            :root { font-family: "Setup wide fallback", monospace; }
+          ` });
+          if (typography === 'wide-fallback') {
+            const loaded = await page.evaluate(async () => {
+              const faces = await document.fonts.load('14px "Setup wide fallback"');
+              return faces.length > 0 && faces.every(face => face.status === 'loaded');
+            });
+            assert.equal(loaded, true, 'the wider fallback face must load, not silently use the generic font');
+          }
+          await page.evaluate(() => document.fonts.ready);
+          for (const scope of ['administrator', 'current-account']) {
+            await page.locator('#windowsAccessScope').selectOption(scope);
+            await assertPrimarySetupFlow(page);
+            assert.equal(await page.locator('#setupAdvanced').evaluate(element => element.open), false);
+            const screen = await page.evaluate(() => ({
+              width: innerWidth, height: innerHeight, scrollY,
+              bounds: ['setupRisk', 'setupGrantBoundary', 'installConsentLabel', 'copyWindowsBrowserPowerShell'].map(id => {
+                const { top, bottom, left, right, height } = document.getElementById(id).getBoundingClientRect();
+                return { id, top, bottom, left, right, height };
+              }),
+            }));
+            assert.equal(screen.scrollY, 0, 'the compact flow fits without scrolling');
+            for (const [index, bounds] of screen.bounds.entries()) {
+              assert.ok(bounds.height > 0 && bounds.top >= 0 && bounds.bottom <= screen.height &&
+                bounds.left >= 0 && bounds.right <= screen.width,
+              `${uiLanguage} ${colorScheme} ${scope} ${typography}: complete risk, boundary, consent and Copy fit with fallback typography: ${JSON.stringify(screen)}`);
+              if (index > 0) assert.ok(screen.bounds[index - 1].bottom <= bounds.top, 'consent-first content never overlaps');
+            }
+            assert.ok(screen.bounds.at(-1).height >= 44, 'Copy keeps its full-size hit target');
+            for (const id of ['language', 'windowsAccessScope']) {
+              assert.ok(await page.locator('#' + id).evaluate(element => element.getBoundingClientRect().height >= 44),
+                id + ' keeps its full-size hit target');
+            }
+            for (const id of ['setupRisk', 'setupGrantBoundary', 'installConsentLabel', 'copyWindowsBrowserPowerShell']) {
+              assert.equal(await page.locator('#' + id).evaluate(element => {
+                const text = element.querySelector('span') || element;
+                const range = document.createRange();
+                range.selectNodeContents(text);
+                const bounds = element.getBoundingClientRect();
+                return element.scrollHeight <= element.clientHeight + 1 && element.scrollWidth <= element.clientWidth + 1 &&
+                  [...range.getClientRects()].every(rect => rect.top >= bounds.top && rect.bottom <= bounds.bottom &&
+                    rect.left >= bounds.left && rect.right <= bounds.right);
+              }), true, id + ' shows its complete text without clipping');
+            }
+            await layout(page, colorScheme);
+            await capture(page, `setup-compact-${uiLanguage}-${colorScheme}-${typography}-${scope}.png`, false);
+            console.log('SETUP_COMPACT_VIEWPORT ' + JSON.stringify({ uiLanguage, colorScheme, scope, typography, ...screen }));
+          }
+          pass(`320x600 ${uiLanguage} ${colorScheme} ${typography}: both Windows scopes fit full risk, consent and Copy without scrolling or expanding Advanced`);
+        });
       }
-      assert.ok(screen.bounds.at(-1).height >= 44, 'Copy keeps its full-size hit target');
-      await layout(page, 'light');
-      console.log('SETUP_COMPACT_VIEWPORT ' + JSON.stringify({ scope, ...screen }));
     }
-    pass('320x600 fallback typography: both Windows scopes fit full risk, consent and Copy without scrolling or expanding Advanced');
-  });
+  }
   for (const uiLanguage of ['en', 'zh_CN']) {
     for (const colorScheme of ['light', 'dark']) {
       for (const viewport of [{ width: 1100, height: 820 }, { width: 320, height: 600 }]) {

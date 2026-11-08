@@ -208,6 +208,114 @@ test('mutation admission persists its operation identity before posting and reje
   assert.deepEqual((await f.api.storage.session.get(MUTATION))[MUTATION], record);
 });
 
+for (const action of ['reconnect', 'disconnect-and-pause', 'prepared-revoke']) {
+  test(`generic ${action} rejection preserves its mutation fence across disconnect and worker restart`, async t => {
+    const f = extension(), wake = bindBrowserWake(f.api);
+    t.after(() => f.native?.onDisconnect.emit());
+    await tick(); f.native.onMessage.emit({ ...f.messages[0], ok: true });
+    const request = { version: 1, id: 'rejected-mutation', action,
+      ...(action === 'prepared-revoke' ? { operationId: 'ae900800-b673-4eee-abe5-e7267e0d46b1', sha256: 'a'.repeat(64) } : {}) };
+    const pending = wake.handleMessage(mutationMessage(f, request), devicesSender(f)); await tick();
+    const record = { ownerId: f.messages[0].id, ...request };
+    const response = { version: 1, id: request.id, action, ok: false };
+    f.native.onMessage.emit(response);
+    assert.deepEqual(await pending, { ownerId: record.ownerId, response });
+    assert.deepEqual((await f.api.storage.session.get(MUTATION))[MUTATION], record);
+    assert.equal(await wake.handleMessage(mutationMessage(f,
+      { version: 1, id: 'unrelated-reconnect', action: 'reconnect' }), devicesSender(f)), null);
+    assert.deepEqual(f.messages.at(-1), request);
+    f.native.onDisconnect.emit(); await tick();
+    assert.equal((await f.api.storage.session.get(OWNER))[OWNER], record.ownerId);
+    assert.equal(f.alarms.size, 0);
+    const next = f.rebind(); await tick();
+    f.setGrant(false); f.removed.emit({ permissions: ['nativeMessaging'] }); await tick();
+    f.setGrant(true); f.added.emit({ permissions: ['nativeMessaging'] }); await tick();
+    assert.equal(await next.handleMessage(statusMessage(), devicesSender(f)), null);
+    assert.deepEqual((await f.api.storage.session.get(MUTATION))[MUTATION], record);
+    assert.equal(f.attempts.length, 1);
+    assert.equal(f.messages.filter(message => message.action === action).length, 1);
+    assert.equal(f.alarms.size, 0);
+  });
+}
+
+test('a generic mutation rejection remains reconcilable only through its matching terminal receipt', async t => {
+  for (const action of ['reconnect', 'disconnect-and-pause', 'prepared-revoke']) {
+    const f = extension(), wake = bindBrowserWake(f.api);
+    t.after(() => f.native?.onDisconnect.emit());
+    await tick(); f.native.onMessage.emit({ ...f.messages[0], ok: true });
+    const request = { version: 1, id: 'rejected-mutation', action,
+      ...(action === 'prepared-revoke' ? { operationId: 'ae900800-b673-4eee-abe5-e7267e0d46b1', sha256: 'a'.repeat(64) } : {}) };
+    const pending = wake.handleMessage(mutationMessage(f, request), devicesSender(f)); await tick();
+    f.native.onMessage.emit({ version: 1, id: request.id, action, ok: false }); assert.ok(await pending);
+    assert.deepEqual((await f.api.storage.session.get(MUTATION))[MUTATION], { ownerId: f.messages[0].id, ...request });
+    const message = action === 'prepared-revoke' ?
+      mutationMessage(f, { ...request, id: 'matching-review', action: 'prepared-review' }) : statusMessage(request.id);
+    const readback = wake.handleMessage(message, devicesSender(f)); await tick();
+    const response = action === 'prepared-revoke' ?
+      { version: 1, id: message.request.id, action: 'prepared-review', ok: true, status: 'owner-revoked', expiresAt: 1794000000000 } :
+      operationReply(message.request, 'not-executed', action);
+    f.native.onMessage.emit(response); assert.ok(await readback);
+    assert.equal((await f.api.storage.session.get(MUTATION))[MUTATION], false);
+    assert.equal(f.messages.filter(message => message.action === action).length, 1);
+    f.native.onDisconnect.emit(); await tick();
+    assert.equal((await f.api.storage.session.get(OWNER))[OWNER], null);
+    assert.equal(f.alarms.size, 1);
+  }
+});
+
+test('blocked-by-local-control directly settles its exact prepared revoke without replay', async t => {
+  const f = extension(), wake = bindBrowserWake(f.api);
+  t.after(() => f.native?.onDisconnect.emit());
+  await tick(); f.native.onMessage.emit({ ...f.messages[0], ok: true });
+  const request = { version: 1, id: 'blocked-revoke', action: 'prepared-revoke',
+    operationId: 'ae900800-b673-4eee-abe5-e7267e0d46b1', sha256: 'a'.repeat(64) };
+  const pending = wake.handleMessage(mutationMessage(f, request), devicesSender(f)); await tick();
+  const response = { version: 1, id: request.id, action: request.action, ok: true,
+    status: 'blocked-by-local-control', expiresAt: 1794000000000 };
+  f.native.onMessage.emit(response);
+  assert.deepEqual(await pending, { ownerId: f.messages[0].id, response });
+  assert.equal((await f.api.storage.session.get(MUTATION))[MUTATION], false);
+  assert.equal(f.disconnected, 0);
+  assert.equal(f.messages.filter(message => message.action === request.action).length, 1);
+  f.native.onDisconnect.emit(); await tick();
+  assert.equal((await f.api.storage.session.get(OWNER))[OWNER], null);
+  assert.equal(f.alarms.size, 1);
+});
+
+test('blocked-by-local-control review settles only the exact unresolved prepared revoke reference', async t => {
+  const f = extension(), wake = bindBrowserWake(f.api);
+  t.after(() => f.native?.onDisconnect.emit());
+  await tick(); f.native.onMessage.emit({ ...f.messages[0], ok: true });
+  const request = { version: 1, id: 'uncertain-revoke', action: 'prepared-revoke',
+    operationId: 'ae900800-b673-4eee-abe5-e7267e0d46b1', sha256: 'a'.repeat(64) };
+  const pending = wake.handleMessage(mutationMessage(f, request), devicesSender(f)); await tick();
+  const reply = (request, status) => ({ version: 1, id: request.id, action: request.action, ok: true,
+    status, expiresAt: 1794000000000 });
+  f.native.onMessage.emit(reply(request, 'admitted-outcome-unconfirmed')); assert.ok(await pending);
+  const record = { ownerId: f.messages[0].id, ...request };
+  for (const reference of [{ ...request, sha256: 'b'.repeat(64) },
+    { ...request, operationId: 'be900800-b673-4eee-abe5-e7267e0d46b1' }]) {
+    const review = { ...reference, id: 'unrelated-review', action: 'prepared-review' };
+    const readback = wake.handleMessage(mutationMessage(f, review), devicesSender(f)); await tick();
+    const response = reply(review, 'blocked-by-local-control');
+    f.native.onMessage.emit(response);
+    assert.deepEqual(await readback, { ownerId: record.ownerId, response });
+    assert.deepEqual((await f.api.storage.session.get(MUTATION))[MUTATION], record);
+    assert.equal(f.disconnected, 0);
+  }
+  const review = { ...request, id: 'matching-review', action: 'prepared-review' };
+  const readback = wake.handleMessage(mutationMessage(f, review), devicesSender(f)); await tick();
+  const response = reply(review, 'blocked-by-local-control');
+  f.native.onMessage.emit(response);
+  assert.deepEqual(await readback, { ownerId: record.ownerId, response });
+  assert.equal((await f.api.storage.session.get(MUTATION))[MUTATION], false);
+  assert.equal(f.disconnected, 0);
+  assert.equal(f.messages.filter(message => message.action === request.action).length, 1);
+  f.native.onDisconnect.emit(); await tick();
+  assert.equal((await f.api.storage.session.get(OWNER))[OWNER], null);
+  assert.equal(f.alarms.size, 1);
+});
+
 test('only an exact matching terminal status receipt clears a lifecycle mutation fence', async t => {
   for (const terminal of ['settled', 'not-executed']) {
     const f = extension(), wake = bindBrowserWake(f.api);

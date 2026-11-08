@@ -43,6 +43,11 @@ function snapshot(root) {
     });
 }
 
+function pinFixtureEntry(root) {
+  const digest = createHash('sha256').update(fs.readFileSync(path.join(root, 'bin.mjs'))).digest('hex');
+  fs.writeFileSync(path.join(root, 'SHA256SUMS.txt'), `${digest}  bin.mjs\n`);
+}
+
 function runPowerShell(root, body) {
   const script = path.join(root, 'harness.ps1');
   fs.writeFileSync(script, `$ErrorActionPreference = 'Stop'
@@ -157,7 +162,7 @@ function uninstallOutput(installDir) {
 
 // Execute the real wrapper flow and portable-cache validator. Only OS discovery,
 // the synthetic archive's pinned digest/version, and bootstrap execution are mocked.
-function runAction(t, { action, pathNode = 'missing', cache = 'valid', explicit = false }) {
+function runAction(t, { action, pathNode = 'missing', cache = 'valid', explicit = false, tamperEntry = false }) {
   const root = fixture(t);
   const local = path.join(root, 'local');
   fs.mkdirSync(local);
@@ -188,6 +193,8 @@ function runAction(t, { action, pathNode = 'missing', cache = 'valid', explicit 
   };
   fs.writeFileSync(path.join(root, 'scenario.json'), JSON.stringify(config));
   fs.writeFileSync(path.join(root, 'bin.mjs'), '// Never executed: bootstrap is a fixture boundary.\n');
+  pinFixtureEntry(root);
+  if (tamperEntry) fs.appendFileSync(path.join(root, 'bin.mjs'), '// changed after pinning\n');
   const args = `-${action} -InstallDir ${quote(installDir)}`
     + (explicit ? ` -NodePath ${quote(discovered)}` : '');
   const result = runPowerShell(root, `${loadFunctions([])}
@@ -286,6 +293,14 @@ $rows = @(Get-ChildItem -LiteralPath ${quote(local)} -Recurse -Force | ForEach-O
   return { result, trace, portable, discovered };
 }
 
+test('read-only installer still rejects a changed entry despite a synthetic digest list', windows, t => {
+  const { result, trace } = runAction(t, { action: 'Verify', tamperEntry: true });
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, '');
+  assert.equal(result.stderr.trim(), 'agent_continue_install_failed: payload_digest_mismatch');
+  assert.equal(trace.some(row => row.kind === 'bootstrap'), false);
+});
+
 for (const action of ['Verify', 'Uninstall']) {
   for (const pathNode of ['missing', 'old', 'unreadable']) {
     test(`${action} reuses validated portable Node when PATH Node is ${pathNode}`, windows, t => {
@@ -367,6 +382,7 @@ test('browser-managed installer observation uses its own closed read-only PowerS
   const root = fixture(t), copy = path.join(root, 'install.ps1'), target = path.join(root, 'must-not-install');
   fs.copyFileSync(installer, copy);
   fs.writeFileSync(path.join(root, 'bin.mjs'), 'console.log(JSON.stringify({fixture:true,args:process.argv.slice(2)}));\n');
+  pinFixtureEntry(root);
   const result = runPowerShell(root, `
 & ${quote(copy)} -DeviceAction browser-installer-status -InstallDir ${quote(target)} -NodePath ${quote(process.execPath)}
 exit $LASTEXITCODE`);

@@ -2,6 +2,35 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Current Hosted Results (Checkpoint67 In Progress)
+
+Remote main matches7a734ba. Full local product regression passed, but actual
+hosted verification is not green: manual run42460884036 passed ordinary-token
+build/smoke then failed the combined setup Plan. Preserve that Plan requirement
+and recover its bounded failure phase before selecting a correction. Automatic
+native run42460845490 passed Ubuntu core/macOS bootstrap; its Windows read-only
+installer step timed out. The locally reproduced digest-less fixture failures
+were repaired with real synthetic-entry hashes, not an unverified-payload flag.
+The34 original cases and a separate tampered-entry negative case passed locally.
+
+Extension run42460844687 still fails Linux fallback-font administrator layout
+(Copy bottom612.34375 in320x600); the original viewport assertion stays intact.
+Independent wake review found inherited false-negative terminal reconciliation
+and missing blocked-by-local-control recognition; narrow fixes are in progress.
+Unknown no-reply mutation availability remains a separate open issue. All latest
+work is source/fixture-only. Do not reinstall/replay settled acceptance operations
+or advertise a new Release/Store submission. The authenticated password file is
+still unread and unnecessary.
+
+The narrow fixes now pass202 parent-run wake/device/Pause cases (46 wake), and
+the wider-font compact layout passes63 render cases. Full UAC risk text remains;
+the selected Administrator label is concise to avoid truncation. The Plan wrapper
+also now retains bounded failure phases and safely normalizes Archive aliases;
+its17 tests pass15 with two unavailable TEMP-alias cases skipped. A real existing
+alias demonstrated the preserved archive rejection, but Run3's lost phase cannot
+be reconstructed as fact. No-reply control progress still requires the proposed
+separate existing-owner channel; see the dated design, not a completed feature.
+
 ### Hosted Verification Follow-Up (Checkpoint66 In Progress)
 
 Canonical main was actually pushed through41d79c4; no version tag, GitHub Release,

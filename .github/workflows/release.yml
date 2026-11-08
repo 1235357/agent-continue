@@ -75,6 +75,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Installer pin contracts failed' }
           python -B tests/setup-release-tests.py
           if ($LASTEXITCODE -ne 0) { throw 'Setup release contracts failed' }
+          python -B -m unittest discover -s tests -p test_setup_release_plan.py
+          if ($LASTEXITCODE -ne 0) { throw 'Setup release Plan diagnostics contracts failed' }
           node --check scripts/build-windows-administrator-bundle.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Administrator builder syntax failed' }
 
