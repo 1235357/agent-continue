@@ -13,6 +13,94 @@ const script=path.join(root,'scripts/Sign-WindowsRelease.ps1');
 const run=promisify(execFile);
 const hash=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 
+function createScratch(prefix){
+  return fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()),prefix));
+}
+
+function removeScratch(scratch){
+  const actual=fs.realpathSync.native(scratch),temporary=fs.realpathSync.native(os.tmpdir());
+  assert.equal(path.dirname(actual),temporary);
+  assert.match(path.basename(actual),/^ac-(?:release-plan|signing-plan)-[A-Za-z0-9]+$/);
+  for(const name of fs.readdirSync(actual,{recursive:true})){
+    assert.equal(fs.lstatSync(path.join(actual,name)).isSymbolicLink(),false);
+  }
+  fs.rmSync(actual,{recursive:true,force:false});
+}
+
+function launcherPlanFixture(){
+  const scratch=createScratch('ac-release-plan-');
+  try {
+    const scripts=path.join(scratch,'scripts'),bootstrap=path.join(scratch,'native/bootstrap');
+    fs.mkdirSync(scripts);fs.mkdirSync(path.join(bootstrap,'payload'),{recursive:true});
+    const builder=path.join(scripts,'Build-ReleaseNativeLauncher.ps1');
+    fs.copyFileSync(path.join(root,'scripts/Build-ReleaseNativeLauncher.ps1'),builder);
+    for(const name of ['NativeLauncher.cs','ReleaseLauncherBinding.cs']){
+      fs.copyFileSync(path.join(root,'native/bootstrap',name),path.join(bootstrap,name));
+    }
+    // The legacy launcher has a fixed 17-pin contract; these payload bytes never execute.
+    const names=['device-native-host.mjs',...Array.from({length:16},(_,i)=>`fixture-${i+1}.mjs`)];
+    const files=names.map(name=>{
+      const bytes=Buffer.from(`throw new Error('inert release Plan fixture: ${name}');\n`);
+      fs.writeFileSync(path.join(bootstrap,'payload',name),bytes);
+      return {path:name,bytes:bytes.length,sha256:hash(bytes)};
+    });
+    const manifest=path.join(bootstrap,'payload-manifest.json');
+    fs.writeFileSync(manifest,JSON.stringify({format:'agent-continue-payload',version:1,files})+'\n');
+    return {scratch,builder,bootstrap,manifest};
+  } catch(error){removeScratch(scratch);throw error;}
+}
+
+function snapshot(scratch){
+  return Object.fromEntries(fs.readdirSync(scratch,{recursive:true}).sort().map(name=>{
+    const file=path.join(scratch,name);
+    return [name,fs.statSync(file).isDirectory()?'directory':hash(fs.readFileSync(file))];
+  }));
+}
+
+test('Plan fixture roots canonicalize a short TEMP alias before creating children',t=>{
+  const alias=path.join(path.parse(root).root,'Users','RUNNER~1','Temp');
+  const canonical=path.join(path.parse(root).root,'Users','Runner Administrator','Temp');
+  let resolved=0;
+  t.mock.method(os,'tmpdir',()=>alias);
+  t.mock.method(fs.realpathSync,'native',value=>{assert.equal(value,alias);resolved++;return canonical;});
+  t.mock.method(fs,'mkdtempSync',prefix=>{
+    assert.equal(prefix,path.join(canonical,'ac-signing-plan-'));
+    return prefix+'fixture';
+  });
+  assert.equal(createScratch('ac-signing-plan-'),path.join(canonical,'ac-signing-plan-fixture'));
+  assert.equal(resolved,1);
+});
+
+test('launcher Plan fixtures reproduce clean-checkout absence and retain digest rejection',
+  {skip:process.platform!=='win32',timeout:15000},async()=>{
+    const fixture=launcherPlanFixture();
+    const powershell=path.join(process.env.SystemRoot,'System32','WindowsPowerShell','v1.0','powershell.exe');
+    const node=fs.realpathSync.native(process.execPath);
+    const args=['-NoLogo','-NoProfile','-NonInteractive','-File',fixture.builder,
+      '-NodePath',node,'-ExpectedNodeSha256',hash(fs.readFileSync(node)),'-Version','0.0.0'];
+    try {
+      const manifest=fs.readFileSync(fixture.manifest);
+      fs.unlinkSync(fixture.manifest);
+      const absent=snapshot(fixture.scratch);
+      await assert.rejects(run(powershell,args,{windowsHide:true,timeout:10000}),error=>{
+        const value=JSON.parse(error.stdout);
+        assert.equal(error.code,1);assert.equal(error.stderr,'');
+        assert.equal(value.error,'release_launcher_build_failed');assert.equal(value.failureLine,30);
+        assert.equal(value.cleanupComplete,true);assert.equal(value.runtimeVerified,false);
+        return true;
+      });
+      assert.deepEqual(snapshot(fixture.scratch),absent);
+      fs.writeFileSync(fixture.manifest,manifest);
+      fs.appendFileSync(path.join(fixture.bootstrap,'payload/device-native-host.mjs'),'tampered');
+      const tampered=snapshot(fixture.scratch);
+      await assert.rejects(run(powershell,args,{windowsHide:true,timeout:10000}),error=>{
+        assert.equal(error.code,1);assert.equal(JSON.parse(error.stdout).error,'release_launcher_input_invalid');
+        assert.equal(error.stderr,'');return true;
+      });
+      assert.deepEqual(snapshot(fixture.scratch),tampered);
+    } finally {removeScratch(fixture.scratch);}
+  });
+
 test('release signing entry never executes artifacts or changes endpoint trust',()=>{
   const source=fs.readFileSync(script,'utf8');
   assert.doesNotMatch(source,/Start-Process|Invoke-Expression|New-SelfSignedCertificate|Import-Certificate|Set-MpPreference|Add-MpPreference|Remove-MpThreat/);
@@ -43,17 +131,20 @@ test('reusable release launcher derives identity locally rather than compiling u
 test('reusable launcher release plan verifies sources without compiling or creating an output',
   {skip:process.platform!=='win32',timeout:15000},async()=>{
     const powershell=path.join(process.env.SystemRoot,'System32','WindowsPowerShell','v1.0','powershell.exe');
-    const builder=path.join(root,'scripts/Build-ReleaseNativeLauncher.ps1');
-    const digest=hash(fs.readFileSync(process.execPath));
-    const result=JSON.parse((await run(powershell,['-NoLogo','-NoProfile','-NonInteractive','-File',builder,
-      '-NodePath',process.execPath,'-ExpectedNodeSha256',digest,'-Version','0.0.0'],{windowsHide:true,timeout:10000})).stdout);
-    assert.equal(result.ok,true);assert.equal(result.mode,'plan');assert.equal(result.runtimePins,17);
-    assert.equal(result.artifactCreated,false);assert.equal(result.signed,false);
-    assert.equal(result.perInstallPathsEmbedded,false);assert.equal(result.runtimeVerified,false);
-    await assert.rejects(run(powershell,['-NoLogo','-NoProfile','-NonInteractive','-File',builder,'-Compile'],
-      {windowsHide:true,timeout:5000}),error=>{
-        assert.equal(JSON.parse(error.stdout).error,'release_launcher_consent_required');return true;
-      });
+    const fixture=launcherPlanFixture(),node=fs.realpathSync.native(process.execPath);
+    try {
+      const before=snapshot(fixture.scratch),digest=hash(fs.readFileSync(node));
+      const result=JSON.parse((await run(powershell,['-NoLogo','-NoProfile','-NonInteractive','-File',fixture.builder,
+        '-NodePath',node,'-ExpectedNodeSha256',digest,'-Version','0.0.0'],{windowsHide:true,timeout:10000})).stdout);
+      assert.equal(result.ok,true);assert.equal(result.mode,'plan');assert.equal(result.runtimePins,17);
+      assert.equal(result.artifactCreated,false);assert.equal(result.signed,false);
+      assert.equal(result.perInstallPathsEmbedded,false);assert.equal(result.runtimeVerified,false);
+      await assert.rejects(run(powershell,['-NoLogo','-NoProfile','-NonInteractive','-File',fixture.builder,'-Compile'],
+        {windowsHide:true,timeout:5000}),error=>{
+          assert.equal(JSON.parse(error.stdout).error,'release_launcher_consent_required');return true;
+        });
+      assert.deepEqual(snapshot(fixture.scratch),before);
+    } finally {removeScratch(fixture.scratch);}
   });
 
 test('Windows framework JSON reader accepts UTF-8 and rejects UTF-16 without compiling the launcher',
@@ -74,17 +165,15 @@ test('release cleanup failures are bounded and reported before the only final re
     const actual=JSON.parse((await run(powershell,['-NoLogo','-NoProfile','-NonInteractive','-File',fixture,'-Builder',builder],
       {windowsHide:true,timeout:5000})).stdout);
     assert.deepEqual(actual,{ok:true,failuresReported:true,allCleanupAttempted:true,launcherCompiled:false,launcherExecuted:false});
-    const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'ac-cleanup-receipt-'));
+    const fixturePlan=launcherPlanFixture();
     try {
-      const entry=path.join(scratch,'plan.ps1');
-      const source=fs.readFileSync(builder,'utf8').replace(
-        "$root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))",
-        "$root = '"+root.replaceAll("'","''")+"'").replace(
-        '$cleanupComplete = Clear-ReleaseTemporaries $provider $compiled $temporary',
-        '$cleanupComplete = $false');
-      fs.writeFileSync(entry,source);
+      const entry=path.join(path.dirname(fixturePlan.builder),'cleanup-plan.ps1');
+      const source=fs.readFileSync(builder,'utf8');
+      const marker='$cleanupComplete = Clear-ReleaseTemporaries $provider $compiled $temporary';
+      assert.equal(source.split(marker).length,2);
+      fs.writeFileSync(entry,source.replace(marker,'$cleanupComplete = $false'));
       await assert.rejects(run(powershell,['-NoLogo','-NoProfile','-NonInteractive','-File',entry,
-        '-NodePath',process.execPath,'-ExpectedNodeSha256',hash(fs.readFileSync(process.execPath)),'-Version','0.0.0'],
+        '-NodePath',fs.realpathSync.native(process.execPath),'-ExpectedNodeSha256',hash(fs.readFileSync(process.execPath)),'-Version','0.0.0'],
       {windowsHide:true,timeout:8000}),error=>{
         assert.equal(error.code,1);assert.equal(error.stderr,'');
         assert.equal(error.stdout.trim().split(/\r?\n/).length,1);
@@ -92,12 +181,12 @@ test('release cleanup failures are bounded and reported before the only final re
           artifactVerified:false,classificationVerified:false,runtimeVerified:false,cleanupComplete:false});
         return true;
       });
-    } finally {fs.rmSync(scratch,{recursive:true,force:true});}
+    } finally {removeScratch(fixturePlan.scratch);}
   });
 
 test('Windows signing plan and refusal paths preserve original bytes and create no artifact',
   {skip:process.platform!=='win32',timeout:30000},async()=>{
-    const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'ac-signing-plan-'));
+    const scratch=createScratch('ac-signing-plan-');
     const input=path.join(scratch,'fixture.ps1'),output=path.join(scratch,'signed-fixture.ps1');
     const bytes=Buffer.from("throw 'this file must never execute'\r\n");
     fs.writeFileSync(input,bytes);
@@ -108,6 +197,7 @@ test('Windows signing plan and refusal paths preserve original bytes and create 
       assert.equal(plan.ok,true);assert.equal(plan.mode,'plan');assert.equal(plan.artifactChanged,false);
       assert.equal(plan.certificateAvailable,false);assert.equal(plan.classificationVerified,false);
       assert.equal(plan.runtimeVerified,false);assert.equal(plan.sourceSha256,hash(bytes));
+      assert.deepEqual(fs.readFileSync(input),bytes);assert.equal(fs.existsSync(output),false);
       for(const [args,code] of [
         [['-Sign','-OutputPath',output],'signing_consent_required'],
         [['-Sign','-Consent','accept-sign','-OutputPath',output],'signing_certificate_required'],
@@ -122,5 +212,5 @@ test('Windows signing plan and refusal paths preserve original bytes and create 
         assert.deepEqual(fs.readFileSync(input),bytes);
         assert.equal(fs.existsSync(output),false);
       }
-    } finally { fs.rmSync(scratch,{recursive:true,force:true}); }
+    } finally { removeScratch(scratch); }
   });

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import * as entry from '../setup-entry.js';
 
@@ -104,4 +105,44 @@ test('real downloader functions enforce redirects, limits and truncation with st
   assert.deepEqual([value.network, value.entryExecuted, value.aclTouched], [false, false, false]);
   assert.equal(value.declarationCompiled, true);
   assert.equal(value.cleanupExitPreserved, true);
+});
+
+test('entry storage actually creates an exclusive protected temporary directory and refuses collisions', { skip: process.platform !== 'win32' }, () => {
+  const source = entry.windowsEntryBootstrapSource({ extensionId, setupId, scope: 'administrator', metadata });
+  const result = spawnSync('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+    ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', fileURLToPath(new URL('./setup-entry-storage-tests.ps1', import.meta.url))],
+    { input: source, encoding: 'utf8', windowsHide: true, timeout: 20000 });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const value = JSON.parse(result.stdout);
+  assert.deepEqual(value, { ok: true, actualDirectoryCreated: true, protectedAclVerified: true,
+    existingDirectoryRefused: true, existingFileRefused: true, cleanupVerified: true,
+    network: false, entryExecuted: false, installedRuntimeTouched: false });
+});
+
+test('verified entry actually launches a harmless OS PowerShell child with the read lease held', { skip: process.platform !== 'win32' }, () => {
+  const payload = Buffer.from(`param([switch]$Administrator,[switch]$Apply,[string]$Consent,[switch]$PromptForConnection,[string]$ExtensionId,[string]$BrowserSetupId,[string]$ExpectedSumsSha256)
+$script:acReleaseTag = 'v3.0.0'
+$ErrorActionPreference='Stop'
+if(-not $Administrator -or -not $Apply -or -not $PromptForConnection -or $Consent -cne 'accept-administrator-browser-installation' -or $ExtensionId -cne '${extensionId}' -or $BrowserSetupId -cne '${setupId}' -or $ExpectedSumsSha256 -cne '${metadata.sumsSha256}'){throw 'fixture_arguments'}
+$writeRefused=$false
+try{$writer=[IO.File]::Open($PSCommandPath,'Open','Write','ReadWrite');$writer.Dispose()}catch [IO.IOException]{$writeRefused=$true}
+if(-not $writeRefused){throw 'fixture_read_lease_missing'}
+[ordered]@{ok=$true;childExecuted=$true;writeRefused=$writeRefused;administratorGranted=$false;runtimeInstalled=$false;network=$false}|ConvertTo-Json -Compress
+exit 23
+`, 'utf8');
+  const pinned = { ...metadata, entrySha256: createHash('sha256').update(payload).digest('hex') };
+  const original = entry.windowsEntryBootstrapSource({ extensionId, setupId, scope: 'administrator', metadata: pinned });
+  const download = `Download ([uri]'${metadata.entryUrl}') $output;`;
+  assert.equal(original.split(download).length, 2);
+  const source = original.replace(download,
+    `$fixture=[Convert]::FromBase64String('${payload.toString('base64')}');$output.Write($fixture,0,$fixture.Length);`);
+  const result = spawnSync('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+    ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', source],
+    { encoding: 'utf8', windowsHide: true, timeout: 20000 });
+  assert.ifError(result.error);
+  assert.equal(result.status, 23, result.stdout + result.stderr);
+  assert.equal(result.stderr, '');
+  assert.deepEqual(JSON.parse(result.stdout), { ok: true, childExecuted: true,
+    writeRefused: true, administratorGranted: false, runtimeInstalled: false, network: false });
 });

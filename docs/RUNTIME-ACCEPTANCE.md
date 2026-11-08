@@ -1,5 +1,43 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## New Browser Connect And Ordinary Administrator Call (Checkpoint84)
+
+- Same authorized r8, unchanged enrolled stager59b3524d. Browser Settings ->
+  Devices was opened through supported native UI, permission Granted. One new
+  Connect3231e567c1c54f0dba932aec52eb954e targeted the exact reauthorization
+  revision f616edca28d34cff9c053ecc0844a8cb:idle. No settled request was replayed.
+- Visible full-runtime verification progressed through24328 entries. Public
+  control receipt says launch-requested/waiting-owner; separate owner-status
+  actually reports ready, generation ca0bdb82f709468b87ef1fd3e409c964 and live
+  broker110584/root96052. Neither a request nor historical receipt is readiness.
+- Actual ordinary ChatGPT acceptance ran browser-connect-3231e567-probe.ps1 once
+  through AgentContinue Windows D940 Chat start_process. Actual output:
+  process75792, administrator=true, roundtrip=true, ownedChildPid3700,
+  ownedChildStartTicks639297493023387963, ownedChildStopped=true. Random marker
+  AC_R8_BROWSER_6d22b79466dc4ad2bac564a0c09683d0 matched independent file readback;
+  parent observed neither same child identity nor the main test process alive.
+  The script refuses replay after its marker/result exists.
+- Screenshot AgentContinue-r8-browser-connect-3231-output.png records this
+  bounded result. A stale retained browser view failed attachment; a fresh
+  IAB view of the same URL worked. Native Raise plus current screenshot-region
+  input restored GUI access; the broader historical browser root cause is not
+  proven. No unsupported proxy, raw debugger mutation or platform bypass used.
+- One Dot temporary probe is pending. Pause/Revoke, saved-running browser close/
+  reopen, real release acquisition and final publication gates are NOT passed.
+- Native47 Windows: control37/37 and actual Job shutdown3/3 passed; signing Plan
+  failed2/6. Test fixtures now isolate the absent generated payload manifest and
+  canonicalize TEMP before file creation. Parent signing8/8 passed12.786s, but
+  no new hosted all-green result yet. Production signing/build scripts unchanged;
+  the legacy17-pin launcher/current21-file payload compatibility is not claimed.
+  Extension105 and Pages16 succeeded on dac48d6.
+- Entry9/9 passed5.454s including actual exclusive scratch CreateDirectoryW/ACL,
+  unchanged collision targets, harmless verified -File child/write-share denial
+  and exit23 propagation. Network bytes were injected, no installer executed,
+  no administrator access granted and no installed runtime touched by this test.
+- The r8 test runtime is now running, not paused. External Chrome's original
+  scheduler and production VPN/MCP/IDE/research were not modified. No new Release
+  or Store review receipt. Current-account source continuation remains in progress.
+
 ## Pinned Entry Candidate And CI46 (Checkpoint83)
 
 - Checkpoint82 authorization is settled and remains paused/idle. No new browser

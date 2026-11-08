@@ -2,6 +2,54 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Browser Connect And Ordinary Chat Proof (Checkpoint84)
+
+This checkpoint supersedes Checkpoint83's paused/no-Connect and unavailable-UI
+statements. Same r8 reauthorization f616edca28d34cff9c053ecc0844a8cb remains
+settled; it was NOT replayed. Native secondary Raise brought the correct app
+window forward. Fresh screenshot-region input then opened the installed IAB
+extension's Settings -> Devices. Browser permission actually reads Granted.
+
+One new Connect was confirmed in the browser, operation
+3231e567c1c54f0dba932aec52eb954e, exact bundle7e174a65 and target
+f616edca28d34cff9c053ecc0844a8cb:idle. The installed bundle's24328 files were
+verified with visible progress. The durable operation receipt is launch-requested,
+not a readiness assertion. Independent public owner-status then reported ready
+for generation ca0bdb82f709468b87ef1fd3e409c964, broker110584/root96052.
+
+A retained ordinary-chat tab failed to attach; a fresh IAB view of the same
+acceptance conversation worked. No browser reselection or unsupported proxy
+patch was used. Actual approved start_process ran the new, single-use disposable
+browser-connect-3231e567-probe.ps1 once: process75792, administrator=true,
+roundtrip=true, owned child3700/startTicks639297493023387963/stopped=true.
+Its random marker was not supplied in the prompt. Parent disk readback matched
+the marker and confirmed neither test process remained alive. This establishes
+this ordinary-chat command/file/owned-process path, not unlimited reliability.
+The local ignored artifact contains the script/result; the visualization
+AgentContinue-r8-browser-connect-3231-output.png shows the real web result.
+
+An additional Dot-only temporary probe was submitted once and is pending. Its
+result is not assumed. No Dot pause/restart or production task action was taken.
+Pause/Revoke and whole-browser saved-intent reopen acceptance remain open.
+
+Actual dac48d6 hosted checks: Extension105 and Pages16 succeeded. Native47
+Windows passed37/37 prior control-contract cases and all3 real Job shutdown
+cases, then failed2 legacy signing-Plan fixtures. Complete log evidence isolates
+an absent ignored payload manifest and an8.3 TEMP alias, not a signature failure.
+Tests now use canonical scratch roots and an inert17-pin Plan fixture, retaining
+missing-manifest/digest/consent refusals. Production signing/build scripts are
+unchanged. Parent reran8/8 successfully; a new hosted result is still required.
+This does not certify the legacy launcher against the current21-file payload.
+
+Entry tests now9/9: the real source directory block creates a protected scratch
+directory and refuses existing file/directory collisions, preserving bytes/ACL.
+The fixed bootstrap also launches a harmless separate OS PowerShell -File child
+with the read lease held and propagates its exit23. Acquisition bytes are injected
+by the test; no public network download or actual installer is established.
+No installed runtime, production VPN/MCP/IDE/research, external Chrome scheduler
+or credentials were changed by those tests. Current-account native continuation
+is still a separate in-progress source task, not installed or released.
+
 ### Pinned Command Acquisition Candidate (Checkpoint83)
 
 The exact r8 reauthorization in Checkpoint82 is settled. It remains authorized,
