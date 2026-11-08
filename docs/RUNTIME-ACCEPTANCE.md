@@ -1,5 +1,17 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Packaged Simplified-UI Browser Fixture Corrected (Checkpoint102)
+
+An actual local preview-kit browser case timed out in setup because its old
+target/OS selectors were inside closed advanced details. Selecting the visible
+current-account control fixed the fixture: actual packaged ConPTY/Chromium
+passed44.041s with command output, pairing, Pause/Reconnect and reload checks.
+The separate REGISTER case passed19.585s using registry capture only.147
+browser/native/session/startup fixtures passed with no skips (52.930s);6 kit
+tests and30 workflow contracts passed. Independent review reproduced the old
+hidden-control timeout; its synthetic-controller result is separate evidence.
+No product UI/lifecycle changes. Full hosted CI/Release/Store remain pending.
+
 ## CI64 Guided Fixture Canonicalization (Checkpoint101)
 
 Native64 passed6/6 protocol cases but reached a private-fixture refusal before

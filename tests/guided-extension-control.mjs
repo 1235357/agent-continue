@@ -158,8 +158,8 @@ async function main() {
     requireCondition(page.url() === setupUrl && await page.evaluate(() => chrome.runtime.id) === input.extensionId);
 
     phase = 'setup';
-    await page.locator('#target').selectOption('windows');
-    await page.locator('#installOsWindows').click();
+    // The simplified Windows-first entry is visible; legacy OS controls are inside closed advanced details.
+    await page.locator('#windowsAccessScope').selectOption('current-account');
     await page.locator('#installConsent').check();
     await page.locator('#windowsStandaloneInstall > summary').click();
     await page.locator('#openWindowsLocalControls').click();

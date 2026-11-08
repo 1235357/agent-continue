@@ -2,6 +2,23 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Packaged Browser Fixture Uses The Simplified Entry (Checkpoint102)
+
+Proactive local preview-kit acceptance reached a previously hidden stale test
+selector: target/installOsWindows are now inside closed setupAdvanced details.
+The actual helper timed out in setup at34.875s; browser-managed REGISTER passed
+19.585s without a real registry write or start. The helper now selects the
+visible current-account access control, leaving the Windows-first product UI
+unchanged. The same real packaged ConPTY/Chromium case then passed44.041s,
+including actual correlated command output, signed pairing, Pause/Reconnect and
+reload non-persistence assertions. Independent scoped review reproduced the
+old hidden-selector timeout and passed the changed helper against a synthetic
+controller; its scope is not the real ConPTY run. The parent also ran147 browser/
+native-session/startup fixtures:147 passed,0 skipped,52.930s. Preview-kit tests6/6
+and workflow contracts30/30 passed. The unchanged preview-kit/build/browser
+group now runs early, before long bootstrap phases; no coverage/limits removed.
+Native66 and latest full CI/publication remain separate pending observations.
+
 ### CI64 Guided Fixture Path Refusal (Checkpoint101)
 
 Native64/run42525342102 passed all6 early protocol cases (exact-shell939.822ms,

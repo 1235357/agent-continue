@@ -233,6 +233,41 @@ jobs:
           $env:TUNNEL_CLIENT_TEST_GUIDED_CMD_COLD = '1'
           node --test --test-concurrency=1 --test-name-pattern=guided-installer tunnel.test.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Windows guided installation acceptance failed' }
+      - name: Build and verify the Windows preview kit
+        if: runner.os == 'Windows'
+        working-directory: .
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'CI browser dependencies unavailable' }
+          npm run vendor
+          if ($LASTEXITCODE -ne 0) { throw 'Reviewed browser assets unavailable' }
+          python -m unittest discover -s tests -p test_windows_preview_kit.py
+          if ($LASTEXITCODE -ne 0) { throw 'Windows preview kit regression tests failed' }
+          python scripts/build-windows-preview-kit.py --output dist/windows-preview-kit
+          if ($LASTEXITCODE -ne 0) { throw 'Windows preview kit build failed' }
+      - name: Verify Windows hosted launch handoff and preflight the exact built kit
+        if: runner.os == 'Windows'
+        working-directory: .
+        shell: pwsh
+        run: |
+          $env:AGENT_CONTINUE_HOSTED_PLAN_TEST_KIT = (Get-Item -LiteralPath ./dist/windows-preview-kit/agent-continue-windows-preview-kit.zip).FullName
+          node --test tests/hosted-windows-launcher-tests.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Windows hosted launch handoff failed' }
+      - name: Test guided browser-managed registration and standalone control from the Windows preview kit
+        id: windows-preview-install-acceptance
+        if: runner.os == 'Windows'
+        shell: pwsh
+        timeout-minutes: 9
+        run: |
+          node ../../node_modules/playwright/cli.js install chromium
+          if ($LASTEXITCODE -ne 0) { throw 'CI Chromium fixture unavailable' }
+          $env:TUNNEL_CLIENT_TEST_NPM_CACHE = (npm config get cache).Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'CI cache discovery failed' }
+          $env:TUNNEL_CLIENT_TEST_PYTHON = (Get-Command python -CommandType Application | Select-Object -First 1).Source
+          $env:TUNNEL_CLIENT_TEST_GUIDED_CHROMIUM = '1'
+          $env:TUNNEL_CLIENT_TEST_PREVIEW_KIT = (Get-Item -LiteralPath ../../dist/windows-preview-kit/agent-continue-windows-preview-kit.zip).FullName
+          node --test --test-concurrency=1 '--test-name-pattern=guided-installer-(chromium|browser-managed)' tunnel.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Windows browser-to-device acceptance failed' }
       - name: Verify pinned download retries and finite process watchdogs offline
         working-directory: .
         shell: pwsh
@@ -364,41 +399,6 @@ jobs:
           $env:AGENT_CONTINUE_OFFICIAL_CLIENT = '1'
           node --test --test-concurrency=1 official-assets.test.mjs packed.test.mjs ../../tests/setup-model-tests.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Official assets and installed tarball acceptance failed' }
-      - name: Build and verify the Windows preview kit
-        if: runner.os == 'Windows'
-        working-directory: .
-        run: |
-          npm ci --ignore-scripts --no-audit --no-fund
-          if ($LASTEXITCODE -ne 0) { throw 'CI browser dependencies unavailable' }
-          npm run vendor
-          if ($LASTEXITCODE -ne 0) { throw 'Reviewed browser assets unavailable' }
-          python -m unittest discover -s tests -p test_windows_preview_kit.py
-          if ($LASTEXITCODE -ne 0) { throw 'Windows preview kit regression tests failed' }
-          python scripts/build-windows-preview-kit.py --output dist/windows-preview-kit
-          if ($LASTEXITCODE -ne 0) { throw 'Windows preview kit build failed' }
-      - name: Verify Windows hosted launch handoff and preflight the exact built kit
-        if: runner.os == 'Windows'
-        working-directory: .
-        shell: pwsh
-        run: |
-          $env:AGENT_CONTINUE_HOSTED_PLAN_TEST_KIT = (Get-Item -LiteralPath ./dist/windows-preview-kit/agent-continue-windows-preview-kit.zip).FullName
-          node --test tests/hosted-windows-launcher-tests.mjs
-          if ($LASTEXITCODE -ne 0) { throw 'Windows hosted launch handoff failed' }
-      - name: Test guided browser-managed registration and standalone control from the Windows preview kit
-        id: windows-preview-install-acceptance
-        if: runner.os == 'Windows'
-        shell: pwsh
-        timeout-minutes: 9
-        run: |
-          node ../../node_modules/playwright/cli.js install chromium
-          if ($LASTEXITCODE -ne 0) { throw 'CI Chromium fixture unavailable' }
-          $env:TUNNEL_CLIENT_TEST_NPM_CACHE = (npm config get cache).Trim()
-          if ($LASTEXITCODE -ne 0) { throw 'CI cache discovery failed' }
-          $env:TUNNEL_CLIENT_TEST_PYTHON = (Get-Command python -CommandType Application | Select-Object -First 1).Source
-          $env:TUNNEL_CLIENT_TEST_GUIDED_CHROMIUM = '1'
-          $env:TUNNEL_CLIENT_TEST_PREVIEW_KIT = (Get-Item -LiteralPath ../../dist/windows-preview-kit/agent-continue-windows-preview-kit.zip).FullName
-          node --test --test-concurrency=1 '--test-name-pattern=guided-installer-(chromium|browser-managed)' tunnel.test.mjs
-          if ($LASTEXITCODE -ne 0) { throw 'Windows browser-to-device acceptance failed' }
       - name: Verify Chromium startup and native port recovery
         id: windows-preview-browser-recovery
         if: runner.os == 'Windows'

@@ -93,6 +93,22 @@ class WindowsReleaseWorkflowTests(unittest.TestCase):
         self.assertNotIn("--test-name-pattern", block)
         self.assertIn("if ($LASTEXITCODE -ne 0)", block)
 
+    def test_packaged_browser_fixture_uses_the_visible_windows_first_setup(self):
+        helper = (ROOT / "tests/guided-extension-control.mjs").read_text(encoding="utf-8")
+        self.assertIn("page.locator('#windowsAccessScope').selectOption('current-account')", helper)
+        self.assertNotIn("page.locator('#target').selectOption", helper)
+        self.assertNotIn("page.locator('#installOsWindows').click", helper)
+        source = (ROOT / ".github/workflows/native-runtime-tests.yml").read_text(encoding="utf-8")
+        core = job(source, "core")
+        name = "Test guided browser-managed registration and standalone control from the Windows preview kit"
+        self.assertEqual(core.count("- name: " + name), 1)
+        self.assertLess(core.index("- name: Build and verify the Windows preview kit"), core.index("- name: " + name))
+        self.assertLess(core.index("- name: " + name), core.index("- name: Verify pinned download retries"))
+        block = step(core, name)
+        self.assertIn("timeout-minutes: 9", block)
+        self.assertIn("guided-installer-(chromium|browser-managed)", block)
+        self.assertIn("if ($LASTEXITCODE -ne 0)", block)
+
     def test_current_account_protocol_fixtures_explicitly_request_source_only_bundles(self):
         source = (ROOT / "native/desktop-commander/tunnel.test.mjs").read_text(encoding="utf-8")
         calls = re.findall(r"await run\(python, \[([^\n]*'[^'\n]*build-setup-release\.py'[^\n]*)\]", source)
