@@ -31,7 +31,8 @@ function runFixture(fixture, batch) {
   const powershell = path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   const args = ['-NoProfile', '-NonInteractive', '-File', fixture];
   if (batch !== undefined) {
-    assert.ok(fixture === ledgerFixture && ['read', 'publication'].includes(batch), 'control_ledger_batch');
+    assert.ok(fixture === ledgerFixture &&
+      ['read', 'read-connect', 'read-resume-saved', 'read-revoke', 'publication'].includes(batch), 'control_ledger_batch');
     args.push('-Batch', batch);
   }
   const result = spawnSync(powershell, args, {
@@ -333,19 +334,46 @@ test('source-only token-aware fixtures retain the independent oracle and both ex
 });
 
 function validateLedgerBatch(result, batch) {
+  const controls = ['connect', 'resume-saved', 'revoke'];
+  const control = controls.find(value => batch === `read-${value}`);
+  const readControls = batch === 'read' ? controls : control ? [control] : [];
   const common = { version: 1, batch, canonicalCases: 0, readCombinations: 0, evidenceControls: 0,
+    readControls,
     publicationCases: 0, damagedHistoryCases: 0, selectedSidGuard: false, inputGuards: false, executionGuards: false,
     protectedAcceptance: false };
-  const expected = batch === 'read' ? { ...common, canonicalCases: 33, readCombinations: 6144, evidenceControls: 3 } :
+  const expected = readControls.length ? { ...common, canonicalCases: 11 * readControls.length,
+    readCombinations: 2048 * readControls.length, evidenceControls: readControls.length } :
     batch === 'publication' ? { ...common, publicationCases: 363, damagedHistoryCases: 66,
       selectedSidGuard: true, inputGuards: true, executionGuards: true } : null;
   assert.ok(expected && result && typeof result === 'object' && !Array.isArray(result), 'control_ledger_batch_manifest');
   assert.ok(Object.keys(result).length === Object.keys(expected).length + 1 &&
-    Object.entries(expected).every(([key, value]) => Object.hasOwn(result, key) && result[key] === value) &&
+    Object.entries(expected).every(([key, value]) => Object.hasOwn(result, key) && (key === 'readControls' ?
+      Array.isArray(result[key]) && result[key].length === value.length && value.every((item, index) => result[key][index] === item) :
+      result[key] === value)) &&
     Number.isSafeInteger(result.assertions) && result.assertions > 0, 'control_ledger_batch_coverage');
 }
 
-for (const batch of ['read', 'publication']) {
+function validateLedgerCoverage(results) {
+  const batches = ['read-connect', 'read-resume-saved', 'read-revoke', 'publication'];
+  assert.ok(Array.isArray(results) && results.length === batches.length, 'control_ledger_aggregate_count');
+  const seen = new Set();
+  for (const result of results) {
+    assert.ok(result && batches.includes(result.batch) && !seen.has(result.batch), 'control_ledger_aggregate_overlap');
+    validateLedgerBatch(result, result.batch);
+    seen.add(result.batch);
+  }
+  assert.deepEqual(results.flatMap(result => result.readControls).sort(), ['connect', 'resume-saved', 'revoke'],
+    'control_ledger_aggregate_controls');
+  const totals = { canonicalCases: 33, readCombinations: 6144, evidenceControls: 3,
+    publicationCases: 363, damagedHistoryCases: 66 };
+  for (const [field, total] of Object.entries(totals)) {
+    assert.equal(results.reduce((sum, result) => sum + result[field], 0), total, 'control_ledger_aggregate_coverage');
+  }
+  return totals;
+}
+
+const ledgerResults = [];
+for (const batch of ['read-connect', 'read-resume-saved', 'read-revoke', 'publication']) {
   test(`Windows administrator control ledger ${batch}: scratch-only PS5.1 fixture (not protected acceptance)`, windows, t => {
     const output = runFixture(ledgerFixture, batch);
     const manifests = [...output.matchAll(/^LEDGER_BATCH (\{[^\r\n]*\})\r?$/gm)];
@@ -354,18 +382,29 @@ for (const batch of ['read', 'publication']) {
     try { result = JSON.parse(manifests[0][1]); } catch { assert.fail('control_ledger_batch_manifest_json'); }
     validateLedgerBatch(result, batch);
     assert.match(output, /^DIAG control-ledger phase=cleanup count=1\r?$/m);
+    ledgerResults.push(result);
     t.diagnostic(JSON.stringify(result));
   });
 }
 
+test('Windows administrator control ledger aggregate retains exact disjoint scratch-only coverage', windows, t => {
+  t.diagnostic(JSON.stringify(validateLedgerCoverage(ledgerResults)));
+});
+
 test('source-only ledger batches retain disjoint exact coverage and reject partial manifests', () => {
   assert.equal(typeof validateLedgerBatch, 'function');
   const read = { version: 1, batch: 'read', canonicalCases: 33, readCombinations: 6144, evidenceControls: 3,
+    readControls: ['connect', 'resume-saved', 'revoke'],
     publicationCases: 0, damagedHistoryCases: 0, selectedSidGuard: false, inputGuards: false, executionGuards: false,
     assertions: 1, protectedAcceptance: false };
   const publication = { ...read, batch: 'publication', canonicalCases: 0, readCombinations: 0, evidenceControls: 0,
+    readControls: [],
     publicationCases: 363, damagedHistoryCases: 66, selectedSidGuard: true, inputGuards: true, executionGuards: true };
-  for (const result of [read, publication]) {
+  const actionReads = ['connect', 'resume-saved', 'revoke'].map(control => ({
+    ...read, batch: `read-${control}`, canonicalCases: 11, readCombinations: 2048, evidenceControls: 1,
+    readControls: [control],
+  }));
+  for (const result of [read, ...actionReads, publication]) {
     assert.doesNotThrow(() => validateLedgerBatch(result, result.batch));
     for (const field of Object.keys(result)) {
       const invalid = { ...result };
@@ -381,17 +420,57 @@ test('source-only ledger batches retain disjoint exact coverage and reject parti
     publicationCases: 363, damagedHistoryCases: 66 })) {
     assert.equal(read[field] + publication[field], total);
     assert.equal(Number(read[field] > 0) + Number(publication[field] > 0), 1);
+    assert.equal([...actionReads, publication].reduce((sum, result) => sum + result[field], 0), total);
     assert.throws(() => validateLedgerBatch({ ...read, [field]: read[field] + 1 }, 'read'));
+  }
+  for (const result of actionReads) {
+    assert.throws(() => validateLedgerBatch({ ...result, readControls: ['connect', 'revoke'] }, result.batch));
+    const other = result.readControls[0] === 'connect' ? 'revoke' : 'connect';
+    assert.throws(() => validateLedgerBatch({ ...result, readControls: [other] }, result.batch));
   }
 });
 
+test('source-only ledger aggregate rejects missing, overlapping and inflated action coverage', () => {
+  assert.equal(typeof validateLedgerCoverage, 'function');
+  const reads = ['connect', 'resume-saved', 'revoke'].map(control => ({
+    version: 1, batch: `read-${control}`, canonicalCases: 11, readCombinations: 2048, evidenceControls: 1,
+    readControls: [control], publicationCases: 0, damagedHistoryCases: 0,
+    selectedSidGuard: false, inputGuards: false, executionGuards: false, assertions: 1, protectedAcceptance: false,
+  }));
+  const publication = { ...reads[0], batch: 'publication', canonicalCases: 0, readCombinations: 0, evidenceControls: 0,
+    readControls: [], publicationCases: 363, damagedHistoryCases: 66,
+    selectedSidGuard: true, inputGuards: true, executionGuards: true };
+  const results = [...reads, publication];
+  assert.doesNotThrow(() => validateLedgerCoverage(results));
+  assert.doesNotThrow(() => validateLedgerCoverage([...results].reverse()));
+  for (let index = 0; index < results.length; index++) {
+    assert.throws(() => validateLedgerCoverage(results.filter((_, row) => row !== index)));
+    assert.throws(() => validateLedgerCoverage([...results, results[index]]));
+    const duplicate = [...results];
+    duplicate[index] = results[(index + 1) % results.length];
+    assert.throws(() => validateLedgerCoverage(duplicate));
+    for (const field of ['canonicalCases', 'readCombinations', 'evidenceControls', 'publicationCases', 'damagedHistoryCases']) {
+      const changed = [...results];
+      changed[index] = { ...results[index], [field]: results[index][field] + 1 };
+      assert.throws(() => validateLedgerCoverage(changed));
+    }
+  }
+  const overlap = [...results];
+  overlap[1] = { ...reads[1], readControls: ['connect'] };
+  assert.throws(() => validateLedgerCoverage(overlap));
+  assert.throws(() => validateLedgerCoverage(null));
+});
+
 test('source-only ledger batch selectors preserve child bounds and reject unknown routes before spawn', () => {
-  for (const batch of ['read', 'publication']) {
+  for (const batch of ['read', 'read-connect', 'read-resume-saved', 'read-revoke', 'publication']) {
     const run = vm.runInNewContext(`(${runFixture.toString()})`, {
       assert, path: path.win32, ledgerFixture: 'C:\\fixture\\ledger.ps1', process: { env: { SystemRoot: 'C:\\Windows' } },
       spawnSync(_exe, args, options) {
         assert.equal(args.slice(-2).join('|'), '-Batch|' + batch);
         assert.equal(options.timeout, 60_000);
+        assert.equal(options.maxBuffer, 1024 * 1024);
+        assert.equal(options.shell, false);
+        assert.equal(options.windowsHide, true);
         return { stdout: '', stderr: '', status: 0, signal: null };
       },
     });
@@ -401,8 +480,14 @@ test('source-only ledger batch selectors preserve child bounds and reject unknow
     assert, path: path.win32, ledgerFixture: 'C:\\fixture\\ledger.ps1', process: { env: { SystemRoot: 'C:\\Windows' } },
     spawnSync() { assert.fail('invalid batch must not spawn'); },
   });
-  for (const batch of ['all', 'READ', '', 'other']) assert.throws(() => run('C:\\fixture\\ledger.ps1', batch));
-  assert.throws(() => run('C:\\fixture\\peer.ps1', 'read'));
+  for (const batch of ['all', 'READ', '', 'other', 'read-Connect', 'read-resume', 'read-revoke ', 'read-connect\n', null, {}, ['read-connect']]) {
+    assert.throws(() => run('C:\\fixture\\ledger.ps1', batch), /control_ledger_batch/);
+  }
+  for (const batch of ['read', 'read-connect', 'read-resume-saved', 'read-revoke', 'publication']) {
+    assert.throws(() => run('C:\\fixture\\peer.ps1', batch), /control_ledger_batch/);
+  }
+  const source = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+  assert.match(source, /const windows = \{ skip: process\.platform !== 'win32', timeout: 65_000 \}/);
 });
 
 test('Windows administrator control pure identity serializers (not OS identity proof)', windows, () => {

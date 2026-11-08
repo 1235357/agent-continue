@@ -236,7 +236,13 @@ let windowsCopyAttempt = null;
 let administratorSetupClient = null;
 let currentAccountSetupClient = null;
 const selectedSetupClient = () => windowsAccessScope === 'administrator' ? administratorSetupClient : currentAccountSetupClient;
-function cancelSetupClients() { administratorSetupClient?.cancel(); currentAccountSetupClient?.cancel(); }
+function cancelSetupClients() {
+  // Permission denial precedes BEGIN and clipboard writes; no operation needs retaining.
+  if (administratorSetupClient?.getState().state === 'permission-denied') administratorSetupClient = null;
+  if (currentAccountSetupClient?.getState().state === 'permission-denied') currentAccountSetupClient = null;
+  administratorSetupClient?.cancel();
+  currentAccountSetupClient?.cancel();
+}
 const ADMINISTRATOR_SETUP_FEEDBACK = Object.freeze({
   preparing: '正在准备本页安装；尚未安装或连接。',
   waiting: '已复制安装命令。等待本页确认安装；尚未请求连接。',
@@ -489,7 +495,7 @@ function renderInstall() {
   for (const [shell, [preview, copy, feedback]] of Object.entries(WINDOWS_GUIDED_ENTRIES)) {
     const command = windowsGuidedCommand(plan, shell);
     $(preview).textContent = command;
-    $(copy).disabled = !command || !!(administratorState && administratorState.state !== 'idle');
+    $(copy).disabled = !command || !!(administratorState && !['idle', 'permission-denied'].includes(administratorState.state));
     $(feedback).textContent = command && administratorState?.shell === shell
       ? t(ADMINISTRATOR_SETUP_FEEDBACK[administratorState.state] ?? '')
       : command && windowsCopyAttempt?.command === command ? t(windowsCopyAttempt.feedbackKey) : '';
@@ -791,6 +797,7 @@ async function copyWindowsGuidedCommand(event, shell) {
 
   if (shell === 'browserPowerShell' || shell === 'browserCmd') {
     let client = selectedSetupClient();
+    if (client?.getState().state === 'permission-denied') client = null;
     client ??= createSetupClient({
       getContext: () => ({ os: installOs, scope: windowsAccessScope, consent: installConsent,
         connectionConsent: installConsent,

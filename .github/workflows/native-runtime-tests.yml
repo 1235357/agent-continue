@@ -75,6 +75,7 @@ on:
       - 'tests/native-release-*.mjs'
       - 'tests/native-release-fixture.ps1'
       - 'tests/test_fetch_ci_tunnel.py'
+      - 'tests/test_windows_release_workflow.py'
       - 'tests/fetch-ci-tunnel-fixture.ps1'
       - 'scripts/Sign-WindowsRelease.ps1'
       - 'scripts/Build-ReleaseNativeLauncher.ps1'
@@ -153,6 +154,7 @@ on:
       - 'tests/native-release-*.mjs'
       - 'tests/native-release-fixture.ps1'
       - 'tests/test_fetch_ci_tunnel.py'
+      - 'tests/test_windows_release_workflow.py'
       - 'tests/fetch-ci-tunnel-fixture.ps1'
       - 'scripts/Sign-WindowsRelease.ps1'
       - 'scripts/Build-ReleaseNativeLauncher.ps1'
@@ -187,6 +189,9 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
+      - name: Verify bounded bootstrap suite coverage
+        working-directory: .
+        run: python -B -m unittest discover -s tests -p test_windows_release_workflow.py
       - name: Verify pinned download retries and finite process watchdogs offline
         working-directory: .
         shell: pwsh
@@ -288,7 +293,9 @@ jobs:
       - name: Check registry failure classification without touching registry
         working-directory: .
         run: node --test native/bootstrap/registry-win.test.mjs native/bootstrap/browser-wake-registration.test.mjs
-      - name: Zero-dependency bootstrap and installed-tarball acquisition
+      # Disjoint phases retain all seven files and their original test deadlines.
+      # A slow acquisition suite must not cancel the unopened tarball cases.
+      - name: Zero-dependency bootstrap and pinned client acquisition
         shell: pwsh
         working-directory: native/bootstrap
         timeout-minutes: 8
@@ -296,8 +303,28 @@ jobs:
           $env:AGENT_CONTINUE_REAL_CACHE = (npm config get cache).Trim()
           if ($LASTEXITCODE -ne 0) { throw 'CI cache discovery failed' }
           $env:AGENT_CONTINUE_OFFICIAL_CLIENT = '1'
-          node --test --test-concurrency=1 bootstrap.test.mjs browser-control.test.mjs client-acquisition.test.mjs device-setup.test.mjs official-assets.test.mjs packed.test.mjs ../../tests/setup-model-tests.mjs
+          node --test --test-concurrency=1 bootstrap.test.mjs client-acquisition.test.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Bootstrap acceptance failed' }
+      - name: Zero-dependency browser control and device setup
+        shell: pwsh
+        working-directory: native/bootstrap
+        timeout-minutes: 8
+        run: |
+          $env:AGENT_CONTINUE_REAL_CACHE = (npm config get cache).Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'CI cache discovery failed' }
+          $env:AGENT_CONTINUE_OFFICIAL_CLIENT = '1'
+          node --test --test-concurrency=1 browser-control.test.mjs device-setup.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Browser control and device setup acceptance failed' }
+      - name: Official assets and installed-tarball acquisition
+        shell: pwsh
+        working-directory: native/bootstrap
+        timeout-minutes: 8
+        run: |
+          $env:AGENT_CONTINUE_REAL_CACHE = (npm config get cache).Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'CI cache discovery failed' }
+          $env:AGENT_CONTINUE_OFFICIAL_CLIENT = '1'
+          node --test --test-concurrency=1 official-assets.test.mjs packed.test.mjs ../../tests/setup-model-tests.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Official assets and installed tarball acceptance failed' }
       - name: Acquire pinned official runtime for isolated protocol fixtures
         shell: pwsh
         timeout-minutes: 3

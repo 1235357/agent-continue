@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import { buildSetupRequest, serializeSetupRequest, describeTarget } from '../setup-model.js';
 import { resolveStatusView } from '../native/bootstrap/registration-status-view.mjs';
 import { buildInstallPlan } from '../native/bootstrap/install-plan.mjs';
+import { bindSetupInstallation } from '../setup-controller.js';
 
 const source = await import('../setup-client.js').catch(error => {
   if (error.code === 'ERR_MODULE_NOT_FOUND') return {};
@@ -427,8 +428,8 @@ test('administrator command builder validates IDs and keeps manual commands free
 });
 
 async function setupPage(options = {}) {
-  const nodes = new Map(), handlers = new Map(), life = new Map(), copies = [], messages = [];
-  let language = 'en', granted = true;
+  const nodes = new Map(), handlers = new Map(), life = new Map(), copies = [], messages = [], connections = [];
+  let language = 'en', granted = options.granted ?? true, requests = 0, generated = 0, controller;
   const node = id => {
     if (!nodes.has(id)) nodes.set(id, { value: '', checked: false, hidden: false, open: false, textContent: '',
       addEventListener: (name, fn) => handlers.set(id + ':' + name, fn), setAttribute() {},
@@ -448,23 +449,52 @@ async function setupPage(options = {}) {
     initializeLanguage: async () => {}, subscribeLanguage() {}, getLanguage: () => language,
     setLanguage: async value => { language = value; },
     document: { getElementById: node, querySelectorAll: () => [], documentElement: {} },
-    chrome: { runtime: { id: extensionId, async sendMessage(message) {
+    chrome: { runtime: { id: extensionId, getURL: name => `chrome-extension://${extensionId}/${name}`, async sendMessage(message) {
       messages.push(message);
-      if (options.send) return options.send(message);
-      const scopedReceipt=message.scope==='current-account'?{setupId:message.setupId,state:'installed',scope:'current-account',
-        extensionId,bindingSha256:'b'.repeat(64)}:{...receipt,setupId:message.setupId};
-      return { ...reply(message.type === types.BEGIN ? 'waiting' : message.type === types.OBSERVE ? 'installed' : 'submitted',
-        { automaticConnect: true, receipt: scopedReceipt }), setupId: message.setupId,
-        ...(message.scope==='current-account'?{scope:'current-account'}:{}) };
-    } }, permissions: { contains: async () => granted, request: async () => (granted = true), onRemoved: event(), onAdded: event() },
+      const deliver = () => {
+        if (controller) return controller.handleMessage(message, { id: extensionId, frameId: 0,
+          documentId: 'setup-page-document', tab: { id: 1 }, url: context.chrome.runtime.getURL('setup.html') });
+        const scopedReceipt=message.scope==='current-account'?{setupId:message.setupId,state:'installed',scope:'current-account',
+          extensionId,bindingSha256:'b'.repeat(64)}:{...receipt,setupId:message.setupId};
+        return { ...reply(message.type === types.BEGIN ? 'waiting' : message.type === types.OBSERVE ? 'installed' : 'submitted',
+          { automaticConnect: true, receipt: scopedReceipt }), setupId: message.setupId,
+          ...(message.scope==='current-account'?{scope:'current-account'}:{}) };
+      };
+      return options.send ? options.send(message, deliver) : deliver();
+    } }, permissions: { contains: async () => granted, async request() {
+      requests++;
+      const allowed = options.request ? await options.request() : true;
+      if (allowed === true) granted = true;
+      return allowed;
+    }, onRemoved: event(), onAdded: event() },
+    tabs: { onRemoved: event(), onUpdated: event() },
     storage: { local: { get: async () => ({ installConsent: true }), set: async () => {} } } },
-    navigator: { clipboard: { writeText: async command => { copies.push(command); } } },
-    crypto: { getRandomValues(bytes) { return bytes.fill(0xaa); } }, performance, setTimeout, clearTimeout,
+    navigator: { clipboard: { writeText: async command => { copies.push(command); return options.copy?.(command); } } },
+    crypto: { getRandomValues(bytes) { return bytes.fill(0xaa + generated++); } }, performance, setTimeout, clearTimeout,
     TextEncoder, URL, Blob, addEventListener: (name, fn) => life.set(name, fn),
   };
+  if (options.controller) {
+    controller = bindSetupInstallation(context.chrome, {
+      controls: { captureStartupPermit: () => () => true,
+        connectFromSetup: () => assert.fail('current-account page must not dispatch administrator control') },
+      currentAccount: { captureStartupPermit: () => () => true,
+        observe: async (_api, id) => ({ setupId: id, state: 'installed', scope: 'current-account',
+          extensionId, bindingSha256: 'b'.repeat(64) }),
+        checkStopSupport: async () => true, prepareObserver: async admit => admit(),
+        async connectFromSetup(setup, admit) {
+          assert.equal(admit(), true);
+          connections.push(structuredClone(setup));
+          return { ...setup, operationId: '12345678-1234-4234-8234-123456789abc', action: 'reconnect', outcome: 'requested' };
+        } },
+    });
+    options.controller.after(() => controller.dispose());
+  }
   await vm.runInNewContext('(async () => {\n' + script + '\n})()', context);
   const emit = async (id, name, value = {}) => { await handlers.get(id + ':' + name)?.(value); await tick(); };
-  return { node, copies, messages, life, emit, async administrator() {
+  return { node, copies, messages, connections, life, emit,
+    get requests() { return requests; }, get generated() { return generated; },
+    grant() { granted = true; context.chrome.permissions.onAdded.emit({ permissions: ['nativeMessaging'] }); },
+    async administrator() {
     await emit('windowsAccessScope', 'change', { target: { value: 'administrator' } });
     await emit('installConsent', 'change', { target: { checked: true } });
   } };
@@ -484,7 +514,7 @@ test('page routes both account scopes through the client and never restores lega
   assert.match(f.node('setupRisk').textContent, /installation and connection.*separate.*Windows/i);
   await f.emit('copyWindowsBrowserPowerShell', 'click', { isTrusted: true });
   for (let i = 0; i < 15; i++) await tick();
-  assert.match(f.copies[1], new RegExp(`-BrowserSetupId ${setupId}$`));
+  assert.match(f.copies[1], new RegExp(`-BrowserSetupId ${'ab'.repeat(16)}$`));
   assert.equal(f.messages.filter(value => value.type === types.CONNECT).length, 2);
   assert.match(f.node('installFeedback').textContent, /requested.*unconfirmed/i);
 });
@@ -499,4 +529,91 @@ test('page consent withdrawal, scope changes, OS switches and pagehide cancel wi
     assert.equal(f.messages.filter(value => value.type === types.CANCEL).length, 1);
     assert.equal(f.messages.some(value => value.type === types.CONNECT), false);
   }
+});
+
+for (const shell of ['PowerShell', 'Cmd']) test(`page recovers a pre-admission permission denial through the real controller using ${shell}`, async t => {
+  const f = await setupPage({ controller: t, granted: false, request: () => false });
+  const button = 'copyWindowsBrowser' + shell;
+  await f.emit('installConsent', 'change', { target: { checked: true } });
+  await f.emit(button, 'click', { isTrusted: true });
+  assert.match(f.node('installFeedback').textContent, /permission was not granted/i);
+  assert.equal(f.requests, 1); assert.equal(f.generated, 1);
+  assert.equal(f.messages.length, 0); assert.equal(f.copies.length, 0); assert.equal(f.connections.length, 0);
+  assert.equal(f.node(button).disabled, false, 'a known pre-admission denial must permit an explicit fresh attempt');
+  f.grant(); await tick();
+  assert.equal(f.generated, 1); assert.equal(f.messages.length, 0); assert.equal(f.copies.length, 0);
+  await f.emit(button, 'click', { isTrusted: false });
+  assert.equal(f.generated, 1); assert.equal(f.messages.length, 0);
+  await f.emit(button, 'click', { isTrusted: true });
+  assert.equal(f.generated, 2); assert.equal(f.requests, 1);
+  assert.equal(f.messages.filter(value => value.type === types.BEGIN).length, 1);
+  assert.equal(f.messages.filter(value => value.type === types.CONNECT).length, 1);
+  assert.equal(f.copies.length, 1); assert.equal(f.connections.length, 1);
+  assert.equal(f.messages[0].setupId, 'ab'.repeat(16), 'the denied ID is retired, not replayed');
+  assert.ok(f.messages.every(value => value.setupId === f.messages[0].setupId && value.scope === 'current-account'));
+  assert.equal(f.node(button).disabled, true);
+  await f.emit(button, 'click', { isTrusted: true });
+  assert.equal(f.generated, 2); assert.equal(f.connections.length, 1); assert.equal(f.copies.length, 1);
+});
+
+test('a fresh trusted retry can request permission again without automatically resuming any denied attempt', async t => {
+  let allowed = false;
+  const f = await setupPage({ controller: t, granted: false, request: () => allowed });
+  await f.emit('installConsent', 'change', { target: { checked: true } });
+  for (const shell of ['PowerShell', 'Cmd']) await f.emit('copyWindowsBrowser' + shell, 'click', { isTrusted: true });
+  assert.equal(f.requests, 2); assert.equal(f.generated, 2);
+  assert.equal(f.messages.length, 0); assert.equal(f.copies.length, 0); assert.equal(f.connections.length, 0);
+  allowed = true;
+  await Promise.all(['PowerShell', 'Cmd'].map(shell => f.emit('copyWindowsBrowser' + shell, 'click', { isTrusted: true })));
+  assert.equal(f.requests, 3); assert.equal(f.generated, 3);
+  assert.equal(f.messages.filter(value => value.type === types.BEGIN).length, 1);
+  assert.equal(f.messages.filter(value => value.type === types.CONNECT).length, 1);
+  assert.equal(f.messages[0].setupId, 'ac'.repeat(16));
+  assert.equal(f.copies.length, 1); assert.equal(f.connections.length, 1);
+});
+
+for (const reset of ['consent', 'scope', 'OS']) test(`permission-denied recovery after ${reset} changes still requires document-local consent`, async t => {
+  const f = await setupPage({ controller: t, granted: false, request: () => false });
+  await f.emit('installConsent', 'change', { target: { checked: true } });
+  await f.emit('copyWindowsBrowserPowerShell', 'click', { isTrusted: true });
+  if (reset === 'consent') await f.emit('installConsent', 'change', { target: { checked: false } });
+  if (reset === 'scope') {
+    await f.emit('windowsAccessScope', 'change', { target: { value: 'administrator' } });
+    await f.emit('windowsAccessScope', 'change', { target: { value: 'current-account' } });
+  }
+  if (reset === 'OS') {
+    await f.emit('installOsMacos', 'click');
+    await f.emit('installConsent', 'change', { target: { checked: false } });
+    await f.emit('installOsWindows', 'click');
+  }
+  f.grant(); await tick();
+  assert.equal(f.node('installConsent').checked, false);
+  assert.equal(f.node('copyWindowsBrowserPowerShell').disabled, true);
+  await f.emit('copyWindowsBrowserPowerShell', 'click', { isTrusted: true });
+  assert.equal(f.generated, 1); assert.equal(f.messages.length, 0); assert.equal(f.copies.length, 0);
+  await f.emit('installConsent', 'change', { target: { checked: true } });
+  assert.equal(f.node('copyWindowsBrowserPowerShell').disabled, false);
+  await f.emit('copyWindowsBrowserPowerShell', 'click', { isTrusted: true });
+  assert.equal(f.generated, 2); assert.equal(f.connections.length, 1); assert.equal(f.copies.length, 1);
+});
+
+for (const stage of ['BEGIN', 'clipboard', 'CONNECT']) test(`page never replaces an attempt after an uncertain ${stage} outcome`, async t => {
+  const f = await setupPage({ controller: t,
+    copy: stage === 'clipboard' ? () => { throw new Error('clipboard outcome unknown'); } : undefined,
+    send: async (message, deliver) => {
+      const result = await deliver();
+      return message.type === types[stage] ? null : result;
+    } });
+  await f.emit('installConsent', 'change', { target: { checked: true } });
+  await f.emit('copyWindowsBrowserPowerShell', 'click', { isTrusted: true });
+  const messages = f.messages.length, copies = f.copies.length, connections = f.connections.length;
+  assert.equal(f.messages.filter(value => value.type === types.BEGIN).length, 1);
+  assert.equal(connections, stage === 'CONNECT' ? 1 : 0);
+  assert.equal(f.node('copyWindowsBrowserPowerShell').disabled, true);
+  await f.emit('installConsent', 'change', { target: { checked: false } });
+  await f.emit('installConsent', 'change', { target: { checked: true } });
+  assert.equal(f.node('copyWindowsBrowserCmd').disabled, true);
+  await f.emit('copyWindowsBrowserCmd', 'click', { isTrusted: true });
+  assert.equal(f.generated, 1); assert.equal(f.messages.length, messages);
+  assert.equal(f.copies.length, copies); assert.equal(f.connections.length, connections);
 });

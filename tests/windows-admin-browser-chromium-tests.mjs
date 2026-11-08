@@ -15,7 +15,9 @@ const pauseOperation = 'a'.repeat(32);
 const target = generation + ':' + pauseOperation;
 const idleTarget = generation + ':idle';
 
-test('disposable Windows Chromium routes fixed Pause and reconcile across tabs and restarts',
+for (const fullBackground of [false, true]) {
+test(fullBackground ? 'disposable Windows Chromium full background refuses unconfirmed installation Pause support' :
+  'disposable Windows Chromium legacy Pause routes preserve reconciliation across tabs and restarts',
   { skip: process.platform !== 'win32', timeout: 90000 }, async () => {
     const scratch = await fs.mkdtemp(path.join(await fs.realpath(os.tmpdir()), 'ac-admin-chromium-'));
     const extension = path.join(scratch, 'extension'), profile = path.join(scratch, 'profile');
@@ -49,12 +51,19 @@ test('disposable Windows Chromium routes fixed Pause and reconcile across tabs a
       const fixedHost = "'com.agentcontinue.administrator_owner'";
       assert.equal(module.split(fixedHost).length, 2);
       await fs.writeFile(path.join(extension, 'admin-browser.js'), module.replace(fixedHost, JSON.stringify(host)));
-      for (const file of ['background.js', 'i18n.js', 'i18n-runtime.js', 'config.js', 'adapter.js']) {
+      for (const file of ['background.js', 'i18n.js', 'i18n-runtime.js', 'config.js', 'adapter.js',
+        'current-account-setup.js', 'setup-handoff.js', 'admin-control.js', 'admin-installation-pause.js', 'setup-controller.js']) {
         await fs.copyFile(new URL(file, project), path.join(extension, file));
       }
       // Isolate the real background dispatcher from the other native host and private preset.
+      await fs.copyFile(new URL('browser-wake.js', project), path.join(extension, 'browser-wake-source.js'));
       await fs.writeFile(path.join(extension, 'browser-wake.js'),
+        "export { validPreparedReference } from './browser-wake-source.js'; " +
         "export const BROWSER_DEVICE_MESSAGE = 'BROWSER_DEVICE_CONTROL_V1'; export const bindBrowserWake = () => null;");
+      // Legacy routing is a distinct contract. The companion full-background
+      // case keeps this real binder and verifies that unknown support cannot downgrade.
+      if (!fullBackground) await fs.writeFile(path.join(extension, 'admin-installation-pause.js'),
+        'export const bindInstallationPause = () => null;');
       await fs.writeFile(path.join(extension, 'preset.js'), 'export const BUNDLED_PROMPT = null;');
       await fs.writeFile(path.join(extension, 'devices.html'), '<!doctype html><title>Administrator bridge fixture</title>');
       await fs.writeFile(path.join(extension, 'manifest.json'), JSON.stringify({
@@ -147,6 +156,13 @@ test('disposable Windows Chromium routes fixed Pause and reconcile across tabs a
       await page.evaluate(() => chrome.storage.local.set({ windowsAdministratorBrowserRestoreV1: false }));
       const other = await context.newPage();
       await other.goto(origin + 'devices.html?mode=browser-managed');
+      if (fullBackground) {
+        assert.equal(await initiatePause(page), null,
+          'unconfirmed installation support must not downgrade to the legacy Pause protocol');
+        assert.deepEqual(await traceRows(), ['wake'], 'the refusal must not send legacy Pause or fence');
+        assert.equal(await previous(page), undefined, 'a pre-admission refusal must not fabricate a Pause record');
+        return;
+      }
       const [first, duplicate] = await Promise.all([initiatePause(page), initiatePause(other)]);
       assert.equal(first.outcome, 'requested');
       assert.match(first.operationId, /^[a-f0-9]{32}$/);
@@ -233,3 +249,4 @@ test('disposable Windows Chromium routes fixed Pause and reconcile across tabs a
       }
     }
   });
+}

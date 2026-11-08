@@ -47,6 +47,39 @@ class WindowsReleaseWorkflowTests(unittest.TestCase):
     def setUp(self):
         self.source = WORKFLOW.read_text(encoding="utf-8")
 
+    def test_native_bootstrap_phases_cover_each_original_file_once_with_bounded_children(self):
+        ordinary = (ROOT / ".github/workflows/native-runtime-tests.yml").read_text(encoding="utf-8")
+        core = job(ordinary, "core")
+        for event in ("push", "pull_request"):
+            trigger = re.search(r"^  " + event + r":\n(.*?)(?=^  [\w-]+:|\Z)", ordinary, re.M | re.S)
+            self.assertIsNotNone(trigger)
+            self.assertIn("      - 'tests/test_windows_release_workflow.py'", trigger.group(1))
+        groups = {
+            "Zero-dependency bootstrap and pinned client acquisition":
+                ["bootstrap.test.mjs", "client-acquisition.test.mjs"],
+            "Zero-dependency browser control and device setup":
+                ["browser-control.test.mjs", "device-setup.test.mjs"],
+            "Official assets and installed-tarball acquisition":
+                ["official-assets.test.mjs", "packed.test.mjs", "../../tests/setup-model-tests.mjs"],
+        }
+        seen = []
+        for name, expected in groups.items():
+            block = step(core, name)
+            self.assertIn("timeout-minutes: 8", block)
+            self.assertIn("shell: pwsh", block)
+            self.assertIn("working-directory: native/bootstrap", block)
+            self.assertIn("$env:AGENT_CONTINUE_REAL_CACHE = (npm config get cache).Trim()", block)
+            self.assertIn("$env:AGENT_CONTINUE_OFFICIAL_CLIENT = '1'", block)
+            self.assertIn("if ($LASTEXITCODE -ne 0)", block)
+            command = re.findall(r"^          node --test --test-concurrency=1 (.+)$", block, re.M)
+            self.assertEqual(len(command), 1)
+            files = command[0].split()
+            self.assertEqual(files, expected)
+            self.assertNotIn("--test-skip", block)
+            seen.extend(files)
+        self.assertEqual(len(seen), 7)
+        self.assertEqual(len(set(seen)), 7)
+
     def test_current_account_continuation_is_in_regular_and_native_checks(self):
         ordinary = (ROOT / ".github/workflows/native-runtime-tests.yml").read_text(encoding="utf-8")
         for event in ("push", "pull_request"):

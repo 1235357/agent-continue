@@ -310,8 +310,8 @@ assert.deepEqual(process.argv.slice(2), ['--browser-wake', binding.origin]);
 let launches = 0, child;
 // Only the tunnel child and its health are synthetic; Chromium, CMD, the
 // controller, ownership lease and named-pipe request path are real.
-await serveBrowserWake({input:process.stdin, output:process.stdout, origin:binding.origin, args:process.argv.slice(3),
-async startOwner(signal) {
+await serveBrowserWake({input:process.stdin, output:process.stdout, origin:binding.origin, binding, args:process.argv.slice(3),
+async startOwner(signal, browserOwnerId) {
 const controller = openController(binding.root, {
   deferStartup: true,
   launch: () => ({ configured:true, command:'fixture', args:[] }),
@@ -326,7 +326,7 @@ const controller = openController(binding.root, {
   hasExited: async () => child?.exitCode === 0,
   fetch: async () => ({status:200}),
 });
-const owner = await startDeviceOwner(bindingFile, {controller, signal});
+const owner = await startDeviceOwner(bindingFile, {controller, signal, browserOwnerId, expectedOrigin:binding.origin});
 try {
   const request = {version:1,id:'fixture-status',action:'status'};
   let response;
@@ -358,7 +358,8 @@ try {
         ...(productWorker ? { action: {}, commands: { 'toggle-running': { description: 'Toggle task' } } } : {}),
       }));
       for (const name of ['browser-wake.js', 'admin-browser.js', 'admin-control.js', 'devices.html', 'devices.css', 'devices.js', 'device-control.js', 'i18n.js',
-        ...(productWorker ? ['background.js', 'config.js', 'adapter.js', 'preset.js', 'i18n-runtime.js'] : [])]) {
+        ...(productWorker ? ['background.js', 'config.js', 'adapter.js', 'preset.js', 'i18n-runtime.js',
+          'current-account-setup.js', 'setup-handoff.js', 'admin-installation-pause.js', 'setup-controller.js'] : [])]) {
         const source = hosted ? path.join(path.dirname(process.env.AC_HOSTED_SETUP), 'AgentContinue', name) : new URL(name, project);
         await fs.copyFile(source, path.join(extension, name));
       }
@@ -554,7 +555,11 @@ void chrome.storage.local.get('armed').then(({armed}) => {
         await page.locator('[data-action=disconnect-and-pause]').click({ timeout: 8000 });
         await page.locator('#confirmOperation').click({ timeout: 8000 });
         await page.waitForFunction(() => document.getElementById('connection').textContent === 'Disconnected' &&
-          document.getElementById('pause').textContent === 'Paused');
+          document.getElementById('pause').textContent === 'Paused').catch(async () => {
+            const observed = await page.evaluate(() => Object.fromEntries(['connection', 'pause', 'feedback']
+              .map(id => [id, document.getElementById(id)?.textContent?.slice(0, 500) ?? null])));
+            assert.fail('Devices did not confirm the fixture Pause: ' + JSON.stringify(observed));
+          });
         await page.close();
       }
       await context.close();

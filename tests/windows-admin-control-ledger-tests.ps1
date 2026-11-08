@@ -1,10 +1,10 @@
 #Requires -Version 5.1
 [CmdletBinding()]
-param([ValidateSet('all','read','publication')][string]$Batch='all')
+param([ValidateSet('all','read','read-connect','read-resume-saved','read-revoke','publication')][string]$Batch='all')
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
-if ($Batch -cnotin @('all','read','publication')) { throw 'control_ledger_batch' }
+if ($Batch -cnotin @('all','read','read-connect','read-resume-saved','read-revoke','publication')) { throw 'control_ledger_batch' }
 function Write-LedgerPhase(
     [ValidateSet('entry','source-extracted','canonical-bytes','matrix-connect','matrix-resume-saved','matrix-revoke',
         'matrix-complete','evidence-guards','publication-connect','publication-resume-saved','publication-revoke',
@@ -71,6 +71,13 @@ $id = 'b' * 32
 $states = @('reserved','intent-saved','launch-requested','launch-unconfirmed',
     'revocation-recorded','stopped','superseded','rejected','fenced','abandoned','recovered-paused')
 $controls = @('connect','resume-saved','revoke')
+$readControls = @(switch -CaseSensitive ($Batch) {
+    'all' { $controls }
+    'read' { $controls }
+    'read-connect' { 'connect' }
+    'read-resume-saved' { 'resume-saved' }
+    'read-revoke' { 'revoke' }
+})
 
 function Assert-True([bool]$Condition,[string]$Message) {
     $script:Assertions++
@@ -221,9 +228,9 @@ function Assert-PublishRefused([string]$Directory,[string]$Control,[string]$Stat
 }
 
 try {
-    if ($Batch -cin @('all','read')) {
+    if ($readControls.Count -gt 0) {
     Write-LedgerPhase 'canonical-bytes' 0
-    foreach ($control in $controls) {
+    foreach ($control in $readControls) {
         foreach ($state in $states) {
             $legalForControl = $state -cin @('reserved','fenced') -or
                 ($control -ceq 'revoke' -and $state -cin @('revocation-recorded','stopped')) -or
@@ -240,14 +247,14 @@ try {
         }
     }
     Write-Output 'PASS canonical version/digest/ID/control/state bytes, LF, and action-specific enums'
-    Write-LedgerPhase 'canonical-bytes' ($controls.Count * $states.Count)
+    Write-LedgerPhase 'canonical-bytes' $script:CanonicalCases
 
     # Gray-code enumeration changes one file at a time; expectations come from
     # the contract table above, never from the implementation's output.
     # Matrix rows do not inspect trace records; every scratch/type/denial check still runs.
     $script:CaptureAclChecks = $false
     try {
-    foreach ($control in $controls) {
+    foreach ($control in $readControls) {
         $matrixPhase = switch ($control) {
             'connect' { 'matrix-connect' }
             'resume-saved' { 'matrix-resume-saved' }
@@ -256,9 +263,11 @@ try {
         Write-LedgerPhase $matrixPhase $script:MatrixCases
         $directory = New-FixtureDirectory
         $legal = Get-LegalReadStates $control
+        $seenMasks = [Collections.Generic.HashSet[int]]::new()
         $previous = 0
         for ($n = 0; $n -lt (1 -shl $states.Count); $n++) {
             $mask = $n -bxor ($n -shr 1)
+            Assert-True ($mask -ge 0 -and $mask -lt (1 -shl $states.Count) -and $seenMasks.Add($mask)) 'read mask is in range and never repeated'
             $changed = $mask -bxor $previous
             if ($n -gt 0) {
                 for ($bit = 0; $bit -lt $states.Count; $bit++) {
@@ -275,13 +284,14 @@ try {
             $previous = $mask
             if (($script:MatrixCases % 256) -eq 0) { Write-LedgerPhase $matrixPhase $script:MatrixCases }
         }
+        Assert-True ($seenMasks.Count -eq (1 -shl $states.Count)) 'read action covers every state combination exactly once'
     }
     } finally { $script:CaptureAclChecks = $true }
     Write-Output ('PASS exhaustive read-state matrix: ' + $script:MatrixCases + ' combinations')
     Write-LedgerPhase 'matrix-complete' $script:MatrixCases
 
     Write-LedgerPhase 'evidence-guards' 0
-    foreach ($control in $controls) {
+    foreach ($control in $readControls) {
         $directory = New-FixtureDirectory
         Assert-Receipt $directory $control 'unconfirmed' 'empty directory'
         Assert-Receipt (Join-Path $directory 'missing') $control 'unconfirmed' 'absent directory'
@@ -338,11 +348,16 @@ try {
         }
         $script:EvidenceControls++
     }
-    $directory = New-FixtureDirectory
-    $null = [IO.Directory]::CreateDirectory((Get-ReceiptPath $directory 'reserved'))
-    Assert-Receipt $directory 'connect' 'unconfirmed' 'directory cannot masquerade as record'
+    if ('connect' -cin $readControls) {
+        $directory = New-FixtureDirectory
+        $null = [IO.Directory]::CreateDirectory((Get-ReceiptPath $directory 'reserved'))
+        Assert-Receipt $directory 'connect' 'unconfirmed' 'directory cannot masquerade as record'
+    }
+    Assert-True ($script:CanonicalCases -eq (11 * $readControls.Count) -and
+        $script:MatrixCases -eq (2048 * $readControls.Count) -and
+        $script:EvidenceControls -eq $readControls.Count) 'read batch has exact canonical, matrix and evidence coverage'
     Write-Output 'PASS corrupt/noncanonical/schema/identity/action/ACL/inaccessible evidence fails closed without repair'
-    Write-LedgerPhase 'evidence-guards' $controls.Count
+    Write-LedgerPhase 'evidence-guards' $script:EvidenceControls
     }
 
     if ($Batch -cin @('all','publication')) {
@@ -533,7 +548,7 @@ try {
         '; readCombinations=' + $script:MatrixCases + '; publicationCases=' + $script:PublicationCases +
         '; protectedAcceptance=false')
     $coverage = [ordered]@{version=1;batch=$Batch;canonicalCases=$script:CanonicalCases;
-        readCombinations=$script:MatrixCases;evidenceControls=$script:EvidenceControls;
+        readCombinations=$script:MatrixCases;readControls=@($readControls);evidenceControls=$script:EvidenceControls;
         publicationCases=$script:PublicationCases;damagedHistoryCases=$script:DamagedHistoryCases;
         selectedSidGuard=$script:SelectedSidGuard;inputGuards=$script:InputGuards;executionGuards=$script:ExecutionGuards;
         assertions=$script:Assertions;protectedAcceptance=$false}

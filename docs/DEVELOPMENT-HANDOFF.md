@@ -2,6 +2,58 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Permission Retry, Real Offline Recovery And Bounded CI Phases (Checkpoint91)
+
+Main9f05514a23b84db57cf52a14a7569a340b771db5 was pushed and observed in IAB.
+Its Native54 Windows128805391807 genuinely timed out the monolithic ledger read
+child at4864/6144, unlike Native52's passing ledger. Three disjoint2048-row read
+children now retain every6144 combination,33 canonical cases,3 evidence groups,
+363 publication and66 damaged-history cases. Aggregate guards reject missing,
+duplicate, overlapping or inflated coverage. Child60s/test65s/output1MiB bounds
+and the independent oracle remain. Worker42/42 passed62.90s; parent independently
+passed42/42 in57.386s. No production ledger helper changed.
+
+Earlier Native53 Windows128805125802 actually cleared the Job fixture, native
+release53/53, setup ZIP39/39, portable Node and registry23/23. Its subsequent
+combined bootstrap step hit the8-minute action limit:168 tests reported164pass,
+one cancelled, three skipped and zero assertion failures. The next tests were
+not accepted. The seven original files are now in three disjoint bounded phases,
+with unchanged per-test limits and8min per phase. New source coverage guards
+were RED before the split, then24/24 passed including both path triggers.
+The full raw log exceeded the browser's string-return limit; the separately read
+65000-character tail retains the actual cancellation and action-timeout evidence.
+
+Independent review found a user-visible setup dead end after initial permission
+denial. The page now permits a new trusted Copy gesture only when denial was
+definitively before BEGIN/clipboard. Consent remains document-local; permission
+grant alone cannot resume. Unknown BEGIN, clipboard or Connect attempts remain
+latched. Worker clean RED had five expected recovery failures, then70/70 passed;
+parent independently reran70/70, zero failures/skips. Production change is only
+the setup-page client lifecycle; installed runtime/permissions were not changed.
+
+Actual local offline Chromium tests exposed stale fixture dependency lists and
+missing owner binding in the synthetic-core startup fixture. Those fixtures now
+include the background's new modules and pass actual binding, browserOwnerId and
+expectedOrigin. Three startup cases passed: Pause, saved-running browser restart,
+and unfinished-Pause no-replay. Native-port loss recovered in30.303s. Two admin
+cases also pass: existing legacy Pause/reconciliation assertions and the real
+installation binder refusing unknown support without legacy downgrade or a fake
+Pause record. That second case still isolates device wake/private preset; it is
+not entirely uninstrumented production-background acceptance. Final combined
+parent run5/5 passed40.089s; independent source review found no actionable defect.
+Only randomized scratch Chromium registrations/profiles were used and removed.
+These fake-core/offline tests do not prove final hosted administrator reopen.
+
+Parent complete root npm test exited0; retained summaries include background,
+Devices65, Setup66, Dot48+12, import16, UI34, MV3 integration13 and ProseMirror5.
+Parent packaging regression also passed34/34 in46.099s, with no publication.
+Log is local checkpoint91-root-npm-test.log. A newly identified Unicode profile
+path limitation remains OPEN; the bounded design is documented in
+docs/plans/2026-11-08-unicode-current-account-paths.md. It is not fixed by the
+permission-retry or test changes. r8 remains paused, with settled ordinary/Dot
+proofs retained and no Connect/probe replay. Final artifacts, whole-browser
+hosted recovery, new GitHub Release and Store review submission are still open.
+
 ### Actual CI52 PID Publication Race Reproduced (Checkpoint90)
 
 Pushed main b0aaf969530159c5d3d17007328da0a8eac3861d ran as Native52,

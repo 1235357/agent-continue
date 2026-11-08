@@ -1,5 +1,37 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Setup Retry And Offline Browser Recovery (Checkpoint91)
+
+- Native53 Windows128805125802 actually cleared Job, native-release53/53,
+  setup ZIP39/39, portable Node and registry23/23. The combined bootstrap step
+  later hit its8min action limit:164pass/one-cancelled/three-skipped, not a full
+  pass and not an assertion failure. Native54 Windows128805391807 separately
+  timed out the old monolithic6144-row ledger child at4864 rows. Official tails
+  are preserved locally. These are two distinct outcomes, not VPN failures.
+- Three disjoint ledger read batches now retain all6144 rows/33canonical/3evidence
+  groups plus363publication/66damaged cases. Same60s child/65s test/1MiB limits.
+  Worker42/42 passed; parent42/42 independently passed57.386s. Bootstrap workflow
+  likewise retains all seven files once across three bounded phases. Coverage
+  regressions were RED, then workflow24/24 passed; new hosted proof is pending.
+- Pre-BEGIN permission denial now allows an explicit trusted setup Copy retry.
+  No automatic grant-triggered resume and no retry of unknown BEGIN, clipboard
+  or Connect. Five initial recovery regressions were RED; worker and parent each
+  passed70/70. Root npm test also exited0, including actual MV3 fixtures and
+  synthetic UI/adapter suites. Parent packaging34/34 passed46.099s. No installed
+  browser/runtime was updated here.
+- Parent offline Chromium5/5 passed40.089s: three current-account startup and
+  two admin routing/refusal cases. Lost native port recovered30.303s. Real OS
+  browser/process/IPC behavior uses fake tunnel health/core, random scratch
+  registrations and profiles. The admin negative case retains the real
+  installation binder within an otherwise isolated background fixture; its
+  legacy companion explicitly isolates that unrelated binder. No production
+  validator, registration or permission was relaxed. These are not hosted
+  final-artifact administrator whole-browser acceptance.
+- Unicode Windows user-profile paths remain unsupported by the current path
+  rules; the bounded repair plan is recorded, not implemented. r8 stays paused.
+  Existing ordinary/Dot proof is not replayed. Release/Store submission and
+  final hosted installation/reopen gates remain open.
+
 ## Actual PID Publication Race, Not Ledger Timeout (Checkpoint90)
 
 - Native52 Windows128802233349 on b0aaf969 passed ledger38/38; its47.30s read
