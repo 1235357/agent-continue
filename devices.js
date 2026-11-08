@@ -514,6 +514,8 @@ const sameAdminControl = (a, b) => Boolean(a && b && a.bundleSha256 === b.bundle
   a.operationId === b.operationId && a.control === b.control);
 const sameAdminSupport = (a, b) => Boolean(a && b && ['control', 'state', 'bundleSha256', 'target', 'ownerState', 'eligible'].every(key => a[key] === b[key]));
 const unsettledAdminControl = record => !adminControlTerminal.has(record.state);
+const recoverableAdminControl = (record, kind) => unsettledAdminControl(record) ||
+  kind === 'reconcile' && record.control === 'revoke' && record.state === 'revocation-recorded';
 
 function closeAdministratorControlReview() {
   adminControlReview = undefined;
@@ -568,10 +570,10 @@ function canRequestAdministratorControl(control, state = controller.getState()) 
     !adminControlRecords.some(unsettledAdminControl);
 }
 
-function canRecoverAdministratorControl(record = selectedAdminControl(), state = controller.getState()) {
+function canRecoverAdministratorControl(record = selectedAdminControl(), state = controller.getState(), kind = 'reconcile') {
   const support = adminControlSupports[record?.control];
   return Boolean(adminPauseRoute() && administratorPermitted(state) && adminControlJournalReady && record &&
-    unsettledAdminControl(record) && support?.state === 'supported' && support.bundleSha256 === record.bundleSha256 &&
+    recoverableAdminControl(record, kind) && support?.state === 'supported' && support.bundleSha256 === record.bundleSha256 &&
     !adminControlWrites.has('recovery') && !adminControlWrites.has(record.control));
 }
 
@@ -581,7 +583,7 @@ function administratorControlReviewCurrent(review) {
   if (review.kind !== 'revoke' && review.journalRevision !== adminControlJournalRevision) return false;
   if (review.record) {
     const selected = selectedAdminControl();
-    return sameAdminControl(review.record, selected) && review.record.target === selected.target && unsettledAdminControl(selected);
+    return sameAdminControl(review.record, selected) && review.record.target === selected.target && recoverableAdminControl(selected, review.kind);
   }
   if (!review.support.eligible) return false;
   return review.kind === 'revoke' ? !adminControlRecords.some(record => record.control === 'revoke' &&
@@ -652,7 +654,9 @@ function renderAdministratorControls(state) {
   }
   $('administrator-control-journal-check').disabled = !adminPauseRoute();
   $('administrator-control-receipt-check').disabled = !allowed || !administratorControlReference() || adminControlReadBusy;
-  for (const id of ['administrator-control-recover', 'administrator-control-fence']) $(id).disabled = !canRecoverAdministratorControl(record, state);
+  for (const [id, kind] of [['administrator-control-recover', 'reconcile'], ['administrator-control-fence', 'fence']]) {
+    $(id).disabled = !canRecoverAdministratorControl(record, state, kind);
+  }
   const note = !adminControlJournalReady ? '管理员操作记录不可用或无效。新启动和恢复操作保持禁用。' :
     adminControlWrites.size ? '正在等待 Windows 授权或本机接收。尚未核实结果。' : adminControlNote ??
       (adminControlStartupUnknown ? '管理员启动结果尚未确认。请读取同一操作回执，不要重新提交。' :
@@ -660,7 +664,7 @@ function renderAdministratorControls(state) {
           Object.keys(adminControlSupports).length ? '操作支持已核对；不代表当前就绪或对话授权。' : '尚未核对原生操作支持。');
   text('administrator-control-feedback', t(note));
   if (adminControlReview && (!administratorControlReviewCurrent(adminControlReview) ||
-      (adminControlReview.record ? !sameAdminControl(adminControlReview.record, record) || !canRecoverAdministratorControl(record, state) :
+      (adminControlReview.record ? !sameAdminControl(adminControlReview.record, record) || !canRecoverAdministratorControl(record, state, adminControlReview.kind) :
         !canRequestAdministratorControl(adminControlReview.kind, state)))) closeAdministratorControlReview();
   if (adminControlReview) {
     text('administrator-control-title', t(adminControlActionKeys[adminControlReview.kind]));
@@ -800,7 +804,7 @@ async function prepareAdministratorConnection() {
 function reviewAdministratorControl(kind) {
   const recovery = kind === 'fence' || kind === 'reconcile';
   const record = recovery ? selectedAdminControl() : undefined;
-  if (recovery ? !canRecoverAdministratorControl(record) : !canRequestAdministratorControl(kind)) return;
+  if (recovery ? !canRecoverAdministratorControl(record, controller.getState(), kind) : !canRequestAdministratorControl(kind)) return;
   if (kind === 'revoke' && adminGuidedBusy) {
     adminGuidedEpoch++;
     adminGuidedNote = '连接准备已取消，保留你的撤销选择。';
@@ -823,7 +827,7 @@ async function confirmAdministratorControl() {
   const review = adminControlReview;
   if (!$('administrator-control-dialog').open || !review) return;
   closeAdministratorControlReview();
-  if (review.record ? !canRecoverAdministratorControl(review.record) : !canRequestAdministratorControl(review.kind)) return;
+  if (review.record ? !canRecoverAdministratorControl(review.record, controller.getState(), review.kind) : !canRequestAdministratorControl(review.kind)) return;
   const revision = adminRevision;
   const busyKey = review.record ? 'recovery' : review.kind;
   const previous = new Set(adminControlRecords.map(adminControlKey));

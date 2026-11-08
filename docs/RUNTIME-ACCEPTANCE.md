@@ -1,5 +1,55 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Actual r16 Revoke Completion And Verified Delivery Build (Checkpoint75)
+
+- Existing IAB installation updated from the r16 public extension ZIP:
+  SHA25601302525ee49ad4198206ac2d87b97ca256073cb1e59940e3961161a6444c24d;
+  paired Store ZIP2e90dc85aeb1191f07549c16ccf5dc2b0cf102b77f2f209951114daa83a9ce19.
+  All247 installed files matched. No storage, permission, registration, production
+  connection or external Chrome original-task changes were made.
+- Exactly one explicit same-ID reconcile of Revoke
+  ee5180ab1aa742b5a30eb02d584ef528 completed. Independent protected observation
+  returned stopped; actual GUI Read this operation receipt also displayed
+  verified shutdown and disabled recovery/fencing. Proof:
+  .artifacts/ordinary-chat-acceptance-20261108/r16-revoke-stopped.png.
+  The installation remains revoked; no new Connect or authorization was issued.
+- Independent review found and fixed the final dispatch/journal race and the
+  native precheck deadline gap. Parent npm run test:admin-controls401/401 passed;
+  independent130/130 and two shared-budget probes passed. Full npm test passed
+  before the last deadline adjustment;70 packaging/site/release tests passed.
+  Caller receipt admission is explicitly separate from the native-call budget.
+- Actual Verify Windows Delivery7 run42476011608 on bbe383b succeeded6m53s,
+  with two reported artifacts. Extension checks92 run42475982637 succeeded.
+  These are build/test receipts, not an installed hosted browser lifecycle or
+  publication. Local combined setup closure and Plan passed with unchanged r8
+  runtime7e174a. No reinstall was performed.
+- Store draft3.0.0 remains r14 and unsubmitted; published2.1.0 is unchanged.
+  Current-account hosted operation, whole-browser saved-running/Pause/Revoke,
+  final Dot write/owned-process proof and publication receipts remain open.
+  Do not repeat settled Revoke; test reauthorization needs its separate consent.
+
+## Recorded Revoke Recovery In Progress (Checkpoint74)
+
+- Actual IAB r14 Revoke ID ee5180ab1aa742b5a30eb02d584ef528: protected
+  revocation-recorded and ownerState revoked. Previous broker98000/root61188
+  absent. Manual GUI read returned recorded, NOT stopped. Screenshot:
+  .artifacts/ordinary-chat-acceptance-20261108/r14-revoke-recorded-recovery-disabled.png.
+- Identified and patched a frontend/coordinator mismatch: recorded Revoke was
+  terminal for freeing a slot and also blocked its permitted same-ID recovery.
+  Only active-journal Revoke reconciliation is newly admitted; no startup,
+  control replay, archived recovery or terminal Fence is added. Four red cases;
+  parent scoped synthetic regression376/376 and full npm test passed. Live
+  refinement still pending.
+- Offline ordinary-token runtime rebuild:24328 files,107068948 bytes, exact
+  installed r8 SHA2567e174a6571003b45ceca557fb01dc4a62f3d1324cb33f012cb273c37154c7fb2.
+  Plan passed; no state, enrollment, registration or tunnel mutation.
+- Extension CI91 passed. Native CI37 passed the previously blocked recovery
+  steps but later timed out in Windows offline-payload tests. Their fixture-only
+  bootstrap/diagnostics change passed parent26/26 in29.48s, zero skips; this is
+  not a demonstrated hosted cure. All15s child/20s case budgets are retained.
+- Store draft3.0.0 r14 remains unsubmitted; public2.1.0 unchanged. Current-account,
+  browser-reopen, final-artifact and release gates remain separate and open.
+
 ## Dot Token Result And Hosted Alias Correction (Checkpoint73)
 
 - Dot's new, independent read-only token command returned PID87952 and marker

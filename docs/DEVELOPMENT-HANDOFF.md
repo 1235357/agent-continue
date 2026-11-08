@@ -2,6 +2,74 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Verified Recorded Revoke Completion And Delivery Build (Checkpoint75)
+
+The installed IAB candidate was updated to r16, with247/247 package members
+hash-verified at the existing observer-reattachment installation path. Browser
+storage, permissions and native registration were not changed. The temporary
+scheduler still shows one confirmed send and is paused at its one-send limit.
+
+The original Revoke ee5180ab1aa742b5a30eb02d584ef528 was reconciled exactly once
+through the actual Devices UI. Independent protected observation and the manual
+GUI receipt read now both report stopped. The Recover/Fence buttons are disabled
+after that terminal readback. This supersedes checkpoint74's pending shutdown
+evidence; it does not reauthorize the revoked installation or reconnect it.
+Proof: .artifacts/ordinary-chat-acceptance-20261108/r16-revoke-stopped.png.
+
+Independent review caught a stale-journal dispatch race and a pre-existing
+native-call deadline gap. The final guard checks the active record in the short
+journal queue but releases the queue before native completion. The same deadline
+now covers native precheck, dispatch, response and postcheck; late completion
+cannot dispatch or publish a result. Earlier caller admission remains outside
+that native-call budget. Parent administrator-control regression401/401 passed;
+independent worker130/130 and two shared-budget probes passed. Full npm test
+passed before this final deadline adjustment;70 packaging/site/release tests
+also passed. These local tests do not replace live lifecycle acceptance.
+
+Formal Verify Windows Delivery7 run42476011608 on bbe383b succeeded in6m53s;
+Extension checks92 run42475982637 also succeeded. The delivery workflow verifies
+the six combined sidecars and ordinary-token build/smoke receipts, not hosted
+installation or publication. The local combined setup build passed its closure
+and Plan checks, using the unchanged7e174a runtime. It did not install anything.
+
+The personal Store remains authenticated. Draft3.0.0 still contains r14;
+published2.1.0 is unchanged. No3.0.0 tag, Release or review submission exists.
+Remaining live gates are current-account hosted operation, whole-browser
+saved-running/Pause/Revoke restoration and final Dot write/owned-process proof,
+followed by matching final artifacts and actual publication/submission receipts.
+Reauthorization of the now-revoked test installation was requested separately;
+do not infer it from the old consent or replay the settled Revoke.
+
+### Recorded Revoke Recovery And Reproducible Runtime (Checkpoint74)
+
+Actual IAB r14 Revoke operation ee5180ab1aa742b5a30eb02d584ef528 reached
+protected revocation-recorded, with ownerState revoked and the previous owned
+broker98000/root61188 absent. Manual GUI receipt read returned the same recorded
+state. This is denial evidence, not a stopped receipt. The GUI incorrectly
+disabled Recover because it shared the startup-slot terminal classification.
+The coordinator and UI now allow explicit same-ID reconciliation only for an
+active-journal recorded Revoke. Fence, archived references, other terminal
+states, permission checks, exact identity and startup denial remain unchanged.
+The four new red cases failed before the fix; parent scoped regression376/376
+and full npm test passed. Independent review and live reload/reconciliation are
+being checked; no stopped or completed-revocation claim is made yet.
+
+A new ordinary-token offline runtime build completed with24328 members and
+107068948 bytes. SHA2567e174a6571003b45ceca557fb01dc4a62f3d1324cb33f012cb273c37154c7fb2
+exactly matches the installed r8 bundle. No installation, registration, new
+authorization or tunnel was performed by this rebuild. Output lives in
+.artifacts/windows-release-verification-20261108-c74/.
+
+Extension CI91 passed on c0cc4ad. Native CI37 run42474404114 passed its recovery,
+Verify and Uninstall steps, then Windows offline-payload fixtures timed out.
+The fixture-only bootstrap now explicitly imports complete modules, restores
+the original autoload preference, emits phase diagnostics and remains bounded
+by the same15s child/20s case deadlines. Parent26/26 passed in29.48s, zero skips;
+the hosted cause/cure remains unverified. No product timeout or gate was relaxed.
+Store remains draft3.0.0 r14, published2.1.0 unchanged; no3.0.0 Release or review
+submission. The personal Store login is already authenticated; passwords were
+not accessed. Preserve the original Revoke ID and do not repeat it.
+
 ### Dot Read-Only Administrator Proof And Hosted Path Alias (Checkpoint73)
 
 The independent, read-only Dot token check returned PID87952 and JSON marker

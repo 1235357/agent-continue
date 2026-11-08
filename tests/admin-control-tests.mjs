@@ -774,6 +774,207 @@ test('revocation receipt may refine to independently verified stopped without be
   assert.equal(f.local[ADMIN_CONTROL_JOURNAL].operations[0].state, 'stopped');
 });
 
+test('recorded Revoke reconciles only its same active ID without replay and requires stopped readback', async t => {
+  const previous = record({ control: 'revoke', target: null, state: 'revocation-recorded' });
+  let stopped = false;
+  const f = fixture(t, { local: { [ADMIN_CONTROL_JOURNAL]: { version: 1, operations: [previous] } },
+    native: r => r.action === 'control-status' ? status(r, stopped ? 'stopped' : 'revocation-recorded') :
+      r.action === 'control-support' ? support(r.control, { ownerState: 'revoked', eligible: false, target: null }) : submission(r) });
+  for (const request of [query(previous, ADMIN_CONTROL_FENCE),
+    { ...query(previous, ADMIN_CONTROL_RECONCILE), bundleSha256: 'e'.repeat(64) },
+    { ...query(previous, ADMIN_CONTROL_RECONCILE), operationId: 'f'.repeat(32) },
+    { ...query(previous, ADMIN_CONTROL_RECONCILE), control: 'connect' },
+    { ...query(previous, ADMIN_CONTROL_RECONCILE), target }]) assert.equal(await f.send(request), null);
+  assert.deepEqual(f.calls, []);
+  assert.deepEqual(await f.send(query(previous, ADMIN_CONTROL_RECONCILE)), submission(previous));
+  assert.deepEqual(f.calls.map(({ host, version, action, id, ...fields }) => ({ action, ...fields })),
+    [{ action: 'control-reconcile', ...identity(previous) }]);
+  assert.deepEqual(f.local[ADMIN_CONTROL_JOURNAL].operations, [previous], 'submission is not stop evidence');
+  assert.deepEqual(f.writes, []);
+  assert.equal(await f.send(connect), null, 'revoked support cannot admit a new Connect');
+  await f.send(query(previous));
+  assert.equal(f.local[ADMIN_CONTROL_JOURNAL].operations[0].state, 'revocation-recorded');
+  stopped = true;
+  await f.send(query(previous));
+  assert.equal(f.local[ADMIN_CONTROL_JOURNAL].operations[0].state, 'stopped');
+  assert.equal(f.local[ADMIN_CONTROL_JOURNAL].operations[0].operationId, previous.operationId);
+  assert.equal(await f.send(query(previous, ADMIN_CONTROL_RECONCILE)), null);
+  assert.equal(await f.send(query(previous, ADMIN_CONTROL_FENCE)), null);
+  assert.equal(f.calls.filter(r => r.action === 'control-reconcile').length, 1);
+  assert.ok(f.calls.every(r => ['control-support', 'control-status', 'control-reconcile'].includes(r.action)));
+});
+
+test('recorded Revoke reconciliation stays single flight', async t => {
+  const previous = record({ control: 'revoke', target: null, state: 'revocation-recorded' });
+  const hold = Promise.withResolvers();
+  const f = fixture(t, { local: { [ADMIN_CONTROL_JOURNAL]: { version: 1, operations: [previous] } },
+    native: () => hold.promise });
+  const pending = f.send(query(previous, ADMIN_CONTROL_RECONCILE));
+  await turn();
+  assert.equal(f.calls.length, 1);
+  assert.equal(await f.send(query(previous, ADMIN_CONTROL_RECONCILE)), null);
+  assert.equal(await f.send(query(previous, ADMIN_CONTROL_FENCE)), null);
+  hold.resolve(submission(previous));
+  assert.deepEqual(await pending, submission(previous));
+  assert.deepEqual(f.calls.map(r => r.action), ['control-reconcile']);
+  assert.deepEqual(f.writes, []);
+});
+
+for (const precheck of ['platform', 'permission']) {
+  test(`recorded Revoke dispatch rechecks stopped persisted during the final ${precheck} precheck`, async t => {
+    const previous = record({ control: 'revoke', target: null, state: 'revocation-recorded' });
+    const hold = Promise.withResolvers();
+    const f = fixture(t, { local: { [ADMIN_CONTROL_JOURNAL]: { version: 1, operations: [previous] } },
+      native: r => r.action === 'control-status' ? status(r, 'stopped') : submission(r) });
+    await turn();
+    let checks = 0;
+    const answer = precheck === 'platform' ? { os: 'win' } : true;
+    const check = async () => ++checks === 2 ? hold.promise : answer;
+    if (precheck === 'platform') f.api.runtime.getPlatformInfo = check;
+    else f.api.permissions.contains = check;
+    t.after(() => hold.resolve(answer));
+    const pending = f.send(query(previous, ADMIN_CONTROL_RECONCILE));
+    await turn();
+    assert.equal(checks, 2, 'the final native precheck is held before transport');
+    assert.deepEqual(f.calls, []);
+    assert.deepEqual(await f.send(query(previous)), status(previous, 'stopped'));
+    assert.equal(f.local[ADMIN_CONTROL_JOURNAL].operations[0].state, 'stopped');
+    assert.equal(f.writes.at(-1)[ADMIN_CONTROL_JOURNAL].operations[0].state, 'stopped');
+    hold.resolve(answer);
+    assert.equal(await pending, null);
+    assert.deepEqual(f.calls.map(r => r.action), ['control-status']);
+  });
+}
+
+for (const phase of ['pre-dispatch', 'post-response']) {
+  for (const check of ['platform', 'permission']) {
+    test(`native deadline bounds held ${phase} ${check} checks and ignores their 31-second release`, async t => {
+      t.mock.timers.enable({ apis: ['setTimeout'] });
+      const previous = record({ control: 'revoke', target: null, state: 'revocation-recorded' });
+      const hold = Promise.withResolvers();
+      const f = fixture(t, { local: { [ADMIN_CONTROL_JOURNAL]: { version: 1, operations: [previous] } },
+        native: r => r.action === 'control-status' ? status(r, 'revocation-recorded') : submission(r) });
+      await turn();
+      let checks = 0, settled = false;
+      const answer = check === 'platform' ? { os: 'win' } : true;
+      const heldAt = phase === 'pre-dispatch' ? 2 : 3;
+      const verify = async () => ++checks === heldAt ? hold.promise : answer;
+      if (check === 'platform') f.api.runtime.getPlatformInfo = verify;
+      else f.api.permissions.contains = verify;
+      t.after(() => hold.resolve(answer));
+      const pending = f.send(query(previous, ADMIN_CONTROL_RECONCILE)).then(value => { settled = true; return value; });
+      await turn();
+      assert.equal(checks, heldAt, 'initial receipt admission completed before the held native check');
+      const permit = f.controller.captureStartupPermit();
+      f.controller.cancelPendingStartup();
+      assert.equal(permit(), false, 'Pause denial stays synchronous while the native check is stalled');
+      assert.deepEqual(await f.send(query(previous)), status(previous, 'revocation-recorded'), 'the journal queue stays available');
+      t.mock.timers.tick(30000);
+      await turn();
+      const settledAtDeadline = settled;
+      t.mock.timers.tick(1000);
+      hold.resolve(answer);
+      assert.equal(await pending, null);
+      await turn();
+      assert.equal(settledAtDeadline, true, 'the native call must finish before the held check is released');
+      assert.equal(f.calls.filter(r => r.action === 'control-reconcile').length, phase === 'pre-dispatch' ? 0 : 1);
+      assert.ok(f.calls.every(r => ['control-status', 'control-reconcile'].includes(r.action)));
+      assert.equal(f.local[ADMIN_CONTROL_JOURNAL].operations[0].state, 'revocation-recorded');
+    });
+  }
+}
+
+test('recorded Revoke dispatch waits for an in-flight worker status commit, not its old journal snapshot', async t => {
+  const previous = record({ control: 'revoke', target: null, state: 'revocation-recorded' });
+  const hold = Promise.withResolvers();
+  const f = fixture(t, { local: { [ADMIN_CONTROL_JOURNAL]: { version: 1, operations: [previous] } },
+    native: r => r.action === 'control-status' ? status(r, 'stopped') : submission(r) });
+  await turn();
+  const set = f.api.storage.local.set;
+  let committing = false;
+  f.api.storage.local.set = async values => { committing = true; await hold.promise; return set(values); };
+  t.after(() => hold.resolve());
+  const reading = f.send(query(previous));
+  await turn();
+  assert.equal(committing, true);
+  const pending = f.send(query(previous, ADMIN_CONTROL_RECONCILE));
+  await turn();
+  assert.deepEqual(f.calls.map(r => r.action), ['control-status'], 'no reconcile may overtake the status commit');
+  hold.resolve();
+  await reading;
+  assert.equal(await pending, null);
+  assert.equal(f.local[ADMIN_CONTROL_JOURNAL].operations[0].state, 'stopped');
+});
+
+for (const cancel of ['timeout', 'permission', 'dispose']) {
+  test(`recorded Revoke cancels a delayed dispatch guard after ${cancel}`, async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const previous = record({ control: 'revoke', target: null, state: 'revocation-recorded' });
+    const hold = Promise.withResolvers();
+    const f = fixture(t, { local: { [ADMIN_CONTROL_JOURNAL]: { version: 1, operations: [previous] } } });
+    await turn();
+    const get = f.api.storage.local.get;
+    let reads = 0;
+    f.api.storage.local.get = async key => {
+      const value = await get(key);
+      if (key === ADMIN_CONTROL_JOURNAL && ++reads === 2) await hold.promise;
+      return value;
+    };
+    t.after(() => hold.resolve());
+    const pending = f.send(query(previous, ADMIN_CONTROL_RECONCILE));
+    await turn();
+    assert.equal(reads, 2, 'the dispatch guard revalidates the active journal');
+    assert.deepEqual(f.calls, []);
+    if (cancel === 'timeout') {
+      t.mock.timers.tick(30000);
+      assert.equal(await pending, null);
+      assert.deepEqual(await f.send(query(previous)), status(previous), 'timeout releases the guard queue before its late read');
+    } else if (cancel === 'permission') f.revoke();
+    else f.controller.dispose();
+    hold.resolve();
+    assert.equal(await pending, null);
+    await turn();
+    assert.equal(f.calls.some(r => r.action === 'control-reconcile'), false, 'a late guard cannot open UAC');
+  });
+}
+
+test('recorded Revoke dispatch releases the journal queue before awaiting native completion', async t => {
+  const previous = record({ control: 'revoke', target: null, state: 'revocation-recorded' });
+  const hold = Promise.withResolvers();
+  const f = fixture(t, { local: { [ADMIN_CONTROL_JOURNAL]: { version: 1, operations: [previous] } },
+    native: r => r.action === 'control-reconcile' ? hold.promise : r.action === 'control-status' ? status(r, 'stopped') : submission(r) });
+  t.after(() => hold.resolve(submission(previous)));
+  const pending = f.send(query(previous, ADMIN_CONTROL_RECONCILE));
+  await turn();
+  assert.deepEqual(f.calls.map(r => r.action), ['control-reconcile']);
+  const permit = f.controller.captureStartupPermit();
+  f.controller.cancelPendingStartup();
+  assert.equal(permit(), false, 'Pause denial does not wait for reconciliation');
+  assert.deepEqual(await f.send(query(previous)), status(previous, 'stopped'));
+  const revoked = await f.send({ type: ADMIN_CONTROL, bundleSha256: digest, control: 'revoke' });
+  assert.equal(revoked.control, 'revoke');
+  assert.notEqual(revoked.operationId, previous.operationId);
+  assert.deepEqual(f.calls.map(r => r.action), ['control-reconcile', 'control-status', 'control']);
+  assert.equal(f.calls.at(-1).operationId, revoked.operationId, 'only the new explicit Revoke is dispatched');
+  hold.resolve(submission(previous));
+  assert.deepEqual(await pending, submission(previous));
+});
+
+test('the recorded Revoke exception keeps other terminal and archived operations read-only', async t => {
+  for (const previous of [record({ state: 'launch-requested' }),
+    record({ control: 'revoke', target: null, state: 'stopped' }), record({ state: 'fenced' })]) {
+    const f = fixture(t, { local: { [ADMIN_CONTROL_JOURNAL]: { version: 1, operations: [previous] } } });
+    for (const type of [ADMIN_CONTROL_RECONCILE, ADMIN_CONTROL_FENCE]) assert.equal(await f.send(query(previous, type)), null);
+    assert.deepEqual(f.calls, []);
+  }
+  const previous = record({ control: 'revoke', target: null, state: 'revocation-recorded' });
+  const key = 'windowsAdministratorControlArchiveV1:' + digest + ':' + operationId;
+  const f = fixture(t, { local: { [ADMIN_CONTROL_JOURNAL]: { version: 1, operations: [] }, [key]: previous } });
+  for (const type of [ADMIN_CONTROL_RECONCILE, ADMIN_CONTROL_FENCE]) assert.equal(await f.send(query(previous, type)), null);
+  assert.deepEqual(f.calls, []);
+  assert.deepEqual(f.writes, []);
+});
+
 test('explicit recovery/fence only address existing matching journal IDs and never replay control', async t => {
   const previous = record();
   const f = fixture(t, { local: { [ADMIN_CONTROL_JOURNAL]: { version: 1, operations: [previous] } } });

@@ -27,6 +27,8 @@ const hex = (v, n) => typeof v === 'string' && v.length === n && /^[a-f0-9]+$/.t
 const validTarget = v => typeof v === 'string' && [37, 65].includes(v.length) &&
   /^[a-f0-9]{32}:(?:[a-f0-9]{32}|idle)$/.test(v);
 const same = (a, b) => a.bundleSha256 === b.bundleSha256 && a.operationId === b.operationId && a.control === b.control;
+const recoverable = (record, action) => record && (!terminal.includes(record.state) ||
+  action === 'control-reconcile' && record.control === 'revoke' && record.state === 'revocation-recorded');
 const validIdentity = v => hex(v.bundleSha256, 64) && hex(v.operationId, 32) && kinds.includes(v.control);
 const validState = (state, control) => states.includes(state) &&
   (control === 'revoke' ? !['intent-saved', 'launch-requested', 'launch-unconfirmed', 'recovered-paused'].includes(state) :
@@ -151,18 +153,22 @@ export function bindAdministratorControls(api, { now = Date.now, timers = global
     journal.operations.splice(index, 1);
     return true;
   }
-  async function native(action, fields, started, admit = () => true) {
+  async function native(action, fields, started, admit = () => true, dispatchGuard = null) {
     const id = crypto.randomUUID();
-    let deadline;
+    let deadline, expired = false;
+    const current = () => !expired && !disposed && epoch === started && admit();
     try {
-      if (disposed || epoch !== started || !admit() || !await permitted(admit) || epoch !== started || !admit()) return null;
+      // One native-call budget covers both permission checks; caller receipt admission stays separate.
+      const timeout = new Promise(resolve => { deadline = timers.setTimeout(() => { expired = true; resolve(null); },
+        action === 'control' || action === 'control-fence' || action === 'control-reconcile' ? 30000 :
+          action === 'control-support' ? 25000 : 4500); deadline?.unref?.(); });
+      if (!current() || !await Promise.race([permitted(current), timeout]) || !current()) return null;
+      const send = () => runtime.sendNativeMessage(ADMIN_BROWSER_HOST, { version: 1, action, id, ...fields });
       const reply = await Promise.race([
-        runtime.sendNativeMessage(ADMIN_BROWSER_HOST, { version: 1, action, id, ...fields }),
-        new Promise(resolve => { deadline = timers.setTimeout(() => resolve(null),
-          action === 'control' || action === 'control-fence' || action === 'control-reconcile' ? 30000 :
-            action === 'control-support' ? 25000 : 4500); deadline?.unref?.(); }),
+        dispatchGuard ? dispatchGuard(send, current, timeout).then(sent => sent?.reply ?? null) : send(),
+        timeout,
       ]);
-      if (disposed || epoch !== started || !admit() || !await permitted(admit) || epoch !== started || !admit() ||
+      if (!current() || !await Promise.race([permitted(current), timeout]) || !current() ||
           reply?.version !== 1 || reply.action !== action || reply.id !== id) return null;
       const { version, action: ignoredAction, id: ignoredId, ...body } = reply;
       if (action === 'control-support') return administratorControlSupport(body, fields.control);
@@ -170,7 +176,7 @@ export function bindAdministratorControls(api, { now = Date.now, timers = global
       return exact(body, ['bundleSha256', 'operationId', 'control', 'outcome']) && validIdentity(body) &&
         same(body, fields) && outcomes.includes(body.outcome) ? body : null;
     } catch { return null; }
-    finally { timers.clearTimeout(deadline); }
+    finally { expired = true; timers.clearTimeout(deadline); }
   }
   function stopObservation() {
     timers.clearTimeout(timer); timer = undefined;
@@ -348,15 +354,25 @@ export function bindAdministratorControls(api, { now = Date.now, timers = global
     const started = epoch;
     if (!await permitted() || started !== epoch) return null;
     const journal = await readJournal();
-    const record = journal?.operations.find(r => same(r, message)) ?? (journal && await archivedRecord(message));
+    const activeRecord = journal?.operations.find(r => same(r, message));
+    const record = activeRecord ?? (journal && await archivedRecord(message));
     if (!record) return null;
     if (action === 'control-status') return observe(record, started);
-    if (terminal.includes(record.state) || submitted.has(record.operationId)) return null;
+    // Revocation releases the startup slot, but same-ID reconciliation may still verify stop.
+    if (!recoverable(activeRecord, action) || submitted.has(record.operationId)) return null;
     // Reconciliation and fencing are explicit requests for this ID, never control resubmission.
     const key = record.operationId;
     if (submitted.has(key)) return null;
     const fields = { bundleSha256: record.bundleSha256, operationId: record.operationId, control: record.control };
-    const work = native(action, fields, started);
+    const dispatchGuard = (send, current, timeout) => serial(async () => {
+      if (!current()) return null;
+      const latest = await Promise.race([readJournal(), timeout]);
+      const active = latest?.operations.find(r => same(r, fields));
+      if (!current() || !recoverable(active, action)) return null;
+      // Keep check and dispatch ordered with journal commits, but never await native work in this queue.
+      return { reply: send() };
+    });
+    const work = native(action, fields, started, () => true, dispatchGuard);
     submitted.set(key, work);
     try { return await work; }
     finally { submitted.delete(key); void observePending(); }

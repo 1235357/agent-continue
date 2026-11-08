@@ -655,6 +655,74 @@ test('Revoke needs no generation or ready owner, requires confirmation, and neve
   assert.doesNotMatch(f.get('administrator-status').textContent, /reported ready|stopped/i);
 });
 
+test('recorded Revoke permits only confirmed same-ID recovery with exact ineligible revoked support', async () => {
+  const saved = record({ control: 'revoke', target: null, state: 'revocation-recorded', outcome: 'requested' });
+  const f = await fixture({ journal: { version: 1, operations: [saved] } });
+  for (const control of controls) Object.assign(f.support[control], { ownerState: 'revoked', eligible: false, target: null });
+  await f.click('administrator-control-support-check');
+  assert.equal(f.get('administrator-control-recover').disabled, false);
+  for (const id of ['administrator-control-fence', 'administrator-connect', 'administrator-reconnect', 'administrator-revoke']) {
+    assert.equal(f.get(id).disabled, true);
+    await f.click(id);
+  }
+  assert.equal(f.get('administrator-control-dialog').open, false, 'disabled Fence cannot open a recovery dialog');
+  await f.click('administrator-control-recover');
+  assert.equal(f.get('administrator-control-dialog').open, true);
+  assert.match(f.get('administrator-control-review-reference').textContent, new RegExp(saved.operationId));
+  assert.equal(f.messages.some(message => message.type === contracts.ADMIN_CONTROL_RECONCILE), false);
+  f.handle(message => message.type === contracts.ADMIN_CONTROL_SUPPORT ? f.support[message.control] :
+    { bundleSha256: digest, operationId, control: 'revoke', outcome: 'requested' });
+  await f.click('administrator-control-confirm');
+  await f.click('administrator-control-confirm');
+  assert.deepEqual(f.messages.filter(message => message.type !== contracts.ADMIN_CONTROL_SUPPORT),
+    [{ type: contracts.ADMIN_CONTROL_RECONCILE, bundleSha256: digest, operationId, control: 'revoke' }]);
+  assert.match(f.get('administrator-control-state').textContent, /stopped processes are not verified/);
+  assert.equal(f.get('administrator-control-fence').disabled, true);
+  assert.equal(f.get('administrator-connect').disabled, true);
+  assert.deepEqual(f.writes, []);
+  f.handle(async message => {
+    assert.deepEqual(plain(message), { type: contracts.ADMIN_CONTROL_STATUS, bundleSha256: digest, operationId, control: 'revoke' });
+    await f.save({ version: 1, operations: [{ ...saved, state: 'stopped' }] });
+    return { bundleSha256: digest, operationId, control: 'revoke', state: 'stopped', progress: null };
+  });
+  await f.click('administrator-control-receipt-check');
+  assert.equal(f.get('administrator-control-recover').disabled, true);
+  assert.equal(f.get('administrator-control-fence').disabled, true);
+});
+
+test('recorded Revoke recovery requires supported exact-digest evidence', async () => {
+  for (const evidence of [null,
+    { control: 'revoke', state: 'unconfirmed', bundleSha256: null, target: null, ownerState: 'unobserved', eligible: false },
+    { control: 'revoke', state: 'supported', bundleSha256: otherDigest, target: null, ownerState: 'revoked', eligible: false }]) {
+    const f = await fixture({ journal: { version: 1, operations: [record({ control: 'revoke', target: null, state: 'revocation-recorded' })] } });
+    if (evidence?.state === 'supported') {
+      for (const control of controls) f.support[control].bundleSha256 = evidence.bundleSha256;
+    }
+    f.support.revoke = evidence;
+    await f.click('administrator-control-support-check');
+    assert.equal(f.get('administrator-control-recover').disabled, true);
+    await f.click('administrator-control-recover');
+    assert.equal(f.get('administrator-control-dialog').open, false);
+    assert.ok(f.messages.every(message => message.type === contracts.ADMIN_CONTROL_SUPPORT));
+  }
+});
+
+test('recorded Revoke recovery review is invalidated by stopped readback or revoked permission', async () => {
+  for (const change of ['stopped', 'permission']) {
+    const saved = record({ control: 'revoke', target: null, state: 'revocation-recorded' });
+    const f = await fixture({ journal: { version: 1, operations: [saved] } });
+    Object.assign(f.support.revoke, { ownerState: 'revoked', eligible: false });
+    await f.click('administrator-control-support-check');
+    await f.click('administrator-control-recover');
+    assert.equal(f.get('administrator-control-dialog').open, true);
+    if (change === 'stopped') await f.save({ version: 1, operations: [{ ...saved, state: 'stopped' }] });
+    else await f.removePermission();
+    assert.equal(f.get('administrator-control-dialog').open, false);
+    await f.click('administrator-control-confirm');
+    assert.ok(f.messages.every(message => message.type === contracts.ADMIN_CONTROL_SUPPORT));
+  }
+});
+
 for (const control of controls) {
   test(`cancelled ${control} without a protected terminal receipt remains selected and recoverable`, async () => {
     const saved = record({ control, target: control === 'revoke' ? null : target, outcome: 'cancelled', state: 'unconfirmed' });
