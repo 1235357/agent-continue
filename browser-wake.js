@@ -96,13 +96,19 @@ export async function controlPrepared(runtime, action, ownerId, operationId, sha
   return null;
 }
 
-export function bindBrowserWake(api, { host = BROWSER_WAKE_HOST, onResult = () => {} } = {}) {
+export function bindBrowserWake(api, { host = BROWSER_WAKE_HOST, onResult = () => {}, onPauseIntent = () => {} } = {}) {
   const { runtime, permissions, storage, alarms } = api;
   const session = storage?.session;
   if (api.extension?.inIncognitoContext || !session?.get || !session?.set ||
       !runtime?.connectNative || !runtime?.getPlatformInfo || !permissions?.contains) return null;
 
   let current, revision = 0, pending = Promise.resolve(), statuses = Promise.resolve();
+  let setupEpoch = 0, setupPrepared = null;
+  const cancelSetupPreparation = () => { setupEpoch++; setupPrepared = null; };
+  const captureSetupPermit = () => {
+    const transport = revision, startup = setupEpoch;
+    return () => transport === revision && startup === setupEpoch;
+  };
   const nativeChanged = change => change?.permissions?.includes('nativeMessaging');
   const enqueue = work => (pending = pending.then(work).catch(() => { onResult('unavailable'); return null; }));
   const live = (requested, allowed) => requested === revision && allowed();
@@ -311,7 +317,7 @@ export function bindBrowserWake(api, { host = BROWSER_WAKE_HOST, onResult = () =
       return attempt;
     });
   }
-  async function dispatch(message, attempt, allowed = () => true) {
+  async function dispatch(message, attempt, allowed = () => true, setup = null) {
     const requested = revision;
     if (!await permissions.contains(NATIVE_PERMISSION) || requested !== revision || current !== attempt ||
         !allowed() || !attempt?.acknowledged || attempt.command ||
@@ -327,7 +333,7 @@ export function bindBrowserWake(api, { host = BROWSER_WAKE_HOST, onResult = () =
       }, 14500);
       const post = () => {
         if (current !== attempt || requested !== revision || !allowed()) { end(attempt, true); return; }
-        try { attempt.port.postMessage(command.request); }
+        try { attempt.port.postMessage(setup ? { ...command.request, action: 'current-account-setup-connect', ...setup } : command.request); }
         catch { end(attempt, true); }
       };
       if (readOnly(command.request.action)) post();
@@ -355,6 +361,7 @@ export function bindBrowserWake(api, { host = BROWSER_WAKE_HOST, onResult = () =
   permissions.onRemoved?.addListener?.(change => {
     if (!nativeChanged(change)) return;
     revision++;
+    cancelSetupPreparation();
     if (current) end(current, true);
     enqueue(async () => {
       const name = (await session.get(RECOVERY))[RECOVERY];
@@ -365,12 +372,44 @@ export function bindBrowserWake(api, { host = BROWSER_WAKE_HOST, onResult = () =
   });
   wake();
   return Object.freeze({
+    captureSetupPermit,
+    cancelSetupPreparation,
+    async prepareSetupObserver(admit) {
+      if (typeof admit !== 'function') return false;
+      const permit = captureSetupPermit();
+      const allowed = () => { try { return permit() && admit() === true; } catch { return false; } };
+      return await bounded(async (requested, active, deadline) => {
+        const attempt = current ?? await wake('status', undefined, () => active() && allowed());
+        if (!attempt || !await Promise.race([attempt.ready, deadline]) || !active() || !allowed()) return false;
+        const records = await permittedOwner(attempt.id, requested, () => active() && allowed());
+        if (!records || current !== attempt || attempt.command || !attempt.acknowledged ||
+            !emptyFence(records.mutation) || !emptyFence(records.priorityPause) || !active() || !allowed()) return false;
+        setupPrepared = { attempt, permit };
+        return true;
+      }) === true;
+    },
+    async connectFromSetup(setup, operationId, admit) {
+      if (!exact(setup, ['setupId', 'scope', 'extensionId', 'bindingSha256']) || setup.scope !== 'current-account' ||
+          setup.extensionId !== runtime.id || typeof setup.setupId !== 'string' || setup.setupId.length !== 32 ||
+          !/^[a-f0-9]{32}$/.test(setup.setupId) || !validPreparedReference(operationId, setup.bindingSha256) ||
+          typeof admit !== 'function') return null;
+      const prepared = setupPrepared;
+      setupPrepared = null;
+      const allowed = () => { try { return prepared?.permit() === true && admit() === true; } catch { return false; } };
+      if (!prepared || prepared.attempt !== current || !allowed()) return null;
+      return dispatch({ ownerId: prepared.attempt.id, request: { version: 1, id: operationId, action: 'reconnect' } },
+        prepared.attempt, allowed, Object.freeze({ ...setup }));
+    },
     async handleMessage(message, sender) {
       if (!runtime.id || sender?.id !== runtime.id || sender.tab?.incognito === true ||
           (sender.frameId !== undefined && sender.frameId !== 0) ||
           typeof sender.url !== 'string' || sender.url.split('#', 1)[0] !== runtime.getURL(BROWSER_DEVICE_PAGE) ||
           !exact(message, ['type', 'ownerId', 'request']) || message.type !== BROWSER_DEVICE_MESSAGE ||
           !validRequest(message.request)) return null;
+      if (message.request.action === 'disconnect-and-pause' || message.request.action === 'prepared-revoke') {
+        cancelSetupPreparation();
+        try { onPauseIntent(); } catch { /* Preparation denial must not prevent the requested control. */ }
+      }
       if (message.request.action === 'disconnect-and-pause') return bounded(async (requested, allowed, deadline) => {
         const records = await enqueue(() => ownerRecords());
         return records ? attachControl(message, records, requested, allowed, deadline, true) : null;

@@ -12,22 +12,34 @@ import { bindAdministratorBrowser, ADMIN_BROWSER_MESSAGE, ADMIN_BROWSER_PAUSE, A
 import { bindAdministratorControls, ADMIN_CONTROL_MESSAGES } from './admin-control.js';
 import { bindInstallationPause } from './admin-installation-pause.js';
 import { bindSetupInstallation, SETUP_MESSAGES } from './setup-controller.js';
+import { bindCurrentAccountSetup } from './current-account-setup.js';
 
-const browserWake = bindBrowserWake(chrome);
+let setupInstallation, currentAccountSetup;
+const browserWake = bindBrowserWake(chrome, {
+  onPauseIntent: () => {
+    currentAccountSetup?.cancelPendingStartup();
+    setupInstallation?.cancelAll();
+  },
+});
 const administratorControls = bindAdministratorControls(chrome, {
   prepareObserver: admit => administratorBrowser?.prepareSetupObserver(admit) ?? false,
 });
 const installationPause = bindInstallationPause(chrome);
-let setupInstallation;
 const administratorBrowser = bindAdministratorBrowser(chrome, {
   installationPause,
   onPauseIntent: () => {
     administratorControls?.cancelPendingStartup();
+    currentAccountSetup?.cancelPendingStartup();
     setupInstallation?.cancelAll();
   },
 });
+currentAccountSetup = bindCurrentAccountSetup(chrome, {
+  wake: browserWake,
+  captureGlobalPermit: () => administratorControls?.captureStartupPermit() ?? (() => false),
+});
 setupInstallation = bindSetupInstallation(chrome, {
   controls: administratorControls,
+  currentAccount: currentAccountSetup,
   checkStopSupport: digest => installationPause?.available(digest) ?? false,
   prepareObserver: admit => administratorBrowser?.prepareSetupObserver(admit) ?? false,
 });

@@ -64,6 +64,7 @@ async function createFixture(options = {}) {
     installConsent: options.installConsent === true,
     deferConsentRead: options.deferConsentRead === true,
     setupMode: options.setupMode ?? 'missing',
+    currentSetupMode: options.currentSetupMode ?? 'automatic',
   };
   const context = await browser.newContext({
     viewport: options.viewport || { width: 1100, height: 820 }, locale: 'zh-CN',
@@ -91,7 +92,7 @@ async function createFixture(options = {}) {
       await route.abort();
     }
   });
-  await context.addInitScript(({ runtimeId, uiLanguage, granted, permissionFailure, nativeStatus, clipboardMode, installConsent, deferConsentRead, setupMode, fixtureOrigin }) => {
+  await context.addInitScript(({ runtimeId, uiLanguage, granted, permissionFailure, nativeStatus, clipboardMode, installConsent, deferConsentRead, setupMode, currentSetupMode, fixtureOrigin }) => {
     const clone = value => structuredClone(value);
     const mock = {
       data: { ...(uiLanguage ? { uiLanguage } : {}), ...(installConsent ? { installConsent } : {}), schedulerPrompt: 'SYNTHETIC_PRIVATE_PROMPT', runtimeKey: 'SYNTHETIC_PRIVATE_KEY' },
@@ -99,7 +100,7 @@ async function createFixture(options = {}) {
       objectURLs: [], revokedURLs: [], exportClicks: [], exportGestures: [],
       languageListeners: [], addedListeners: [], removedListeners: [],
       nativeCalls: [], nativeMode: 'ready', clipboardWrites: [],
-      setupMode, setupMessages: [], permissionRequests: [],
+      setupMode, currentSetupMode, setupMessages: [], permissionRequests: [],
     };
     globalThis.__setupMock = mock;
     const forbid = name => (...args) => {
@@ -116,29 +117,33 @@ async function createFixture(options = {}) {
     const runtime = {
       getManifest: () => ({ version: '3.0.0' }),
       async sendMessage(message) {
-        const { type, setupId } = message ?? {};
-        if (Object.keys(message ?? {}).sort().join(',') !== 'setupId,type' ||
+        const { type, setupId, scope } = message ?? {};
+        const current = scope === 'current-account';
+        if (Object.keys(message ?? {}).sort().join(',') !== (current ? 'scope,setupId,type' : 'setupId,type') ||
             !/^WINDOWS_INSTALLATION_(BEGIN|OBSERVE|CONNECT|CANCEL)_V1$/.test(type) ||
             typeof setupId !== 'string' || setupId.length !== 32 || !/^[a-f0-9]{32}$/.test(setupId)) {
           return forbid('unrelated runtime.sendMessage')();
         }
         if (type.endsWith('BEGIN_V1') && (!mock.granted ||
             !document.getElementById('installConsent').checked ||
-            document.getElementById('windowsAccessScope').value !== 'administrator')) {
+            document.getElementById('windowsAccessScope').value !== (current ? 'current-account' : 'administrator'))) {
           return forbid('unconsented setup Begin')();
         }
         mock.setupMessages.push(clone(message));
-        const result = state => ({ setupId, state, receipt: null, operation: null });
+        const result = state => ({ setupId, state, receipt: null, operation: null,
+          ...(current ? { scope: 'current-account' } : {}) });
         if (type.endsWith('CANCEL_V1')) return result('cancelled');
-        if (mock.setupMode === 'missing') return null;
+        const mode = current ? mock.currentSetupMode : mock.setupMode;
+        if (mode === 'missing') return null;
         if (type.endsWith('BEGIN_V1')) return { ...result('waiting'),
-          ...(mock.setupMode === 'automatic' ? { automaticConnect: true } : {}) };
-        if (mock.setupMode !== 'automatic') return forbid('automatic continuation without capability')();
+          ...(mode === 'automatic' ? { automaticConnect: true } : {}) };
+        if (mode !== 'automatic') return forbid('automatic continuation without capability')();
         if (type.endsWith('OBSERVE_V1')) {
           if (mock.deferSetupObserve) await new Promise(resolve => { mock.finishSetupObserve = resolve; });
           return { ...result('installed'), receipt: {
             setupId: mock.invalidSetupReceipt ? '0'.repeat(32) : setupId,
-            state: 'installed', bundleSha256: 'b'.repeat(64), target: 'c'.repeat(32) + ':idle',
+            state: 'installed', ...(current ? {scope:'current-account',extensionId:runtimeId,bindingSha256:'b'.repeat(64)} :
+              {bundleSha256: 'b'.repeat(64), target: 'c'.repeat(32) + ':idle'}),
           } };
         }
         if (mock.deferSetupConnect) await new Promise(resolve => { mock.finishSetupConnect = resolve; });
@@ -223,7 +228,7 @@ async function createFixture(options = {}) {
           const active = navigator.userActivation.isActive;
           if (!active || JSON.stringify(value) !== JSON.stringify({ permissions: ['nativeMessaging'] }) ||
               !document.getElementById('installConsent').checked ||
-              document.getElementById('windowsAccessScope').value !== 'administrator') {
+              !['administrator','current-account'].includes(document.getElementById('windowsAccessScope').value)) {
             return forbid('unconsented permissions.request')();
           }
           mock.permissionRequests.push({ value: clone(value), active });
@@ -326,7 +331,7 @@ async function assertSafety(fixture) {
   for (const request of state.permissionRequests) assert.deepEqual(request,
     { value: { permissions: ['nativeMessaging'] }, active: true });
   for (const message of state.setupMessages) {
-    assert.deepEqual(Object.keys(message).sort(), ['setupId', 'type']);
+    assert.deepEqual(Object.keys(message).sort(), message.scope === 'current-account' ? ['scope','setupId','type'] : ['setupId','type']);
     assert.match(message.setupId, /^[a-f0-9]{32}$/);
   }
   assert.deepEqual(fixture.errors, []);
@@ -598,10 +603,13 @@ try {
       assert.equal(await scope.getAttribute('aria-describedby'), 'setupRisk setupGrantBoundary');
       assert.deepEqual(await scope.locator('option').allTextContents(), chinese
         ? ['当前账户', '管理员'] : ['Current account', 'Administrator']);
-      const permissionChecks = await page.evaluate(() => __setupMock.permissionChecks.length);
       const unchangedCommands = await page.locator('#windowsNodeCommand, #windowsPowerShellCommand, #windowsCmdCommand').allTextContents();
+      assert.equal(await page.locator('#installConsent').isChecked(),false,'legacy saved consent cannot authorize combined setup');
+      await page.locator('#installConsent').check();
       await page.locator('#copyWindowsBrowserPowerShell').click();
-      assert.notEqual(await page.locator('#windowsBrowserPowerShellFeedback').textContent(), '');
+      await page.waitForFunction(()=>__setupMock.setupMessages.some(value=>value.scope==='current-account'&&value.type.endsWith('CONNECT_V1')));
+      const currentSetupId=await page.evaluate(()=>__setupMock.setupMessages.find(value=>value.scope==='current-account').setupId);
+      const permissionChecks = await page.evaluate(() => __setupMock.permissionChecks.length);
       await scope.selectOption('administrator');
       assert.equal(await page.locator('#installConsent').isChecked(), false, 'stored standard consent cannot authorize administrator access');
       for (const id of ['copyWindowsBrowserPowerShell', 'copyWindowsBrowserCmd', 'copyWindowsGuidedCommand', 'copyWindowsGuidedCmdCommand']) {
@@ -647,18 +655,18 @@ try {
       assert.equal(await page.locator('#windowsBrowserCmdFeedback').textContent(), '');
       assert.equal(await page.locator('#windowsBrowserPowerShellFeedback').textContent(), '');
       await page.locator('#installConsent').check();
-      assert.equal(await page.locator('#windowsBrowserPowerShell').textContent(), browserCommand(extensionId));
+      assert.equal(await page.locator('#windowsBrowserPowerShell').textContent(), browserCommand(extensionId,'current-account','browserPowerShell',currentSetupId));
       assert.equal(await page.locator('#windowsGuidedCommand').textContent(), guidedCommand(extensionId));
       assert.deepEqual(await page.locator('#windowsNodeCommand, #windowsPowerShellCommand, #windowsCmdCommand').allTextContents(), unchangedCommands);
       await scope.selectOption('administrator');
       assert.equal(await page.locator('#installConsent').isChecked(), false, 'a second administrator selection cannot revive earlier consent');
       assert.equal(await page.evaluate(() => __setupMock.permissionChecks.length), permissionChecks + 1, 'only the explicit administrator Copy rechecks browser permission');
       assert.deepEqual(await page.evaluate(() => __setupMock.permissionRequests), [], 'an existing permission does not trigger a browser UI request');
-      assert.deepEqual(await page.evaluate(() => __setupMock.setupMessages.map(value => value.type)),
+      assert.deepEqual(await page.evaluate(() => __setupMock.setupMessages.filter(value=>value.scope!=='current-account').map(value => value.type)),
         ['WINDOWS_INSTALLATION_BEGIN_V1', 'WINDOWS_INSTALLATION_CANCEL_V1']);
       assert.deepEqual(await page.evaluate(() => __setupMock.nativeCalls), []);
       assert.deepEqual(await page.evaluate(() => __setupMock.writes.filter(value => !Object.hasOwn(value, 'uiLanguage'))),
-        [{ installConsent: false }, { installConsent: false }, { installConsent: false }, { installConsent: true }, { installConsent: false }]);
+        Array.from({length:6},()=>({installConsent:false})));
       assert.equal(await page.locator('#copyWindowsBrowserPowerShell').isDisabled(), true);
       pass(`${uiLanguage}: administrator commands require fresh scope consent, translate without changing authority and leave standard commands intact`);
     });
@@ -711,7 +719,7 @@ try {
       await page.locator('#windowsAccessScope').selectOption('administrator');
       assert.deepEqual(await page.evaluate(() => [__setupMock.setupMessages, __setupMock.permissionRequests]), [[], []]);
       assert.match(await page.locator('#setupRisk').innerText(), /installation and connection.*separate Windows approvals/i);
-      assert.match(await page.locator('#setupGrantBoundary').innerText(), /request one connection after installation.*withdrawing consent cancels/i);
+      assert.match(await page.locator('#setupGrantBoundary').innerText(), /fresh install.*one connection request.*withdrawal cancels unsent requests.*admitted work may finish.*original receipt.*ChatGPT \/ Dot separately/i);
       await page.locator('#installConsent').check();
       assert.deepEqual(await page.evaluate(() => [__setupMock.setupMessages, __setupMock.permissionRequests]), [[], []]);
       await page.locator('#copyWindowsBrowserPowerShell').click();
@@ -859,6 +867,11 @@ try {
           for (const scope of ['administrator', 'current-account']) {
             await page.locator('#windowsAccessScope').selectOption(scope);
             await assertPrimarySetupFlow(page);
+            assert.match(await page.locator('#setupGrantBoundary').innerText(), uiLanguage === 'en'
+              ? /fresh install.*one connection request.*withdrawal cancels unsent requests.*admitted work may finish.*original receipt.*ChatGPT \/ Dot separately/i
+              : /全新安装后.*一次连接.*撤回同意.*未发请求.*已受理操作仍可能完成.*原回执.*ChatGPT \/ Dot.*分别授权/);
+            assert.equal(await page.locator('#installConsentLabel span').innerText(), uiLanguage === 'en'
+              ? 'I agree to install and request one connection.' : '我同意安装并请求一次连接。');
             assert.equal(await page.locator('#setupAdvanced').evaluate(element => element.open), false);
             const screen = await page.evaluate(() => ({
               width: innerWidth, height: innerHeight, scrollY,
@@ -936,11 +949,14 @@ try {
           const initialResult = await page.locator('#installDetection').textContent();
           await page.locator('#installConsent').check();
           await page.locator('#copyWindowsBrowserPowerShell').click();
-          await page.waitForFunction(() => __setupMock.clipboardWrites.length === 1 && document.getElementById('windowsBrowserPowerShellFeedback').textContent !== '');
+          await page.waitForFunction(() => __setupMock.clipboardWrites.length === 1 && __setupMock.setupMessages.some(value =>
+            value.scope === 'current-account' && value.type.endsWith('CONNECT_V1')) &&
+            document.getElementById('installDetection').textContent.match(/Installation verified|安装已验证/));
           await assertPrimarySetupFlow(page);
-          assert.equal(await page.locator('#installDetection').textContent(), initialResult, 'standard copying never invents installation progress');
+          assert.match(await page.locator('#installDetection').textContent(),uiLanguage==='en'?/Installation verified.*unconfirmed/:/安装已验证.*未确认/);
+          const currentSetupId=await page.evaluate(()=>__setupMock.setupMessages.find(value=>value.scope==='current-account').setupId);
           assert.deepEqual((await clipboardWrites(page)).at(-1), {
-            text: browserCommand(extensionId), active: true,
+            text: browserCommand(extensionId,'current-account','browserPowerShell',currentSetupId), active: true,
           });
           await page.locator('#windowsAccessScope').selectOption('administrator');
           assert.equal(await page.locator('#installConsent').isChecked(), false);
@@ -973,11 +989,12 @@ try {
     }
   }
   await withFixture({ installConsent: true, nativeStatus: true, granted: true }, async fixture => {
-    assert.equal(await fixture.page.locator('#copyWindowsBrowserPowerShell').isEnabled(), true);
+    assert.equal(await fixture.page.locator('#copyWindowsBrowserPowerShell').isDisabled(), true);
+    assert.equal(await fixture.page.locator('#installConsent').isChecked(),false);
     assert.deepEqual(await fixture.page.evaluate(() => __setupMock.nativeCalls), []);
     assert.deepEqual(await clipboardWrites(fixture.page), []);
     assert.deepEqual(await effects(fixture), { writes: 0, objectURLs: 0, exportClicks: 0, forbidden: [], downloads: 0, popups: 0 });
-    pass('restoring existing consent only enables copying; never installs, probes, grants or connects');
+    pass('legacy install-only consent never authorizes combined setup, probes, grants or connections');
   });
   for (const hash of ['#handoff-title', '#chat-connection-title', '#hosted-prepare-title', '#windows-handoff-title', '#references-title', '#windowsRunGuidance', '#windowsBrowserPowerShell', '#localControlDetails']) {
     await withFixture({ hash }, async fixture => {
@@ -1034,7 +1051,7 @@ try {
     assert.equal(await page.locator('#detectInstall').isVisible(), false);
     pass('Windows post-install status correlates native responses, clears stale state and never probes without permission');
   });
-  await withFixture({ clipboardMode: 'allowed' }, async fixture => {
+  for (const shell of ['browserPowerShell', 'browserCmd']) await withFixture({ clipboardMode: 'allowed' }, async fixture => {
     const { page } = fixture;
     await chooseTarget(fixture, 'windows');
     const browserCommandElement = page.locator('#windowsBrowserPowerShell');
@@ -1050,24 +1067,31 @@ try {
     assert.equal(await standalone.locator('#windowsNodeCommand').isVisible(), false);
     assert.equal(await page.locator('#windowsSetupSteps').isVisible(), false);
     await openDetails(page, 'windowsCommandDetails');
-    assert.match(await page.locator('#windowsSetupSteps').innerText(), /REGISTER[\s\S]*Check status[\s\S]*Reconnect/);
+    assert.match(await page.locator('#windowsSetupSteps').innerText(),
+      /REGISTER[\s\S]*installer leaves the device paused[\s\S]*this page separately requests one connection while consent remains valid[\s\S]*fresh installation is verified[\s\S]*request does not mean ready[\s\S]*Check status in Devices[\s\S]*authorize ChatGPT and Dot separately/);
     await page.locator('#windowsCommandDetails > summary').click();
     assert.doesNotMatch(await page.locator('#windowsBrowserInstall').innerText(), /\bPAIR\b|\bCONNECT\b/);
     const before = await effects(fixture);
-    await page.locator('#copyWindowsBrowserPowerShell').click();
+    if (shell === 'browserCmd') await page.locator('#windowsBrowserCmdDetails > summary').click();
+    await page.locator(shell === 'browserCmd' ? '#copyWindowsBrowserCmd' : '#copyWindowsBrowserPowerShell').click();
+    await page.waitForFunction(() => /Connection requested; readiness is unconfirmed/.test(document.getElementById('installFeedback').textContent));
+    const messages = await page.evaluate(() => __setupMock.setupMessages);
+    assert.deepEqual(messages.map(value => value.type), ['BEGIN','OBSERVE','CONNECT'].map(name => `WINDOWS_INSTALLATION_${name}_V1`));
+    const setupId = messages[0].setupId;
+    assert.ok(messages.every(value => value.scope === 'current-account' && value.setupId === setupId));
     assert.deepEqual(await clipboardWrites(page), [{
-      text: browserCommand(extensionId), active: true,
+      text: browserCommand(extensionId, 'current-account', shell, setupId), active: true,
     }]);
-    await page.locator('#windowsBrowserCmdDetails > summary').click();
-    await page.locator('#copyWindowsBrowserCmd').click();
-    assert.deepEqual((await clipboardWrites(page)).at(-1), { text: browserCommand(extensionId, 'current-account', 'browserCmd'), active: true });
-    assert.deepEqual(await effects(fixture), before, 'copy does not start setup or request a browser permission');
+    assert.equal(await page.locator('#copyWindowsBrowserPowerShell').isDisabled(), true);
+    assert.equal(await page.locator('#copyWindowsBrowserCmd').isDisabled(), true, 'a second shell cannot rearm this document');
+    assert.equal(await page.evaluate(() => __setupMock.permissionRequests.length), 1, 'only the consented Copy requests browser permission');
+    assert.deepEqual(await effects(fixture), before, 'combined copy does not export, launch, or persist setup authority in the page');
     await standalone.locator(':scope > summary').click();
     assert.equal(await standalone.locator('#windowsGuidedCommand').isVisible(), true);
     assert.match(await standalone.innerText(), /CONNECT[\s\S]*PAIR/);
     await page.locator('#installOsLinux').click();
     assert.equal(await existingDevice.isVisible(), false);
-    pass('browser-managed Windows is the primary consented route and standalone remains a separate fallback');
+    pass(`${shell}: browser-managed Windows uses one scoped fresh-install request and standalone remains a separate fallback`);
   });
 
   for (const uiLanguage of [undefined, 'zh_CN']) {
@@ -1278,21 +1302,21 @@ try {
   for (const clipboardMode of ['denied', 'missing']) {
     for (const uiLanguage of ['en', 'zh_CN']) {
       for (const scope of ['current-account', 'administrator']) {
-        await withFixture({ clipboardMode, uiLanguage, viewport: { width: 320, height: 600 }, nativeStatus: true, granted: true }, async fixture => {
+        await withFixture({ clipboardMode, uiLanguage, setupMode: 'automatic', viewport: { width: 320, height: 600 }, nativeStatus: true, granted: true }, async fixture => {
           const { page } = fixture;
           if (scope === 'administrator') await page.locator('#windowsAccessScope').selectOption(scope);
           await page.locator('#installConsent').check();
           await assertPrimarySetupFlow(page);
           const initialResult = await page.locator('#installDetection').textContent();
           await page.locator('#copyWindowsBrowserPowerShell').click();
-          const message = scope === 'administrator'
-            ? uiLanguage === 'zh_CN' ? '自动复制失败，本页自动连接已取消。请手动复制命令，安装后在设备页连接。'
-              : 'Automatic copy failed and automatic connection from this page is cancelled. Copy the command manually, then connect in Devices after installation.'
-            : uiLanguage === 'zh_CN' ? '无法自动复制，请选择命令文本手动复制。'
-              : 'Automatic copy failed; select the command text and copy it manually.';
+          const message = uiLanguage === 'zh_CN' ? '自动复制失败，本页自动连接已取消。请手动复制命令，安装后在设备页连接。'
+            : 'Automatic copy failed and automatic connection from this page is cancelled. Copy the command manually, then connect in Devices after installation.';
           await page.waitForFunction(text => document.getElementById('windowsBrowserPowerShellFeedback').textContent === text, message);
-          const command = scope === 'administrator' ? administratorCommand(extensionId)
-            : browserCommand(extensionId);
+          const messages = await page.evaluate(() => __setupMock.setupMessages);
+          assert.deepEqual(messages.map(value => value.type), ['BEGIN','CANCEL'].map(name => `WINDOWS_INSTALLATION_${name}_V1`));
+          assert.ok(messages.every(value => value.setupId === messages[0].setupId &&
+            (scope === 'current-account' ? value.scope === scope : value.scope === undefined)));
+          const command = browserCommand(extensionId, scope, 'browserPowerShell', messages[0].setupId);
           assert.equal(await page.locator('#windowsBrowserPowerShell').innerText(), command);
           assert.equal(await page.locator('#windowsBrowserPowerShell').isVisible(), true, 'copy failure reveals the command for manual copying');
           assert.equal(await page.locator('#windowsSetupSteps').isVisible(), true, 'copy failure also reveals manual prerequisites');

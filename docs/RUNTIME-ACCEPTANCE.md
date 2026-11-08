@@ -1,5 +1,68 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Current-Account Source Integration And Recovery Correction (Checkpoint86)
+
+- Fresh installer publication now reaches actual background/current-account
+  adapter/wake/native operation modules, rather than only injected controller
+  fixtures. A one-time setup proof and reservation bind extension, setup, native
+  binding and original operation ID. No existing installation adoption, automatic
+  unpause, administrator transport reuse or live current-account deployment.
+- Added module to both fixed ZIP layouts after four failing package cases.
+  Parent package34/34 passed52.784s. Current-account13/13 passed with PS5.1
+  parser/pure/mock fixture; now included by regular npm and native CI. Workflow
+  routing22/22 and canonical release-source7/7 passed. No public download proved.
+- Independent review found an actual fail-open source gate when setup consumption
+  was missing. Parent scratch regression failed before the fix. Recovery now
+  requires absence of ALL setup evidence for legacy behavior, and the no-journal
+  path uses the same gate. Parent42/42 and independent reviewer30/30 passed,
+  zero skips. The finding is closed in source, not an OS power-loss guarantee.
+- Parent full control-ledger/observation38/38 passed58.552s after test-only
+  overhead reduction, preserving all6144+3+363+66 cases and60s/65s limits.
+  Worker measured local read19.53s ->16.51s. No new hosted pass yet.
+- Parent full npm reruns exposed an actual320x600 fallback-font overflow and
+  obsolete manual-Reconnect assertions. Concise bilingual copy fixes the overflow
+  without hiding risk text or changing font size; Copy bottom575.08px, previously
+  658.23px. Rendered Setup66/66 and the final complete root npm test exited0.
+  Root includes background35+57, Devices65, Setup66, Dot48+12, import16, UI34,
+  MV3 integration13 and ProseMirror5 checks, plus its other suites. Final package
+  34/34 passed52.983s. Full native npm test exited0 with278 passed/4 platform
+  skips. English Store description and GitHub Issues support URL were saved
+  through IAB and exactly read back after reload; only the listing draft changed,
+  with no review submission or change to the public version. r8 remains paused.
+  Whole-browser
+  reopen, new current-account installation/hosted operation, Release and Store
+  submission receipts remain open. No production or original-scheduler change.
+
+## Dot Result, Pause Readback And CI48 (Checkpoint85)
+
+- Supersedes the pending Dot and running r8 statements in Checkpoint84.
+  The separate Dot call actually executed process105128 as administrator,
+  wrote/read its disposable marker and stopped its own child109648 with
+  startTicks639297495769072891. Random nonce
+  AC_R8_BROWSER_DOT_991659f88c274c8aaae7e683944ea7ce matched disk readback;
+  parent observed neither exact test process alive. The actual page output is
+  in AgentContinue-r8-browser-connect-3231-dot-output.png. Together with the
+  ordinary-chat result below, both surfaces passed these bounded operations.
+- Actual browser Pausee7372afeb31348f78b120bc207661634 recorded pause then stopped.
+  Independent public control-owner reads paused; broker110584/root96052 identities
+  are gone. Devices displayed the operation's stopped verification. CURRENT r8
+  STATE IS PAUSED. Existing saved restore preference does not authorize clearing
+  pause. Do not replay Connect3231, either probe, or settled reauthorization.
+- Whole-browser saved-running reopen remains NOT tested. Old Revoke evidence
+  remains historical; this checkpoint did not issue a fresh Revoke. No production
+  VPN/MCP/IDE/research or external Chrome scheduler change was made.
+- Entry10/10 passed6.879s: independent exact ACL oracle and a preexisting-directory
+  cleanup regression now supplement the scratch creation/inert OS-child tests.
+  Cleanup requires confirmed fixture creation. No public download, installer,
+  UAC grant, browser grant or runtime activation is established by those tests.
+- Pushed main a718d08194ef421cd2f0c63b0dd566a85bb3ea20. Native48 Windows failed
+  at the read-ledger60s watchdog;36/37 control tests passed. Last stdout count3840
+  is a completion lower bound, not an exact failure location. Prepared-helper
+  cases passed, downstream signing/runtime cases were skipped. Native47's ledger
+  had passed near58s. Test performance is being investigated without dropping
+  matrix cases or increasing budgets. Ubuntu/macOS succeeded. No new Release or
+  Store submission; current-account continuation is not installed or accepted.
+
 ## New Browser Connect And Ordinary Administrator Call (Checkpoint84)
 
 - Same authorized r8, unchanged enrolled stager59b3524d. Browser Settings ->

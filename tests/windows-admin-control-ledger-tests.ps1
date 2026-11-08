@@ -58,6 +58,7 @@ $script:ExecutionGuards = $false
 $script:StorageCalls = 0
 $script:NewFiles = [Collections.Generic.List[object]]::new()
 $script:AclChecks = [Collections.Generic.List[object]]::new()
+$script:CaptureAclChecks = $true
 $script:DenyAclPath = ''
 $script:Scratch = Join-Path ([IO.Path]::GetTempPath()) ('ac-control-ledger-test-' + [guid]::NewGuid().ToString('N'))
 $script:Scratch = [IO.Path]::GetFullPath($script:Scratch)
@@ -91,10 +92,13 @@ function Assert-ScratchPath([string]$Path) {
     # No fixture may follow a reparse point, including one in an ancestor.
     $cursor = $full
     while ($cursor.Length -ge $script:Scratch.Length) {
-        if ([IO.File]::Exists($cursor) -or [IO.Directory]::Exists($cursor)) {
+        try {
             if ([IO.File]::GetAttributes($cursor) -band [IO.FileAttributes]::ReparsePoint) {
                 throw 'fixture_reparse_point'
             }
+        } catch {
+            $cause = $_.Exception.GetBaseException()
+            if ($cause -isnot [IO.FileNotFoundException] -and $cause -isnot [IO.DirectoryNotFoundException]) { throw }
         }
         if ($cursor -ceq $script:Scratch) { break }
         $cursor = [IO.Path]::GetDirectoryName($cursor)
@@ -104,7 +108,9 @@ function Assert-ScratchPath([string]$Path) {
 # Deliberate scratch-only ACL substitutes, NOT protected ACL acceptance.
 function Assert-SealedAcl([string]$Path,[bool]$Directory,[bool]$Private=$false,[string]$ReaderSid='') {
     Assert-ScratchPath $Path
-    $script:AclChecks.Add(@{Path=[IO.Path]::GetFullPath($Path);Directory=$Directory;Private=$Private;Sid=$ReaderSid})
+    if ($script:CaptureAclChecks) {
+        $script:AclChecks.Add(@{Path=[IO.Path]::GetFullPath($Path);Directory=$Directory;Private=$Private;Sid=$ReaderSid})
+    }
     if ($Path -ceq $script:DenyAclPath) { throw 'fixture_acl_denied' }
     Assert-PathType $Path $Directory
 }
@@ -127,13 +133,13 @@ function Open-SealedNewFile([string]$Path,[bool]$Private=$false,[string]$ReaderS
 }
 
 function New-FixtureDirectory {
-    $directory = Join-Path $script:Scratch ([guid]::NewGuid().ToString('N'))
+    $directory = [IO.Path]::Combine($script:Scratch,[guid]::NewGuid().ToString('N'))
     $null = [IO.Directory]::CreateDirectory($directory)
     return $directory
 }
 
 function Get-ReceiptPath([string]$Directory,[string]$State,[string]$OperationId=$id) {
-    return Join-Path $Directory ('control-' + $OperationId + '.' + $State + '.json')
+    return [IO.Path]::Combine($Directory,('control-' + $OperationId + '.' + $State + '.json'))
 }
 
 function Get-ExpectedText([string]$Control,[string]$State,[string]$Digest=$digest,[string]$OperationId=$id) {
@@ -150,7 +156,10 @@ function Assert-Receipt([string]$Directory,[string]$Control,[string]$State,[stri
     [string]$Digest=$digest,[string]$OperationId=$id) {
     $actual = Read-AdministratorControlReceipt $Directory $Digest $sid $OperationId $Control
     Assert-True ($actual -is [Collections.IDictionary]) ($Message + ': dictionary')
-    Assert-True ((@($actual.Keys | Sort-Object) -join ',') -ceq 'bundleSha256,control,operationId,progress,state') ($Message + ': closed projection')
+    $keys = @($actual.Keys)
+    Assert-True ($keys.Count -eq 5 -and [Array]::IndexOf($keys,'bundleSha256') -ge 0 -and
+        [Array]::IndexOf($keys,'control') -ge 0 -and [Array]::IndexOf($keys,'operationId') -ge 0 -and
+        [Array]::IndexOf($keys,'progress') -ge 0 -and [Array]::IndexOf($keys,'state') -ge 0) ($Message + ': closed projection')
     Assert-True ($actual.bundleSha256 -ceq $Digest) ($Message + ': digest')
     Assert-True ($actual.operationId -ceq $OperationId) ($Message + ': operation ID')
     Assert-True ($actual.control -ceq $Control) ($Message + ': control')
@@ -235,6 +244,9 @@ try {
 
     # Gray-code enumeration changes one file at a time; expectations come from
     # the contract table above, never from the implementation's output.
+    # Matrix rows do not inspect trace records; every scratch/type/denial check still runs.
+    $script:CaptureAclChecks = $false
+    try {
     foreach ($control in $controls) {
         $matrixPhase = switch ($control) {
             'connect' { 'matrix-connect' }
@@ -264,6 +276,7 @@ try {
             if (($script:MatrixCases % 256) -eq 0) { Write-LedgerPhase $matrixPhase $script:MatrixCases }
         }
     }
+    } finally { $script:CaptureAclChecks = $true }
     Write-Output ('PASS exhaustive read-state matrix: ' + $script:MatrixCases + ' combinations')
     Write-LedgerPhase 'matrix-complete' $script:MatrixCases
 

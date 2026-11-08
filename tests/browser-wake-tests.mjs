@@ -84,6 +84,53 @@ async function pendingReconnect(t, options = {}) {
   return { f, wake, request, primary, ownerId: f.messages[0].id };
 }
 
+const setupTuple={setupId:'a'.repeat(32),scope:'current-account',extensionId:'a'.repeat(32),bindingSha256:'b'.repeat(64)};
+const setupOperation='12345678-1234-4234-8234-123456789abc';
+
+test('setup hook uses the existing owner and generic receipt fence but sends an exact scoped native frame',async t=>{
+  const f=extension(),wake=bindBrowserWake(f.api);
+  t.after(()=>f.native?.onDisconnect.emit());await tick();f.native.onMessage.emit({...f.messages[0],ok:true});
+  assert.equal(typeof wake.prepareSetupObserver,'function');assert.equal(typeof wake.connectFromSetup,'function');
+  assert.equal(await wake.prepareSetupObserver(()=>true),true);
+  const work=wake.connectFromSetup(setupTuple,setupOperation,()=>true);await tick();
+  const wire=f.messages.at(-1);
+  assert.deepEqual(wire,{version:1,id:setupOperation,action:'current-account-setup-connect',...setupTuple});
+  assert.deepEqual((await f.api.storage.session.get(MUTATION))[MUTATION],{
+    ownerId:f.messages[0].id,version:1,id:setupOperation,action:'reconnect'});
+  const response={version:1,id:setupOperation,action:'reconnect',ok:true,state:{paused:false,connection:'ready',
+    operation:{id:setupOperation,action:'reconnect',status:'settled'}}};
+  f.native.onMessage.emit(response);assert.deepEqual((await work).response,response);
+  assert.equal(await wake.connectFromSetup(setupTuple,setupOperation,()=>true),null);
+  assert.equal(f.attempts.length,1);assert.equal(f.messages.filter(v=>v.action==='current-account-setup-connect').length,1);
+});
+
+test('current-account setup permit is invalidated synchronously by an explicit Pause intent',async t=>{
+  const f=extension({pauseAttach:true});let paused=0;
+  const wake=bindBrowserWake(f.api,{onPauseIntent:()=>paused++});
+  t.after(()=>f.native?.onDisconnect.emit());await tick();f.native.onMessage.emit({...f.messages[0],ok:true});
+  assert.equal(typeof wake.captureSetupPermit,'function');const permit=wake.captureSetupPermit();
+  assert.equal(await wake.prepareSetupObserver(()=>true),true);
+  const pause={version:1,id:'explicit-pause',action:'disconnect-and-pause'};
+  const work=wake.handleMessage(mutationMessage(f,pause),devicesSender(f));await tick();
+  assert.equal(permit(),false);assert.equal(paused,1);
+  assert.equal(await wake.connectFromSetup(setupTuple,setupOperation,()=>true),null);
+  const call=f.attachments.at(-1);call.resolve(attachedReply(call,'settled'));await work;
+  assert.equal(f.messages.some(v=>v.action==='current-account-setup-connect'),false);
+});
+
+test('permission cycling during setup fence persistence prevents a late scoped native send',async t=>{
+  const f=extension(),wake=bindBrowserWake(f.api);
+  t.after(()=>f.native?.onDisconnect.emit());await tick();f.native.onMessage.emit({...f.messages[0],ok:true});
+  assert.equal(typeof wake.prepareSetupObserver,'function');assert.equal(await wake.prepareSetupObserver(()=>true),true);
+  const save=f.api.storage.session.set,pending=Promise.withResolvers();let storing=false;
+  f.api.storage.session.set=async values=>{await save(values);if(values[MUTATION]){storing=true;await pending.promise;}};
+  const work=wake.connectFromSetup(setupTuple,setupOperation,()=>true);
+  for(let i=0;i<30&&!storing;i++)await tick();assert.equal(storing,true);
+  f.setGrant(false);f.removed.emit({permissions:['nativeMessaging']});f.setGrant(true);
+  pending.resolve();assert.equal(await work,null);
+  assert.equal(f.messages.some(v=>v.action==='current-account-setup-connect'),false);
+});
+
 test('independent status attaches to the same owner before and after a never-returning Reconnect deadline', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const { f, wake, request, primary, ownerId } = await pendingReconnect(t);

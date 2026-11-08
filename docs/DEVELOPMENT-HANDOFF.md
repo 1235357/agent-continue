@@ -2,6 +2,95 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Fresh Current-Account Continuation Wired (Checkpoint86)
+
+The installer now publishes a create-only, exact setup/extension/binding proof
+only after a fresh current-account browser-managed installation. The actual
+background adapter, long native wake port and existing operation owner/journal
+carry one correlated reconnect. Existing installs are not adopted or unpaused.
+Fresh document-local installation-and-connection consent replaces the former
+persisted install-only boolean. Preparation cancellation is not a rollback of
+an already admitted native request; uncertain outcomes retain their original ID.
+No new runtime deployment or live current-account connection is established.
+
+Parent added the new module to the fixed distribution allowlist after a failing
+four-layout package regression. Package34/34 passed52.784s. The four focused
+current-account suites are wired into regular npm test and the native CI matrix;
+parent13/13 passed, including the real PS5.1 parser/pure/mock publication fixture.
+Release-workflow routing22/22 and release-source7/7 passed. The main README,
+Chinese README, policy and Store source describe the same flow. The English Store
+description and GitHub Issues support URL were saved through IAB and matched
+readback after reload. This is a listing DRAFT save, not review submission.
+The3.0.0 Store package remains Draft;2.1.0 is Published public.
+
+Fresh independent code review reproduced a P2 recovery defect: absent consumption
+could be interpreted as no setup history despite retained setup publication or
+success evidence. Parent reproduced it RED in scratch tests. Both recovery
+helpers now reject incomplete setup evidence, including the missing-journal path;
+legacy manual recovery with no setup history remains allowed. Parent42/42 passed,
+and the reviewer independently reran30/30 and closed this finding. This is source/
+scratch evidence, not an observed Windows persistence incident or power-loss test.
+
+The test-only ledger optimization retains6144 matrix cases,3 evidence guards,
+363 publication cases and66 damaged histories without changing60s/65s budgets.
+It removes unused trace allocation, per-row sorting and redundant fixture path
+queries. Parent's full ledger/observation38/38 passed58.552s, zero skips; the
+worker's measured read batch fell19.53s to16.51s locally. This does not prove
+CI48's precise resource cause or a new hosted pass. No production helper changed.
+
+Rendered Setup regression found the longer consent explanation overflowed a
+320x600 wide-fallback-font view. Concise same-meaning bilingual copy now keeps
+the Copy control at575.08px rather than658.23px in that600px view, without hiding
+risk text or reducing font size. Rendered Setup66/66 passed. The final complete
+root npm test exited0, including background35+57, Devices65, Setup66, Dot48+12,
+import16, UI34, MV3 integration13 and ProseMirror5 checks, plus its other suites.
+Final package34/34 passed52.983s. Full native npm test exited0:278 passed and
+4 platform-specific skips, not282 passes. Native/source checks do not replace
+actual fresh current-account installation, whole-browser reopen or final release
+artifact acceptance. r8 remains paused at Checkpoint85. Final root/native logs
+are local ignored artifacts checkpoint86-final-npm-test.txt and
+checkpoint86-native-npm-test.txt, not public user telemetry.
+
+### Both Web Surfaces And Browser Pause Verified (Checkpoint85)
+
+This supersedes Checkpoint84's pending Dot result and running-state statement.
+The same browser-initiated r8 generation completed a separate Dot probe once:
+process105128, administrator=true, roundtrip=true, ownedChildPid109648,
+ownedChildStartTicks639297495769072891, ownedChildStopped=true. The random
+AC_R8_BROWSER_DOT_991659f88c274c8aaae7e683944ea7ce marker matched independent
+disk readback; neither exact test process remained alive. Screenshot
+AgentContinue-r8-browser-connect-3231-dot-output.png records the actual result.
+Ordinary ChatGPT and Dot have now each passed the bounded administrator command,
+file roundtrip and owned-process test on this generation. Do not replay either
+single-use probe or the settled Connect3231 operation.
+
+The browser's Pause administrator connection action then produced operation
+e7372afeb31348f78b120bc207661634, pause-recorded followed by stopped. Independent
+readback found ownerState=paused and confirmed broker110584/root96052 identities
+were gone. The Devices UI also showed the operation's verified stopped result.
+The test installation is CURRENTLY PAUSED. Its existing restore preference does
+not clear that pause. No new Connect, reauthorization, key import or Revoke is
+needed merely to inspect these settled receipts. Whole-browser saved-running
+reopen is still unverified; a popup, tab or extension reload is not that proof.
+
+Independent review found a cleanup ownership defect in the new storage fixture:
+creation refusal must not let cleanup remove a directory it did not create.
+The fixture now requires a successful creation flag before cleanup, tests the
+preexisting-directory refusal path, and independently checks the exact protected
+ACL principals, rights and inheritance. Entry10/10 passed in6.879s with no skips.
+These remain scratch storage and inert-child tests, not real release acquisition
+or installer acceptance. The inert child field is named elevationRequested,
+not a falsely measured administrator-grant result.
+
+Unique main a718d08194ef421cd2f0c63b0dd566a85bb3ea20 was pushed. Its Native48
+Windows job128780394014 failed:36/37 control tests passed, but the read-ledger
+fixture hit its60s watchdog after the last reported resume-saved count3840.
+Prepared-helper cases passed; later signing/runtime steps were skipped. Native47's
+same ledger had passed near58s. A test-only performance investigation is underway;
+do not raise budgets, drop matrix cases, or call the signing fix hosted-cleared.
+Ubuntu/macOS succeeded. No final GitHub Release or Store submission is claimed.
+Current-account native continuation remains an uninstalled source task.
+
 ### Browser Connect And Ordinary Chat Proof (Checkpoint84)
 
 This checkpoint supersedes Checkpoint83's paused/no-Connect and unavailable-UI

@@ -120,6 +120,17 @@ test('entry storage actually creates an exclusive protected temporary directory 
     network: false, entryExecuted: false, installedRuntimeTouched: false });
 });
 
+test('storage fixture never deletes an existing directory it failed to create', { skip: process.platform !== 'win32' }, () => {
+  const source = entry.windowsEntryBootstrapSource({ extensionId, setupId, scope: 'administrator', metadata });
+  const result = spawnSync('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+    ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', fileURLToPath(new URL('./setup-entry-storage-tests.ps1', import.meta.url)), '-Scenario', 'existing'],
+    { input: source, encoding: 'utf8', windowsHide: true, timeout: 15000 });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), { ok: true, existingDirectoryRetained: true,
+    creationRefused: true, network: false, entryExecuted: false });
+});
+
 test('verified entry actually launches a harmless OS PowerShell child with the read lease held', { skip: process.platform !== 'win32' }, () => {
   const payload = Buffer.from(`param([switch]$Administrator,[switch]$Apply,[string]$Consent,[switch]$PromptForConnection,[string]$ExtensionId,[string]$BrowserSetupId,[string]$ExpectedSumsSha256)
 $script:acReleaseTag = 'v3.0.0'
@@ -128,7 +139,7 @@ if(-not $Administrator -or -not $Apply -or -not $PromptForConnection -or $Consen
 $writeRefused=$false
 try{$writer=[IO.File]::Open($PSCommandPath,'Open','Write','ReadWrite');$writer.Dispose()}catch [IO.IOException]{$writeRefused=$true}
 if(-not $writeRefused){throw 'fixture_read_lease_missing'}
-[ordered]@{ok=$true;childExecuted=$true;writeRefused=$writeRefused;administratorGranted=$false;runtimeInstalled=$false;network=$false}|ConvertTo-Json -Compress
+[ordered]@{ok=$true;childExecuted=$true;writeRefused=$writeRefused;elevationRequested=$false;runtimeInstalled=$false;network=$false}|ConvertTo-Json -Compress
 exit 23
 `, 'utf8');
   const pinned = { ...metadata, entrySha256: createHash('sha256').update(payload).digest('hex') };
@@ -144,5 +155,5 @@ exit 23
   assert.equal(result.status, 23, result.stdout + result.stderr);
   assert.equal(result.stderr, '');
   assert.deepEqual(JSON.parse(result.stdout), { ok: true, childExecuted: true,
-    writeRefused: true, administratorGranted: false, runtimeInstalled: false, network: false });
+    writeRefused: true, elevationRequested: false, runtimeInstalled: false, network: false });
 });

@@ -47,6 +47,21 @@ class WindowsReleaseWorkflowTests(unittest.TestCase):
     def setUp(self):
         self.source = WORKFLOW.read_text(encoding="utf-8")
 
+    def test_current_account_continuation_is_in_regular_and_native_checks(self):
+        ordinary = (ROOT / ".github/workflows/native-runtime-tests.yml").read_text(encoding="utf-8")
+        for event in ("push", "pull_request"):
+            trigger = re.search(r"^  " + event + r":\n(.*?)(?=^  [\w-]+:|\Z)", ordinary, re.M | re.S)
+            self.assertIsNotNone(trigger)
+            for item in ("current-account-setup.js", "tests/current-account-*"):
+                self.assertIn("      - '" + item + "'", trigger.group(1))
+        entry = step(job(ordinary, "core"), "Verify fresh current-account setup with local fixtures only")
+        scripts = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))["scripts"]
+        self.assertIn("npm run test:current-account-setup", scripts["test:setup"])
+        for fixture in ("current-account-setup-tests.mjs", "current-account-native-protocol-tests.mjs",
+                        "current-account-setup-integration-tests.mjs", "current-account-installer-runner-tests.mjs"):
+            self.assertIn("../../tests/" + fixture, entry)
+            self.assertIn("tests/" + fixture, scripts["test:current-account-setup"])
+
     def test_offline_payload_fixture_changes_trigger_native_checks(self):
         ordinary = (ROOT / ".github/workflows/native-runtime-tests.yml").read_text(encoding="utf-8")
         for event in ("push", "pull_request"):

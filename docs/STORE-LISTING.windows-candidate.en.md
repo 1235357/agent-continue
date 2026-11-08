@@ -49,12 +49,15 @@ authorization are separate; success in ordinary ChatGPT does not establish Dot.
 Standalone current-account setup does not register a browser host. Browser-managed
 current-account setup registers the confirmed extension under HKCU; administrator
 setup uses protected HKLM registration and an administrator-owner task. Installation
-is not chat authorization. The administrator installer itself finishes paused.
+is not chat authorization. Browser-managed installers themselves finish paused.
 Standalone current-account setup can request one connection with tunnel inputs
 and connection consent (`CONNECT` in the guided prompt). Browser-managed guided
 setup instead confirms `REGISTER` without starting the tunnel in that step. After exact installation
-readback, the consented fresh-administrator flow may request one connection from
-the unchanged initiating Setup page. Installation and connection can require
+readback, a freshly consented flow in either scope may request one connection from
+the unchanged initiating Setup page. Current-account continuation uses its own
+one-time proof rather than administrator transport. Existing installations are
+not automatically adopted or unpaused; uncertain outcomes use their original IDs.
+Final installed-artifact acceptance remains required. Installation and connection can require
 separate UAC approvals. Setup may download verified Node.js, npm dependencies and
 the official client from nodejs.org, the npm registry and GitHub.
 

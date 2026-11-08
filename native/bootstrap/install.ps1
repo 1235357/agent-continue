@@ -69,6 +69,68 @@ $script:acExistingBrowserInstall = $false
 $script:acReleaseTag = ''
 $script:acAdministratorInstallerSha256 = ''
 
+function Assert-BrowserSetupContinuationInput {
+    param([string]$Id, [bool]$Administrator, [bool]$Apply, [bool]$InstallLocal,
+        [bool]$BrowserManaged, [bool]$PromptForConnection, [string]$Consent)
+    if ($Id -cnotmatch '\A[a-f0-9]{32}\z') { throw 'invalid_browser_setup_id' }
+    if ($Administrator) {
+        if (-not $Apply) { throw 'invalid_browser_setup_id' }
+        return
+    }
+    if (-not $InstallLocal -or -not $BrowserManaged -or -not $PromptForConnection -or $Apply -or
+        $Consent -cne 'accept-install') { throw 'invalid_browser_setup_id' }
+}
+
+function Get-CurrentAccountSetupPublisherSource {
+    return @'
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+const [payloadRoot,installDir,extensionId,setupId]=process.argv.slice(1);
+if (!path.isAbsolute(payloadRoot) || !path.isAbsolute(installDir) || !/^[a-p]{32}$/.test(extensionId) ||
+    !/^[a-f0-9]{32}$/.test(setupId)) throw new Error('setup_receipt_failed');
+const { verifyProviderStage }=await import(pathToFileURL(path.join(payloadRoot,'bootstrap.mjs')).href);
+await verifyProviderStage(installDir,payloadRoot);
+const app=path.join(installDir,'app');
+const { readNativeBinding }=await import(pathToFileURL(path.join(app,'device-owner.mjs')).href);
+const { publishCurrentAccountSetupReceipt }=await import(pathToFileURL(path.join(app,'device-operations.mjs')).href);
+await verifyProviderStage(installDir,payloadRoot);
+const binding=readNativeBinding(path.join(app,'device-native-binding.json'));
+if (binding.extensionId !== extensionId || binding.root !== path.join(installDir,'state')) throw new Error('setup_identity_mismatch');
+binding.assertCurrent();
+const receipt=publishCurrentAccountSetupReceipt(binding,setupId);
+process.stdout.write(JSON.stringify(receipt)+'\n');
+'@
+}
+
+function Publish-CurrentAccountBrowserSetup([string]$Output) {
+    try {
+        $value = ConvertFrom-Json -InputObject $Output
+        if (-not (Test-ExactJsonProperties $value @('ok','action','mode','configured','registered','connected',
+                'browserLaunchVerified','chatAuthorizationVerified','registration')) -or
+            $value.ok -isnot [bool] -or -not $value.ok -or $value.action -cne 'install-local' -or
+            $value.mode -cne 'browser-managed' -or $value.configured -isnot [bool] -or -not $value.configured -or
+            $value.registered -isnot [bool] -or -not $value.registered -or $value.connected -isnot [bool] -or $value.connected -or
+            $value.browserLaunchVerified -isnot [bool] -or $value.browserLaunchVerified -or
+            $value.chatAuthorizationVerified -isnot [bool] -or $value.chatAuthorizationVerified) { throw 'setup_receipt_failed' }
+        $registration = $value.registration
+        if (-not (Test-ExactJsonProperties $registration @('ok','status','host','registered','launchVerified','activated','chatAuthorizationVerified')) -or
+            $registration.ok -isnot [bool] -or -not $registration.ok -or $registration.status -cnotin @('written','already-present') -or
+            $registration.host -cne 'com.agentcontinue.device_wake' -or $registration.registered -isnot [bool] -or -not $registration.registered -or
+            $registration.launchVerified -isnot [bool] -or $registration.launchVerified -or
+            $registration.activated -isnot [bool] -or $registration.activated -or
+            $registration.chatAuthorizationVerified -isnot [bool] -or $registration.chatAuthorizationVerified) { throw 'setup_receipt_failed' }
+        $source = Get-CurrentAccountSetupPublisherSource
+        $raw = (& $script:acNode '--input-type=module' '-e' $source $script:acPayloadRoot $InstallDir $ExtensionId $BrowserSetupId 2>$null) -join "`n"
+        if ($LASTEXITCODE -ne 0 -or $raw.Length -gt 4096) { throw 'setup_receipt_failed' }
+        $proof = ConvertFrom-Json -InputObject $raw
+        if (-not (Test-ExactJsonProperties $proof @('setupId','state','scope','extensionId','bindingSha256')) -or
+            $proof.setupId -cne $BrowserSetupId -or $proof.state -cne 'installed' -or $proof.scope -cne 'current-account' -or
+            $proof.extensionId -cne $ExtensionId -or $proof.bindingSha256 -isnot [string] -or
+            $proof.bindingSha256 -cnotmatch '\A[a-f0-9]{64}\z') { throw 'setup_receipt_failed' }
+        return $proof
+    } catch { throw 'setup_receipt_failed' }
+}
+
 function Get-DefaultPayloadBase {
     if ($env:AGENT_CONTINUE_PAYLOAD_BASE) { return $env:AGENT_CONTINUE_PAYLOAD_BASE }
     if ($script:acReleaseTag) {
@@ -431,8 +493,11 @@ try {
         }
     }
 
-    if ($PSBoundParameters.ContainsKey('BrowserSetupId') -and
-        (-not $Administrator -or -not $Apply -or $BrowserSetupId -cnotmatch '\A[a-f0-9]{32}\z')) { throw 'invalid_browser_setup_id' }
+    if ($PSBoundParameters.ContainsKey('BrowserSetupId')) {
+        Assert-BrowserSetupContinuationInput -Id $BrowserSetupId -Administrator ([bool]$Administrator) -Apply ([bool]$Apply) `
+            -InstallLocal ([bool]$InstallLocal) -BrowserManaged ([bool]$BrowserManaged) `
+            -PromptForConnection ([bool]$PromptForConnection) -Consent $Consent
+    }
     if ($Administrator) {
         if (-not $Apply -or $Consent -cne 'accept-administrator-browser-installation') { throw 'consent_required' }
         if ($InstallLocal -or $BrowserManaged -or $InstallDir -or $Arch -or $SetupRequest -or $NodePath -or
@@ -1083,6 +1148,9 @@ try {
             if ($TunnelId) { $arguments += @('--tunnel-id', $TunnelId, '--runtime-key-file', $RuntimeKeyFile) }
             if ($BrowserManaged) { $arguments += @('--browser-managed', 'true') }
             $output = Invoke-Bootstrap $arguments
+            if ($BrowserManaged -and $PSBoundParameters.ContainsKey('BrowserSetupId')) {
+                $null = Publish-CurrentAccountBrowserSetup $output
+            }
             [Console]::Out.WriteLine($output)
             if ($PromptForConnection -and -not $BrowserManaged) {
                 try {

@@ -38,6 +38,131 @@ async function fixture(t, overrides = {}) {
   };
 }
 
+const setupId = 'a'.repeat(32), setupExtension = 'b'.repeat(32);
+const setupOperation = '12345678-1234-4234-8234-123456789abc';
+async function setupFixture(t) {
+  const f=await fixture(t),api=await import(source.href);
+  for(const name of ['publishCurrentAccountSetupReceipt','readCurrentAccountSetupReceipt','dispatchCurrentAccountSetup'])
+    assert.equal(typeof api[name],'function',name);
+  const binding={root:f.root,extensionId:setupExtension,assertCurrent(){}};
+  const receipt=api.publishCurrentAccountSetupReceipt(binding,setupId);
+  const frame={version:1,id:setupOperation,action:'current-account-setup-connect',setupId,
+    scope:'current-account',extensionId:setupExtension,bindingSha256:receipt.bindingSha256};
+  return {...f,api,binding,receipt,frame,send:(owner,value=frame)=>api.dispatchCurrentAccountSetup(binding,value,request=>owner.handle(request))};
+}
+
+test('fresh setup publication is create-only and proof binds scope, setup, extension and canonical binding',async t=>{
+  const f=await setupFixture(t);
+  assert.deepEqual(f.api.readCurrentAccountSetupReceipt(f.binding,setupId),f.receipt);
+  assert.equal(f.receipt.scope,'current-account');assert.equal(f.receipt.state,'installed');
+  assert.throws(()=>f.api.publishCurrentAccountSetupReceipt(f.binding,setupId),/setup_receipt_failed/);
+  assert.equal(f.api.readCurrentAccountSetupReceipt(f.binding,'c'.repeat(32)).state,'unconfirmed');
+  assert.equal(f.api.readCurrentAccountSetupReceipt({...f.binding,extensionId:'c'.repeat(32)},setupId).state,'unconfirmed');
+});
+
+test('setup consumption and the original journal admission precede one reconnect, including after reopen',async t=>{
+  const f=await setupFixture(t),owner=f.open(),reconnect=f.controller.reconnect;
+  f.controller.reconnect=async()=>{
+    const consumed=JSON.parse(fs.readFileSync(path.join(f.root,'browser-setup-consumed.json'),'utf8'));
+    assert.equal(consumed.operationId,setupOperation);assert.equal(consumed.setupId,setupId);
+    assert.equal(JSON.parse(fs.readFileSync(f.journal,'utf8').trim().split('\n').at(-1)).id,setupOperation);
+    return reconnect();
+  };
+  assert.equal((await f.send(owner)).state.operation.id,setupOperation);
+  assert.equal(f.api.readCurrentAccountSetupReceipt(f.binding,setupId).state,'unconfirmed');
+  await f.send(owner);owner.close();await f.send(f.open());
+  assert.equal(f.calls.filter(value=>value==='reconnect').length,1);
+});
+
+test('setup action, scope, extension, digest and setup substitutions cannot admit a standard reconnect',async t=>{
+  const f=await setupFixture(t),owner=f.open();
+  for(const change of [{scope:'administrator'},{extensionId:'c'.repeat(32)},{setupId:'c'.repeat(32)},
+    {bindingSha256:'c'.repeat(64)},{action:'reconnect'},{id:'not-a-uuid'},{extra:true}])
+    assert.equal((await f.send(owner,{...f.frame,...change})).ok,false);
+  assert.equal(f.calls.includes('reconnect'),false);
+  assert.equal(fs.existsSync(path.join(f.root,'browser-setup-consumed.json')),false);
+});
+
+test('a settled Pause or a lifecycle marker prevents automatic fresh continuation',async t=>{
+  const f=await setupFixture(t),owner=f.open();
+  await owner.handle(request('prior-pause','disconnect-and-pause'));
+  assert.equal((await f.send(owner)).ok,false);assert.equal(f.calls.includes('reconnect'),false);
+  assert.equal(f.api.readCurrentAccountSetupReceipt(f.binding,setupId).state,'unconfirmed');
+  const g=await setupFixture(t),second=g.open();
+  fs.writeFileSync(path.join(g.root,'lifecycle.json'),encode({format:'agent-continue-lifecycle',version:1,paused:true}));
+  assert.equal((await g.send(second)).ok,false);assert.equal(g.calls.includes('reconnect'),false);
+});
+
+test('consumption uncertainty has no replay permit for same-ID, replacement-ID or generic reconnect',async t=>{
+  const f=await setupFixture(t),owner=f.open(),open=fs.openSync,sync=fs.fsyncSync;let consumedFD;
+  const openMock=t.mock.method(fs,'openSync',(...args)=>{
+    const fd=open(...args);if(args[0]===path.join(f.root,'browser-setup-consumed.json'))consumedFD=fd;return fd;
+  });
+  const syncMock=t.mock.method(fs,'fsyncSync',fd=>{if(fd===consumedFD)throw Error('injected lost write acknowledgement');return sync(fd);});
+  assert.equal((await f.send(owner)).ok,false);openMock.mock.restore();syncMock.mock.restore();
+  assert.equal(fs.existsSync(path.join(f.root,'browser-setup-consumed.json')),true);
+  assert.equal((await f.send(owner)).ok,false);
+  assert.equal((await f.send(owner,{...f.frame,id:'22345678-1234-4234-8234-123456789abc'})).ok,false);
+  assert.equal((await owner.handle(request(setupOperation,'reconnect'))).ok,false);
+  assert.equal((await owner.handle(request('replacement','reconnect'))).ok,false);
+  assert.equal(owner.canRestoreSavedIntent(),false);assert.equal(f.calls.includes('reconnect'),false);
+});
+
+test('expiry, noncanonical bytes, hard links and changed receipt identity fail closed',async t=>{
+  const f=await setupFixture(t),owner=f.open(),file=path.join(f.root,'browser-setup.json');
+  const original=fs.readFileSync(file,'utf8'),saved=JSON.parse(original);
+  for(const bytes of [original+' ',encode({...saved,createdAt:saved.createdAt-900001,expiresAt:saved.expiresAt-900001}),
+    encode({...saved,scope:'administrator'}),encode({...saved,version:2})]){
+    fs.writeFileSync(file,bytes);assert.equal((await f.send(owner)).ok,false);
+  }
+  fs.writeFileSync(file,original);fs.linkSync(file,path.join(f.root,'receipt-alias'));
+  assert.equal((await f.send(owner)).ok,false);assert.equal(f.calls.includes('reconnect'),false);
+});
+
+test('scoped dispatch requires the actual in-process operation-lease owner and cannot retain a deferred permit',async t=>{
+  const f=await setupFixture(t);
+  assert.equal((await f.api.dispatchCurrentAccountSetup(f.binding,f.frame,()=>assert.fail('no owner'))).ok,false);
+  assert.equal(fs.existsSync(path.join(f.root,'browser-setup-consumed.json')),false);
+  const owner=f.open();let delayed;
+  await f.api.dispatchCurrentAccountSetup(f.binding,f.frame,value=>{delayed=value;return {...value,ok:false};});
+  assert.equal((await owner.handle(delayed)).ok,false);assert.equal(f.calls.includes('reconnect'),false);
+});
+
+test('only observed successful setup can allow saved-intent restoration; settled failure cannot',async t=>{
+  const f=await setupFixture(t),owner=f.open();
+  f.controller.reconnect=async()=>({paused:false,runtime:'failed',ready:false});
+  assert.equal((await f.send(owner)).state.operation.status,'settled');
+  assert.equal(owner.canRestoreSavedIntent(),false);
+  assert.equal(f.api.deviceOperationRecoverySettled(f.root),false);
+  const g=await setupFixture(t),successful=g.open();
+  await g.send(successful);assert.equal(successful.canRestoreSavedIntent(),true);
+  assert.equal(g.api.deviceOperationRecoverySettled(g.root),true);
+});
+
+test('missing setup consumption cannot turn incomplete setup history into legacy restore authority',async t=>{
+  const fresh=await setupFixture(t);
+  assert.equal(fresh.api.deviceOperationRecoverySettled(fresh.root),false,'setup publication without a journal is not recovery authority');
+  for(const success of [false,true]){
+    const f=await setupFixture(t),owner=f.open();
+    if(!success)f.controller.reconnect=async()=>({paused:false,runtime:'failed',ready:false});
+    await f.send(owner);
+    fs.unlinkSync(path.join(f.root,'browser-setup-consumed.json'));
+    assert.equal(owner.canRestoreSavedIntent(),false,'missing consumption with retained setup evidence');
+    assert.equal(f.api.deviceOperationRecoverySettled(f.root),false,'read-only recovery requires the same evidence');
+    if(success){
+      fs.unlinkSync(path.join(f.root,'browser-setup.json'));
+      assert.equal(owner.canRestoreSavedIntent(),false,'orphaned success cannot become legacy authority');
+      assert.equal(f.api.deviceOperationRecoverySettled(f.root),false);
+    }
+    owner.close();
+    assert.equal(f.open().canRestoreSavedIntent(),false,'reopening cannot erase setup provenance');
+  }
+  const legacy=await fixture(t),owner=legacy.open(),api=await import(source.href);
+  await owner.handle(request('legacy-manual-connect','reconnect'));
+  assert.equal(owner.canRestoreSavedIntent(),true,'no setup history retains existing manual recovery');
+  assert.equal(api.deviceOperationRecoverySettled(legacy.root),true);
+});
+
 check('status validates the closed browser envelope and never mutates', async t => {
   const f = await fixture(t), owner = f.open();
   const before = fs.readFileSync(f.journal, 'utf8');

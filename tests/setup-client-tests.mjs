@@ -451,8 +451,11 @@ async function setupPage(options = {}) {
     chrome: { runtime: { id: extensionId, async sendMessage(message) {
       messages.push(message);
       if (options.send) return options.send(message);
+      const scopedReceipt=message.scope==='current-account'?{setupId:message.setupId,state:'installed',scope:'current-account',
+        extensionId,bindingSha256:'b'.repeat(64)}:{...receipt,setupId:message.setupId};
       return { ...reply(message.type === types.BEGIN ? 'waiting' : message.type === types.OBSERVE ? 'installed' : 'submitted',
-        { automaticConnect: true, receipt: { ...receipt, setupId: message.setupId } }), setupId: message.setupId };
+        { automaticConnect: true, receipt: scopedReceipt }), setupId: message.setupId,
+        ...(message.scope==='current-account'?{scope:'current-account'}:{}) };
     } }, permissions: { contains: async () => granted, request: async () => (granted = true), onRemoved: event(), onAdded: event() },
     storage: { local: { get: async () => ({ installConsent: true }), set: async () => {} } } },
     navigator: { clipboard: { writeText: async command => { copies.push(command); } } },
@@ -467,16 +470,22 @@ async function setupPage(options = {}) {
   } };
 }
 
-test('page integrates the client using existing IDs and fresh administrator consent while standard copy stays unchanged', async () => {
+test('page routes both account scopes through the client and never restores legacy install-only consent', async () => {
   const f = await setupPage();
+  assert.equal(f.node('installConsent').checked,false);
   await f.emit('copyWindowsBrowserPowerShell', 'click', { isTrusted: true });
-  assert.match(f.copies[0], /-InstallLocal -BrowserManaged/); assert.equal(f.messages.length, 0);
+  assert.equal(f.copies.length,0);assert.equal(f.messages.length,0);
+  await f.emit('installConsent','change',{target:{checked:true}});
+  await f.emit('copyWindowsBrowserPowerShell', 'click', { isTrusted: true });
+  assert.match(f.copies[0], /-InstallLocal -BrowserManaged/);
+  assert.match(f.copies[0],new RegExp(`-BrowserSetupId ${setupId}$`));
+  assert.equal(f.messages.filter(value=>value.type===types.CONNECT&&value.scope==='current-account').length,1);
   await f.administrator();
   assert.match(f.node('setupRisk').textContent, /installation and connection.*separate.*Windows/i);
   await f.emit('copyWindowsBrowserPowerShell', 'click', { isTrusted: true });
   for (let i = 0; i < 15; i++) await tick();
   assert.match(f.copies[1], new RegExp(`-BrowserSetupId ${setupId}$`));
-  assert.equal(f.messages.filter(value => value.type === types.CONNECT).length, 1);
+  assert.equal(f.messages.filter(value => value.type === types.CONNECT).length, 2);
   assert.match(f.node('installFeedback').textContent, /requested.*unconfirmed/i);
 });
 

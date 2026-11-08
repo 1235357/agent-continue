@@ -185,6 +185,67 @@ test('ledger diagnostic phases retain exhaustive matrix and publication coverage
   assert.match(source, /same-ID concurrent acquisition is busy/);
   assert.match(source, /execution function contains explicit Flush\(true\)/);
   assert.match(source, /control_ledger_cleanup_reparse_refused/);
+  const scratch = source.slice(source.indexOf('function Assert-ScratchPath('), source.indexOf('function Assert-SealedAcl('));
+  assert.doesNotMatch(scratch, /\[IO\.(?:File|Directory)\]::Exists/);
+  assert.match(scratch, /GetAttributes\(\$cursor\)[\s\S]*?ReparsePoint/);
+  assert.match(scratch, /\[IO\.FileNotFoundException\][\s\S]*?\[IO\.DirectoryNotFoundException\][\s\S]*?\{ throw \}/);
+});
+
+test('ledger receipt assertions retain ordinal closed fields without a per-row sorting pipeline', windows, () => {
+  const source = readFileSync(ledgerFixture, 'utf8');
+  const body = source.slice(source.indexOf('function Assert-Receipt('), source.indexOf('function Get-Snapshot('));
+  assert.doesNotMatch(body, /Sort-Object/);
+  assert.match(body, /\[Array\]::IndexOf\(\$keys,'bundleSha256'\)/);
+  const code = `
+$ErrorActionPreference='Stop'
+$text=[Console]::In.ReadToEnd()
+$tokens=$errors=$null
+$ast=[Management.Automation.Language.Parser]::ParseInput($text,[ref]$tokens,[ref]$errors)
+if($errors.Count){throw 'fixture_parse'}
+foreach($name in @('Assert-True','Assert-Receipt','Assert-SealedAcl')){
+ $definition=@($ast.FindAll({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq $name},$true))
+ if($definition.Count -ne 1){throw 'fixture_function'}
+ . ([scriptblock]::Create($definition[0].Extent.Text))
+}
+$script:Assertions=0;$digest='a'*64;$sid='S-1-5-21-1-2-3-1001';$id='b'*32;$checks=0
+function Read-AdministratorControlReceipt {return $script:row}
+$script:row=@{bundleSha256=$digest;operationId=$id;control='connect';state='reserved';progress=$null}
+Assert-Receipt 'unused' 'connect' 'reserved' 'valid';$checks++
+foreach($field in @('bundleSha256','operationId','control','state','progress')){
+ foreach($variant in @('missing','wrong-case','extra')){
+  $script:row=[Collections.Hashtable]::new([StringComparer]::Ordinal)
+  foreach($key in @('bundleSha256','operationId','control','state','progress')){
+   $value=@{bundleSha256=$digest;operationId=$id;control='connect';state='reserved';progress=$null}[$key]
+   if($key -ceq $field -and $variant -ceq 'missing'){continue}
+   $name=if($key -ceq $field -and $variant -ceq 'wrong-case'){$key.ToUpperInvariant()}else{$key}
+   $script:row.Add($name,$value)
+  }
+  if($variant -ceq 'extra'){$script:row.Add('extra',$null)}
+  $failed=$false;try{Assert-Receipt 'unused' 'connect' 'reserved' 'invalid'}catch{$failed=$true}
+  if(-not $failed){throw 'fixture_accepted_invalid_fields'};$checks++
+ }
+}
+$script:AclChecks=[Collections.Generic.List[object]]::new();$script:CaptureAclChecks=$false
+$script:DenyAclPath='';$script:pathChecks=0;$script:typeChecks=0;$traceChecks=0
+function Assert-ScratchPath {param($Path) $script:pathChecks++}
+function Assert-PathType {param($Path,$Directory) $script:typeChecks++}
+Assert-SealedAcl 'fixture' $true $false $sid
+if($script:pathChecks -ne 1 -or $script:typeChecks -ne 1 -or $script:AclChecks.Count -ne 0){throw 'fixture_trace_guard'};$traceChecks++
+$script:DenyAclPath='fixture';$failed=$false
+try{Assert-SealedAcl 'fixture' $true $false $sid}catch{if($_.Exception.Message -cne 'fixture_acl_denied'){throw};$failed=$true}
+if(-not $failed -or $script:pathChecks -ne 2 -or $script:typeChecks -ne 1){throw 'fixture_denial_guard'};$traceChecks++
+$script:DenyAclPath='';$script:CaptureAclChecks=$true
+Assert-SealedAcl 'fixture' $true $false $sid
+if($script:pathChecks -ne 3 -or $script:typeChecks -ne 2 -or $script:AclChecks.Count -ne 1 -or $script:AclChecks[0].Sid -cne $sid){throw 'fixture_trace_identity'};$traceChecks++
+[Console]::WriteLine('ordinal_receipt_checks='+$checks+';acl_trace_checks='+$traceChecks)
+`;
+  const powershell = path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  const result = spawnSync(powershell, ['-NoProfile', '-NonInteractive', '-Command', code], {
+    input: source, encoding: 'utf8', windowsHide: true, shell: false, timeout: 10_000,
+  });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(result.stdout.trim(), 'ordinal_receipt_checks=16;acl_trace_checks=3');
 });
 
 function assertFixtureHostToken(result, kind) {
@@ -285,7 +346,7 @@ function validateLedgerBatch(result, batch) {
 }
 
 for (const batch of ['read', 'publication']) {
-  test(`Windows administrator control ledger ${batch}: scratch-only PS5.1 fixture (not protected acceptance)`, windows, () => {
+  test(`Windows administrator control ledger ${batch}: scratch-only PS5.1 fixture (not protected acceptance)`, windows, t => {
     const output = runFixture(ledgerFixture, batch);
     const manifests = [...output.matchAll(/^LEDGER_BATCH (\{[^\r\n]*\})\r?$/gm)];
     assert.equal(manifests.length, 1, 'control_ledger_batch_manifest_count');
@@ -293,6 +354,7 @@ for (const batch of ['read', 'publication']) {
     try { result = JSON.parse(manifests[0][1]); } catch { assert.fail('control_ledger_batch_manifest_json'); }
     validateLedgerBatch(result, batch);
     assert.match(output, /^DIAG control-ledger phase=cleanup count=1\r?$/m);
+    t.diagnostic(JSON.stringify(result));
   });
 }
 

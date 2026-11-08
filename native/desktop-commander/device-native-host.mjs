@@ -5,6 +5,8 @@ const matchesOrigin = (args, origin) => args[0] === origin &&
   (args.length === 1 || process.platform === 'win32' && args.length === 2 && /^--parent-window=\d{1,20}$/.test(args[1]));
 
 const preparedActions = new Set(['prepared-review', 'prepared-revoke']);
+const exact = (value,keys) => value && typeof value === 'object' && !Array.isArray(value) &&
+  Object.keys(value).length === keys.length && keys.every(key=>Object.hasOwn(value,key));
 
 export function createPreparedControl(binding, { openPreparedProcesses, operationField, processDigestField }) {
   return frame => {
@@ -35,8 +37,18 @@ export function createPreparedControl(binding, { openPreparedProcesses, operatio
 export async function serveBrowserWake({ input, output, origin, args, startOwner, handlePrepared, binding }) {
   if (!matchesOrigin(args, origin)) throw new Error('invalid_browser_wake');
   const { readFrame, writeFrame, sendExistingBrowserControl } = await import('./device-owner.mjs');
-  const { validateDeviceRequest } = await import('./device-operations.mjs');
+  const { validateDeviceRequest, readCurrentAccountSetupReceipt, dispatchCurrentAccountSetup } = await import('./device-operations.mjs');
   const request = await readFrame(input);
+  if (request?.action === 'current-account-setup-status') {
+    if (!exact(request,['version','id','action','scope','extensionId','setupId']) || request.version !== 1 ||
+        typeof request.id !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(request.id) ||
+        request.scope !== 'current-account' || !binding || binding.origin !== origin ||
+        request.extensionId !== binding.extensionId || typeof request.setupId !== 'string' ||
+        request.setupId.length !== 32 || !/^[a-f0-9]{32}$/.test(request.setupId)) throw new Error('invalid_current_account_setup');
+    const receipt=readCurrentAccountSetupReceipt(binding,request.setupId);
+    await writeFrame(output,{...request,state:receipt.state,bindingSha256:receipt.bindingSha256});
+    return;
+  }
   if (request?.version === 2 || request?.action === 'attach-control') {
     try {
       if (!request || Array.isArray(request) || Object.keys(request).length !== 4 ||
@@ -81,9 +93,16 @@ export async function serveBrowserWake({ input, output, origin, args, startOwner
           throw error;
         }
         if (lifetime.signal.aborted) break;
-        const response = handlePrepared && preparedActions.has(frame?.action)
-          ? handlePrepared(frame)
-          : await owner.request(validateDeviceRequest(frame));
+        let response;
+        if (frame?.action === 'current-account-setup-connect') {
+          if (!binding || binding.origin !== origin) throw new Error('invalid_current_account_setup');
+          response=await dispatchCurrentAccountSetup(binding,frame,value=>{
+            if (lifetime.signal.aborted) return {...value,ok:false};
+            binding.assertCurrent();
+            return owner.request(value);
+          });
+        } else response = handlePrepared && preparedActions.has(frame?.action)
+          ? handlePrepared(frame) : await owner.request(validateDeviceRequest(frame));
         if (lifetime.signal.aborted || output.destroyed || output.writableEnded) break;
         try { await writeFrame(output, response); }
         catch { break; } // The receipt is already durable; a lost reply is not replayed.

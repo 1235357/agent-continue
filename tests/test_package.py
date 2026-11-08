@@ -59,6 +59,9 @@ class PackageTests(unittest.TestCase):
                         names = archive.namelist()
                         self.assertTrue(all(name.startswith(prefix) for name in names))
                         self.assertIn(prefix + "content.js", names)
+                        self.assertIn(prefix + "current-account-setup.js", names)
+                        self.assertEqual(archive.read(prefix + "current-account-setup.js"),
+                                         (ROOT / "current-account-setup.js").read_bytes())
                         manifest = json.loads(archive.read(prefix + "manifest.json"))
                         relative = {name[len(prefix):] for name in names}
                         package.validate_manifest_files(manifest, relative)

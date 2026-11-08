@@ -7,6 +7,12 @@ import { createSetupClient } from './setup-client.js';
 import { buildWindowsSetupCommand } from './setup-entry.js';
 
 const catalog = {
+  '全新安装后仅请求一次连接。撤回同意可取消未发请求；已受理操作仍可能完成，请核对原回执。ChatGPT / Dot 需分别授权。': 'Fresh install, then one connection request. Withdrawal cancels unsent requests; admitted work may finish. Check the original receipt. Authorize ChatGPT / Dot separately.',
+  '粘贴命令并输入隧道 ID 和密钥文件路径，再输入 REGISTER。安装器保留暂停状态；本页同意仍有效时另行请求一次连接。不要粘贴密钥内容。': 'Paste the command, enter the tunnel ID and key-file path, then type REGISTER. The installer leaves the device paused; this page separately requests one connection while consent remains valid. Never paste the key itself.',
+  '全新安装验证后，本页请求一次连接；请求不代表就绪。请在设备页核对状态，ChatGPT 和 Dot 仍需分别授权。': 'After fresh installation is verified, this page requests one connection; a request does not mean ready. Check status in Devices and authorize ChatGPT and Dot separately.',
+  '复制会申请浏览器本机通信权限并准备本页安装意图，不会运行安装。安装只使用当前账户，不请求管理员提权。': 'Copy requests browser native-messaging permission and prepares setup intent for this page; it does not install anything. Installation uses the current account without requesting administrator elevation.',
+  '我同意安装并请求一次连接。': 'I agree to install and request one connection.',
+  '确认连接状态。': 'Confirm connection state.',
   'Windows 访问权限': 'Windows access',
   '当前账户': 'Current account',
   '管理员': 'Administrator',
@@ -228,6 +234,9 @@ let installConsentEpoch = 0;
 let installFeedbackKey = null;
 let windowsCopyAttempt = null;
 let administratorSetupClient = null;
+let currentAccountSetupClient = null;
+const selectedSetupClient = () => windowsAccessScope === 'administrator' ? administratorSetupClient : currentAccountSetupClient;
+function cancelSetupClients() { administratorSetupClient?.cancel(); currentAccountSetupClient?.cancel(); }
 const ADMINISTRATOR_SETUP_FEEDBACK = Object.freeze({
   preparing: '正在准备本页安装；尚未安装或连接。',
   waiting: '已复制安装命令。等待本页确认安装；尚未请求连接。',
@@ -457,15 +466,15 @@ function renderInstall() {
     ? '授权后，MCP 可按系统账户权限修改文件、执行命令和控制进程。管理员或 root 权限仍需系统批准。'
     : administrator ? '授权后，MCP 可按 Windows 管理员权限操作文件、终端和进程。安装和连接可能分别请求 Windows 批准（UAC）。'
       : '授权后，MCP 可按当前账户权限修改文件、执行命令和控制进程。无需管理员批准。');
-  $('setupGrantBoundary').textContent = t(installOs === 'windows' && administrator
-    ? '同意并复制后，运行命令允许本页在安装完成后请求一次连接。离开本页或撤回同意会取消；ChatGPT / Dot 授权仍需分别完成。'
+  $('setupGrantBoundary').textContent = t(installOs === 'windows'
+    ? '全新安装后仅请求一次连接。撤回同意可取消未发请求；已受理操作仍可能完成，请核对原回执。ChatGPT / Dot 需分别授权。'
     : '复制不安装、不连接、不授予权限。浏览器及 ChatGPT / Dot 授权仍需分别完成；手动暂停会保留。');
   for (const [id, standardKey, administratorKey] of [
-    ['windowsRunGuidance', '粘贴命令，按提示输入隧道 ID 和密钥文件路径，再输入 REGISTER 注册桥接；留空取消。无需 JSON，不要粘贴密钥内容；此步骤不启动隧道。',
+    ['windowsRunGuidance', '粘贴命令并输入隧道 ID 和密钥文件路径，再输入 REGISTER。安装器保留暂停状态；本页同意仍有效时另行请求一次连接。不要粘贴密钥内容。',
       '粘贴命令，按提示输入隧道 ID 和密钥文件路径。不要粘贴密钥内容。安装后仅在本页仍打开且同意有效时请求连接。安装和连接可能分别请求 Windows 批准（UAC）。'],
-    ['windowsConnectGuidance', '安装后允许本机控制桥访问，检查状态，再重新连接。最后分别完成 ChatGPT 和 Dot 的插件授权。',
+    ['windowsConnectGuidance', '全新安装验证后，本页请求一次连接；请求不代表就绪。请在设备页核对状态，ChatGPT 和 Dot 仍需分别授权。',
       '兼容组件安装后，本页会请求一次连接；请求不代表就绪。若不支持自动继续，请在设备页手动连接。ChatGPT 和 Dot 仍需分别授权。'],
-    ['windowsCommandScope', '只写入当前用户空间，不需要管理员。',
+    ['windowsCommandScope', '复制会申请浏览器本机通信权限并准备本页安装意图，不会运行安装。安装只使用当前账户，不请求管理员提权。',
       '复制命令会申请浏览器本机通信权限并准备本页安装意图，不会运行安装。安装和连接可能分别请求 Windows 批准（UAC）。'],
     ['windowsNodeProvisioning', '已有兼容的 Node.js 时直接使用；否则确认后会自动下载并校验官方便携 Node ZIP，只为当前用户安装。不运行 EXE/MSI 安装器，不需要管理员权限，不改系统 PATH。',
       '管理员路径使用单独校验的安装包及其固定版本的便携 Node，不使用当前账户的 Node 补装流程。'],
@@ -476,7 +485,7 @@ function renderInstall() {
   $('installConsentLabel').hidden = installOs !== 'windows';
   $('windowsExistingDevice').hidden = installOs !== 'windows';
   $('windowsSourceInstall').hidden = installOs !== 'windows';
-  const administratorState = administrator ? administratorSetupClient?.getState() : null;
+  const administratorState = selectedSetupClient()?.getState();
   for (const [shell, [preview, copy, feedback]] of Object.entries(WINDOWS_GUIDED_ENTRIES)) {
     const command = windowsGuidedCommand(plan, shell);
     $(preview).textContent = command;
@@ -529,15 +538,13 @@ function installPlan(os) {
 
 function windowsGuidedCommand(plan, shell) {
   if (plan?.os !== 'windows' || !installConsent) return '';
-  if (windowsAccessScope === 'administrator') {
-    const state = administratorSetupClient?.getState();
+  if (shell === 'browserPowerShell' || shell === 'browserCmd') {
+    const state = selectedSetupClient()?.getState();
     if (state?.extensionId === plan.extensionId && state.shell === shell && state.command) return state.command;
-    return buildWindowsSetupCommand({ extensionId: plan.extensionId, scope: 'administrator', shell,
+    return buildWindowsSetupCommand({ extensionId: plan.extensionId, scope: windowsAccessScope, shell,
       version: globalThis.chrome?.runtime?.getManifest?.()?.version });
   }
-  if (shell === 'browserPowerShell' || shell === 'browserCmd') return buildWindowsSetupCommand({
-    extensionId: plan.extensionId, scope: 'current-account', shell,
-    version: globalThis.chrome?.runtime?.getManifest?.()?.version });
+  if (windowsAccessScope === 'administrator') return '';
   return shell === 'cmd' ? plan.entry.cmd : plan.entry.local;
 }
 
@@ -562,7 +569,7 @@ function invalidateReview() {
 $('target').addEventListener('change', () => { invalidateReview(); render(); });
 for (const [elementId, os] of OS_SWITCHES) $(elementId).addEventListener('click', () => {
   if (installOs !== os) {
-    administratorSetupClient?.cancel();
+    cancelSetupClients();
     resetDetection();
     windowsCopyAttempt = null;
   }
@@ -644,7 +651,7 @@ for (const [id, action] of [['localControlCheck', 'status'], ['localControlPause
 $('installConsent').addEventListener('change', event => {
   installConsentEpoch++;
   installConsent = event?.target?.checked === true;
-  if (!installConsent) administratorSetupClient?.cancel();
+  if (!installConsent) cancelSetupClients();
   installFeedbackKey = null;
   windowsCopyAttempt = null;
   render();
@@ -654,7 +661,7 @@ $('windowsAccessScope').addEventListener('change', event => {
   const next = event.target.value;
   if (!['current-account', 'administrator'].includes(next) || next === windowsAccessScope) { renderInstall(); return; }
   windowsAccessScope = next;
-  administratorSetupClient?.cancel();
+  cancelSetupClients();
   installConsentEpoch++;
   installConsent = false;
   installFeedbackKey = null;
@@ -718,7 +725,7 @@ for (const event of [globalThis.chrome?.permissions?.onAdded, globalThis.chrome?
   });
 }
 addEventListener('pagehide', () => {
-  administratorSetupClient?.cancel();
+  cancelSetupClients();
   for (const url of urls) URL.revokeObjectURL(url);
   urls.clear();
 });
@@ -761,14 +768,14 @@ async function loadInstallConsent() {
   const epoch = installConsentEpoch;
   if (epoch !== 0) return;
   try {
-    const values = await globalThis.chrome?.storage?.local?.get?.([CONSENT_KEY]);
-    if (epoch === installConsentEpoch && windowsAccessScope === 'current-account') installConsent = values?.[CONSENT_KEY] === true;
+    await globalThis.chrome?.storage?.local?.get?.([CONSENT_KEY]);
+    if (epoch === installConsentEpoch && windowsAccessScope === 'current-account') installConsent = false;
   } catch { if (epoch === installConsentEpoch) installConsent = false; }
 }
 
 async function saveInstallConsent() {
-  // The legacy persisted boolean authorizes only the current-account command.
-  try { await globalThis.chrome?.storage?.local?.set?.({ [CONSENT_KEY]: windowsAccessScope === 'current-account' && installConsent }); }
+  // Combined connection consent is document-local, never restored from the legacy install-only flag.
+  try { await globalThis.chrome?.storage?.local?.set?.({ [CONSENT_KEY]: false }); }
   catch { installFeedbackKey = '无法保存同意状态。'; render(); }
 }
 
@@ -782,9 +789,11 @@ async function copyWindowsGuidedCommand(event, shell) {
     return;
   }
 
-  if (windowsAccessScope === 'administrator') {
-    administratorSetupClient ??= createSetupClient({
+  if (shell === 'browserPowerShell' || shell === 'browserCmd') {
+    let client = selectedSetupClient();
+    client ??= createSetupClient({
       getContext: () => ({ os: installOs, scope: windowsAccessScope, consent: installConsent,
+        connectionConsent: installConsent,
         epoch: installConsentEpoch, extensionId: globalThis.chrome?.runtime?.id,
         version: globalThis.chrome?.runtime?.getManifest?.()?.version }),
       permissionGranted: () => permission === 'granted',
@@ -793,7 +802,9 @@ async function copyWindowsGuidedCommand(event, shell) {
         renderInstall();
       },
     });
-    await administratorSetupClient.copy(event, shell);
+    if (windowsAccessScope === 'administrator') administratorSetupClient = client;
+    else currentAccountSetupClient = client;
+    await client.copy(event, shell);
     return;
   }
 

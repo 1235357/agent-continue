@@ -21,6 +21,8 @@ on:
       - 'devices*'
       - 'device-control.js'
       - 'browser-wake.js'
+      - 'current-account-setup.js'
+      - 'tests/current-account-*'
       - 'admin-browser.js'
       - 'background.js'
       - 'tests/admin-browser-tests.mjs'
@@ -96,6 +98,8 @@ on:
       - 'devices*'
       - 'device-control.js'
       - 'browser-wake.js'
+      - 'current-account-setup.js'
+      - 'tests/current-account-*'
       - 'admin-browser.js'
       - 'background.js'
       - 'tests/admin-browser-tests.mjs'
@@ -176,6 +180,8 @@ jobs:
           package-manager-cache: false
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm test
+      - name: Verify fresh current-account setup with local fixtures only
+        run: node --test ../../tests/current-account-setup-tests.mjs ../../tests/current-account-native-protocol-tests.mjs ../../tests/current-account-setup-integration-tests.mjs ../../tests/current-account-installer-runner-tests.mjs
       - uses: actions/setup-python@v6
         with:
           python-version: '3.13'

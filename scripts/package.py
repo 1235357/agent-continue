@@ -38,7 +38,7 @@ RUNTIME_FILES = (
     "support.html", "support.css", "support.js", "support-info.js", "activity-export.js",
     "devices.html", "devices.css", "devices.js", "device-control.js",
     "setup.html", "setup.css", "setup.js", "setup-model.js", "setup-handoff.js", "setup-controller.js", "setup-client.js",
-    "setup-entry.js", "setup-entry-release.js",
+    "setup-entry.js", "setup-entry-release.js", "current-account-setup.js",
     "native/bootstrap/install-plan.mjs", "native/bootstrap/registration-status-view.mjs",
     "_locales/en/messages.json", "_locales/zh_CN/messages.json",
     "LICENSE", "CHANGELOG.md", "PRIVACY.md", "VALIDATION.md", "ALTERNATIVES.md",
