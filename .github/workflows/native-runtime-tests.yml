@@ -290,7 +290,7 @@ jobs:
           $fixture = Join-Path ([IO.Path]::GetTempPath()) ('ac-node-provision-' + [Guid]::NewGuid().ToString('N'))
           & ./tests/portable-node-acceptance.ps1 -Fixture $fixture -AllowDownload
           if (-not $?) { throw 'Portable Node acceptance failed' }
-      - name: Check registry failure classification without touching registry
+      - name: Check registry failures and disposable Unicode roundtrips
         working-directory: .
         run: node --test native/bootstrap/registry-win.test.mjs native/bootstrap/browser-wake-registration.test.mjs
       # Disjoint phases retain all seven files and their original test deadlines.

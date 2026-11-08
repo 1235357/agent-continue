@@ -781,19 +781,70 @@ class SetupReleaseTests(unittest.TestCase):
             return {path.relative_to(root): hashlib.sha256(path.read_bytes()).digest() if path.is_file() else None
                     for tree in (sandbox, extracted) for path in tree.rglob("*") if path not in startup_files}
 
-        def assert_unchanged(before):
+        def fixture_changes(before):
             after = snapshot()
             changed = before.keys() ^ after.keys()
             changed.update(path for path in before.keys() & after.keys() if before[path] != after[path])
-            self.assertEqual(sorted(map(str, changed)), [], "guided command changed the fixture tree")
+            return sorted(map(str, changed))
+
+        def assert_unchanged(before):
+            self.assertEqual(fixture_changes(before), [], "guided command changed the fixture tree")
+
+        def bounded_output(value):
+            if isinstance(value, bytes):
+                value = value.decode("utf-8", errors="backslashreplace")
+            return (value or "")[:4096]
+
+        def timeout_diagnostic(error, args, started, before):
+            report = {"rootCause": "unresolved", "args": args, "timeoutSeconds": 20,
+                      "elapsedSeconds": round(time.monotonic() - started, 3),
+                      "originalPhase": "CMD/PowerShell refusal boundary; internal phase not observed",
+                      "stdout": bounded_output(error.stdout), "stderr": bounded_output(error.stderr)}
+            # A separate read-only probe, not an installer replay or an observation
+            # of the timed-out process. ParseFile never executes the installer.
+            probe_source = """
+$ErrorActionPreference = 'Stop'
+[Console]::Out.WriteLine('engine-entered')
+$tokens = $null; $parseErrors = $null
+$null = [System.Management.Automation.Language.Parser]::ParseFile(
+    $env:AC_GUIDED_CMD_PROBE_INSTALLER, [ref]$tokens, [ref]$parseErrors)
+[Console]::Out.WriteLine(('installer-parsed:' + $parseErrors.Count))
+$null = [Net.ServicePointManager]::SecurityProtocol
+[Console]::Out.WriteLine('tls-ready')
+Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1')
+[Console]::Out.WriteLine('utility-imported')
+Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Archive/Microsoft.PowerShell.Archive.psd1')
+[Console]::Out.WriteLine('archive-imported')
+[Console]::Out.WriteLine(('stdin-redirected:' + [Console]::IsInputRedirected))
+"""
+            probe_env = {**env, "AC_GUIDED_CMD_PROBE_INSTALLER": str(extracted / "install.ps1")}
+            try:
+                probe = subprocess.run([str(ps), "-NoLogo", "-NoProfile", "-Command", probe_source],
+                                       cwd=extracted, env=probe_env, input="", capture_output=True, text=True, timeout=3)
+                report["postTimeoutEngineProbe"] = {"status": "completed", "returncode": probe.returncode,
+                    "stdout": bounded_output(probe.stdout), "stderr": bounded_output(probe.stderr)}
+            except subprocess.TimeoutExpired as probe_error:
+                report["postTimeoutEngineProbe"] = {"status": "timeout",
+                    "stdout": bounded_output(probe_error.stdout), "stderr": bounded_output(probe_error.stderr)}
+            except OSError as probe_error:
+                report["postTimeoutEngineProbe"] = {"status": "launch", "error": type(probe_error).__name__}
+            try:
+                report["fixtureChanges"] = fixture_changes(before)
+            except OSError as snapshot_error:
+                report["fixtureSnapshotError"] = type(snapshot_error).__name__
+            return "guided_cmd_timeout: " + json.dumps(report, ensure_ascii=True, sort_keys=True)
 
         base = [cmd, "/d", "/c", "install.cmd", "guided"]
         extension_id = "a" * 32
         before = snapshot()
         for args in ([extension_id], ["z" * 32], [extension_id, "-Verify"]):
             with self.subTest(guided_cmd_args=args):
-                result = subprocess.run([*base, *args], cwd=extracted, env=env,
-                                        input="must not be read\n", capture_output=True, text=True, timeout=20)
+                started = time.monotonic()
+                try:
+                    result = subprocess.run([*base, *args], cwd=extracted, env=env,
+                                            input="must not be read\n", capture_output=True, text=True, timeout=20)
+                except subprocess.TimeoutExpired as error:
+                    self.fail(timeout_diagnostic(error, args, started, before))
                 diagnostic = result.stdout + result.stderr
                 self.assertNotEqual(result.returncode, 0, diagnostic)
                 if args == [extension_id]:
@@ -981,6 +1032,131 @@ class SetupReleaseTests(unittest.TestCase):
                         run()
                         self.assertEqual(len(calls), 3)
                         self.assertFalse((root / "guided-cmd/AppData/Local/Microsoft/Windows/PowerShell/ModuleAnalysisCache").exists())
+
+    def test_guided_cmd_timeout_keeps_original_evidence_and_does_not_retry_installer(self):
+        with tempfile.TemporaryDirectory(prefix="ac-guided-timeout-") as temporary:
+            root = Path(temporary).resolve()
+            extracted = root / "extracted"
+            extracted.mkdir()
+            calls = []
+
+            def timed_out(command, **kwargs):
+                calls.append((command, kwargs))
+                if len(calls) == 1:
+                    raise subprocess.TimeoutExpired(command, 20, output=b"original partial stdout\xff",
+                                                    stderr=b"original partial stderr")
+                return subprocess.CompletedProcess(command, 0, "engine-entered\ninstaller-parsed:0\n", "")
+
+            observed = None
+            with mock.patch.dict(os.environ, {"SystemRoot": str(root / "system")}), \
+                    mock.patch.object(shutil, "which", return_value=None), \
+                    mock.patch.object(subprocess, "run", side_effect=timed_out):
+                try:
+                    SetupReleaseTests.check_guided_cmd(unittest.TestCase(), root / "powershell/powershell.exe", extracted, root)
+                except Exception as error:
+                    observed = error
+            self.assertIsInstance(observed, AssertionError, "timeout must include bounded phase diagnostics")
+            report = json.loads(str(observed).split("guided_cmd_timeout: ", 1)[1])
+            self.assertEqual(report["rootCause"], "unresolved")
+            self.assertEqual(report["args"], ["a" * 32])
+            self.assertEqual(report["timeoutSeconds"], 20)
+            self.assertGreaterEqual(report["elapsedSeconds"], 0)
+            self.assertIn("original partial stdout", report["stdout"])
+            self.assertEqual(report["stderr"], "original partial stderr")
+            self.assertEqual(report["fixtureChanges"], [])
+            self.assertEqual(report["postTimeoutEngineProbe"]["stdout"], "engine-entered\ninstaller-parsed:0\n")
+            self.assertEqual(report["postTimeoutEngineProbe"]["returncode"], 0)
+            self.assertEqual(len(calls), 2, "the original installer must never be retried")
+            original, probe = calls
+            self.assertEqual(original[1]["timeout"], 20)
+            self.assertEqual(original[1]["input"], "must not be read\n")
+            self.assertEqual(probe[1]["timeout"], 3)
+            self.assertEqual(probe[1]["input"], "")
+            self.assertIn("-Command", probe[0])
+            self.assertNotIn("-File", probe[0])
+            self.assertEqual(probe[1]["env"]["AC_GUIDED_CMD_PROBE_INSTALLER"], str(extracted / "install.ps1"))
+            self.assertNotIn("AC_GUIDED_CMD_PROBE_INSTALLER", original[1]["env"])
+            for name in ("USERPROFILE", "LOCALAPPDATA", "APPDATA", "TEMP", "TMP", "PATH", "PSModuleAnalysisCachePath"):
+                self.assertEqual(original[1]["env"][name], probe[1]["env"][name])
+
+    def test_guided_cmd_timeout_probe_failure_preserves_original_and_fixture_changes(self):
+        for probe_failure in ("timeout", "launch"):
+            with self.subTest(probe_failure=probe_failure), tempfile.TemporaryDirectory(prefix="ac-guided-timeout-") as temporary:
+                root = Path(temporary).resolve()
+                extracted = root / "extracted"
+                extracted.mkdir()
+                calls = []
+
+                def timed_out(command, **kwargs):
+                    calls.append(command)
+                    if len(calls) == 1:
+                        local = Path(kwargs["env"]["LOCALAPPDATA"])
+                        marker = local / "AgentContinue/installed.marker"
+                        marker.parent.mkdir()
+                        marker.write_bytes(b"synthetic forbidden write")
+                        (local / "Microsoft/Windows/PowerShell/StartupProfileData-Interactive").write_bytes(b"engine startup")
+                        raise subprocess.TimeoutExpired(command, 20, stderr=b"original refusal stalled")
+                    if probe_failure == "timeout":
+                        raise subprocess.TimeoutExpired(command, 3, output=b"engine-entered\n" + b"x" * 9000,
+                                                        stderr=b"probe partial stderr")
+                    raise OSError("synthetic probe launch failure")
+
+                observed = None
+                with mock.patch.dict(os.environ, {"SystemRoot": str(root / "system")}), \
+                        mock.patch.object(shutil, "which", return_value=None), \
+                        mock.patch.object(subprocess, "run", side_effect=timed_out):
+                    try:
+                        SetupReleaseTests.check_guided_cmd(unittest.TestCase(), root / "powershell/powershell.exe", extracted, root)
+                    except Exception as error:
+                        observed = error
+                self.assertIsInstance(observed, AssertionError, "probe failure must not hide original timeout")
+                report = json.loads(str(observed).split("guided_cmd_timeout: ", 1)[1])
+                self.assertEqual(report["stderr"], "original refusal stalled")
+                self.assertTrue(any(name.endswith("installed.marker") for name in report["fixtureChanges"]))
+                self.assertFalse(any("StartupProfileData" in name for name in report["fixtureChanges"]))
+                probe = report["postTimeoutEngineProbe"]
+                self.assertEqual(probe["status"], probe_failure)
+                self.assertLessEqual(len(probe.get("stdout", "")), 4096)
+                if probe_failure == "timeout":
+                    self.assertTrue(probe["stdout"].startswith("engine-entered\n"))
+                    self.assertEqual(probe["stderr"], "probe partial stderr")
+                self.assertEqual(len(calls), 2)
+
+    @unittest.skipUnless(os.name == "nt", "Windows PowerShell read-only timeout phase probe")
+    def test_guided_cmd_timeout_engine_probe_parses_but_never_executes_installer(self):
+        with tempfile.TemporaryDirectory(prefix="ac-guided-timeout-") as temporary:
+            root = Path(temporary).resolve()
+            extracted = root / "extracted"
+            extracted.mkdir()
+            marker = extracted / "must-not-execute.txt"
+            installer = extracted / "install.ps1"
+            installer.write_text("[IO.File]::WriteAllText('" + str(marker).replace("'", "''") + "', 'unsafe')\n")
+            ps = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+            real_run = subprocess.run
+            calls = []
+
+            def timed_out(command, **kwargs):
+                calls.append(command)
+                if len(calls) == 1:
+                    raise subprocess.TimeoutExpired(command, 20)
+                return real_run(command, **kwargs)
+
+            observed = None
+            with mock.patch.object(subprocess, "run", side_effect=timed_out):
+                try:
+                    SetupReleaseTests.check_guided_cmd(unittest.TestCase(), ps, extracted, root)
+                except Exception as error:
+                    observed = error
+            self.assertIsInstance(observed, AssertionError)
+            report = json.loads(str(observed).split("guided_cmd_timeout: ", 1)[1])
+            probe = report["postTimeoutEngineProbe"]
+            self.assertEqual(probe["status"], "completed", probe)
+            self.assertEqual(probe["returncode"], 0, probe)
+            self.assertEqual(probe["stdout"].splitlines(), ["engine-entered", "installer-parsed:0", "tls-ready",
+                                                         "utility-imported", "archive-imported", "stdin-redirected:True"])
+            self.assertFalse(marker.exists(), "the phase probe must only parse the fixture installer")
+            self.assertEqual(report["fixtureChanges"], [])
+            self.assertEqual(len(calls), 2)
 
     def test_release_workflow_carries_matching_setup_assets(self):
         workflow = (REPO / ".github/workflows/release.yml").read_text(encoding="utf-8")

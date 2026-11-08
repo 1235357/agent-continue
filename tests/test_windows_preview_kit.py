@@ -99,6 +99,19 @@ class WindowsPreviewKitTests(unittest.TestCase):
         self.assertIn("dist/windows-preview-kit/" + kit.ARCHIVE + ".sha256", artifact)
         self.assertNotIn("contents: write", workflow)
 
+    def test_preview_explicitly_uses_source_only_without_relaxing_combined_delivery(self):
+        source = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('"scripts/build-setup-release.py"), "--source-only", "--output"', source)
+        self.assertNotIn('"--administrator-bundle"', source)
+        with zipfile.ZipFile(self.archive) as archive:
+            self.assertFalse(any(name.lower().endswith((".exe", ".msi", ".zip")) for name in archive.namelist()))
+        combined = subprocess.run([sys.executable, str(ROOT / "scripts/build-setup-release.py"),
+                                   "--output", str(self.root / "combined-must-not-exist")],
+                                  capture_output=True, text=True, timeout=20)
+        self.assertNotEqual(combined.returncode, 0)
+        self.assertIn("combined_administrator_bundle_required", combined.stderr)
+        self.assertFalse((self.root / "combined-must-not-exist").exists())
+
     @staticmethod
     def write_archive(path, members):
         with zipfile.ZipFile(path, "w") as archive:

@@ -620,3 +620,205 @@ void chrome.storage.local.get('armed').then(({armed}) => {
     }
   });
 }
+
+test('Windows Chromium native CMD launch preserves Unicode app and Node paths',
+  { skip: process.platform !== 'win32', timeout: 90000 }, async t => {
+    const { createWinRegistry } = await import('../native/bootstrap/registry-win.mjs');
+    const powershell = path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+    const ps = script => exec(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand',
+      Buffer.from("$ErrorActionPreference='Stop'\n" + script, 'utf16le').toString('base64')],
+    { windowsHide: true, timeout: 15000, maxBuffer: 16384 });
+    const installedNode = await fs.realpath(process.execPath);
+    assert.match(installedNode, /^[A-Za-z]:\\[\x20-\x7e]+\\node\.exe$/i,
+      'this regression requires the existing ASCII-path installed Node');
+    const signature = await ps(`
+$image = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${Buffer.from(installedNode).toString('base64')}'))
+Import-Module (Join-Path $PSHOME 'Modules\\Microsoft.PowerShell.Security\\Microsoft.PowerShell.Security.psd1')
+$signature = Get-AuthenticodeSignature -LiteralPath $image
+if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'CN=(OpenJS Foundation|Node.js Foundation)(,|$)') {
+  throw 'fixture_requires_official_signed_node'
+}
+[Console]::WriteLine('official-node')`);
+    assert.equal(signature.stdout.trim(), 'official-node');
+    const nodeSha256 = createHash('sha256').update(await fs.readFile(installedNode)).digest('hex');
+
+    // Fixed inert host: consume one bounded native frame, not stdin-to-EOF.
+    const nativeHost = `
+const deadline = setTimeout(() => process.exit(1), 8000);
+let input = Buffer.alloc(0), answered = false;
+process.stdin.on('data', chunk => {
+  if (answered || input.length + chunk.length > 4100) return process.exit(1);
+  input = Buffer.concat([input, chunk]);
+  if (input.length < 4) return;
+  const length = input.readUInt32LE(0);
+  if (length < 2 || length > 4096) return process.exit(1);
+  if (input.length < length + 4) return;
+  if (input.length !== length + 4) return process.exit(1);
+  let request;
+  try { request = JSON.parse(input.subarray(4).toString('utf8')); }
+  catch { return process.exit(1); }
+  answered = true;
+  process.stdin.pause();
+  const body = Buffer.from(JSON.stringify({ echo: request, execPath: process.execPath,
+    argv: process.argv, version: process.version, pid: process.pid }));
+  const header = Buffer.alloc(4);
+  header.writeUInt32LE(body.length, 0);
+  process.stdout.end(Buffer.concat([header, body]), () => {
+    clearTimeout(deadline);
+    process.stdin.destroy();
+  });
+});
+process.stdin.on('end', () => { if (!answered) process.exit(1); });
+`;
+
+    for (const copied of [false, true]) await t.test(copied ? 'copied official Unicode Node' : 'installed ASCII Node',
+      { timeout: 40000 }, async () => {
+        const scratch = await fs.mkdtemp(path.join(await fs.realpath(os.tmpdir()), 'ac-native-unicode-'));
+        const profile = path.join(scratch, 'profile-\u7528\u6237');
+        const app = path.join(profile, 'app');
+        const extension = path.join(scratch, 'extension');
+        const browserCwd = path.join(scratch, 'browser-cwd');
+        const browserProfile = path.join(scratch, 'browser');
+        const entry = path.join(app, 'device-native-host.mjs');
+        const launcher = path.join(app, 'browser-wake', 'wake.cmd');
+        const hostManifest = path.join(app, 'browser-wake', 'fixture-host.json');
+        const node = copied ? path.join(profile, 'Node', 'node.exe') : installedNode;
+        const host = 'com.agentcontinue.unicode_fixture_' + randomBytes(12).toString('hex');
+        const subkey = 'Software\\Chromium\\NativeMessagingHosts\\' + host;
+        const plan = { keyPath: 'HKCU\\' + subkey, hive: 'HKCU', view: '32', regSzValue: hostManifest };
+        const registry = createWinRegistry();
+        const { publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+        const key = publicKey.export({ type: 'spki', format: 'der' });
+        const id = createHash('sha256').update(key).digest('hex').slice(0, 32)
+          .replace(/[a-f0-9]/g, ch => 'abcdefghijklmnop'[Number.parseInt(ch, 16)]);
+        const origin = 'chrome-extension://' + id + '/';
+
+        // Compare Unicode entirely inside PowerShell; its stdout is ASCII only.
+        const checkRegistry = async action => {
+          const result = await ps(`
+$expected = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${Buffer.from(hostManifest).toString('base64')}'))
+$name = '${subkey}'
+${action === 'absent' ? `
+foreach ($hive in @([Microsoft.Win32.RegistryHive]::CurrentUser, [Microsoft.Win32.RegistryHive]::LocalMachine)) {
+  foreach ($view in @([Microsoft.Win32.RegistryView]::Registry32, [Microsoft.Win32.RegistryView]::Registry64)) {
+    $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey($hive, $view)
+    $key = $null
+    try {
+      $key = $base.OpenSubKey($name, $false)
+      if ($null -ne $key) { throw 'fixture_registry_must_be_absent' }
+    } finally { if ($key) { $key.Dispose() }; $base.Dispose() }
+  }
+}` : `
+$base = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser, [Microsoft.Win32.RegistryView]::Registry32)
+$key = $null
+try {
+  $key = $base.OpenSubKey($name, $false)
+  if ($null -eq $key) {
+    ${action === 'cleanup' ? "[Console]::WriteLine('absent'); exit 0" : "throw 'fixture_registry_missing'"}
+  }
+  if ($key.SubKeyCount -ne 0 -or $key.ValueCount -ne 1 -or
+      $key.GetValueKind('') -ne [Microsoft.Win32.RegistryValueKind]::String -or
+      -not [string]::Equals($key.GetValue(''), $expected, [StringComparison]::Ordinal)) {
+    throw 'fixture_registry_changed_refusing_cleanup'
+  }
+  ${action === 'cleanup' ? `$key.Dispose(); $key = $null
+  $base.DeleteSubKey($name, $true)
+  $key = $base.OpenSubKey($name, $false)
+  if ($null -ne $key) { throw 'fixture_registry_cleanup_unconfirmed' }` : ''}
+} finally { if ($key) { $key.Dispose() }; $base.Dispose() }
+`}
+[Console]::WriteLine('${action}')`);
+          assert.ok([action, ...(action === 'cleanup' ? ['absent'] : [])].includes(result.stdout.trim()),
+            'scratch registry operation was not confirmed: ' + action);
+        };
+        let context, registrationAttempted = false, registrationCreated = false, nativePid;
+        try {
+          for (const directory of [app, extension, browserCwd]) await fs.mkdir(directory, { recursive: true });
+          assert.match(app, /[^\x00-\x7f]/);
+          if (copied) {
+            await fs.mkdir(path.dirname(node));
+            await fs.copyFile(installedNode, node);
+            assert.equal(createHash('sha256').update(await fs.readFile(node)).digest('hex'), nodeSha256,
+              'the Unicode fixture must run the exact official installed Node binary');
+            assert.match(node, /[^\x00-\x7f]/);
+          }
+          assert.equal(await fs.realpath(app), app);
+          assert.equal(await fs.realpath(node), node);
+          await fs.writeFile(entry, nativeHost, { flag: 'wx' });
+          let staged;
+          const stagingRegistry = {
+            inspect(view) { return view.hive === 'HKCU' && staged ?
+              { present: true, value: staged } : { present: false }; },
+            createOnly(view) { staged = view.regSzValue; return true; },
+          };
+          assert.equal(publishBrowserWake({ app, node, registry: stagingRegistry,
+            binding: { extensionId: id, assertCurrent() {} } }).status, 'written');
+          const manifest = JSON.parse(await fs.readFile(staged, 'utf8'));
+          assert.equal(manifest.path, launcher);
+          assert.deepEqual(manifest.allowed_origins, [origin]);
+          const cmd = await fs.readFile(launcher);
+          assert.equal(cmd.some(byte => byte > 127), false, 'CMD must remain ASCII without a BOM');
+          const token = copied ? '%~dp0..\\..\\Node\\node.exe' : installedNode;
+          assert.ok(cmd.toString('ascii').endsWith('"' + token +
+            '" "%~dp0..\\device-native-host.mjs" --browser-wake "%~1"\r\n'),
+          'the actual generated launcher must use the expected Node token and exact origin argument');
+          // Remap only the manifest host ID; execute the generated CMD unchanged.
+          await fs.writeFile(hostManifest, encode({ ...manifest, name: host }), { flag: 'wx' });
+          await fs.writeFile(path.join(extension, 'manifest.json'), encode({
+            manifest_version: 3, name: 'Unicode native launch fixture', version: '1.0.0',
+            key: key.toString('base64'), permissions: ['nativeMessaging'],
+            background: { service_worker: 'worker.js' },
+          }), { flag: 'wx' });
+          await fs.writeFile(path.join(extension, 'worker.js'),
+            'chrome.runtime.onInstalled.addListener(() => {});\n', { flag: 'wx' });
+          await checkRegistry('absent');
+          registrationAttempted = true;
+          assert.equal(registry.createOnly(plan), true, 'scratch registration must be create-only');
+          registrationCreated = true;
+          await checkRegistry('verify');
+
+          assert.notEqual(browserCwd, path.dirname(launcher));
+          const previousCwd = process.cwd();
+          try {
+            process.chdir(browserCwd);
+            context = await chromium.launchPersistentContext(browserProfile, {
+              channel: 'chromium', headless: true, chromiumSandbox: true, timeout: 15000,
+              env: Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('AC_HOSTED_'))),
+              args: ['--disable-background-networking', '--no-first-run',
+                `--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
+            });
+          } finally { process.chdir(previousCwd); }
+          const worker = context.serviceWorkers().find(item => item.url() === origin + 'worker.js') ??
+            await context.waitForEvent('serviceworker', { timeout: 10000 });
+          assert.equal(worker.url(), origin + 'worker.js');
+          const challenge = { nonce: randomBytes(24).toString('hex'), text: '\u6d4b\u8bd5 native stdio \u00e9' };
+          const observed = await within(() => worker.evaluate(async ({ host, challenge }) => {
+            try { return { response: await chrome.runtime.sendNativeMessage(host, challenge) }; }
+            catch (error) { return { error: String(error.message) }; }
+          }, { host, challenge }), 12000, 'Unicode CMD native messaging did not finish one framed request');
+          assert.equal(observed.error, undefined, 'Chromium failed to launch the generated Unicode CMD: ' + observed.error);
+          const response = observed.response;
+          nativePid = response.pid;
+          assert.ok(Number.isSafeInteger(nativePid) && nativePid > 0 && nativePid !== process.pid);
+          assert.deepEqual(response.echo, challenge, 'binary native stdio must echo the fresh Unicode challenge');
+          assert.equal(response.execPath, node);
+          assert.equal(response.version, process.version);
+          assert.deepEqual(response.argv, [node, entry, '--browser-wake', origin]);
+          await waitFor(() => fixtureExited(nativePid), 'single-request native fixture did not exit', 5000);
+        } finally {
+          try {
+            await within(() => context?.close(), 10000, 'scratch Chromium did not close');
+          } finally {
+            if (registrationCreated) {
+              await checkRegistry('cleanup');
+              await checkRegistry('absent');
+            } else if (registrationAttempted) {
+              assert.fail('scratch registration ownership was not confirmed; preserving key and files at ' + scratch);
+            }
+            if (nativePid) await waitFor(() => fixtureExited(nativePid), 'scratch native fixture survived cleanup', 5000);
+            assert.equal(await fs.realpath(scratch), scratch);
+            await fs.rm(scratch, { recursive: true, maxRetries: 4, retryDelay: 100 });
+          }
+        }
+      });
+  });

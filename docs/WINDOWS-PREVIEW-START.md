@@ -75,9 +75,11 @@ inspector does not execute an interpreter inferred from an installed file.
 `registryComplete: false` also preserves unreadable or changing registry slots,
 even if another slot establishes a conflicting registration.
 
-Current preview limits: browser-wake setup supports only its validated CMD-safe
-ASCII application and Node paths; some otherwise valid Windows profile paths
-are not supported. Node version alone does not establish that its architecture
+Browser-wake setup accepts validated local Unicode application paths. Its CMD
+launcher remains ASCII: a Unicode Node path is supported only when an exact,
+same-drive ASCII suffix can be resolved from the launcher directory. Other
+Unicode Node locations and unsafe path components are refused without a fallback.
+Node version alone does not establish that its architecture
 and npm installation can be used. Browser-managed removal is not yet delivered;
 the legacy uninstall command is plan-only. Do not delete or overwrite an
 uncertain installation to work around these limits.

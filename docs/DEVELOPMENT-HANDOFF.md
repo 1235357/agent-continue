@@ -2,6 +2,63 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Unicode Native Launch And Fresh Combined Candidate (Checkpoint92)
+
+Supersedes Checkpoint91's open Unicode source limitation. Current-account
+installation accepts bounded Unicode local paths while preserving CMD literal,
+canonical-path, reparse, ownership, four registry-view and create-only checks.
+ASCII absolute Node launchers retain their original bytes. Unicode Node uses
+only an exact same-drive ASCII suffix relative to the launcher, never CWD/PATH.
+Actual PS5.1 CP437 stdout corrupted a Unicode registry value before the fix;
+explicit no-BOM UTF-8 now roundtrips Chinese, accent and emoji in both views.
+
+Independent source review reproduced a second real defect: distinct Kelvin-sign
+and ASCII-k directories lowercase identically and incorrectly certified a
+different Node interpreter as matched. The inspector now compares actual file
+identity and rechecks it with the configuration. The actual two-executable RED
+replay returned matched where mismatch was required; corrected full helper31/31
+and independent combined52/52 passed. Parent independently reran52/52 in28.683s.
+Provider/profile/registry doubles in that regression remain explicit; executable
+launches, filesystem identities and the resolver are real.
+
+Parent actual Chromium startup6/6 passed52.335s after the identity fix, including
+both Unicode launch cases, binary framing, exact executable/script/origin and a
+different CWD. The isolated saved-running fixture recovered native-port loss in
+30.293s. Separate admin Chromium2/2 passed6.414s. Those echo/fake-core fixtures
+are not final hosted administrator whole-browser proof. PS5.1 extracted adoption
+boundary44 checks passed, not a live device installation. Workflow49/49 passed.
+
+The source-only preview builder incorrectly invoked the combined-public default.
+It now explicitly requests --source-only; the complete public builder remains
+combined and still rejects a missing administrator bundle. Parent preview6/6
+passed3.618s, with no custom executable/archive in that source-only preview ZIP.
+
+Fresh r9 combined artifacts built successfully in
+.artifacts/windows-public-3.0.0-closure-r9/. Administrator ZIP SHA256
+26f186ee15d3d04143d512799e94b4c9147aa454b598f732f5c007c1a16a4d34;
+setup ZIP c86738db612fd8df8a7ac91e17e18b1979081e212c345dbae94b21032e18b7c3.
+The builder verified the combined closure and stager Plan; protectedFilesVerified
+and activation were not claimed. An attempted stale-r8 reuse correctly failed
+source consistency. npm packaging first lacked the build inputs, then correctly
+refused old r8 generated metadata. After verifying and archiving only that local
+generated directory, the actual fresh root-tarball/offline-install/CLI package
+suite passed115/115 in74.249s. All six shipped hashes match the r9 build receipt.
+This generated artifact is not a published release or installed runtime.
+
+Native55 on pushed da04832 failed Windows128811789061: the valid and invalid
+guided CMD cases each exceeded their existing20s bound. The saved log does not
+identify the stalled phase. Local unchanged39/39 and nine exact invocations did
+not reproduce it. Added failure-only bounded partial-output/tree diagnostics
+and a separate3s read-only engine/parser/module probe; it never executes or
+retries the installer. Root cause remains UNRESOLVED, not a claimed timeout fix.
+Parent expanded setup ZIP42/42 passed22.362s, zero skips; next hosted proof needed.
+
+Same r8 remains deliberately paused. Settled ordinary/Dot proofs are retained,
+not replayed. No current-account live install, new hosted administrator reopen,
+GitHub Release, npm publication or Store review submission is established here.
+IAB Store listing still shows the saved English draft/support; no password read.
+No production VPN/MCP/IDE/research or external Chrome task was changed.
+
 ### Permission Retry, Real Offline Recovery And Bounded CI Phases (Checkpoint91)
 
 Main9f05514a23b84db57cf52a14a7569a340b771db5 was pushed and observed in IAB.

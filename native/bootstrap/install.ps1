@@ -381,9 +381,17 @@ function Test-ExistingBrowserInstall([string]$Root) {
 }
 
 function Assert-BrowserWakeInstallPath([string]$Root) {
-    $app = [IO.Path]::Combine($Root,'app')
-    if ($app -cnotmatch '\A[A-Za-z]:\\[ -~]+\z' -or $app.Substring(2) -match '[:"%!^&|<>()]' -or
-        @($app.Substring(3).Split('\') | Where-Object { -not $_ -or $_ -match '[. ]$' }).Count) {
+    try { $app = [IO.Path]::Combine($Root,'app') }
+    catch { throw 'browser_wake_invalid_install' }
+    # The path is JSON data, not a literal embedded in the ASCII CMD launcher.
+    if ($app -cnotmatch '\A[A-Za-z]:\\[^\x00-\x1f\x7f-\x9f]+\z' -or $app.Substring(2) -match '[:"%!^&|<>()/?*]' -or
+        @($app.Substring(3).Split('\') | Where-Object { -not $_ -or $_ -match '[. ]$' -or
+            $_ -match '\A(CON|PRN|AUX|NUL|COM[1-9\u00b9\u00b2\u00b3]|LPT[1-9\u00b9\u00b2\u00b3])(?:\.|$)' }).Count) {
+        throw 'browser_wake_invalid_install'
+    }
+    try { $null = [Text.UTF8Encoding]::new($false,$true).GetByteCount($app) }
+    catch { throw 'browser_wake_invalid_install' }
+    if (-not [string]::Equals([IO.Path]::GetFullPath($app),$app,[StringComparison]::OrdinalIgnoreCase)) {
         throw 'browser_wake_invalid_install'
     }
 }

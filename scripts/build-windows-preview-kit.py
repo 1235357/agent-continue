@@ -97,7 +97,7 @@ def build(destination):
         stage = Path(temporary)
         extension = package_release(ROOT, output_directory=stage / "extension", windows_preview=True)
         installer = stage / "setup"
-        subprocess.run([sys.executable, str(ROOT / "scripts/build-setup-release.py"), "--output", str(installer)],
+        subprocess.run([sys.executable, str(ROOT / "scripts/build-setup-release.py"), "--source-only", "--output", str(installer)],
                        cwd=ROOT, check=True, capture_output=True)
         members = {**read_archive(extension), **read_archive(installer / "agent-continue-setup.zip", "WindowsSetup")}
         members[GUIDE] = read_public(ROOT, "docs/WINDOWS-PREVIEW-START.md", {}).replace(b"\r\n", b"\n")

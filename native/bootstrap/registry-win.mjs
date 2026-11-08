@@ -58,6 +58,8 @@ const loadInterop = "Add-Type -TypeDefinition @'\n" + registryInterop + "\n'@\n"
 export function createWinRegistry(queryProcess = spawnSync) {
   function run(script, code) {
     const executable = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+    // EncodedCommand covers input only; PS5.1 otherwise uses the console code page for stdout.
+    script = '[Console]::OutputEncoding=New-Object System.Text.UTF8Encoding($false);\n' + script;
     const result = queryProcess(executable, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
       { encoding: 'utf8', windowsHide: true, timeout: 15000, maxBuffer: 65536 });
     if (result.error || result.signal || result.status !== 0) throw new Error(code);

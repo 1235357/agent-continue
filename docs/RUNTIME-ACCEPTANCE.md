@@ -1,5 +1,34 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Unicode Launch, Interpreter Identity And r9 Package (Checkpoint92)
+
+- Replaces the older unsupported-Unicode source conclusion. Bounded Unicode
+  app/profile paths and same-drive ASCII-relative Node launch are implemented;
+  unsafe components, aliases, reparse/ownership/conflict checks remain. Actual
+  PS5.1 CP437 registry corruption was reproduced then fixed with UTF-8 stdout.
+- Independent real Kelvin/k executable test exposed case-folded false identity.
+  File identity/recheck fix closed the exact RED replay; helper31/31, independent
+  combined52/52 and parent52/52 in28.683s passed, zero skips. Real resolver and
+  Node launches; provider/profile/registry observations are fixture doubles.
+- Parent real Chromium startup6/6 in52.335s, separate admin2/2 in6.414s, PS5.1
+  extracted adoption44 checks, preview6/6 and workflow49/49 passed. Unicode CMD
+  framing/executable/script/origin and different CWD are real; fake tunnel core
+  and echo host do not prove final hosted whole-browser administrator recovery.
+- r9 full combined builder succeeded: admin26f186ee15d3d04143d512799e94b4c9147aa454b598f732f5c007c1a16a4d34,
+  setup c86738db612fd8df8a7ac91e17e18b1979081e212c345dbae94b21032e18b7c3.
+  Stager Plan true; no protected install/activation claimed. Old r8 generated
+  package was verified and archived locally, not overwritten as a valid r9.
+  Fresh root-tarball/offline-install/CLI suite115/115 passed74.249s with exact
+  six-asset receipt matching. No npm/GitHub release publication occurred.
+- Native55 Windows128811789061 on da04832 failed two original20s guided CMD
+  invocations. Local39/39 plus nine exact invocations did not reproduce it.
+  Failure-only diagnostics retain original evidence and add a distinct3s parser/
+  engine probe, not installer execution/retry or proof of the original stall.
+  Expanded parent42/42 passed22.362s; hosted cause remains unresolved.
+- r8 is still paused. No replay of settled Connect/probes, production changes,
+  current-account live acceptance, new hosted administrator reopen, Release or
+  Store review submission. Goal remains active; draft is not submitted.
+
 ## Setup Retry And Offline Browser Recovery (Checkpoint91)
 
 - Native53 Windows128805125802 actually cleared Job, native-release53/53,

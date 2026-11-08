@@ -46,10 +46,23 @@ try {
     Check (Test-ExistingBrowserInstall $install) 'existing_root_detected'
     Check (-not (Test-ExistingBrowserInstall (Join-Path $root 'absent'))) 'missing_root_not_adopted'
     Assert-BrowserWakeInstallPath 'C:\Users\example\AgentContinue'
-    $badRoot = 'C:\Users\' + [char]0x7528 + '\AgentContinue'
+    $unicodeRoot = 'C:\Users\' + [char]0x7528 + [char]0x6237 + '\AgentContinue'
+    Assert-BrowserWakeInstallPath $unicodeRoot
+    $unsafeIndex=0
+    foreach ($unsafeRoot in @('C:\Users\unsafe%profile%\AgentContinue', 'C:\Users\x\..\AgentContinue',
+        'C:\Users\trailing.\AgentContinue', ('C:\Users\tab'+[char]9+'name\AgentContinue'),
+        'C:\Users\x/name\AgentContinue', '\\server\share\AgentContinue', 'relative\AgentContinue',
+        ('C:\Users\control'+[char]0x85+'name\AgentContinue'), 'C:\Users\NUL.txt\AgentContinue',
+        ('C:\Users\broken'+[char]0xd800+'name\AgentContinue'))) {
+        $refused=$false
+        try { Assert-BrowserWakeInstallPath $unsafeRoot } catch { $refused=$_.Exception.Message -ceq 'browser_wake_invalid_install' }
+        Check $refused ('unsafe_launcher_path_refused_'+$unsafeIndex)
+        $unsafeIndex++
+    }
+    $badRoot = 'C:\Users\unsafe%profile%\AgentContinue'
     $refused = $false
     try { Assert-BrowserWakeInstallPath $badRoot } catch { $refused = $_.Exception.Message -ceq 'browser_wake_invalid_install' }
-    Check $refused 'non_ascii_launcher_path_refused'
+    Check $refused 'unsafe_launcher_path_refused'
     foreach ($paused in @($true,$false)) {
         [IO.File]::WriteAllText((Join-Path $install 'lifecycle.json'),('{"paused":'+$paused.ToString().ToLowerInvariant()+'}'))
         [IO.File]::WriteAllText((Join-Path $install 'owner-revoked'),'retained')
@@ -93,7 +106,7 @@ try {
     $InstallDir=$badRoot;$Apply=$false;$refused=$false
     try { . ([scriptblock]::Create($inputGate[0].Extent.Text)) }
     catch { $refused=$_.Exception.Message -ceq 'browser_wake_invalid_install' }
-    Check $refused 'actual_fresh_input_gate_refuses_non_ascii_before_prompt'
+    Check $refused 'actual_fresh_input_gate_refuses_unsafe_before_prompt'
     $script:status='existing-matched';$script:invalidResult=$false
     $script:fixtureOutput=Invoke-Bootstrap @('browser-install-status','--install-dir',$install,'--extension-id',$extension)
     function Invoke-InertAdoptionNode { $global:LASTEXITCODE=1; return $script:fixtureOutput }

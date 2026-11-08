@@ -10,8 +10,24 @@ const KEY = '\\Software\\Google\\Chrome\\NativeMessagingHosts\\' + HOST;
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fail = code => { throw new Error(code); };
 const same = (a, b) => a.dev === b.dev && a.ino === b.ino;
-const safeCmdPath = value => typeof value === 'string' && /^[A-Z]:\\[ -~]+$/i.test(value) &&
-  !/[:"%!^&|<>()]/.test(value.slice(2)) && !value.slice(3).split('\\').some(part => !part || /[. ]$/.test(part));
+const safePathPart = value => value.length > 0 && !/[\x00-\x1f\x7f-\x9f/\\:*?"%!^&|<>()]/.test(value) &&
+  !/[. ]$/.test(value) && !/^(?:CON|PRN|AUX|NUL|COM[1-9\u00b9\u00b2\u00b3]|LPT[1-9\u00b9\u00b2\u00b3])(?:\.|$)/i.test(value);
+const safeLocalPath = value => typeof value === 'string' && value.isWellFormed() && /^[A-Z]:\\.+/i.test(value) &&
+  path.normalize(value) === value && value.slice(3).split('\\').every(safePathPart);
+const safeCmdPath = value => safeLocalPath(value) && /^[ -~]+$/.test(value);
+const safeRelativeCmdPath = value => /^[ -~]+$/.test(value) && !path.isAbsolute(value) &&
+  path.normalize(value) === value && value.split('\\').every(part => part === '..' || safePathPart(part));
+
+function nodeCmdToken(directory, node) {
+  if (safeCmdPath(node)) return node;
+  const relative = path.relative(directory, node);
+  // Only cancel a shared Unicode prefix; never serialize Unicode into the batch file.
+  if (!safeRelativeCmdPath(relative) || path.resolve(directory, relative) !== node) fail('browser_wake_invalid_install');
+  try {
+    if (resolveLocalPath(directory) !== directory || resolveLocalPath(node) !== node) fail('invalid');
+  } catch { fail('browser_wake_invalid_install'); }
+  return '%~dp0' + relative;
+}
 
 function assertDirectory(file, original) {
   const current = fs.lstatSync(file, { bigint: true });
@@ -42,8 +58,9 @@ function put(file, bytes) {
 function browserWakeLayout({ app, binding, node }) {
   if (process.platform !== 'win32') fail('unsupported_platform');
   if (!/^[a-p]{32}$/.test(binding?.extensionId ?? '') || typeof binding.assertCurrent !== 'function' ||
-      !safeCmdPath(app) || !safeCmdPath(node) || path.basename(node).toLowerCase() !== 'node.exe') fail('browser_wake_invalid_install');
+      !safeLocalPath(app) || !safeLocalPath(node) || path.basename(node).toLowerCase() !== 'node.exe') fail('browser_wake_invalid_install');
   const directory = path.join(app, 'browser-wake'), launcher = path.join(directory, 'wake.cmd');
+  const nodeToken = nodeCmdToken(directory, node);
   const manifest = path.join(directory, 'host.json');
   const origin = 'chrome-extension://' + binding.extensionId + '/';
   const environment = ['NODE_OPTIONS', 'NODE_PATH', 'NODE_CHANNEL_FD', 'NODE_CHANNEL_SERIALIZATION_MODE',
@@ -51,7 +68,7 @@ function browserWakeLayout({ app, binding, node }) {
     'CONTROL_PLANE_API_KEY', 'CONTROL_PLANE_TUNNEL_ID', 'AGENT_CONTINUE_TUNNEL_CLIENT'];
   // Chrome's first argument is the origin. Do not expand %* or forward window arguments.
   const cmd = Buffer.from(['@echo off', 'setlocal DisableDelayedExpansion', ...environment.map(name => 'set "' + name + '="'),
-    '"' + node + '" "%~dp0..\\device-native-host.mjs" --browser-wake "%~1"', ''].join('\r\n'), 'ascii');
+    '"' + nodeToken + '" "%~dp0..\\device-native-host.mjs" --browser-wake "%~1"', ''].join('\r\n'), 'ascii');
   const json = Buffer.from(JSON.stringify({ name: HOST, description: 'AgentContinue Windows browser wake',
     path: launcher, type: 'stdio', allowed_origins: [origin] }) + '\n');
   const views = ['32', '64'].flatMap(view => ['HKCU', 'HKLM'].map(hive => ({ view, hive, keyPath: hive + KEY })));
@@ -59,6 +76,7 @@ function browserWakeLayout({ app, binding, node }) {
 }
 
 export function preflightBrowserWake({ installDir, extensionId, node = process.execPath }) {
+  if (!safeLocalPath(installDir)) fail('browser_wake_invalid_install');
   browserWakeLayout({ app: path.join(installDir, 'app'), binding: { extensionId, assertCurrent() {} }, node });
   return { ok: true };
 }
@@ -158,17 +176,33 @@ export function inspectPublishedBrowserWake({ app, binding, node, registry }) {
 function recordedWakeNode(app, binding) {
   const file = path.join(app, 'browser-wake', 'wake.cmd');
   try {
-    const info = fs.lstatSync(file);
-    if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || info.size > 65536) return null;
-    const bytes = fs.readFileSync(file);
+    const directory = path.dirname(file), identity = assertDirectory(directory);
+    const record = snapshot(file), bytes = record.bytes;
     if (bytes.some(byte => byte > 127)) return null;
-    const match = /"([A-Za-z]:\\[ -~]+)" "%~dp0\.\.\\device-native-host\.mjs" --browser-wake "%~1"\r\n$/.exec(bytes.toString('ascii'));
+    const match = /\r\n"([^"\r\n]+)" "%~dp0\.\.\\device-native-host\.mjs" --browser-wake "%~1"\r\n$/.exec(bytes.toString('ascii'));
     if (!match) return null;
-    const layout = browserWakeLayout({ app, binding, node: match[1] });
-    assertDirectory(path.dirname(file));
+    const token = match[1];
+    let node = token;
+    if (token.startsWith('%~dp0')) {
+      const relative = token.slice(5);
+      if (!safeRelativeCmdPath(relative)) return null;
+      node = path.resolve(directory, relative);
+    }
+    const layout = browserWakeLayout({ app, binding, node });
     assertFile(file, layout.cmd);
-    return match[1];
+    assertDirectory(directory, identity);
+    record.assertCurrent();
+    return node;
   } catch { return null; }
+}
+
+function sameInterpreterFile(recorded, current) {
+  try {
+    const first = fs.lstatSync(recorded, { bigint: true });
+    const second = fs.lstatSync(current, { bigint: true });
+    return first.isFile() && second.isFile() && !first.isSymbolicLink() && !second.isSymbolicLink() &&
+      first.ino !== 0n && second.ino !== 0n && same(first, second);
+  } catch { return false; }
 }
 
 export async function inspectBrowserWake({ installDir, expectedExtensionId }, { packageRoot } = {}) {
@@ -193,11 +227,12 @@ export async function inspectBrowserWake({ installDir, expectedExtensionId }, { 
   }
   const currentNode = resolveLocalPath(process.execPath);
   const installedNode = recordedWakeNode(app, binding);
-  const interpreterMismatch = installedNode !== null && installedNode.toLowerCase() !== currentNode.toLowerCase();
+  let interpreterMismatch = installedNode !== null && !sameInterpreterFile(installedNode, currentNode);
   let configurationVerified = null;
   const assertConfiguration = () => {
     try {
       binding.assertCurrent();
+      if (installedNode !== null && !sameInterpreterFile(installedNode, currentNode)) interpreterMismatch = true;
       if (interpreterMismatch) configurationVerified = false;
       else {
         let configured = false;

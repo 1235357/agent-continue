@@ -160,14 +160,26 @@ test('wrong extension, partial installation, denied access and unconfirmed regis
   }
 });
 
-test('launcher preflight rejects non-ASCII paths before acquisition or setup', windows, async t => {
+test('launcher preflight rejects unsafe paths before acquisition or setup', windows, async t => {
   const f = await fixture(t);
-  const install = path.join(f.root, '\u7528\u6237', 'new-install');
+  const install = path.join(f.root, 'unsafe%profile%', 'new-install');
   const before = snapshot(f.root);
   await assert.rejects(f.main(['install-local', '--install-dir', install, '--consent', 'accept-install',
     '--guided-extension-id', extensionId, '--browser-managed', 'true', '--tunnel-id', 'unused',
     '--runtime-key-file', 'never-read']), /browser_wake_invalid_install/);
   assert.equal(f.device.setup, 0);
+  assert.equal(f.provider.verify, 0);
+  assert.deepEqual(snapshot(f.root), before);
+});
+
+test('Unicode application paths reach only the mocked fresh setup dispatch', windows, async t => {
+  const f = await fixture(t);
+  const install = path.join(f.root, '\u7528\u6237', 'new-install');
+  const before = snapshot(f.root);
+  await assert.rejects(f.main(['install-local', '--install-dir', install, '--consent', 'accept-install',
+    '--guided-extension-id', extensionId, '--browser-managed', 'true', '--tunnel-id', 'unused',
+    '--runtime-key-file', 'never-read']), /unexpected setup/);
+  assert.equal(f.device.setup, 1);
   assert.equal(f.provider.verify, 0);
   assert.deepEqual(snapshot(f.root), before);
 });
