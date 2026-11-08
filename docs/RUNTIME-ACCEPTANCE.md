@@ -1,5 +1,33 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Reconnect Readback, Dot Read And Store URL Repair (Checkpoint72)
+
+- One existing GUI Connect c67639ecdc56411db5406001622ce640 reached generation
+  8fefb168004148bb8a78b6742ff3fae7 ready. Protected metadata, independent native
+  observation and the actual Devices status check agreed. No duplicate Connect.
+  Historical saved progress remains waiting-owner and must not be called the
+  current connection state. Proof: r14-admin-ready.png in the ordinary-chat
+  acceptance artifact directory.
+- GitHub Pages run42473012368 on8fcdcc2 succeeded. Actual IAB homepage/privacy
+  rendered at https://1235357.github.io/agent-continue/. The complete canonical
+  privacy document is included, not a shortened policy. Store links were saved
+  and Submit for review is enabled. r14 upload completed and Package shows
+  draft3.0.0/public2.1.0. No downloaded CRX-content comparison is claimed.
+  This is a validation gate, not submission.
+- Dot Read File returned the existing exact disposable marker. Dot reported
+  Start Process refused as a perceived repeated request; the dedicated output
+  is absent. Do not claim a new Dot administrator/file-write/process proof or
+  blindly retry that request. Prior D940 acceptance is a distinct checkpoint.
+- Parent changed-fixture recovery suite38/38, zero skips,44.38seconds. Bootstrap
+  module test1/1 passed with real Utility/Management manifests and restored
+  autoload preference. Independent review found no actionable defect, passed two
+  focused tests and10 separate restoration probes; broader committed preference
+  transition coverage is a non-blocking recommendation. No product assertion,
+  timeout or security weakening. Hosted
+  CI35 underlying hang is not locally reproduced or established fixed yet.
+- No final3.0.0 Release/review receipt. Production VPN/MCP/IDE/research and the
+  external Chrome original scheduler were not changed.
+
 ## Installed r14 Upgrade Pause (Checkpoint71)
 
 - r13 same-popup Devices navigation and its exact reload were verified live.

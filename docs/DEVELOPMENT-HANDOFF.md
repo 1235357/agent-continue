@@ -2,6 +2,47 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Verified Reconnect And Public Store Links (Checkpoint72)
+
+The existing GUI Connect operation c67639ecdc56411db5406001622ce640 was NOT
+replayed. It reached r8 generation8fefb168004148bb8a78b6742ff3fae7. Protected
+owner-status and independent ObserveHostedOwner returned ready; the actual
+Devices Check administrator status also showed the last check ready. This
+supersedes checkpoint71's pending readiness, not its operation history. Saved
+progress still says waiting-owner; that historical progress is not current status.
+Proof: .artifacts/ordinary-chat-acceptance-20261108/r14-admin-ready.png.
+
+Public documentation source8fcdcc2 was pushed to main. The GitHub Pages source
+was explicitly set to Actions; Pages run42473012368 succeeded and reported
+https://1235357.github.io/agent-continue/. Both the homepage and complete
+privacy.html rendered in IAB. Generator11/11 tests passed. The Store homepage,
+support and privacy URLs were updated and saved; Submit for review became
+enabled, removing the former URL-timeout blocker. r14 ZIP upload completed and
+the Package page returned draft3.0.0; public2.1.0 stayed unchanged. This is not
+review submission or a CRX-content readback.
+The authenticated personal Store session was used; no password file was read.
+
+Dot returned the exact disposable Read File marker through the selected app.
+It reported Start Process rejected by its safety review because it considered
+the operation a repeat. The dedicated dot-roundtrip-5b2063ae.txt does not exist.
+No second process start or alternate-ID replay was attempted. Therefore this
+continuation establishes Dot file-read only, not a new Dot administrator run.
+The earlier D940 proof remains historical and is not a final-artifact substitute.
+
+Native CI35 now passes Utility import but other cases stall after bootstrap-start
+or before their first body milestone. Implicit Management discovery is a suspect,
+not an established underlying cause. Test-only bootstrap explicitly
+imports the complete real Management and Utility manifests, briefly disables
+autoload only for those imports, then restores the original preference. It adds
+phase milestones and a strengthened regression. Parent recovery38/38 passed,
+zero skips. Independent review found no actionable defect, passed the bootstrap
+and one diagnostic test, and passed10 separate success/import-failure restoration
+probes. Its recommendation to commit broader restoration regression coverage is
+non-blocking and remains open. The hosted cause/cure is not yet proven. The37 product cases and
+15s/20s limits are unchanged. New-runtime Revoke, full browser reopen, final
+current-account/Dot lifecycle and delivery-build gates remain open. No3.0.0
+Release or Store review submission is claimed.
+
 ### Current Binding Upgrade And Live Pause (Checkpoint71)
 
 Main6bcbb23 was pushed. IAB r13 reload and same-popup Devices navigation were

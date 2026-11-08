@@ -71,13 +71,29 @@ function Write-FixtureMilestone([string]$Name) {
 }
 Write-FixtureMilestone 'entry'
 ${prelude}
-# Join-Path would trigger implicit Management discovery before the explicit import.
-$utilityModule = [IO.Path]::Combine($PSHOME, 'Modules\\Microsoft.PowerShell.Utility\\Microsoft.PowerShell.Utility.psd1')
-Write-FixtureMilestone 'utility-import-start'
-Import-Module $utilityModule
-Write-FixtureMilestone 'utility-imported'
+$fixtureAutoloadVariable = $ExecutionContext.SessionState.PSVariable.Get('PSModuleAutoLoadingPreference')
+$fixtureAutoloadDefined = $null -ne $fixtureAutoloadVariable
+$fixtureAutoloadPreference = if ($fixtureAutoloadDefined) { $fixtureAutoloadVariable.Value } else { $null }
+try {
+    # Only bootstrap disables discovery; the test body retains its original preference.
+    $PSModuleAutoLoadingPreference = 'None'
+    # Join-Path would itself need Management before its explicit manifest import.
+    $utilityModule = [IO.Path]::Combine($PSHOME, 'Modules\\Microsoft.PowerShell.Utility\\Microsoft.PowerShell.Utility.psd1')
+    $managementModule = [IO.Path]::Combine($PSHOME, 'Modules\\Microsoft.PowerShell.Management\\Microsoft.PowerShell.Management.psd1')
+    Write-FixtureMilestone 'utility-import-start'
+    Import-Module $utilityModule -ErrorAction Stop
+    Write-FixtureMilestone 'utility-imported'
+    Write-FixtureMilestone 'management-import-start'
+    Import-Module $managementModule -ErrorAction Stop
+    Write-FixtureMilestone 'management-imported'
+} finally {
+    if ($fixtureAutoloadDefined) { $PSModuleAutoLoadingPreference = $fixtureAutoloadPreference }
+    else { $ExecutionContext.SessionState.PSVariable.Remove('PSModuleAutoLoadingPreference') }
+}
+Write-FixtureMilestone 'autoload-restored'
 $env:PROCESSOR_ARCHITECTURE = 'AMD64'
 $env:PROCESSOR_ARCHITEW6432 = ''
+Write-FixtureMilestone 'body-start'
 ${body}`, 'utf8');
   const started = performance.now();
   const label = `case=${JSON.stringify(t.name)} phase=${phase}`;
@@ -117,25 +133,53 @@ ${body}`, 'utf8');
   return result;
 }
 
-test('installer fixture imports the complete Utility module without implicit module discovery', windows, async t => {
+test('installer fixture imports complete Utility and Management modules without implicit module discovery', windows, async t => {
   const root = fixture(t);
   const result = await runPowerShell(t, root, `
 $stream = [IO.MemoryStream]::new([Text.Encoding]::UTF8.GetBytes('fixture'))
 try { $hash = (Microsoft.PowerShell.Utility\\Get-FileHash -InputStream $stream -Algorithm SHA256).Hash }
 finally { $stream.Dispose() }
+$json = Microsoft.PowerShell.Utility\\ConvertFrom-Json '{"value":"fixture"}'
+$safePath = Microsoft.PowerShell.Management\\Join-Path ${quote(root)} 'harness.ps1'
+$safeItem = Microsoft.PowerShell.Management\\Get-Item -LiteralPath $safePath
+$discoveryBlocked = $false
+try { $null = Get-Command Get-Item }
+catch {
+    if ($_.Exception.Message -cne 'fixture_implicit_command_discovery_forbidden') { throw }
+    $discoveryBlocked = $true
+}
 [Console]::WriteLine((@{
+    utilityLoaded = [bool](Get-Module Microsoft.PowerShell.Utility)
     managementLoaded = [bool](Get-Module Microsoft.PowerShell.Management)
+    utilityPath = (Get-Module Microsoft.PowerShell.Utility).Path
+    managementPath = (Get-Module Microsoft.PowerShell.Management).Path
     autoload = $PSModuleAutoLoadingPreference
     hash = $hash
-} | ConvertTo-Json -Compress))`, 'module-bootstrap', "$PSModuleAutoLoadingPreference = 'None'");
+    jsonValue = $json.value
+    safePath = $safeItem.FullName
+    safePathExists = Microsoft.PowerShell.Management\\Test-Path -LiteralPath $safePath -PathType Leaf
+    discoveryBlocked = $discoveryBlocked
+} | ConvertTo-Json -Compress))`, 'module-bootstrap', `
+$PSModuleAutoLoadingPreference = 'None'
+function Get-Command { throw 'fixture_implicit_command_discovery_forbidden' }
+`);
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stderr, '');
-  assert.deepEqual(JSON.parse(result.stdout), {
-    managementLoaded: false, autoload: 'None',
+  const { utilityPath, managementPath, ...actual } = JSON.parse(result.stdout);
+  assert.equal(utilityPath.toLowerCase(), path.join(path.dirname(powershell),
+    'Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1').toLowerCase());
+  assert.equal(managementPath.toLowerCase(), path.join(path.dirname(powershell),
+    'Modules/Microsoft.PowerShell.Management/Microsoft.PowerShell.Management.psd1').toLowerCase());
+  assert.deepEqual(actual, {
+    utilityLoaded: true, managementLoaded: true, autoload: 'None',
     hash: createHash('sha256').update('fixture').digest('hex').toUpperCase(),
+    jsonValue: 'fixture', safePath: path.join(root, 'harness.ps1'), safePathExists: true, discoveryBlocked: true,
   });
   const milestones = fs.readFileSync(path.join(root, 'milestones.txt'), 'utf8').trim().split(/\r?\n/);
-  assert.deepEqual(milestones.map(line => line.split('=')[0]), ['entry', 'utility-import-start', 'utility-imported']);
+  assert.deepEqual(milestones.map(line => line.split('=')[0]), [
+    'entry', 'utility-import-start', 'utility-imported', 'management-import-start', 'management-imported',
+    'autoload-restored', 'body-start',
+  ]);
   assert.ok(milestones.every(line => /^[a-z-]+=\d+$/.test(line)));
 });
 
