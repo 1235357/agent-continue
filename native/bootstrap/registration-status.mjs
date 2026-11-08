@@ -3,6 +3,7 @@
 // produced text/JSON never contains channel secrets, MACs or key material.
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { performance } from 'node:perf_hooks';
 import { createRegQueryRegistry, formatReport, precheckInstall } from './runtime-precheck.mjs';
 
 export const STATUS_FORMAT = 'agent-continue-registration-status';
@@ -72,8 +73,8 @@ export function renderVerifyJson(report) {
     counts: report.counts, checks: report.checks }) + '\n';
 }
 
-function nodeCheck(file) {
-  const result = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8', windowsHide: true, timeout: 15000 });
+function nodeCheck(file, run = spawnSync) {
+  const result = run(process.execPath, ['--check', file], { encoding: 'utf8', windowsHide: true, timeout: 15000 });
   if (result.error) return { ok: false, reason: 'node --check failed: ' + result.error.message };
   if (result.status !== 0) return { ok: false, reason: 'node --check: ' + String(result.stderr || '').trim().split('\n')[0] };
   return { ok: true, reason: 'parses as an ES module (node --check)' };
@@ -103,9 +104,21 @@ export function executeStatusCommand(args, deps = {}) {
     throw new Error('invalid_arguments');
   }
   if (!root || !path.isAbsolute(root)) throw new Error('invalid_arguments');
+  // The six sequential child waits share a budget; filesystem inspection is not timed here.
+  const now = deps.monotonicNow ?? (() => performance.now());
+  const deadline = now() + 45000;
+  const runner = deps.processRunner ?? spawnSync;
+  const run = (file, argv, options) => {
+    const remaining = Math.floor(deadline - now());
+    if (!Number.isFinite(remaining) || remaining <= 0) {
+      return { error: new Error('status_process_budget_exhausted') };
+    }
+    const result = runner(file, argv, { ...options, timeout: Math.min(options.timeout, remaining) });
+    return now() > deadline ? { error: new Error('status_process_budget_exhausted') } : result;
+  };
   const report = precheckInstall({ root,
-    registry: deps.registry === undefined ? createRegQueryRegistry() : deps.registry,
-    verifySyntax: deps.verifySyntax === undefined ? nodeCheck : deps.verifySyntax,
+    registry: deps.registry === undefined ? createRegQueryRegistry(run) : deps.registry,
+    verifySyntax: deps.verifySyntax === undefined ? file => nodeCheck(file, run) : deps.verifySyntax,
     ...(deps.reference !== undefined ? { reference: deps.reference } : seenReference ? { reference } : {}) });
   if (command === 'status') {
     const status = statusFromReport(report);

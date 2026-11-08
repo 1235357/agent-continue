@@ -2,6 +2,61 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### r10 Draft And A Different CI58 Failure (Checkpoint95)
+
+Current tested source is0d3b43670b31767a91a4892e427acfc479184740. Local r10
+combined setup and paired extension archives were rebuilt from it. The six
+public asset hashes match the build receipt. Actual root npm package regression
+completed115/115 in72.260s, zero failures/cancellations/skips. Independent
+read-only audit verified250/250 runtime members agree between Store/GitHub ZIP
+layouts, including both generated setup-entry records. No scoped P1/P2 source
+or packaging finding was reported. This does not certify installation or hosting.
+
+IAB uploaded Store ZIP069d45e57d3b4d14141f8bd4644309aba2a1fef9c1dff23cb267181e7869f493
+and completed Save draft. Package readback shows Draft3.0.0, Published2.1.0.
+The first chooser upload stayed0percent with a mangled backslash-path filename;
+it was cancelled before one successful forward-slash-path retry. A subsequent
+draft-CRX download timed out; no returned CRX byte comparison is established.
+The draft is NOT submitted for review, approved or publicly released.
+
+Native58/run42512315663 Windows128827829510 actually FAILED after18m29s.
+The previously failing ZIP suite passed46/46 in18.101s under unchanged limits.
+Ledger42/42 and the device/control phase66pass/2platform-skips also completed.
+The next official-assets/installed-tarball phase had16pass/1fail/1explicit-skip:
+packed.test.mjs:909 hit owned_child_deadline in the actual bin status child at
+its unchanged60000ms bound; the test took63.952s. This is a different failure,
+not another guided-CMD refusal. The raw log is preserved locally under
+.artifacts/ordinary-chat-acceptance-20261108/checkpoint95-ci58-windows-raw.txt.
+That first raw export is truncated; checkpoint95-ci58-windows-tail.txt retains
+the complete final24000 characters, including the failure and cleanup. Its
+failing internal boundary remains under investigation. Later skipped steps
+are not passes. Do not widen the deadline, skip the test, replay settled runtime
+operations or describe CI58 as successful.
+
+A separately proved timeout-composition gap is repaired in source: six sequential
+subprocess waits could nominally consume90s inside the packed test's60s outer
+deadline. Status/verify now share a45s monotonic subprocess-wait budget while
+retaining each15s cap and all six checks. Exhaustion or late replies report error,
+not absence or successful registration. Filesystem inspection and process teardown
+are not claimed to have a hard45s total bound. Three deterministic regressions
+cover exhaustion, all-six-check success with reduced remaining allowance, and a
+late positive reply. These Windows-registry-adapter cases are explicitly Windows-
+only; independent review caught and corrected their non-Windows platform guard.
+Actual Windows focused status/precheck/registry tests passed31/31 in27.960s before
+that declaration-only correction; packed installed-bin test passed1/1 in9.138s.
+This closes a proven budget defect, NOT the exact historical CI58 root cause.
+The r10 draft predates this patch and must not be represented as containing it.
+
+Fresh public r8 control-owner readback still names the stopped Pause
+e7372afeb31348f78b120bc207661634. Stale owner-status is unobserved, not live
+health. Final-artifact installation/current-account hosted operation and full
+browser saved-running/Pause/Revoke acceptance remain open. The owner reported the
+other workflow's native file picker finished, and fresh native UI inspection
+confirmed no Open dialog. Other workflows still use the shared Codex app; do not
+terminate that app or their tabs to manufacture a lifecycle proof.
+No new Release/tag, npm publication, Store review submission, production network,
+MCP, IDE, research or external-Chrome original-task change was made here.
+
 ### Ordinary-Token Delivery And Refusal Startup (Checkpoint94)
 
 Verify Windows delivery8 on495e76c actually SUCCEEDED (run42510504503,

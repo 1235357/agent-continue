@@ -1,5 +1,38 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## r10 Draft Saved; CI58 Status Timeout Still Open (Checkpoint95)
+
+- Fresh r10 combined candidate on0d3b436: exact six-asset receipt verification,
+  administrator stager Plan, paired extension250/250 runtime-member comparison
+  and root package115/115 in72.260s passed. Installed/published remain false.
+- StoreZIP069d45e57d3b4d14141f8bd4644309aba2a1fef9c1dff23cb267181e7869f493
+  was uploaded through IAB and Save draft completed. Package shows Draft3.0.0
+  versus Published2.1.0. Forward-slash file-chooser path succeeded after the
+  stalled backslash-path upload was cancelled. Returned CRX download timed out;
+  no server-returned archive digest proof. No review submission or new approval.
+- Native58/run42512315663 Windows128827829510 FAILED18m29s. Original ZIP46/46
+  passed18.101s, ledger42/42 passed106.020s, browser/device68total completed
+  with66pass/2explicit-platform-skips. Official-assets/packed18total then had
+  16pass/1fail/1explicit-skip: actual bin status at packed.test.mjs:909 exceeded
+  the unchanged60000ms child bound. Full failing test63.952s. Preserve the raw
+  checkpoint95-ci58-windows-raw.txt is truncated; the separate24000-character
+  checkpoint95-ci58-windows-tail.txt preserves the failure through cleanup.
+  No proved internal root cause yet. Later
+  skipped steps are unaccepted. This does not invalidate earlier bounded passes.
+- Source repair: all six status/verify subprocess waits now share45s monotonic
+  budget with unchanged15s individual caps; exhaustion/late results remain errors.
+  This corrects the demonstrable90s nested allowance inside a60s outer test, not
+  the proved cause of CI58. Focused Windows31/31 passed27.960s; actual packed
+  installed-bin1/1 passed9.138s. Three budget tests require the real Windows
+  registry adapter platform branch and are declared Windows-only after review.
+  Neither filesystem time nor process teardown is included in a hard45s promise.
+  Current r10 Store draft does not yet contain this source patch.
+- r8 public owner projection remains paused under the existing stopped Pause.
+  Its owner-status is stale/unobserved, not new readiness. No replay or install.
+  Owner confirmed the other native file picker finished; fresh native UI shows
+  no Open dialog. Shared app still hosts other workflows; do not terminate them.
+  Final-artifact/live whole-browser recovery and Release/Store gates stay open.
+
 ## Delivery8 Passed; Refusal Startup Under Verification (Checkpoint94)
 
 2026-11-08 UTC: IAB observed Verify Windows delivery8/run42510504503 SUCCESS

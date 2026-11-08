@@ -176,6 +176,8 @@ function fixture(t) {
     handle.child.stderr.on('data', data => { stderrBytes += data.length; stderrHash.update(data); });
     const result = await handle.wait(options.timeout || 60000);
     if (!result) {
+      t.diagnostic(JSON.stringify({ childDeadline: true, deadlineMs: options.timeout || 60000,
+        stdoutBytes, stderrBytes, outputLimitExceeded: overflow }));
       assert.ok(await handle.stop(), 'owned_child_exit_unconfirmed');
       throw new Error('owned_child_deadline');
     }

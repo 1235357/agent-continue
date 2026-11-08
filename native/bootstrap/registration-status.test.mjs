@@ -133,3 +133,69 @@ test('status and verify reject malformed arguments', t => {
   assert.throws(() => executeStatusCommand(['status', '--install-dir', root, '--unknown'], deps(registryOf({}))), /invalid_arguments/);
   assert.throws(() => executeStatusCommand(['status', '--install-dir', root, '--reference', 'relative'], deps(registryOf({}))), /invalid_arguments/);
 });
+
+test('status shares one monotonic subprocess budget without inventing registry absence', { skip: process.platform !== 'win32' }, t => {
+  const { root } = install(t);
+  let elapsed = 0;
+  const calls = [];
+  const result = executeStatusCommand(['status', '--install-dir', root, '--json'], {
+    monotonicNow: () => elapsed,
+    processRunner(file, args, options) {
+      calls.push({ syntax: args[0] === '--check', timeout: options.timeout,
+        hidden: options.windowsHide });
+      elapsed += options.timeout;
+      return { status: null, signal: 'SIGTERM', error: new Error('fixture_timeout'), stdout: '', stderr: '' };
+    },
+  });
+  assert.equal(elapsed, 45000);
+  assert.deepEqual(calls, [
+    { syntax: true, timeout: 15000, hidden: true },
+    { syntax: true, timeout: 15000, hidden: true },
+    { syntax: false, timeout: 15000, hidden: true },
+  ]);
+  assert.equal(result.exitCode, 0);
+  const report = JSON.parse(result.output);
+  assert.equal(report.registered, 'error');
+  assert.equal(report.hostStartable, false);
+  assert.ok(report.failed > 0);
+});
+
+test('verify retains all six real checks while reducing only the remaining subprocess allowance', { skip: process.platform !== 'win32' }, t => {
+  const { root } = install(t);
+  let elapsed = 0;
+  const calls = [];
+  const result = executeStatusCommand(['verify', '--install-dir', root, '--json'], {
+    monotonicNow: () => elapsed,
+    processRunner(file, args, options) {
+      const syntax = args[0] === '--check';
+      calls.push({ syntax, timeout: options.timeout, hidden: options.windowsHide });
+      elapsed += 7000;
+      return { status: 0, signal: null, stdout: syntax ? '' : '{"missing":true}', stderr: '' };
+    },
+  });
+  assert.equal(elapsed, 42000);
+  assert.deepEqual(calls.map(call => call.timeout), [15000, 15000, 15000, 15000, 15000, 10000]);
+  assert.deepEqual(calls.map(call => call.syntax), [true, true, false, false, false, false]);
+  assert.ok(calls.every(call => call.hidden));
+  assert.equal(result.exitCode, 0);
+  const report = JSON.parse(result.output);
+  assert.equal(report.failed, 0);
+  for (const id of [...USER_VIEWS, ...MACHINE_VIEWS]) assert.ok(report.checks.some(check => check.id === id));
+});
+
+test('a late positive registry reply cannot certify absence after the subprocess budget', { skip: process.platform !== 'win32' }, t => {
+  const { root } = install(t);
+  let elapsed = 0;
+  let calls = 0;
+  const result = executeStatusCommand(['status', '--install-dir', root, '--json'], {
+    monotonicNow: () => elapsed,
+    processRunner(file, args) {
+      calls++;
+      const syntax = args[0] === '--check';
+      elapsed += syntax ? 100 : 45000;
+      return { status: 0, signal: null, stdout: syntax ? '' : '{"missing":true}', stderr: '' };
+    },
+  });
+  assert.equal(calls, 3);
+  assert.equal(JSON.parse(result.output).registered, 'error');
+});
