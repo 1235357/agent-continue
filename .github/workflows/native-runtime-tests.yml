@@ -214,6 +214,25 @@ jobs:
           $env:TUNNEL_CLIENT_TEST_PACKAGED = '1'
           node --test --test-concurrency=1 tunnel.test.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Windows packaged tunnel acceptance failed' }
+      - uses: actions/setup-python@v6
+        if: runner.os == 'Windows'
+        with:
+          python-version: '3.13'
+          architecture: 'x64'
+      - name: Windows guided install, cold CMD provisioning, and pause over loopback
+        if: runner.os == 'Windows'
+        shell: pwsh
+        timeout-minutes: 8
+        run: |
+          python -m pip install --disable-pip-version-check --only-binary=:all: --no-deps pywinpty==2.0.15
+          if ($LASTEXITCODE -ne 0) { throw 'CI ConPTY fixture dependency unavailable' }
+          $env:TUNNEL_CLIENT_TEST_NPM_CACHE = (npm config get cache).Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'CI cache discovery failed' }
+          $env:TUNNEL_CLIENT_TEST_PYTHON = (Get-Command python -CommandType Application | Select-Object -First 1).Source
+          $env:TUNNEL_CLIENT_TEST_GUIDED = '1'
+          $env:TUNNEL_CLIENT_TEST_GUIDED_CMD_COLD = '1'
+          node --test --test-concurrency=1 --test-name-pattern=guided-installer tunnel.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Windows guided installation acceptance failed' }
       - name: Verify pinned download retries and finite process watchdogs offline
         working-directory: .
         shell: pwsh
@@ -345,25 +364,6 @@ jobs:
           $env:AGENT_CONTINUE_OFFICIAL_CLIENT = '1'
           node --test --test-concurrency=1 official-assets.test.mjs packed.test.mjs ../../tests/setup-model-tests.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Official assets and installed tarball acceptance failed' }
-      - uses: actions/setup-python@v6
-        if: runner.os == 'Windows'
-        with:
-          python-version: '3.13'
-          architecture: 'x64'
-      - name: Windows guided install, cold CMD provisioning, and pause over loopback
-        if: runner.os == 'Windows'
-        shell: pwsh
-        timeout-minutes: 8
-        run: |
-          python -m pip install --disable-pip-version-check --only-binary=:all: --no-deps pywinpty==2.0.15
-          if ($LASTEXITCODE -ne 0) { throw 'CI ConPTY fixture dependency unavailable' }
-          $env:TUNNEL_CLIENT_TEST_NPM_CACHE = (npm config get cache).Trim()
-          if ($LASTEXITCODE -ne 0) { throw 'CI cache discovery failed' }
-          $env:TUNNEL_CLIENT_TEST_PYTHON = (Get-Command python -CommandType Application | Select-Object -First 1).Source
-          $env:TUNNEL_CLIENT_TEST_GUIDED = '1'
-          $env:TUNNEL_CLIENT_TEST_GUIDED_CMD_COLD = '1'
-          node --test --test-concurrency=1 --test-name-pattern=guided-installer tunnel.test.mjs
-          if ($LASTEXITCODE -ne 0) { throw 'Windows guided installation acceptance failed' }
       - name: Build and verify the Windows preview kit
         if: runner.os == 'Windows'
         working-directory: .

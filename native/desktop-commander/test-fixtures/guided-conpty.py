@@ -102,11 +102,14 @@ def require_fixture(config):
     install = Path(config["installDir"])
     preload = Path(__file__).resolve().with_name("guided-loopback-preload.mjs")
     options = os.environ.get("NODE_OPTIONS", "")
-    if (not root.is_absolute() or root.resolve(strict=True) != root
-            or install != Path(os.environ.get("AC_GUIDED_INSTALL", ""))
-            or unquote(options) != "--import=" + unquote(preload.as_uri())
-            or not preload.is_file()):
-        raise FixtureError("private_fixture_required")
+    if not root.is_absolute() or root.resolve(strict=True) != root:
+        raise FixtureError("private_fixture_root_noncanonical")
+    if install != Path(os.environ.get("AC_GUIDED_INSTALL", "")):
+        raise FixtureError("private_fixture_install_mismatch")
+    if unquote(options) != "--import=" + unquote(preload.as_uri()):
+        raise FixtureError("private_fixture_preload_mismatch")
+    if not preload.is_file():
+        raise FixtureError("private_fixture_preload_missing")
     for name in ("packageDir", "installDir", "keyPath"):
         candidate = Path(config[name])
         if root not in candidate.parents or ".." in candidate.parts:

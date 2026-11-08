@@ -37,7 +37,8 @@ for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle', 'replay
     assert.ok(path.isAbsolute(executable));
     assert.equal(crypto.createHash('sha256').update(fs.readFileSync(executable)).digest('hex'),
       pins.platforms[process.platform + '-' + process.arch].executableSha256);
-    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'agentcontinue-tunnel-'));
+    // Hosted Windows TEMP can use an 8.3 alias; every fixture peer requires the same canonical spelling.
+    const scratch = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'agentcontinue-tunnel-')));
     const guidedInstall = mode.startsWith('guided-installer-');
     const guidedCmd = mode === 'guided-installer-cmd-unpaired';
     const provisionNode = guidedCmd && coldCmd;

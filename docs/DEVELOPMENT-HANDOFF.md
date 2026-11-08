@@ -2,6 +2,23 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### CI64 Guided Fixture Path Refusal (Checkpoint101)
+
+Native64/run42525342102 passed all6 early protocol cases (exact-shell939.822ms,
+packaged manager167.485s), then failed at20m59s before either guided installer
+started: private_fixture_required. Its Node scratch path used the hosted TEMP
+8.3 spelling RUNNER~1, while the Python peer requires a resolved canonical
+root. The fixture now canonicalizes mkdtemp through realpathSync.native before
+deriving or passing paths. Peer guards are not relaxed; their formerly combined
+failure code is split into four fixed stage codes, with no raw path logging.
+The same complete guided group now runs immediately after the early protocol
+group so another fixture error does not require20 minutes of preceding checks.
+No cases or deadlines were removed.29 workflow contracts passed; real local
+ConPTY guided paired and CMD-unpaired cases passed34.432s/26.837s (61.382s total),
+including status/connection/Pause. That local run reused installed Node and
+does not prove cold portable provisioning or remote CI. R11 remains revoked.
+Release/tag/Store submission are pending the complete hosted checks.
+
 ### CI63 Output Gate Investigation (Checkpoint100)
 
 Native63/run42524370728 passed the corrected initial native suite but stopped

@@ -101,6 +101,21 @@ class WindowsReleaseWorkflowTests(unittest.TestCase):
             self.assertIn("'--source-only'", call)
             self.assertIn("'--output', release", call)
 
+    def test_guided_protocol_uses_canonical_fixture_paths_and_runs_before_long_bootstrap(self):
+        fixture = (ROOT / "native/desktop-commander/tunnel.test.mjs").read_text(encoding="utf-8")
+        self.assertIn("fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'agentcontinue-tunnel-')))", fixture)
+        source = (ROOT / ".github/workflows/native-runtime-tests.yml").read_text(encoding="utf-8")
+        core = job(source, "core")
+        name = "Windows guided install, cold CMD provisioning, and pause over loopback"
+        self.assertEqual(core.count("- name: " + name), 1)
+        self.assertLess(core.index("- name: Windows packaged manager"), core.index("- name: " + name))
+        self.assertLess(core.index("- name: " + name), core.index("- name: Verify pinned download retries"))
+        block = step(core, name)
+        self.assertIn("timeout-minutes: 8", block)
+        self.assertIn("$env:TUNNEL_CLIENT_TEST_GUIDED_CMD_COLD = '1'", block)
+        self.assertIn("--test-name-pattern=guided-installer tunnel.test.mjs", block)
+        self.assertIn("if ($LASTEXITCODE -ne 0)", block)
+
     def test_native_bootstrap_phases_cover_each_original_file_once_with_bounded_children(self):
         ordinary = (ROOT / ".github/workflows/native-runtime-tests.yml").read_text(encoding="utf-8")
         core = job(ordinary, "core")

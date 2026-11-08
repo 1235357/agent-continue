@@ -1,5 +1,17 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## CI64 Guided Fixture Canonicalization (Checkpoint101)
+
+Native64 passed6/6 protocol cases but reached a private-fixture refusal before
+guided installation. Node had passed the runner TEMP short spelling RUNNER~1;
+Python requires a canonical root. Canonicalization now happens when the Node
+scratch is created, without relaxing root/preload/install guards. Four fixed
+refusal codes distinguish those guards. The unchanged guided group runs early
+to bound feedback latency.29 workflow contracts and2 actual local ConPTY
+guided cases passed (61.382s total); local installed-Node reuse is not cold
+provisioning or hosted CI acceptance. No product runtime changes or settled
+control replays. Full CI and both publication receipts remain pending.
+
 ## CI63 Output Observation Investigation (Checkpoint100)
 
 Native63 passed initial native tests; protocol5/6, exact-shell timed out15.840s.
