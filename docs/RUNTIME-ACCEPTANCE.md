@@ -1,5 +1,37 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Remaining Hosted Fixture Failures And Local Install Chain (Checkpoint88)
+
+- Main28f40ac73a93c803c62aef17b4e0162acba4cac6 pushed; Native50 Windows
+  job128794907741 passed native278/4-platform-skip, current-account13/13,
+  ledger38/38, signing8/8 and session6/6. Native-release44/49 failed five
+  preparation fixtures involving RUNNER~1 paths. Policy-byte and installer-
+  manifest cases now pass. Raw short aliases were expanded by PS5.1 and rejected
+  by the unchanged canonical-path gate before the intended fixture branch.
+  Actual Assert-LocalPath refused PROGRA~1 and accepted Program Files; three
+  controlled TEMP-alias regressions were RED before canonicalization. No actual
+  short TEMP alias was available locally. All three fixture roots now canonicalize
+  TEMP; guarded cleanup checks ownership, parent and links. Original49 cases plus
+  four regressions passed53/53 independently in worker67.76s and parent66.574s,
+  zero skips. Parent workflow23/23 passed again. Production guards/pins/timeouts
+  unchanged. The next hosted run is still required; downstream skips are not proof.
+- Two local instrumented catalog children exited before initialization because
+  test anchors still targeted the old host send block. Updated fixture anchors
+  retain the actual delivery/cleanup/finally block and exact request allowlists.
+  Bounded failure diagnostics omit raw stderr. Parent22/22 passed. A further
+  prepared-command stale anchor failed an added LF/CRLF regression; its exact
+  single-line repair then passed the final hosted-routing12/12. Production host
+  bytes, quotas and live tool grants were not changed.
+- Parent setup ZIP38/38 passed. Actual scratch PS5.1 portable Node22.23.4 first
+  download/reuse/corruption/refusal checks passed with no native registration or
+  tunnel start. Bootstrap170 total:167 pass,3 explicit platform/archive skips,
+  zero failures. Actual installed local tarball used a pinned isolated host for
+  MCP initialize/list/owned-file roundtrip; activation/authentication, actual
+  browser registration, chat grants and npm publication remain unverified.
+- Same r8 remains paused. Whole-browser saved-running reopen and final installed
+  artifact gates remain open. English Store/support draft save is not a review
+  submission. No release/tag or production/original-scheduler mutation occurred.
+
 ## Hosted Release Failures And Narrow Regression Fixes (Checkpoint87)
 
 - Pushed main62bd21d4cb780105074dd5cd40f7fe0e68662b98. Actual Native49 Windows

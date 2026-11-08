@@ -23,8 +23,24 @@ const safeCodes = ['native_release_unavailable', 'native_release_invalid', 'nati
   'native_release_node_mismatch', 'native_release_payload_mismatch', 'native_release_destination_exists',
   'native_release_consent_required', 'native_release_preparation_failed'];
 
+function createScratch(prefix) {
+  return fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), prefix));
+}
+
+function removeScratch(dir) {
+  const actual = fs.realpathSync.native(dir), temporary = fs.realpathSync.native(os.tmpdir());
+  assert.equal(actual, dir);
+  assert.equal(path.dirname(actual), temporary);
+  assert.match(path.basename(actual), /^ac-(?:release-source|publisher-helpers|release-inert)-[A-Za-z0-9]+$/);
+  assert.equal(fs.lstatSync(actual).isSymbolicLink(), false);
+  for (const name of fs.readdirSync(actual, {recursive: true})) {
+    assert.equal(fs.lstatSync(path.join(actual, name)).isSymbolicLink(), false);
+  }
+  fs.rmSync(actual, {recursive: true, force: false});
+}
+
 function fixture() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ac-release-source-'));
+  const dir = createScratch('ac-release-source-');
   const release = path.join(dir, 'release'), payload = path.join(dir, 'package'), install = path.join(dir, 'install');
   fs.mkdirSync(path.join(release, 'x64'), {recursive: true});
   fs.mkdirSync(path.join(payload, 'payload'), {recursive: true});
@@ -102,6 +118,46 @@ async function helpers(body, args = []) {
     Buffer.from(command, 'utf16le').toString('base64'), ...args], {windowsHide: true, timeout: 15000});
 }
 
+for (const prefix of ['ac-release-source-', 'ac-publisher-helpers-', 'ac-release-inert-']) {
+  test(`preparation fixture root ${prefix} canonicalizes a short TEMP alias before creating children`, t => {
+    const alias = path.join(path.parse(root).root, 'Users', 'RUNNER~1', 'AppData', 'Local', 'Temp');
+    const canonical = path.join(path.parse(root).root, 'Users', 'Runner Administrator', 'AppData', 'Local', 'Temp');
+    let resolved = 0;
+    t.mock.method(os, 'tmpdir', () => alias);
+    t.mock.method(fs.realpathSync, 'native', value => {
+      assert.equal(value, alias);
+      resolved++;
+      return canonical;
+    });
+    t.mock.method(fs, 'mkdtempSync', value => {
+      assert.equal(value, path.join(canonical, prefix));
+      return value + 'fixture';
+    });
+    assert.equal(createScratch(prefix), path.join(canonical, prefix + 'fixture'));
+    assert.equal(resolved, 1);
+  });
+}
+
+test('preparation fixture cleanup refuses unowned or redirected roots before removal', t => {
+  const temporary = path.join(path.parse(root).root, 'fixture-temp');
+  const owned = path.join(temporary, 'ac-release-source-fixture');
+  const outside = path.join(path.dirname(temporary), 'ac-release-source-fixture');
+  let redirected = false, linked = false, removed = 0;
+  t.mock.method(os, 'tmpdir', () => temporary);
+  t.mock.method(fs.realpathSync, 'native', value => value === owned && redirected ? outside : value);
+  t.mock.method(fs, 'lstatSync', value => ({isSymbolicLink: () => linked && value === path.join(owned, 'redirect')}));
+  t.mock.method(fs, 'readdirSync', () => ['redirect']);
+  t.mock.method(fs, 'rmSync', () => { removed++; });
+  assert.throws(() => removeScratch(outside));
+  assert.throws(() => removeScratch(path.join(temporary, 'not-owned')));
+  redirected = true;
+  assert.throws(() => removeScratch(owned));
+  redirected = false;
+  linked = true;
+  assert.throws(() => removeScratch(owned));
+  assert.equal(removed, 0);
+});
+
 test('preparation source is standalone, create-only, and cannot build, run, sign, or register', () => {
   assert.ok(fs.existsSync(script), 'the bounded preparation entry point must exist');
   const source = fs.readFileSync(script, 'utf8');
@@ -151,12 +207,12 @@ test('PS5.1 unchanged preparer refuses publisher-policy substitution and self-se
       failure(await invoke(f.args, env, entry), 'native_release_signature_invalid');
       assert.deepEqual(fs.readFileSync(script), source);
       assert.deepEqual(fs.readFileSync(publisherPath), pinnedBytes);
-    } finally { fs.rmSync(f.dir, {recursive: true, force: true}); }
+    } finally { removeScratch(f.dir); }
   });
 
 test('PS5.1 publisher helpers enforce closed canonical unique bounded lists and retain the pinned file',
   {skip: !windows, timeout: 15000}, async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ac-publisher-helpers-'));
+    const dir = createScratch('ac-publisher-helpers-');
     const policyFile = path.join(dir, 'native-publishers.json');
     fs.copyFileSync(publisherPath, policyFile);
     const q = value => `'${value.replaceAll("'", "''")}'`;
@@ -195,7 +251,7 @@ test('PS5.1 publisher helpers enforce closed canonical unique bounded lists and 
       `;
       assert.equal((await helpers(body)).stdout.trim(), 'publishers_refused_and_retained');
       assert.equal(fs.readFileSync(policyFile, 'utf8'), encode(emptyPublishers));
-    } finally { fs.rmSync(dir, {recursive: true, force: true}); }
+    } finally { removeScratch(dir); }
   });
 
 test('PS5.1 consent and missing vendor assets fail closed without writes', {skip: !windows, timeout: 30000}, async () => {
@@ -214,7 +270,7 @@ test('PS5.1 consent and missing vendor assets fail closed without writes', {skip
     failure(await invoke(f.args), 'native_release_signature_invalid');
     failure(await invoke([...f.args, '-Apply', '-Consent', 'accept-install', '-NodePath', process.execPath]), 'native_release_signature_invalid');
     assert.deepEqual(tree(f.dir), candidate);
-  } finally { fs.rmSync(f.dir, {recursive: true, force: true}); }
+  } finally { removeScratch(f.dir); }
 });
 
 test('PS5.1 rejects noncanonical, duplicate, mistyped, unbounded, and malformed release policy',
@@ -245,7 +301,7 @@ test('PS5.1 rejects noncanonical, duplicate, mistyped, unbounded, and malformed 
         failure(await invoke(f.args), 'native_release_invalid', `policy case ${index}`);
         assert.deepEqual(tree(f.dir), before, `policy case ${index} changed files`);
       }
-    } finally { fs.rmSync(f.dir, {recursive: true, force: true}); }
+    } finally { removeScratch(f.dir); }
   });
 
 test('PS5.1 validates local canonical names without touching nonlocal sources', {skip: !windows, timeout: 60000}, async () => {
@@ -259,7 +315,7 @@ test('PS5.1 validates local canonical names without touching nonlocal sources', 
     }
     failure(await invoke([...f.args.slice(0, -2), '-Arch', 'x86']), 'native_release_invalid');
     assert.equal(fs.existsSync(path.join(f.install, 'native-host.json')), false);
-  } finally { fs.rmSync(f.dir, {recursive: true, force: true}); }
+  } finally { removeScratch(f.dir); }
 });
 
 test('PS5.1 payload and installed-binding validators use actual current bytes and closed schemas',
@@ -306,7 +362,7 @@ test('PS5.1 payload and installed-binding validators use actual current bytes an
       assert.equal((await helpers(body)).stdout.trim(), 'validated');
       fs.writeFileSync(path.join(f.payload, 'payload', RUNTIME_FILES[0]), 'changed');
       await assert.rejects(helpers(body), /native_release_payload_mismatch/);
-    } finally { fs.rmSync(f.dir, {recursive: true, force: true}); }
+    } finally { removeScratch(f.dir); }
   });
 
 test('PS5.1 never mistakes the existing Node executable for an Agent Continue launcher',
@@ -330,7 +386,7 @@ test('PS5.1 never mistakes the existing Node executable for an Agent Continue la
 
 test('inert PS5.1 create-only staging refuses overwrite and retains partial output',
   {skip: !windows, timeout: 15000}, async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ac-release-inert-'));
+    const dir = createScratch('ac-release-inert-');
     const source = path.join(dir, 'source.txt'), target = path.join(dir, 'destination.txt');
     const partial = path.join(dir, 'partial.txt'), written = path.join(dir, 'written.json');
     fs.writeFileSync(source, 'inert data only\n');
@@ -361,7 +417,7 @@ test('inert PS5.1 create-only staging refuses overwrite and retains partial outp
       assert.equal(fs.statSync(partial).size, 0);
       assert.equal(fs.readFileSync(written, 'utf8'), '{"inert":true}\n');
       assert.equal(fs.readdirSync(dir).some(name => name.endsWith('.exe')), false);
-    } finally { fs.rmSync(dir, {recursive: true, force: true}); }
+    } finally { removeScratch(dir); }
   });
 
 test('PS5.1 refuses reparse ancestors even when the leaf is absent',
@@ -378,6 +434,6 @@ test('PS5.1 refuses reparse ancestors even when the leaf is absent',
       assert.equal((await helpers(body)).stdout.trim(), 'refused_reparse');
     } finally {
       if (fs.existsSync(link)) fs.unlinkSync(link);
-      fs.rmSync(f.dir, {recursive: true, force: true});
+      removeScratch(f.dir);
     }
   });

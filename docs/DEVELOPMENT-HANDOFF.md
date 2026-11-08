@@ -2,6 +2,52 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Remaining Fixture Drift And Broader Local Installation Proof (Checkpoint88)
+
+Main28f40ac73a93c803c62aef17b4e0162acba4cac6 was pushed. Native50 Windows
+job128794907741 actually passed native278/4-platform-skip, current-account13/13,
+ledger38/38, signing8/8 and session6/6. Native-release improved from36/46 to44/49,
+but five preparation fixtures still failed. The policy byte-pin and installer
+manifest fixes cleared their cases; later skipped steps remain NOT accepted.
+The raw log is retained locally as checkpoint88-ci50-windows-log.txt. The five
+failures used raw RUNNER~1 scratch paths: PS5.1 expands an existing short alias,
+so the unchanged production canonical-path gate rejected before the intended
+test branch. Actual Assert-LocalPath rejected PROGRA~1 and accepted Program Files;
+three controlled TEMP-alias regressions were RED before fixture canonicalization.
+No actual short TEMP alias was available on the owner PC, so those three alias
+cases are controlled regressions, not an owner-PC short-TEMP incident.
+
+All three preparation scratch creation sites now canonicalize TEMP first. Cleanup
+checks the exact canonical root, parent, owned prefix and absence of links. The
+three alias cases and one cleanup case retain all49 original tests. Worker53/53
+passed67.76s; parent independently reran the full native-release53/53 in66.574s,
+zero failures/skips. Parent workflow23/23 passed again. Production path guards,
+publisher pins, timeouts and original skip conditions did not change. A new hosted
+workflow result is still required; CI50's downstream skips remain unaccepted.
+
+Independent work reproduced two hosted catalog fixture failures before MCP
+initialization. The fixture still searched for an obsolete send-block anchor;
+stderr had been discarded. Instrumentation now preserves the current delivery,
+pending-request cleanup and flushing-finally block. Its diagnostics keep only
+bounded byte counts, exit/signal and allowlisted classifications, not raw stderr.
+Parent22/22 local checks passed after this repair. Parent then reproduced another
+stale prepared-command anchor and replaced it with an exact single-line match,
+preserving both LF/CRLF support and the unchanged revocation message. The final
+hosted-routing three-suite run passed12/12. No production host source changed.
+
+Broader parent local verification also passed: setup ZIP extraction38/38;
+PS5.1 portable Node22.23.4 actual first download, pinned-byte validation, reuse,
+corruption rejection and failed-download cleanup; bootstrap170 total with167
+passes, three explicit platform/cross-architecture skips and no failures. The
+actual local npm tarball configured an isolated pinned host and completed MCP
+initialize/list/owned-file roundtrip. It did NOT authenticate a hosted tunnel,
+register the live browser, authorize a chat or publish npm. Current-account live
+installation and final-artifact hosted acceptance remain separate open gates.
+
+r8 is still paused at Checkpoint85. Store English/support changes remain a saved
+draft only. No new tag, GitHub Release, Store review submission or production/
+original external Chrome scheduler change is established by this checkpoint.
+
 ### Hosted Release Failures Reproduced And Corrected (Checkpoint87)
 
 Main62bd21d4cb780105074dd5cd40f7fe0e68662b98 was pushed. Native49 Windows

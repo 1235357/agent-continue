@@ -89,12 +89,13 @@ export function instrumentCatalogHost(source, { shellRequest, prepared = false, 
     catch { /* Observation never changes the actual MCP response. */ }
   };
   ${managedProcess ? `const acProcessGate = createManagedProcessGate(${JSON.stringify(managedProcess)}, root, catalog);` : ''}`);
-  source = spliceOnce(source, '    try { return await send(message, ...options); }',
-    `    try {
-      ${append ? `if (entry?.receipt && message.id === appendRpc && !message.error && message.result?.isError !== true &&
+  source = spliceOnce(source, '      let delivery;',
+    `      ${append ? `if (entry?.receipt && message.id === appendRpc && !message.error && message.result?.isError !== true &&
           Array.isArray(message.result?.content)) { appendSucceeded = true; catalog('append-write-result'); }` : ''}
       ${managedProcess ? `if (entry?.method === 'tools/call') await acProcessGate.observeReply(message, Boolean(entry.receipt));` : ''}
-      const result = await send(message, ...options);
+      let delivery;`);
+  source = spliceOnce(source, '      return await delivery;',
+    `      const result = await delivery;
       if (entry?.method === 'tools/list') {
         const tools = message.result?.tools;
         catalog(!Array.isArray(tools) ? 'list-error' :
@@ -102,15 +103,15 @@ export function instrumentCatalogHost(source, { shellRequest, prepared = false, 
           tools.some(tool => tool.name === 'start_process') ? 'list-legacy-only' : 'list-missing-process');
         if (Array.isArray(tools) && tools.some(tool => tool.name === 'agent_continue_start_prepared_process')) catalog('list-prepared');
       }
-      return result;
-    } catch (error) {
+      return result;`);
+  source = spliceOnce(source, '    } finally { flushing--; }',
+    `    } catch (error) {
       if (entry?.method === 'tools/list') catalog('list-send-failed');
       throw error;
-    }`);
-  if (prepared) source = spliceOnce(source, '  const rejectRevoked = id => reject(id, -32074,',
-    "  const rejectRevoked = id => (catalog('shell-owner-revoked'), reject(id, -32074,");
-  if (prepared) source = spliceOnce(source, "This request did not execute.');\n\n  transport.send",
-    "This request did not execute.'));\n\n  transport.send");
+    } finally { flushing--; }`);
+  if (prepared) source = spliceOnce(source,
+    "  const rejectRevoked = id => reject(id, -32074, 'The device owner revoked this operation before admission. This request did not execute.');",
+    "  const rejectRevoked = id => (catalog('shell-owner-revoked'), reject(id, -32074, 'The device owner revoked this operation before admission. This request did not execute.'));");
   return spliceOnce(source, '      const { id } = message;',
     `      if (message.method === 'initialize') catalog('initialize');
       if (message.method === 'tools/list') catalog('list-request');

@@ -10,6 +10,66 @@ import test from 'node:test';
 import { buildHostLaunch, prepareState } from '../native/desktop-commander/runtime.mjs';
 import { catalogAuditFile, hostedCanaryGate, instrumentCatalogHost, summarizeCatalogAudit } from './hosted-catalog-fixture.mjs';
 
+function hostDiagnostics() {
+  const limit = 4096;
+  let stderr = Buffer.alloc(0), bytes = 0;
+  return {
+    capture(chunk) {
+      chunk = Buffer.from(chunk);
+      bytes = Math.min(limit + 1, bytes + chunk.length);
+      if (stderr.length < limit) stderr = Buffer.concat([stderr, chunk.subarray(0, limit - stderr.length)]);
+    },
+    summary(child) {
+      const text = stderr.toString('utf8');
+      const labels = [
+        ['reviewed host anchor must appear exactly once', 'reviewed-anchor-mismatch'],
+        ['agent_continue_native_start_failed', 'native-start-failed'],
+        ['ERR_MODULE_NOT_FOUND', 'module-not-found'],
+        ['ERR_UNSUPPORTED_RESOLVE_REQUEST', 'unsupported-resolve-request'],
+        ['SyntaxError', 'syntax-error'],
+      ].filter(([match]) => text.includes(match)).map(([, label]) => label);
+      return JSON.stringify({ exitCode: Number.isInteger(child.exitCode) ? child.exitCode : null,
+        signal: ['SIGTERM', 'SIGKILL', 'SIGINT'].includes(child.signalCode) ? child.signalCode : null,
+        stderrBytes: bytes, stderrTruncated: bytes > limit, labels });
+    },
+  };
+}
+
+test('host diagnostics are bounded and never echo raw stderr, paths, commands, or credentials', () => {
+  const diagnostic = hostDiagnostics();
+  diagnostic.capture(Buffer.from('reviewed host anchor must appear '));
+  diagnostic.capture(Buffer.from('exactly once\nprivate-token private-command C:\\private\\path\n'));
+  diagnostic.capture(Buffer.alloc(8192, 120));
+  diagnostic.capture(Buffer.from('agent_continue_native_start_failed'));
+  const summary = diagnostic.summary({ exitCode: 1, signalCode: 'private-signal' });
+  assert.deepEqual(JSON.parse(summary), { exitCode: 1, signal: null, stderrBytes: 4097,
+    stderrTruncated: true, labels: ['reviewed-anchor-mismatch'] });
+  assert.ok(summary.length < 256);
+  assert.doesNotMatch(summary, /private|xxxx|native-start-failed/);
+  assert.deepEqual(JSON.parse(hostDiagnostics().summary({ exitCode: null, signalCode: 'SIGTERM' })), {
+    exitCode: null, signal: 'SIGTERM', stderrBytes: 0, stderrTruncated: false, labels: [],
+  });
+});
+
+test('catalog instrumentation accepts the current host without replacing its delivery cleanup', async () => {
+  const source = await fs.readFile(new URL('../native/desktop-commander/host.mjs', import.meta.url), 'utf8');
+  const instrumented = instrumentCatalogHost(source);
+  const deliveryStart = source.indexOf('      let delivery;');
+  const deliveryEnd = source.indexOf('      return await delivery;', deliveryStart);
+  assert.ok(deliveryStart !== -1 && deliveryEnd > deliveryStart);
+  assert.ok(instrumented.includes(source.slice(deliveryStart, deliveryEnd)));
+  assert.ok(instrumented.includes('} finally { flushing--; }'));
+  for (const prepared of [false, true]) {
+    for (const ending of ['\n', '\r\n']) {
+      assert.doesNotThrow(() => instrumentCatalogHost(source.replace(/\r?\n/g, ending), { prepared }));
+    }
+  }
+  for (const anchor of ['      let delivery;', '      return await delivery;', '    } finally { flushing--; }']) {
+    assert.throws(() => instrumentCatalogHost(source.replace(anchor, '')), /reviewed host anchor/);
+    assert.throws(() => instrumentCatalogHost(source + '\n' + anchor), /reviewed host anchor/);
+  }
+});
+
 test('catalog trace rejects unexpected content and an unreviewed host', () => {
   assert.throws(() => summarizeCatalogAudit('unexpected value\n'), /unexpected catalog/);
   assert.throws(() => summarizeCatalogAudit('initialize\n'.repeat(400)), /exceeds fixture limit/);
@@ -65,8 +125,10 @@ for (const mode of ['shell', 'append']) test('instrumented pinned host allows on
         return { ...loaded, source: instrumentCatalogHost(Buffer.from(loaded.source).toString('utf8'),
           ${JSON.stringify(instrument)}) };
       } });`;
+    const diagnostic = hostDiagnostics();
     child = spawn(launch.command, ['--import', 'data:text/javascript,' + encodeURIComponent(preload), ...launch.args],
-      { ...launch, stdio: ['pipe', 'pipe', 'ignore'] });
+      { ...launch, stdio: ['pipe', 'pipe', 'pipe'] });
+    child.stderr.on('data', diagnostic.capture);
     closed = once(child, 'close');
     const lines = createInterface({ input: child.stdout });
     const send = (method, id, params = {}) => child.stdin.write(JSON.stringify({
@@ -106,12 +168,13 @@ for (const mode of ['shell', 'append']) test('instrumented pinned host allows on
           return reply;
         }
       }
-      assert.fail('host exited before returning tools/list');
+      await closed;
+      assert.fail('host exited before completing the reviewed sequence: ' + diagnostic.summary(child));
     })();
     send('initialize', 1, { protocolVersion: '2025-11-25', capabilities: {},
       clientInfo: { name: 'catalog-positive-control', version: '1.0.0' } });
     const listed = await Promise.race([replies, new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new Error('catalog positive control timed out')), 12000);
+      timer = setTimeout(() => reject(new Error('catalog positive control timed out: ' + diagnostic.summary(child))), 12000);
     })]);
     if (mode === 'shell') assert.match(JSON.stringify(listed?.content), /AC_GUARD_OK/);
     else {
