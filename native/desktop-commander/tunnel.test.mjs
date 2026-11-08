@@ -30,6 +30,38 @@ if (coldCmd) assert.ok(guided && process.arch === 'x64', 'cold CMD test requires
 if (previewKit) assert.ok(guidedChromium && path.isAbsolute(previewKit), 'preview kit requires guided Chromium and an absolute path');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+function acquisitionDiagnostic(installDir) {
+  try {
+    const file = path.join(installDir, 'acquisition', 'process.json');
+    const info = fs.lstatSync(file);
+    if (!info.isFile() || info.isSymbolicLink() || info.size > 4096) return { observed: false };
+    const report = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (report.format !== 'agent-continue-acquisition-process' || report.version !== 1) return { observed: false };
+    const result = { observed: true };
+    for (const key of ['exitObserved', 'closeObserved']) if (typeof report[key] === 'boolean') result[key] = report[key];
+    for (const key of ['exitCode', 'closeCode', 'durationMs']) if (Number.isSafeInteger(report[key])) result[key] = report[key];
+    if (['deadline', 'cancelled', null].includes(report.cancelReason)) result.cancelReason = report.cancelReason;
+    return result;
+  } catch { return { observed: false }; }
+}
+
+test('acquisition failure diagnostics disclose bounded process facts only', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agentcontinue-acquisition-diagnostic-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  assert.deepEqual(acquisitionDiagnostic(root), { observed: false });
+  fs.mkdirSync(path.join(root, 'acquisition'));
+  const file = path.join(root, 'acquisition', 'process.json');
+  fs.writeFileSync(file, JSON.stringify({ format: 'agent-continue-acquisition-process', version: 1,
+    exitObserved: true, closeObserved: false, exitCode: 1, closeCode: null, durationMs: 180001,
+    cancelReason: 'deadline', command: 'PRIVATE_COMMAND', path: 'PRIVATE_PATH', key: 'PRIVATE_KEY' }));
+  assert.deepEqual(acquisitionDiagnostic(root), { observed: true, exitObserved: true, closeObserved: false,
+    exitCode: 1, durationMs: 180001, cancelReason: 'deadline' });
+  for (const value of ['invalid json', JSON.stringify({ format: 'other', version: 1 }), ' '.repeat(4097)]) {
+    fs.writeFileSync(file, value);
+    assert.deepEqual(acquisitionDiagnostic(root), { observed: false });
+  }
+});
+
 for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle', 'replayed-write', 'exact-shell', ...(sealedFixture ? ['sealed-profile'] : []), ...(packaged ? ['packaged-manager'] : []),
   ...(guided ? ['guided-installer-paired', 'guided-installer-cmd-unpaired'] : []),
   ...(guidedChromium ? ['guided-installer-chromium', 'guided-installer-browser-managed'] : [])]) test('official ' + process.platform + ' tunnel 0.0.19 supervises the real core via ' + mode + ' against a loopback-only fake control plane',
@@ -345,9 +377,18 @@ for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle', 'replay
         AC_GUIDED_ORIGIN: 'http://127.0.0.1:' + mock.address().port, NODE_OPTIONS: '--import=' + preload,
         ...(browserManaged ? { AC_GUIDED_CAPTURE_WAKE_REGISTRATION: '1' } : {}),
         ...(browserRoundtrip ? { PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH ?? path.join(process.env.LOCALAPPDATA, 'ms-playwright') } : {}) };
-      const { stdout, stderr } = await run(python, [path.join(here, 'test-fixtures', 'guided-conpty.py'), config], {
-        timeout: 270000, windowsHide: true, env: guidedEnvironment,
-      });
+      let guidedResult;
+      try {
+        guidedResult = await run(python, [path.join(here, 'test-fixtures', 'guided-conpty.py'), config], {
+          timeout: 270000, windowsHide: true, env: guidedEnvironment,
+        });
+      } catch (error) {
+        const code = /^guided_conpty: ([a-z0-9_]+)\r?\n?$/.exec(error.stderr ?? '')?.[1];
+        t.diagnostic(JSON.stringify({ phase: 'guided-installer', mode,
+          code: code ?? 'unclassified_fixture_failure', acquisition: acquisitionDiagnostic(installDir) }));
+        throw error;
+      }
+      const { stdout, stderr } = guidedResult;
       assert.equal(stderr, '');
       const result = JSON.parse(stdout);
       if (browserManaged) {
@@ -421,10 +462,16 @@ for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle', 'replay
       packageBin = path.join(payload, 'bin.mjs');
       const cache = process.env.TUNNEL_CLIENT_TEST_NPM_CACHE;
       const archive = process.env.TUNNEL_CLIENT_TEST_ARCHIVE;
-      const result = await run(process.execPath, [packageBin, 'setup', '--install-dir', installDir, '--consent', 'full-account',
-        '--setup-request', request, '--tunnel-id', 'tunnel_0123456789abcdef0123456789abcdef', '--runtime-key-file', key,
-        ...(cache ? ['--offline-cache', cache] : []), ...(archive ? ['--tunnel-archive', archive] : [])],
-        { timeout: 260000, windowsHide: true });
+      let result;
+      try {
+        result = await run(process.execPath, [packageBin, 'setup', '--install-dir', installDir, '--consent', 'full-account',
+          '--setup-request', request, '--tunnel-id', 'tunnel_0123456789abcdef0123456789abcdef', '--runtime-key-file', key,
+          ...(cache ? ['--offline-cache', cache] : []), ...(archive ? ['--tunnel-archive', archive] : [])],
+          { timeout: 260000, windowsHide: true });
+      } catch (error) {
+        t.diagnostic(JSON.stringify({ phase: 'packaged-manager-setup', acquisition: acquisitionDiagnostic(installDir) }));
+        throw error;
+      }
       const receipt = JSON.parse(result.stdout);
       assert.equal(receipt.configured, true);
       for (const field of ['activated', 'authenticationVerified', 'nativeRegistrationVerified', 'chatAuthorizationVerified']) assert.equal(receipt[field], false);

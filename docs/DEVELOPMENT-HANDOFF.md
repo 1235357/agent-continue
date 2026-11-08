@@ -2,6 +2,20 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Cold Runner Failure Diagnostics (Checkpoint103)
+
+The complete root npm test command passed locally, including13 MV3 integration,
+48 Dot adapter,12 Dot keyboard and5 official ProseMirror scenarios. Native67
+passed packaged manager setup in about186s, but its guided paired case stopped
+at20.807s with terminal_timeout_1; cold CMD stopped229.150s with
+installer_failed_dependency_acquisition_failed. Native66 had the same broad
+acquisition error without a retained process report. These are not proof of
+a VPN, model, Defender or specific npm defect. The protocol fixture now emits
+only allowlisted acquisition process facts before cleanup, and prompt timeouts
+distinguish empty output, a seen prompt, and other output without logging text.
+One diagnostic test and30 workflow contracts passed. No product timeout, pin,
+permission, runtime or settled operation changed. Release/Store remain pending.
+
 ### Packaged Browser Fixture Uses The Simplified Entry (Checkpoint102)
 
 Proactive local preview-kit acceptance reached a previously hidden stale test

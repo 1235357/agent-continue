@@ -1,5 +1,17 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Cold Runner Diagnostics Without Relaxing Checks (Checkpoint103)
+
+Full root npm test passed locally. Native67 packaged setup passed about186s;
+guided paired failed20.807s at terminal_timeout_1, cold CMD failed229.150s at
+installer_failed_dependency_acquisition_failed. The earlier Native66 acquisition
+failure has no retained process report and its root cause remains unknown.
+Failure-only fixture diagnostics now retain allowlisted exit/deadline facts
+and a content-free prompt-output category before disposable cleanup. One new
+diagnostic test and30 workflow contracts passed. No product bounds or security
+checks changed. Real r11 acceptance remains scoped to Checkpoint97; publication
+is still pending and the test installation remains revoked/not running.
+
 ## Packaged Simplified-UI Browser Fixture Corrected (Checkpoint102)
 
 An actual local preview-kit browser case timed out in setup because its old

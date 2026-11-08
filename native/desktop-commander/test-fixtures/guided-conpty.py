@@ -156,7 +156,9 @@ def read_stage(terminal, deadline, stage, *, prompt=None, line_count=None, echo=
                     raise FixtureError("unexpected_prompt")
             elif len(output_lines(complete.decode("utf-8"), echo)) >= line_count:
                 return output.decode("utf-8")
-    raise FixtureError(f"terminal_timeout_{stage}")
+    observed = VT_SEQUENCE.sub(b"", raw)
+    state = "empty" if not observed.strip() else "prompt_present" if prompt and prompt in observed else "other_output"
+    raise FixtureError(f"terminal_timeout_{stage}_{state}")
 
 
 def output_lines(output, echo=None):
