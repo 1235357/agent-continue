@@ -2,6 +2,25 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Dot Read-Only Administrator Proof And Hosted Path Alias (Checkpoint73)
+
+The independent, read-only Dot token check returned PID87952 and JSON marker
+AC_DOT_READONLY_TOKEN_20261108_72 with administrator=true. Dot reported that
+process finished but no exit code was provided. This supersedes checkpoint72's
+pending Dot administrator observation, not the refused dot-admin-probe.ps1.
+That write/child-process script was not retried and its output remains absent.
+Proof: .artifacts/ordinary-chat-acceptance-20261108/dot-readonly-admin-result.png.
+
+Native run42473888039 on73a8610 passed Ubuntu and macOS; Windows passed its
+module bootstrap execution and12 diagnostic cases but failed the bootstrap
+test's exact path-string comparison. The actual FileInfo.FullName expanded
+RUNNER~1 to runneradmin while the expected Node temporary root retained8.3 form.
+The test now compares both existing paths through native realpath; all remaining
+module/hash/JSON/discovery assertions and time budgets are unchanged. This is
+a test-only alias correction, not a product authorization change or evidence
+that all later Windows delivery steps passed. Store draft3.0.0 remains r14 and
+unsubmitted; main-only source sync continues. Password files were not accessed.
+
 ### Verified Reconnect And Public Store Links (Checkpoint72)
 
 The existing GUI Connect operation c67639ecdc56411db5406001622ce640 was NOT

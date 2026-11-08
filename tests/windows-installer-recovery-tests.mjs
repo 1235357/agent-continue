@@ -165,15 +165,18 @@ function Get-Command { throw 'fixture_implicit_command_discovery_forbidden' }
 `);
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stderr, '');
-  const { utilityPath, managementPath, ...actual } = JSON.parse(result.stdout);
+  const { utilityPath, managementPath, safePath, ...actual } = JSON.parse(result.stdout);
   assert.equal(utilityPath.toLowerCase(), path.join(path.dirname(powershell),
     'Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1').toLowerCase());
   assert.equal(managementPath.toLowerCase(), path.join(path.dirname(powershell),
     'Modules/Microsoft.PowerShell.Management/Microsoft.PowerShell.Management.psd1').toLowerCase());
+  // PowerShell expands 8.3 temporary-directory aliases in FileInfo.FullName.
+  assert.equal(fs.realpathSync.native(safePath).toLowerCase(),
+    fs.realpathSync.native(path.join(root, 'harness.ps1')).toLowerCase());
   assert.deepEqual(actual, {
     utilityLoaded: true, managementLoaded: true, autoload: 'None',
     hash: createHash('sha256').update('fixture').digest('hex').toUpperCase(),
-    jsonValue: 'fixture', safePath: path.join(root, 'harness.ps1'), safePathExists: true, discoveryBlocked: true,
+    jsonValue: 'fixture', safePathExists: true, discoveryBlocked: true,
   });
   const milestones = fs.readFileSync(path.join(root, 'milestones.txt'), 'utf8').trim().split(/\r?\n/);
   assert.deepEqual(milestones.map(line => line.split('=')[0]), [

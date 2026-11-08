@@ -1,5 +1,19 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Dot Token Result And Hosted Alias Correction (Checkpoint73)
+
+- Dot's new, independent read-only token command returned PID87952 and marker
+  AC_DOT_READONLY_TOKEN_20261108_72 with administrator=true. The response says
+  finished, without an exit code. Proof: dot-readonly-admin-result.png under
+  .artifacts/ordinary-chat-acceptance-20261108/. This does not establish the
+  refused file-write/owned-child script, which was not retried.
+- Native run42473888039: Ubuntu and macOS succeeded. Windows bootstrap executed
+  successfully and12 diagnostic cases passed; the one failure was exact8.3
+  versus expanded temporary-path spelling. Native realpath now compares the
+  same existing fixture file; module/hash/JSON/discovery and time limits remain.
+  Later Windows steps were skipped after failure, not accepted by inference.
+- r14 remains draft3.0.0; no GitHub3.0.0 Release or Store review receipt yet.
+
 ## Reconnect Readback, Dot Read And Store URL Repair (Checkpoint72)
 
 - One existing GUI Connect c67639ecdc56411db5406001622ce640 reached generation
