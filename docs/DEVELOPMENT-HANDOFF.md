@@ -21,6 +21,11 @@ The final parent run passed all four cases in3.83s: locked publication, Revoke,
 root-exit and broker-loss. The three real Job scenarios retain every descendant
 membership/exit assertion and the unrelated-process survival assertion.
 This changes tests only, not the production Job implementation or permissions.
+Independent review found that the initial500ms hold could miss contention under
+descheduling. The final fixture therefore holds the lock until the read-conflict
+callback signals release, asserts at least one actual caught conflict, and bounds
+both waits7s. Exceptional writer cleanup now requires a confirmed exit. Parent
+rerun passed all four cases3.395s. No original Job assertion was removed.
 Another hosted result is required. r8 remains paused; settled Connect/probes are
 not replayed. No Release, npm publication or Store review submission is implied.
 

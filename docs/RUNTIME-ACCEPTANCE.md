@@ -12,6 +12,10 @@
   Parent final four-case run passed3.83s. Revoke/root-exit/broker-loss still check
   all retained descendants exited and the unrelated process survived. No actual
   installed-runtime source or permission changed. New hosted proof remains needed.
+- Independent review's fixed-delay sensitivity finding is closed by a real
+  writer/reader handshake: the writer waits for a caught32/33 signal before
+  release, and the parent asserts at least one conflict. Both sides stay bounded
+  7s; exceptional cleanup confirms writer exit. Final four cases passed3.395s.
 - CI52 downstream skips are not passes. r8 remains deliberately paused; no
   settled operation, web probe, production connection or original task replay.
   Whole-browser/final-artifact gates, Release and Store submission remain open.

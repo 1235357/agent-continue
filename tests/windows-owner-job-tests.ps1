@@ -21,7 +21,7 @@ function New-TestLaunch([string]$Dir, [string]$Role) {
     return $plan
 }
 
-function Read-ExactProcess([string]$Dir, [string]$Role) {
+function Read-ExactProcess([string]$Dir, [string]$Role, [scriptblock]$OnReadConflict) {
     $file = Join-Path $Dir ($Role + '.pid')
     $watch = [Diagnostics.Stopwatch]::StartNew()
     do {
@@ -32,6 +32,7 @@ function Read-ExactProcess([string]$Dir, [string]$Role) {
                 # Exists can observe the PID file before its writer closes it.
                 $errorCode = $_.Exception.HResult -band 0xffff
                 if ($errorCode -ne 32 -and $errorCode -ne 33) { throw }
+                if ($OnReadConflict) { & $OnReadConflict }
             }
             if ($value -match '\A[1-9][0-9]{0,8}\z') {
                 $process = [Diagnostics.Process]::GetProcessById([int]$value)
@@ -63,6 +64,8 @@ try {
     $null = [IO.Directory]::CreateDirectory($publication)
     $publicationFile = Join-Path $publication 'outside.pid'
     $publicationLiteral = $publicationFile.Replace("'", "''")
+    $releaseFile = Join-Path $publication 'release'
+    $releaseLiteral = $releaseFile.Replace("'", "''")
     $writerCode = @"
 `$stream = [IO.File]::Open('$publicationLiteral',[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
 try {
@@ -71,7 +74,11 @@ try {
     `$stream.Flush()
     [Console]::Out.WriteLine('pid-file-locked')
     [Console]::Out.Flush()
-    Start-Sleep -Milliseconds 500
+    `$releaseWait = [Diagnostics.Stopwatch]::StartNew()
+    while (-not [IO.File]::Exists('$releaseLiteral')) {
+        if (`$releaseWait.ElapsedMilliseconds -ge 7000) { throw 'publication lock was not observed' }
+        Start-Sleep -Milliseconds 30
+    }
 } finally { `$stream.Dispose() }
 "@
     $writerPlan = [Diagnostics.ProcessStartInfo]::new((Join-Path $PSHOME 'powershell.exe'),
@@ -83,13 +90,21 @@ try {
     try {
         $ready = $writer.StandardOutput.ReadLineAsync()
         if (-not $ready.Wait(7000) -or $ready.Result -cne 'pid-file-locked') { throw 'publication lock witness missing' }
-        $publicationProcess = Read-ExactProcess $publication 'outside'
+        $publicationObserved = [pscustomobject]@{ Conflicts = 0 }
+        $publicationProcess = Read-ExactProcess $publication 'outside' {
+            $publicationObserved.Conflicts++
+            [IO.File]::WriteAllText($releaseFile,'release')
+        }
         try { if ($publicationProcess.Id -ne $PID) { throw 'publication identity mismatch' } }
         finally { $publicationProcess.Dispose() }
+        if ($publicationObserved.Conflicts -lt 1) { throw 'publication read did not encounter its held lock' }
         if (-not $writer.WaitForExit(7000) -or $writer.ExitCode -ne 0) { throw 'publication writer failed' }
         Write-Output 'PASS pid-publication: locked PID file retries until its exact process is readable'
     } finally {
-        if (-not $writer.HasExited) { $writer.Kill(); $null = $writer.WaitForExit(7000) }
+        if (-not $writer.HasExited) {
+            $writer.Kill()
+            if (-not $writer.WaitForExit(7000)) { throw 'publication writer cleanup unconfirmed' }
+        }
         $writer.Dispose()
     }
     $outside = [Diagnostics.Process]::Start((New-TestLaunch $scratch 'outside'))
