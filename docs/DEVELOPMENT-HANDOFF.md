@@ -2,6 +2,26 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Yellow Argon Corrected And Resubmitted (Checkpoint108)
+
+Canonical main7d8e00b contains the metadata correction and regression tests.
+The final English Description is3,131 characters. Its exact saved value was
+verified after a real Store page reload. Independent review's detached-process
+and separate OpenAI/key revocation warnings were incorporated;34 focused tests
+pass. On November8 at approximately23:07 UTC, the actual Store resubmission
+returned "Your extension was submitted for review" and displayed Pending review.
+The existing3.0.1 package was not replaced or rebuilt; only English listing
+metadata changed. Auto-publish after approval remains selected. No appeal,
+new grant, binary/tag replacement or production operation was performed.
+
+This new receipt supersedes Checkpoint107's rejected-current state, not the
+historical rejection itself. It is resubmission, not Google approval or3.0.1
+Store publication. GitHub Releasev3.0.1 remains published from2159a8c; later
+metadata/evidence commits are on main and do not silently mutate that release.
+Saved UI proof: AgentContinue-3.0.1-store-resubmitted-after-Yellow-Argon.png
+in the original chat's visualization directory. Monitor a future actual verdict;
+do not withdraw or resubmit an unchanged pending draft.
+
 ### Public 3.0.1 Release; Store Metadata Rejection (Checkpoint107)
 
 GitHub Release v3.0.1 is published from immutable main2159a8c. Release12,

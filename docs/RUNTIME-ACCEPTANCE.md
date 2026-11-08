@@ -1,5 +1,19 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Corrected Metadata Resubmission Receipt (Checkpoint108)
+
+At approximately23:07 UTC on November8,2026, the Store returned the actual
+"Your extension was submitted for review" receipt after English Description
+correction. Header Pending review was visible. Exact saved3,131-character copy
+matched canonical main7d8e00b after reload; it omits the rejected enumeration
+and retains detached-process and separate access/key revocation warnings from
+independent review.34 focused support/documentation tests pass. The same3.0.1
+package remains; no new upload/build/tag, privacy-form change or permission grant.
+Auto-publish after approval stays selected. Screenshot:
+AgentContinue-3.0.1-store-resubmitted-after-Yellow-Argon.png, original visualization
+directory. This supersedes the previous rejected-current state but is not approval
+or Store publication. No new runtime acceptance or production changes are claimed.
+
 ## Public Release And Store Metadata Rejection (Checkpoint107)
 
 Release12/run42531571521 published v3.0.1 from canonical main2159a8c. Public
