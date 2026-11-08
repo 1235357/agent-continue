@@ -21,6 +21,28 @@ function scratch(t) {
 }
 const tunnelId = 'tunnel_0123456789abcdef0123456789abcdef';
 
+test('sealed Windows profile pins the interpreter, import fence and private credential reference', { skip: process.platform !== 'win32' }, t => {
+  const { base } = scratch(t);
+  const bundleRoot = path.join(base, "sealed [candidate] with space's");
+  const options = { bundleRoot, tunnelId };
+  const state = bundleRoot + '.state';
+  const profile = api.createSealedWindowsProfileDocument(options);
+  assert.deepEqual(profile.control_plane, { base_url: 'https://api.openai.com', tunnel_id: tunnelId,
+    api_key: 'file:' + path.join(bundleRoot + '.secrets', 'runtime.key') });
+  const argv = [path.join(bundleRoot, 'runtime', 'node.exe'), '--no-global-search-paths', '--import',
+    pathToFileURL(path.join(state, 'startup-imports.mjs')).href, path.join(bundleRoot, 'app', 'host.mjs'), '--state-dir', state];
+  assert.equal(profile.mcp.commands[0].command, argv.map(value => '"' + value.replaceAll('\\', '/') + '"').join(' '));
+  assert.equal(profile.mcp.stdio_failure_policy, 'exit');
+  assert.equal(profile.admin_ui.open_browser, false);
+  assert.equal(profile.health.listen_addr, '127.0.0.1:0');
+  assert.equal(fs.existsSync(bundleRoot), false);
+  assert.equal(fs.existsSync(state), false);
+  for (const extra of [{ endpoint: 'http://127.0.0.1:9000' }, { runtimeKeyFile: 'other.key' },
+    { command: 'other.exe' }, { stateRoot: state + '-other' }]) {
+    assert.throws(() => api.createSealedWindowsProfileDocument({ ...options, ...extra }), /invalid_profile_input/);
+  }
+});
+
 check('profile points only to official API and fixed stdio core without embedded key data', t => {
   const { base, root } = scratch(t), key = path.join(base, 'runtime.key');
   const profile = api.createProfileDocument(root, { tunnelId, runtimeKeyFile: key });

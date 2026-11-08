@@ -6,6 +6,30 @@ const t = createTranslator(runtimeCatalog);
 import { DEFAULT_CONFIG, DELIVERY_BEHAVIOR_VERSION, normalizeUrl, validateTarget, readConfig, currentPrompt, inQuietHours, MAX_PROMPT_CHARS } from './config.js';
 import { pageAction, translatePageResult } from './adapter.js';
 import { BUNDLED_PROMPT } from './preset.js';
+import { bindBrowserWake, BROWSER_DEVICE_MESSAGE } from './browser-wake.js';
+import { bindAdministratorBrowser, ADMIN_BROWSER_MESSAGE, ADMIN_BROWSER_PAUSE, ADMIN_BROWSER_PAUSE_RECONCILE,
+  ADMIN_BROWSER_PAUSE_STATUS, ADMIN_BROWSER_RESTORE } from './admin-browser.js';
+import { bindAdministratorControls, ADMIN_CONTROL_MESSAGES } from './admin-control.js';
+import { bindInstallationPause } from './admin-installation-pause.js';
+import { bindSetupInstallation, SETUP_MESSAGES } from './setup-controller.js';
+
+const browserWake = bindBrowserWake(chrome);
+const administratorControls = bindAdministratorControls(chrome);
+const installationPause = bindInstallationPause(chrome);
+let setupInstallation;
+const administratorBrowser = bindAdministratorBrowser(chrome, {
+  installationPause,
+  onPauseIntent: () => {
+    administratorControls?.cancelPendingStartup();
+    setupInstallation?.cancelAll();
+  },
+});
+setupInstallation = bindSetupInstallation(chrome, {
+  controls: administratorControls,
+  checkStopSupport: digest => installationPause?.available(digest) ?? false,
+  prepareObserver: admit => administratorBrowser?.prepareSetupObserver(admit) ?? false,
+});
+
 const ALARM_NAME = 'agent-continue-heartbeat';
 const RETRY_MS = 60_000;
 // Leave room for a Stop -> composer replacement -> Send -> receipt transition.
@@ -35,7 +59,14 @@ async function setJob(job) {
     // Session state is the cancellation authority. Persistent state is only a
     // recovery plan; tab IDs from a previous browser session are never trusted.
     await chrome.storage.session.set({ job });
-    await chrome.storage.local.set({ resumeJob: job });
+    try { await chrome.storage.local.set({ resumeJob: job }); }
+    catch (error) {
+      if (job.enabled) throw error;
+      // If a paused snapshot cannot be saved, discard stale running recovery.
+      // The complete paused task remains available in this browser session.
+      await chrome.storage.local.remove('resumeJob');
+      if ((await chrome.storage.local.get('resumeJob')).resumeJob) throw error;
+    }
   } else {
     await chrome.storage.session.remove('job');
     await chrome.storage.local.remove('resumeJob');
@@ -70,7 +101,11 @@ async function updateBadge(job) {
 }
 async function syncAlarm(job) {
   if (!job?.enabled) { await chrome.alarms.clear(ALARM_NAME); return; }
-  if (!await chrome.alarms.get(ALARM_NAME)) await chrome.alarms.create(ALARM_NAME, { delayInMinutes: 1, periodInMinutes: 1 });
+  const periodic = alarm => Number.isFinite(alarm?.periodInMinutes) && alarm.periodInMinutes > 0;
+  if (!periodic(await chrome.alarms.get(ALARM_NAME))) {
+    await chrome.alarms.create(ALARM_NAME, { delayInMinutes: 1, periodInMinutes: 1 });
+    if (!periodic(await chrome.alarms.get(ALARM_NAME))) throw fail(t('无法创建后台计时器。'));
+  }
 }
 async function syncPower(job) {
   if (!chrome.power) return false;
@@ -92,17 +127,23 @@ async function protectFromDiscard(tab, enabled) {
   } catch { return { originalAutoDiscardable: original, autoDiscardableChanged: false, discardProtection: 'unavailable' }; }
 }
 async function restoreDiscard(job) {
-  if (!job?.autoDiscardableChanged || typeof job.originalAutoDiscardable !== 'boolean') return;
-  try { await chrome.tabs.update(job.tabId, { autoDiscardable: job.originalAutoDiscardable }); } catch { /* Closed target. */ }
+  if (!job?.autoDiscardableChanged || typeof job.originalAutoDiscardable !== 'boolean') return true;
+  try {
+    const tab = await chrome.tabs.update(job.tabId, { autoDiscardable: job.originalAutoDiscardable });
+    return tab?.autoDiscardable === job.originalAutoDiscardable;
+  } catch { return false; }
 }
 async function pauseLocked(job, message, event = 'paused') {
   if (!job) { await syncAlarm(null); await syncPower(null); await updateBadge(null); return null; }
-  const paused = { ...job, enabled: false, runId: token(), runDeadline: null, phase: 'idle', nextAt: null, statusText: message, autoDiscardableChanged: false, discardProtection: 'paused', systemAwake: false, needsAttention: false };
+  const paused = { ...job, enabled: false, runId: token(), runDeadline: null, phase: 'idle', nextAt: null, statusText: message, discardProtection: 'paused', systemAwake: false, needsAttention: false };
   await setJob(paused); // revoke before housekeeping
-  await syncAlarm(paused);
+  try { await syncAlarm(paused); } catch { /* A stale alarm cannot authorize a paused task. */ }
   await syncPower(paused);
-  await restoreDiscard(job);
-  await logEvent(event, message);
+  if (await restoreDiscard(job) && paused.autoDiscardableChanged) {
+    paused.autoDiscardableChanged = false;
+    await setJob(paused);
+  }
+  try { await logEvent(event, message); } catch { /* Diagnostics cannot prevent Pause. */ }
   await updateBadge(paused);
   return paused;
 }
@@ -264,25 +305,39 @@ async function start(configInput, version, tabId) {
   return response;
 }
 async function resume(version) {
-  const snapshot = await transact(async () => {
-    assertIntent(version);
-    const job = await getJob();
-    if (!job) throw fail(t('请先绑定 dot 或会话。'));
-    if (job.maxSends > 0 && job.sentCount >= job.maxSends) throw fail(t('已达到所设上限；请开始新任务。'));
-    if (job.mode === 'queue-once' && job.queueIndex >= job.queue.length) throw fail(t('队列已完成；请开始新任务。'));
-    return job;
-  });
-  if (snapshot.enabled) return { ok: true, job: snapshot };
   return transact(async () => {
     assertIntent(version);
     const current = await getJob();
-    if (!current || current.id !== snapshot.id) throw fail(t('目标任务已改变，请刷新面板。'));
+    if (!current) throw fail(t('请先绑定 dot 或会话。'));
+    if (current.maxSends > 0 && current.sentCount >= current.maxSends) throw fail(t('已达到所设上限；请开始新任务。'));
+    if (current.mode === 'queue-once' && current.queueIndex >= current.queue.length) throw fail(t('队列已完成；请开始新任务。'));
+    if (current.enabled) {
+      // Repair the heartbeat without invalidating an in-flight page operation.
+      try { await syncAlarm(current); await setJob(current); }
+      catch {
+        await pauseLocked(current, t('后台计时器不可用，未启动任务。'), 'scheduler-error');
+        throw fail(t('无法创建后台计时器。'));
+      }
+      return { ok: true, job: current };
+    }
     let protection = {};
-    try { const tab = await chrome.tabs.get(current.tabId); if (normalizeUrl(tab.url) === current.url) protection = await protectFromDiscard(tab, current.preventDiscard); } catch { /* Wait for original page. */ }
+    try {
+      const tab = await chrome.tabs.get(current.tabId);
+      if (normalizeUrl(tab.url) === current.url) {
+        protection = await protectFromDiscard(tab, current.preventDiscard);
+        if (current.autoDiscardableChanged && protection.originalAutoDiscardable === false) {
+          protection.originalAutoDiscardable = current.originalAutoDiscardable;
+          protection.autoDiscardableChanged = true;
+        }
+      }
+    } catch { /* Wait for original page. */ }
     const job = { ...current, ...protection, enabled: true, runId: token(), runDeadline: null, phase: 'idle', nextAt: Date.now() + current.intervalMinutes * 60_000, needsAttention: false, statusText: t`已继续原任务；约 ${current.intervalMinutes} 分钟后检查。` };
     job.systemAwake = await syncPower(job);
-    await setJob(job);
-    await syncAlarm(job);
+    try { await setJob(job); await syncAlarm(job); }
+    catch {
+      await pauseLocked(job, t('后台计时器不可用，未启动任务。'), 'scheduler-error');
+      throw fail(t('无法创建后台计时器。'));
+    }
     await logEvent('resumed', t('已使用原提示词与原设置继续任务。'));
     await updateBadge(job);
     return { ok: true, job };
@@ -480,11 +535,23 @@ async function initialize() {
     }
     if (job) { job.systemAwake = await syncPower(job); await setJob(job); }
     else await syncPower(null);
-    await syncAlarm(job); await updateBadge(job);
+    try { await syncAlarm(job); }
+    catch {
+      await pauseLocked(job, t('后台计时器不可用，未启动任务。'), 'scheduler-error');
+      return;
+    }
+    await updateBadge(job);
   });
 }
 const initialized = initialize();
 async function dispatch(message, sender, version) {
+  if (SETUP_MESSAGES.includes(message?.type)) return setupInstallation?.handleMessage(message, sender) ?? null;
+  if (message?.type === BROWSER_DEVICE_MESSAGE) return browserWake?.handleMessage(message, sender) ?? null;
+  if (ADMIN_CONTROL_MESSAGES.includes(message?.type)) return administratorControls?.handleMessage(message, sender) ?? null;
+  if (message?.type === ADMIN_BROWSER_MESSAGE || message?.type === ADMIN_BROWSER_PAUSE ||
+      message?.type === ADMIN_BROWSER_PAUSE_STATUS || message?.type === ADMIN_BROWSER_PAUSE_RECONCILE) {
+    return administratorBrowser?.handleMessage(message, sender) ?? null;
+  }
   await initialized;
   if (!message || typeof message.type !== 'string') throw fail(t('无效请求。'));
   const ownExtensionPage = chrome.runtime.id && sender.id === chrome.runtime.id && typeof sender.url === 'string' && sender.url.startsWith(chrome.runtime.getURL(''));
@@ -503,7 +570,8 @@ async function dispatch(message, sender, version) {
     case 'CLEAR_DATA': return transact(async () => {
       await pauseLocked(await getJob(), t('已停止任务并清除本地数据。'));
       await setJob(null);
-      for (const key of ['config', 'logs', 'templates', 'uiTheme']) await chrome.storage.local.remove(key);
+      // Administrator operation journals survive Clear Data; uncertainty is never cleared into permission to replay.
+      for (const key of ['config', 'logs', 'templates', 'uiTheme', ADMIN_BROWSER_RESTORE]) await chrome.storage.local.remove(key);
       // Do not silently reimport a personal bundle after an explicit clear.
       if (BUNDLED_PROMPT) await chrome.storage.local.set({ privatePresetImported: true });
       return { ok: true };

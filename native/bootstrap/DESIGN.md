@@ -21,9 +21,12 @@ keys, user state, services or browser registration belong in the package.
 
 `build-package.mjs --output ABS_NEW_DIRECTORY` assembles only an exact allowlist:
 bootstrap bin/library/README/LICENSE/package metadata and a `payload/` containing
-the twelve runtime source/pin/lock files listed in `payload-layout.mjs`:
+the runtime source/pin/lock files listed in `payload-layout.mjs`:
+`device-native-host.mjs`, `device-operations.mjs`, `device-owner.mjs`,
+`device-server.mjs`, `device-ssh.mjs`,
 `host.mjs`, `lifecycle.mjs`, `package-lock.json`, `package.json`,
-`process-observation.mjs`, `profile.mjs`, `runtime.mjs`, `setup-cli.mjs`,
+`process-observation.mjs`, `profile.mjs`, `research-handoff.mjs`,
+`research-runner.mjs`, `runtime.mjs`, `setup-cli.mjs`,
 `tunnel-pins.json`, `upstream-pin.json`, `windows-child.mjs`, and
 `windows-process-query.cs`. `build-package.mjs` exports
 `buildPackage(destination, {runtimeRoot?})`; runtimeRoot is a trusted build/test
@@ -33,7 +36,7 @@ The packed bin hashbang has LF even after a Windows CRLF source checkout, so
 npm's normal bin-links newline fix does not change installed package bytes.
 Its exact closed JSON shape is `{format:"agent-continue-payload",version:1,
 provider:{name:"@wonderwhy-er/desktop-commander",version:"0.3.1"},
-files:[{path,bytes,sha256},...]}`. Files are exactly the twelve names above,
+files:[{path,bytes,sha256},...]}`. Files are exactly the fifteen names above,
 lexically sorted, with nonnegative integer sizes and lowercase 64-hex digests.
 Encoding is UTF-8 JSON.stringify output plus one LF; extra/duplicate keys or
 entries and noncanonical bytes reject. It detects changes

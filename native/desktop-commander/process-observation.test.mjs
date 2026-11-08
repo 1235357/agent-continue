@@ -69,7 +69,9 @@ test('wrong identity, unexpected error and fixture exit are never retried', asyn
 check('malformed process identities reject before operating-system queries', async () => {
   for (const pid of [0, -1, 1.5, true, '1', Number.NaN, 2147483648]) {
     await assert.rejects(api.observeCore(pid, process.execPath), /invalid_process_identity/);
+    await assert.rejects(api.observeDirectChild(process.pid, pid, process.execPath), /invalid_process_identity/);
   }
+  await assert.rejects(api.observeDirectChild(process.pid, process.pid, process.execPath), /invalid_process_identity/);
   for (const executable of ['', 'relative', null, '/absolute\0bad']) {
     await assert.rejects(api.observeCore(process.pid, executable), /invalid_process_identity/);
   }

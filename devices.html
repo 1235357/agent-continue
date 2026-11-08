@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title data-i18n="Agent Continue | 设备">Agent Continue | Devices</title>
+  <link rel="stylesheet" href="devices.css">
+</head>
+<body>
+  <a class="skip-link" href="#local-title" data-i18n="跳至设备状态">Skip to device status</a>
+  <header>
+    <div class="brand"><a href="popup.html?view=full">Agent Continue</a><h1 data-i18n="设备">Devices</h1></div>
+    <div class="language-field">
+      <label for="language" data-i18n="界面语言">Interface language</label>
+      <select id="language" disabled>
+        <option value="en" data-i18n="英语">English</option>
+        <option value="zh_CN" data-i18n="简体中文">Simplified Chinese</option>
+      </select>
+    </div>
+  </header>
+  <main>
+    <section class="connection-surface" aria-labelledby="local-title">
+      <div class="section-heading"><h2 id="local-title" tabindex="-1" data-i18n="本机">This device</h2><a id="setup-entry" href="setup.html" data-i18n="安装指南">Installation guide</a></div>
+      <nav class="mode-links" aria-label="Local device mode">
+        <a id="standard-mode" href="devices.html" data-i18n="独立管理器">Standalone manager</a>
+        <a id="browser-mode" href="devices.html?mode=browser-managed" data-i18n="浏览器管理的 Windows">Browser-managed Windows</a>
+      </nav>
+      <p class="host-identity"><span data-i18n="当前设备">Selected device</span>: <code id="selected-target">This device</code> · <a href="devices.html" data-i18n="返回本机">Return to this device</a></p>
+      <dl class="status-grid">
+        <dt data-i18n="浏览器权限">Browser permission</dt><dd id="permission" data-i18n="未知">Unknown</dd>
+      </dl>
+      <fieldset id="account-selector" class="account-selector" hidden>
+        <legend data-i18n="账户">Account</legend>
+        <div class="account-options">
+          <label for="account-current"><input id="account-current" name="device-account" type="radio" value="current" aria-controls="standard-controls device-diagnostics prepared-account-scope" checked><span id="account-current-label" data-i18n="当前账户">Current account</span></label>
+          <label for="account-administrator"><input id="account-administrator" name="device-account" type="radio" value="administrator" aria-controls="administrator-controls administrator-control-panel"><span id="account-administrator-label" data-i18n="管理员">Administrator</span></label>
+        </div>
+      </fieldset>
+      <div id="standard-controls">
+        <dl class="status-grid">
+          <dt id="registration-label" data-i18n="原生桥接注册">Native bridge registration</dt><dd id="registration" data-i18n="尚未检查">Not checked</dd>
+          <dt id="connection-label" data-i18n="MCP 连接">MCP connection</dt><dd id="connection" data-i18n="尚未检查">Not checked</dd>
+          <dt id="pause-label" data-i18n="手动暂停">Manual pause</dt><dd id="pause" data-i18n="未知">Unknown</dd>
+        </dl>
+        <p id="feedback" class="feedback" role="status" aria-live="polite" aria-atomic="true" data-i18n="尚未检查设备状态。">Device status has not been checked.</p>
+        <p id="lockNotice" class="notice" role="status" hidden></p>
+        <div class="actions" aria-describedby="feedback lockNotice">
+          <button type="button" data-action="status" data-i18n="检查状态" disabled>Check status</button>
+          <button type="button" data-action="disconnect-and-pause" data-i18n="断开并暂停" disabled>Disconnect and pause</button>
+          <button type="button" data-action="reconnect" data-i18n="重新连接" disabled>Reconnect</button>
+        </div>
+      </div>
+    </section>
+    <section id="administrator-controls" aria-labelledby="administrator-title" hidden>
+      <h2 id="administrator-title" data-i18n="Windows 管理员运行端">Windows administrator runtime</h2>
+      <p id="administrator-status" class="feedback" role="status" aria-live="polite"></p>
+      <p data-i18n="管理员操作需要本机 Windows 授权及对应原生支持。普通权限连接的操作不会影响管理员连接。">Administrator actions require local Windows authorization and corresponding native support. Standard connection controls do not affect the administrator connection.</p>
+      <div class="actions">
+        <button id="administrator-guided-connect" type="button" aria-haspopup="dialog" data-i18n="连接管理员运行端" disabled>Connect administrator runtime</button>
+        <button type="button" id="administrator-check" data-i18n="核对管理员状态" disabled>Check administrator status</button>
+        <button type="button" id="administrator-pause" aria-haspopup="dialog" data-i18n="暂停管理员连接" disabled>Pause administrator connection</button>
+      </div>
+      <p id="administrator-pause-request-feedback" role="status" aria-live="polite" hidden></p>
+      <p id="administrator-guided-feedback" class="feedback" role="status" aria-live="polite"></p>
+      <p id="administrator-control-feedback" class="feedback" role="status" aria-live="polite"></p>
+      <p id="administrator-control-progress" class="feedback" role="status" aria-live="polite"></p>
+      <div class="actions secondary-actions">
+        <button type="button" id="administrator-revoke" aria-haspopup="dialog" data-i18n="撤销此安装的管理员授权" disabled>Revoke administrator authorization for this installation</button>
+      </div>
+      <label class="consent" for="administrator-restore">
+        <input id="administrator-restore" type="checkbox" aria-describedby="administrator-boundary" disabled>
+        <span data-i18n="浏览器重开时恢复已授权的管理员连接">Restore the authorized administrator connection when Chrome reopens</span>
+      </label>
+      <p id="administrator-boundary" class="muted" data-i18n="此选项不安装或授权运行端，不启动首次连接，也不解除本机暂停。关闭此选项不会取消已受理的启动或暂停现有连接；需要停止时请使用断开并暂停。">This does not install or authorize the runtime, start a first connection, or clear a local pause. Turning it off does not cancel an accepted startup or pause an existing connection; use Disconnect and pause to stop.</p>
+    </section>
+    <section aria-labelledby="access-title">
+      <h2 id="access-title" data-i18n="可选的原生桥接">Optional native bridge</h2>
+      <p id="permissionRisk" data-i18n="原生消息权限允许扩展联系单独安装的本机控制桥。重新连接会恢复 MCP 远程访问；断开并暂停会中断该访问。此权限不会安装控制桥，也不会授予任何对话工具权限。">Native messaging permission lets the extension contact a separately installed local bridge. Reconnecting restores MCP remote access; disconnecting and pausing interrupts that access. This permission neither installs the bridge nor grants tools to any chat.</p>
+      <label class="consent" for="riskConsent"><input id="riskConsent" type="checkbox" aria-describedby="permissionRisk"><span data-i18n="我理解本机控制及恢复远程访问的风险，并同意请求可选的原生消息权限。">I understand the risks of local control and restoring remote access, and consent to requesting optional native messaging permission.</span></label>
+      <p id="permission-feedback" class="feedback" role="status" aria-live="polite"></p>
+      <div class="actions">
+        <button type="button" id="grantPermission" aria-describedby="permission-feedback" disabled>Allow local bridge access</button>
+      </div>
+    </section>
+    <details id="device-advanced" class="advanced">
+      <summary data-i18n="高级设置与诊断">Advanced setup and diagnostics</summary>
+      <div class="actions">
+        <button type="button" id="permission-check" data-i18n="重新核对浏览器权限" aria-describedby="permission-feedback" disabled>Check browser permission</button>
+      </div>
+      <section id="device-diagnostics" aria-labelledby="device-diagnostics-title">
+        <h2 id="device-diagnostics-title" data-i18n="设备操作">Device operation</h2>
+        <dl class="status-grid">
+          <dt data-i18n="设备操作">Device operation</dt><dd id="operation" data-i18n="尚无回执">No receipt</dd>
+          <dt data-i18n="操作编号">Operation ID</dt><dd><code id="operation-id" data-i18n="无">None</code></dd>
+          <dt data-i18n="最近有效观测">Last valid observation</dt><dd id="observed" data-i18n="尚无观测">No observation</dd>
+        </dl>
+        <p class="muted" data-i18n="远程设备登记尚未发布。已在本机登记的目标可使用安装器提供的设备链接选择；此页面不接收主机、密钥或 SSH 命令。">Remote enrollment is not released. A locally enrolled target can be selected using an installer-provided device link; this page never accepts hosts, keys, or SSH commands.</p>
+        <p class="host-identity"><span data-i18n="原生主机标识">Native host identity</span>: <code id="native-host">com.agentcontinue.device_control</code></p>
+      </section>
+      <section id="administrator-control-panel" aria-labelledby="administrator-advanced-title" hidden>
+        <h2 id="administrator-advanced-title" data-i18n="管理员操作记录">Administrator operation record</h2>
+        <div class="actions">
+          <button type="button" id="administrator-control-support-check" data-i18n="核对管理员操作支持" disabled>Check administrator control support</button>
+          <button type="button" id="administrator-connect" aria-haspopup="dialog" data-i18n="连接管理员运行端" disabled>Connect administrator runtime</button>
+          <button type="button" id="administrator-reconnect" aria-haspopup="dialog" data-i18n="重连已保存的管理员连接" disabled>Reconnect saved administrator connection</button>
+        </div>
+        <dl class="status-grid">
+          <dt data-i18n="连接支持">Connect support</dt><dd id="administrator-connect-support"></dd>
+          <dt data-i18n="已保存连接的重连支持">Saved-connection reconnect support</dt><dd id="administrator-reconnect-support"></dd>
+          <dt data-i18n="撤销支持">Revoke support</dt><dd id="administrator-revoke-support"></dd>
+        </dl>
+        <label for="administrator-control-operation" data-i18n="管理员操作记录">Administrator operation record</label>
+        <select id="administrator-control-operation" disabled></select>
+        <div id="administrator-control-reference-fields" hidden>
+          <div class="prepared-fields">
+            <label><span data-i18n="安装包 SHA-256">Bundle SHA-256</span>
+              <input id="administrator-control-reference-bundle" type="text" minlength="64" maxlength="64" pattern="[0-9a-f]{64}" spellcheck="false" dir="ltr">
+            </label>
+            <label><span data-i18n="操作编号">Operation ID</span>
+              <input id="administrator-control-reference-id" type="text" minlength="32" maxlength="32" pattern="[0-9a-f]{32}" spellcheck="false" dir="ltr">
+            </label>
+            <label><span data-i18n="管理员操作">Administrator action</span>
+              <select id="administrator-control-reference-action">
+                <option value="connect" data-i18n="连接管理员运行端">Connect administrator runtime</option>
+                <option value="resume-saved" data-i18n="重连已保存的管理员连接">Reconnect saved administrator connection</option>
+                <option value="revoke" data-i18n="撤销此安装的管理员授权">Revoke administrator authorization for this installation</option>
+              </select>
+            </label>
+          </div>
+          <p id="administrator-control-reference-feedback" role="status" aria-live="polite"></p>
+        </div>
+        <dl id="administrator-control-details" class="status-grid" hidden>
+          <dt data-i18n="操作编号">Operation ID</dt><dd><code id="administrator-control-id" dir="ltr"></code></dd>
+          <dt data-i18n="安装包 SHA-256">Bundle SHA-256</dt><dd><code id="administrator-control-bundle" dir="ltr"></code></dd>
+          <dt data-i18n="管理员操作">Administrator action</dt><dd id="administrator-control-action"></dd>
+          <dt data-i18n="原始操作目标">Original operation target</dt><dd><code id="administrator-control-target" dir="ltr"></code></dd>
+          <dt data-i18n="距请求记录的时间（最近更新时）">Elapsed since request record (at last update)</dt><dd id="administrator-control-elapsed"></dd>
+          <dt data-i18n="已存请求结果">Stored submission outcome</dt><dd id="administrator-control-outcome"></dd>
+          <dt data-i18n="已存操作状态（非当前就绪状态）">Stored operation state (not current readiness)</dt><dd id="administrator-control-state"></dd>
+          <dt data-i18n="最近手动回执查询">Last manual receipt read</dt><dd id="administrator-control-receipt"></dd>
+        </dl>
+        <div class="actions">
+          <button type="button" id="administrator-control-journal-check" data-i18n="重读操作记录" disabled>Reload operation records</button>
+          <button type="button" id="administrator-control-receipt-check" data-i18n="查询此操作回执" disabled>Read this operation receipt</button>
+          <button type="button" id="administrator-control-recover" aria-haspopup="dialog" data-i18n="恢复核对此操作" disabled>Recover this operation</button>
+          <button type="button" id="administrator-control-fence" aria-haspopup="dialog" data-i18n="阻止此编号再次接收" disabled>Fence this operation ID</button>
+        </div>
+        <form id="administrator-pause-receipt" autocomplete="off">
+          <div class="prepared-fields">
+            <label><span data-i18n="管理员暂停操作编号">Administrator pause operation ID</span>
+              <input id="administrator-pause-id" type="text" maxlength="32" pattern="[0-9a-f]{32}" spellcheck="false" required dir="ltr">
+            </label>
+          </div>
+          <div class="actions">
+            <button id="administrator-pause-check" type="submit" data-i18n="查询暂停回执" disabled>Check pause receipt</button>
+          </div>
+        </form>
+        <p id="administrator-pause-feedback" role="status" aria-live="polite" hidden></p>
+        <div class="actions"><button type="button" id="administrator-pause-reconcile" aria-haspopup="dialog" data-i18n="核对上次暂停并防止重放" hidden disabled>Reconcile last Pause</button></div>
+        <p id="administrator-pause-reconcile-feedback" role="status" aria-live="polite" hidden></p>
+      </section>
+      <div id="prepared-account-scope">
+      <section id="prepared-controls" aria-labelledby="prepared-title" hidden>
+        <h2 id="prepared-title" data-i18n="已准备的命令">Prepared command</h2>
+        <form id="prepared-form" autocomplete="off">
+          <div class="prepared-fields">
+            <label><span data-i18n="操作编号">Operation ID</span>
+              <input id="prepared-id" type="text" spellcheck="false" required dir="ltr">
+            </label>
+            <label><span data-i18n="命令 SHA-256">Command SHA-256</span>
+              <input id="prepared-digest" type="text" spellcheck="false" required dir="ltr">
+            </label>
+          </div>
+          <div class="actions">
+            <button id="prepared-check" type="submit" data-i18n="核对命令引用" disabled>Check command reference</button>
+            <button id="prepared-revoke" type="button" data-i18n="撤销待执行命令" disabled>Revoke pending command</button>
+          </div>
+        </form>
+        <p id="prepared-feedback" class="feedback" role="status" aria-live="polite"></p>
+      </section>
+      </div>
+      <section id="install-guide" aria-labelledby="setup-title">
+        <h2 id="setup-title" data-i18n="安装指南">Installation guide</h2>
+        <p data-i18n="请从已校验并解压的 Windows 安装包中运行命令。不需要 Agent Continue EXE/MSI 安装器或管理员提权；只有浏览器管理模式注册本机控制桥。">Run the setup command from a verified, extracted Windows bundle. No Agent Continue EXE/MSI installer or administrator elevation is required. Only browser-managed mode registers the local bridge.</p>
+        <p data-i18n="独立管理和临时本机配对不需要原生消息权限。使用浏览器管理模式时，请先注册本机控制桥，再授予此权限。">Standalone mode and temporary local pairing do not need native messaging. For browser-managed mode, register the local bridge before granting this permission.</p>
+        <ol>
+          <li><a href="setup.html" data-i18n="Windows 命令安装与本机控制">Windows command setup and local controls</a><br>
+            <span data-i18n="使用 PowerShell 或 CMD 引导安装。安装后可按需使用临时本机地址和配对码打开控制面板。">Use the guided PowerShell or CMD setup. After setup, you can open controls with a temporary local address and pairing code.</span></li>
+          <li><a href="setup.html#chat-connection-title" data-i18n="连接 ChatGPT 或 Dot">Connect ChatGPT or Dot</a><br>
+            <span data-i18n="按托管连接步骤单独配置工具并为选定的对话授权。本机安装或配对不会授予对话访问权限。">Follow the hosted connection steps to configure tools and authorize the chosen conversation separately. Local setup or pairing does not grant chat access.</span></li>
+        </ol>
+        <p class="host-identity"><span data-i18n="扩展标识">Extension ID</span>: <code id="extension-id" data-i18n="未知">Unknown</code></p>
+      </section>
+      <section aria-labelledby="scope-title">
+        <h2 id="scope-title" data-i18n="对话与设备边界">Chat and device boundaries</h2>
+        <p data-i18n="Dot 与普通 ChatGPT 对话使用相同的设备控制边界。设备操作独立于提示词调度；不会开始、暂停或更改任何调度任务，也不会更改对话授权。">Dot and ordinary ChatGPT chats have the same device-control boundary. Device actions are separate from prompt scheduling: they do not start, pause, or change scheduled jobs or change chat grants.</p>
+        <p data-i18n="对话中的工具可用性与审批仍由对应平台管理。这里的回执只反映控制桥报告的有限状态，不证明远端访问或工具授权成功。远程管理接线是未发布源码候选，尚未进行真实 SSH 或登录恢复验收。">Tool availability and approval remain with each chat platform. Receipts here reflect only bounded state reported by the bridge, not successful remote access or tool authorization. Remote management wiring is an unreleased source candidate without real SSH or login-recovery acceptance.</p>
+      </section>
+    </details>
+  </main>
+  <dialog id="operationDialog" aria-labelledby="dialog-title" aria-describedby="dialog-risk">
+    <h2 id="dialog-title"></h2>
+    <p id="dialog-risk"></p>
+    <div class="actions">
+      <button id="cancelOperation" type="button" data-i18n="取消" autofocus>Cancel</button>
+      <button id="confirmOperation" type="button" data-i18n="确认操作">Confirm action</button>
+    </div>
+  </dialog>
+  <dialog id="administrator-control-dialog" aria-labelledby="administrator-control-title" aria-describedby="administrator-control-risk administrator-control-reference">
+    <h2 id="administrator-control-title"></h2>
+    <p id="administrator-control-risk"></p>
+    <p id="administrator-control-reference" class="host-identity"><code id="administrator-control-review-reference" dir="ltr"></code></p>
+    <form method="dialog" class="actions">
+      <button value="cancel" data-i18n="取消" autofocus>Cancel</button>
+      <button id="administrator-control-confirm" type="button" data-i18n="确认管理员操作">Confirm administrator action</button>
+    </form>
+  </dialog>
+  <dialog id="administrator-pause-dialog" aria-labelledby="administrator-pause-title" aria-describedby="administrator-pause-risk administrator-pause-unresolved">
+    <h2 id="administrator-pause-title" data-i18n="暂停管理员连接">Pause administrator connection</h2>
+    <p id="administrator-pause-risk" data-i18n="若发出新请求，确认后本机 Windows 会提示授权。此操作仅影响管理员 MCP，不会更改普通权限连接或提示词调度。">If a new request is sent, a local Windows authorization prompt follows confirmation. This affects only the administrator MCP and does not change the standard connection or prompt schedules.</p>
+    <p id="administrator-pause-unresolved" data-i18n="如果上次暂停仍未解决，则不会发出新请求。请查询上次操作的回执。">If a previous Pause is unresolved, no new request is sent. Check the receipt for the previous operation.</p>
+    <form method="dialog" class="actions">
+      <button value="cancel" data-i18n="取消" autofocus>Cancel</button>
+      <button id="administrator-pause-confirm" type="button" data-i18n="确认暂停">Confirm pause</button>
+    </form>
+  </dialog>
+  <dialog id="administrator-pause-reconcile-dialog" aria-labelledby="administrator-pause-reconcile-title" aria-describedby="administrator-pause-reconcile-target administrator-pause-reconcile-risk">
+    <h2 id="administrator-pause-reconcile-title" data-i18n="核对上次暂停并防止重放">Reconcile last Pause</h2>
+    <p><span data-i18n="管理员暂停操作编号">Administrator pause operation ID</span>: <code id="administrator-pause-reconcile-target" dir="ltr"></code></p>
+    <p id="administrator-pause-reconcile-risk" data-i18n="此请求需要本机 Windows 授权。防重放仅阻止此编号再次被接收，不会重新连接或更改当前连接，也不能证明上次请求从未执行。">This request requires local Windows authorization. A fence only prevents this ID from being admitted again. It does not reconnect or change the current connection, and it does not prove the earlier request never ran.</p>
+    <form method="dialog" class="actions">
+      <button value="cancel" data-i18n="取消" autofocus>Cancel</button>
+      <button id="administrator-pause-reconcile-confirm" type="button" data-i18n="请求防重放">Request fence</button>
+    </form>
+  </dialog>
+  <dialog id="prepared-dialog" aria-labelledby="prepared-dialog-title" aria-describedby="prepared-risk prepared-reference">
+    <h2 id="prepared-dialog-title" data-i18n="撤销待执行命令">Revoke pending command</h2>
+    <p><code id="prepared-reference"></code></p>
+    <p id="prepared-risk" data-i18n="撤销会阻止此引用的后续执行，但不会停止已被接收的命令，也不会更改任何对话权限。">Revocation blocks future execution of this reference. It does not stop a command that has already been admitted or change any chat grants.</p>
+    <form method="dialog" class="actions">
+      <button value="cancel" data-i18n="取消" autofocus>Cancel</button>
+      <button id="prepared-confirm" type="button" data-i18n="确认撤销">Confirm revocation</button>
+    </form>
+  </dialog>
+  <script type="module" src="devices.js"></script>
+</body>
+</html>

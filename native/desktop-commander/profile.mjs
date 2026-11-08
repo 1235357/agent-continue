@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readState, buildHostLaunch, verifyUpstream } from './runtime.mjs';
 
 const pins = JSON.parse(fs.readFileSync(new URL('./tunnel-pins.json', import.meta.url), 'utf8'));
@@ -25,9 +25,12 @@ function localPath(value) {
 }
 
 function profileInputs(options) {
-  if (!exact(options, ['tunnelId', 'runtimeKeyFile']) || typeof options.tunnelId !== 'string' ||
+  if ((!exact(options, ['tunnelId', 'runtimeKeyFile']) && !exact(options, ['tunnelId', 'runtimeKeyFile', 'privateRuntime'])) ||
+      (Object.hasOwn(options,'privateRuntime') && typeof options.privateRuntime!=='boolean') ||
+      (options.privateRuntime===true && process.platform!=='win32') || typeof options.tunnelId !== 'string' ||
       !/^tunnel_(?:[a-z0-9]{4}_)?[a-z0-9]{32}$/.test(options.tunnelId)) fail('invalid_profile_input');
-  return { tunnelId: options.tunnelId, runtimeKeyFile: localPath(options.runtimeKeyFile) };
+  return { tunnelId: options.tunnelId, runtimeKeyFile: localPath(options.runtimeKeyFile),
+    ...(options.privateRuntime===true ? {privateRuntime:true} : {}) };
 }
 
 function entryExists(file) {
@@ -61,20 +64,49 @@ function quote(value) {
   return '"' + (process.platform === 'win32' ? value.replaceAll('\\', '/') : value.replaceAll('\\', '\\\\')) + '"';
 }
 
+function profileDocument(root, { tunnelId, runtimeKeyFile }, argv) {
+  return {
+    config_version: 1,
+    control_plane: { base_url: 'https://api.openai.com', tunnel_id: tunnelId, api_key: 'file:' + runtimeKeyFile },
+    health: { listen_addr: '127.0.0.1:0', url_file: path.join(root, 'health.url') },
+    admin_ui: { open_browser: false },
+    log: { level: 'warn', format: 'json', file: path.join(root, 'native-tunnel.log'), http_raw_unsafe: false },
+    mcp: { commands: [{ channel: 'main', command: argv.map(quote).join(' ') }], stdio_failure_policy: 'exit' },
+  };
+}
+
+// Rendering alone grants no authority. The elevated owner must verify the sealed
+// bundle and state, protect the key, and supply the stager's clean environment.
+export function createSealedWindowsProfileDocument(options) {
+  if (process.platform !== 'win32' || !exact(options, ['bundleRoot', 'tunnelId']) ||
+      typeof options.bundleRoot !== 'string' || !/^[A-Za-z]:\\[^\\]/.test(options.bundleRoot) ||
+      /[<>:"|?*/]/.test(options.bundleRoot.slice(2)) ||
+      options.bundleRoot !== path.resolve(options.bundleRoot)) fail('invalid_profile_input');
+  const bundle = localPath(options.bundleRoot);
+  const root = localPath(bundle + '.state');
+  const key = path.join(bundle + '.secrets', 'runtime.key');
+  const input = profileInputs({ tunnelId: options.tunnelId, runtimeKeyFile: key });
+  const node = localPath(path.join(bundle, 'runtime', 'node.exe'));
+  const loader = pathToFileURL(localPath(path.join(root, 'startup-imports.mjs'))).href;
+  const host = localPath(path.join(bundle, 'app', 'host.mjs'));
+  return profileDocument(root, input, [node, '--no-global-search-paths', '--import', loader, host, '--state-dir', root]);
+}
+
 export function createProfileDocument(root, options) {
   root = localPath(root);
   const input = profileInputs(options);
   rejectReservedKeyLocation(root, input.runtimeKeyFile);
   root = readState(root).root;
   const launch = buildHostLaunch(root, {});
-  return {
-    config_version: 1,
-    control_plane: { base_url: 'https://api.openai.com', tunnel_id: input.tunnelId, api_key: 'file:' + input.runtimeKeyFile },
-    health: { listen_addr: '127.0.0.1:0', url_file: path.join(root, 'health.url') },
-    admin_ui: { open_browser: false },
-    log: { level: 'warn', format: 'json', file: path.join(root, 'native-tunnel.log'), http_raw_unsafe: false },
-    mcp: { commands: [{ channel: 'main', command: [launch.command, ...launch.args].map(quote).join(' ') }], stdio_failure_policy: 'exit' },
-  };
+  let interpreter=launch.command;
+  if(input.privateRuntime===true) {
+    const install=path.dirname(root);
+    if(path.basename(root)!=='state' || launch.args[0]!==path.join(install,'app','host.mjs')) fail('invalid_profile_input');
+    // This fixed Windows install-relative target can be prepared before its
+    // create-only copy. Configuration is not executable/readiness acceptance.
+    interpreter=localPath(path.join(install,'runtime','node.exe'));
+  }
+  return profileDocument(root, input, [interpreter, ...launch.args]);
 }
 
 function checkKeyReference(file) {
@@ -110,10 +142,12 @@ function bindingPaths(root) {
 
 export function writeTunnelProfile(root, options) {
   root = localPath(root);
-  if (!exact(options, ['tunnelId', 'runtimeKeyFile', 'tunnelExecutable'])) fail('invalid_profile_input');
+  if (!exact(options, ['tunnelId', 'runtimeKeyFile', 'tunnelExecutable']) &&
+      !exact(options, ['tunnelId', 'runtimeKeyFile', 'tunnelExecutable','privateRuntime'])) fail('invalid_profile_input');
   const names = bindingPaths(root);
   if (entryExists(names.profile) || entryExists(names.receipt)) fail('binding_exists');
-  const input = profileInputs({ tunnelId: options.tunnelId, runtimeKeyFile: options.runtimeKeyFile });
+  const input = profileInputs({ tunnelId: options.tunnelId, runtimeKeyFile: options.runtimeKeyFile,
+    ...(Object.hasOwn(options,'privateRuntime') ? {privateRuntime:options.privateRuntime} : {}) });
   rejectReservedKeyLocation(root, input.runtimeKeyFile);
   checkKeyReference(input.runtimeKeyFile);
   rejectClientOverlap(input.runtimeKeyFile, options.tunnelExecutable);
@@ -121,8 +155,9 @@ export function writeTunnelProfile(root, options) {
   const client = verifyTunnelExecutable(options.tunnelExecutable);
   verifyUpstream();
   const profile = createProfileDocument(root, input);
-  const receipt = { format: 'agent-continue-tunnel-binding', version: 1,
-    tunnelId: input.tunnelId, runtimeKeyFile: input.runtimeKeyFile, tunnelExecutable: client.file };
+  const receipt = { format: 'agent-continue-tunnel-binding', version: input.privateRuntime===true ? 2 : 1,
+    tunnelId: input.tunnelId, runtimeKeyFile: input.runtimeKeyFile, tunnelExecutable: client.file,
+    ...(input.privateRuntime===true ? {hostRuntime:'install-private'} : {}) };
   fs.writeFileSync(names.profile, serialize(profile), { flag: 'wx', mode: 0o600 });
   // A partial write remains visibly incomplete. Never infer consent or repair it.
   fs.writeFileSync(names.receipt, serialize(receipt), { flag: 'wx', mode: 0o600 });
@@ -135,9 +170,12 @@ function loadBinding(root) {
   if (!profileExists && !receiptExists) return null;
   if (!profileExists || !receiptExists) fail('binding_incomplete');
   const { value: receipt } = readRecord(names.receipt);
-  if (!exact(receipt, ['format', 'version', 'tunnelId', 'runtimeKeyFile', 'tunnelExecutable']) ||
-      receipt.format !== 'agent-continue-tunnel-binding' || receipt.version !== 1) fail('binding_changed');
-  const input = profileInputs({ tunnelId: receipt.tunnelId, runtimeKeyFile: receipt.runtimeKeyFile });
+  const privateRuntime=receipt?.version===2;
+  if (!exact(receipt, ['format', 'version', 'tunnelId', 'runtimeKeyFile', 'tunnelExecutable',
+      ...(privateRuntime ? ['hostRuntime'] : [])]) || receipt.format !== 'agent-continue-tunnel-binding' ||
+      ![1,2].includes(receipt.version) || (privateRuntime && receipt.hostRuntime!=='install-private')) fail('binding_changed');
+  const input = profileInputs({ tunnelId: receipt.tunnelId, runtimeKeyFile: receipt.runtimeKeyFile,
+    ...(privateRuntime ? {privateRuntime:true} : {}) });
   rejectReservedKeyLocation(root, input.runtimeKeyFile);
   checkKeyReference(input.runtimeKeyFile);
   rejectClientOverlap(input.runtimeKeyFile, receipt.tunnelExecutable);

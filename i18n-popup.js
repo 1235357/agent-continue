@@ -123,6 +123,7 @@ export default {
   "无法申请防休眠权限，请检查浏览器扩展设置。": "Unable to request keep-awake permission. Check browser extension settings.",
   "主题保存失败。": "Theme could not be saved.",
   "无法打开完整控制台。": "Unable to open the full console.",
+  "无法打开设备设置或控制页面。": "Unable to open device setup or controls.",
   "请先填写模板名称。": "Enter a template name first.",
   "当前还没有可保存的提示词。": "There is no prompt to save yet.",
   "最多保存 30 个模板，请先删除不需要的模板。": "Up to 30 templates can be saved. Delete unused templates first.",

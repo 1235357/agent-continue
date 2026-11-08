@@ -74,6 +74,18 @@ async function processIdentity(pid) {
   } catch { unknown(); }
 }
 
+// Confirm a specific process, without returning or inspecting command lines.
+export async function observeDirectChild(parentPid, pid, childExecutable) {
+  if (!pidOK(parentPid) || !pidOK(pid) || parentPid === pid) invalid();
+  const expected = executable(childExecutable);
+  const observed = await processIdentity(pid);
+  if (!observed || observed.parentPid !== parentPid ||
+      (process.platform === 'linux' && ['Z', 'X', 'x'].includes(observed.state))) return null;
+  if (!observed.executable) unknown();
+  if (executable(observed.executable) !== expected) return null;
+  return { pid, startTime: observed.startTime, executable: childExecutable };
+}
+
 export async function observeCore(parentPid, nodeExecutable) {
   if (!pidOK(parentPid)) invalid();
   const expected = executable(nodeExecutable);

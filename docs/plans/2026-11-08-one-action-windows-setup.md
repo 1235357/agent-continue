@@ -1,0 +1,160 @@
+# Windows Setup: One Informed Decision
+
+## Owner Requirement
+
+The owner approved simplifying the configuration experience on 2026-11-07
+(America/Chicago): after informed consent, installation, configuration and
+connection should be automated as far as the browser and operating system permit.
+This refines the current active Windows release goal; it does not replace the
+goal with a UI-only milestone.
+
+## Default Experience
+
+1. Show Windows setup first, with one recommended command and concise account-level
+   access disclosure. Do not auto-install merely because a page opened.
+2. Reuse compatible Node, or verify and provision the official portable Node ZIP.
+   Do not introduce an AgentContinue EXE/MSI installer.
+3. Coordinate installation and bridge registration in the command path. Preserve
+   exact extension identity, local credential handling and recoverable receipts.
+4. In Devices, show connection state, Connect and Pause. Keep Revoke accessible.
+   Move hashes, operation IDs, manual recovery and alternative modes into closed
+   advanced sections.
+5. A manual Connect outside installation prepares read-only prerequisites before
+   its informed confirmation. The combined fresh-install flow must instead
+   disclose installation AND automatic connection before the copy gesture, then
+   continue on the same Setup document without another application-level dialog.
+   Do not reuse old install-only consent or require manual support checks.
+6. Preserve mandatory Windows elevation and ChatGPT tool authorization. Extension
+   consent is not installation, an elevated token, a tunnel or a chat grant.
+
+## Safety And Usability Contracts
+
+- Pause/Revoke cancel pending connection preparation. Late checks cannot open a
+  stale Connect dialog or create a new operation after a pause.
+- An unresolved operation blocks new startup; read its original receipt. Do not
+  replay it or manufacture a replacement operation ID.
+- Do not show a historical receipt as current readiness. A stopped Pause receipt
+  may replace stale request wording only for the exact latest stored operation.
+- Permission/support failures release UI busy state and provide an actionable,
+  bounded error. No background reconnect loops are added.
+- Keep the scheduler, prompt contents, production VPN/MCP and external Chrome
+  original task unchanged.
+
+## Work Log
+
+Checkpoint65: fresh dedicated current-account installation actually passed;
+configuration/registration succeeded without starting a duplicate connection.
+The real archive-only repeat command exposed and then verified the adoption fix:
+read-only existing-matched, no mutation or credential prompt. Public source review
+and manual hosted-verification contracts passed; actual hosted CI and publication
+remain separate. Scope selection is presentation-only; diagnostic inputs stay
+closed by default. This supersedes checkpoint64's fresh-current-install gap.
+
+The actual IAB status check also recovered the newly installed current-account
+bridge without another installation: Granted, Bridge reachable, Disconnected,
+Paused. The worker now supports explicit read-only reattachment after its initial
+host-not-found attempt; pending handshakes are awaited, not duplicated, and
+owner/mutation fences remain intact. Only the dedicated acceptance preview was
+reloaded. The owner completed Store authentication; its current published and
+draft versions are2.1.0, not the GitHub-only scheduler2.2.1.
+
+Checkpoint64 current state supersedes the stopped-runtime checkpoint60 below:
+the dedicated ec7 connection is ready after one checkpoint63 GUI Connect, not a
+replayed operation. Current Dot completed bounded administrator/file/owned-test-
+process execution, independently cross-checked; no sessions remained afterward.
+Devices now presents one selected Current account / Administrator surface, with
+Advanced closed and guided Revoke accessible. Existing-administrator full public
+inventory/registration/task inspection passed without writes; current-account
+adoption passed source fixtures, not a new live install. Full product and96/96
+public-package checks passed on r4. The installer recovery-command lifetime fix
+now passed362 focused checks and the full guided-install command. Closure-r5,
+paired extension-r5 and npm-r5 are built; final product exit0, package103/103 and
+extension packaging32/32 passed. Whole-browser administrator recovery,
+Revoke, actual hosted CI and public GitHub/Store delivery remain open.
+
+Checkpoint60 live update: fresh administrator installation and same-document
+automatic Connect have now been accepted on ec7eb4e2, with ordinary-web actual
+administrator/file/owned-process proof and a later actual GUI Pause. The
+acceptance runtime is now stopped. One-click navigation from the installed IAB
+popup is repaired with fixed extension-page destinations and a same-document
+fallback; its minimum width is320px. The original suspected foreign Pause block
+was disproved by new stopped receipt5ff4cb5636e947a7bc06518e198ccd91. Feedback
+can arrive before shutdown; the source fix adds at most four further read-only
+checks within a15-second total budget after explicit Pause.106 focused cases
+pass. This followup source was installed in checkpoint60c, but it was not
+exercised by a new real OS Pause; the existing receipt was only read manually.
+These observations supersede the older source-only boundaries below. Neither
+public release/submission nor current-account/existing-install adoption is done.
+
+Checkpoint58 supersedes older source-only notes below: the actual worker and
+page now import the coordinator/client and installation-wide Pause. The default
+page hides manual setup/diagnostic controls behind closed disclosures. Full
+product exit0 and rendered Setup47/47 passed; final client24/24 covers slow human
+approval. This is tested candidate source, not installed combined-flow acceptance.
+
+- [x] Native release goal created and active; publication and Store submission
+  remain completion gates.
+- [x] Guided-connection regression cases written before implementation; initial
+  run failed because the guided control did not exist.
+- [x] Integrate primary Devices layout and guided preparation; scoped111 tests
+  and rendered40-check Devices suite passed. Independent review found and fixed
+  a delayed-Connect/Revoke race, consent withdrawal and permission-refresh hangs.
+- [x] Integrate Windows-first setup layout and default selection tests;37 rendered
+  setup checks passed across both languages and desktop/mobile viewports.
+- [x] Inspect the updated installed IAB candidate visually. Only six page files
+  changed; retained existing authorization, scheduler and protected runtime.
+- [x] Add Current account / Administrator scope selection and scope-specific
+  command/consent. Late saved-consent and clipboard results cannot restore a
+  previous scope. Setup44 rendered browser checks passed; the three Setup files
+  were updated and visually checked in the existing IAB preview.
+- [x] Implement command-only administrator orchestration: one explicit consent,
+  one UAC and one fresh InstallBrowserOwner action. Add checked source snapshots,
+  full closure preflight, durable exact-ID receipts and read-only Observe.
+- [x] Build a local setup source ZIP plus separate pinned administrator bundle;
+  verify parent/helper/stager/bundle bytes and data-only Plan. No installation or
+  publication performed. Do not reuse the existing public v2.2.1 tag.
+- [x] Add same-gate sealed setup receipts and fast read-only setup-status, with
+  exact extension/SID/original-target checks. These are advisory observations,
+  not new connection authority;589 scratch receipt checks and26 installer checks.
+- [x] Add worker-wide pre-dispatch startup cancellation and a durable setup-ID to
+  original-operation association committed/read back with the existing journal.
+  Same-document coordinator and joint-module fixtures pass. Checkpoint58 wires
+  the real worker/page; missing stop support and observer admission default deny.
+- [x] Implement authenticated installation-wide Pause and actual provider wiring.
+  Preserve original-ID unknown-state readback and legacy semantics; final installed
+  acceptance remains separate from source/native-function fixtures.
+- [x] Accept the combined installer and automatic continuation on a fresh
+  administrator installation (checkpoint59); ordinary-web administrator/file/
+  owned-process proof and actual GUI Pause followed in checkpoint60.
+- [x] Define/read back compatible existing-install and current-account behavior
+  without overwriting an active runtime.
+- [x] Wire same-document consented copy/receipt/observer/one-Connect continuation
+  after a verified fresh installation. The native installer itself still finishes
+  paused; the unchanged initiating page's automatic Connect was actually accepted
+  in checkpoint59 and ordinary-web control followed in checkpoint60.
+- [x] Disclose the measured approval boundary: current Connect/Pause launch plans
+  separately use runas. Installation's one UAC is not the total flow's count.
+  Reuse this checked path for near-term delivery; fixed delegation is a future
+  option, not a reason to block the one-command flow or bypass Windows approval.
+- [ ] Complete lifecycle/revocation gates for the exact release artifacts.
+- [ ] Update public release packaging, privacy and Store disclosures together.
+  Candidate Windows sidecar workflow and privacy drafts exist. Hosted Windows
+  runner compatibility is not established; the ordinary-token build guard must
+  not be bypassed or presented as a passing CI job.
+- [ ] Publish matching GitHub release and verify Store submission receipt.
+
+## Evidence Boundary
+
+The old70a97761 acceptance was revoked/unenrolled. The newer ec7eb4e2 acceptance
+installation connected automatically from the original consented Setup page,
+proved ordinary-web administrator operations and was then explicitly GUI-paused.
+These are real local/browser observations, not published npm/Release delivery.
+The installer itself finishes paused; the same initiating page separately admits
+the consented continuation. Reopen/recovery/Revoke/Dot/final-artifact adoption and
+publication gates remain open rather than being hidden by interface copy.
+
+The first complete product run reached the MV3 stage and exposed an old fixture
+assumption: diagnostic text moved inside closed Advanced details. The test now
+opens the actual disclosure before reading it; all13 MV3 cases passed. A fresh
+complete product run is recorded in the candidate artifact directory. Do not
+replace its actual exit code with the separate scoped results.

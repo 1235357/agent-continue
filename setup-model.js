@@ -33,3 +33,18 @@ export function serializeSetupRequest(request) {
   }
   return JSON.stringify(expected, null, 2) + '\n';
 }
+
+export function buildLocalControlFrameUrl(value) {
+  const match = typeof value === 'string' && /^http:\/\/127\.0\.0\.1:([1-9][0-9]{3,4})\/?$/.exec(value.trim());
+  if (!match || Number(match[1]) < 1024 || Number(match[1]) > 65535) throw new Error('Invalid local control address.');
+  return `http://127.0.0.1:${match[1]}/embed`;
+}
+
+export function parseLocalPairingTicket(value) {
+  const match = typeof value === 'string' && [56, 57].includes(value.length) &&
+    /^ACPAIR1:([1-9][0-9]{3,4}):([A-Za-z0-9_-]{43})$/.exec(value);
+  if (!match || match[0] !== value || Number(match[1]) < 1024 || Number(match[1]) > 65535) {
+    throw new Error('Invalid local pairing ticket.');
+  }
+  return { destination: buildLocalControlFrameUrl(`http://127.0.0.1:${match[1]}`), code: match[2] };
+}

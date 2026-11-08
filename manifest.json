@@ -4,7 +4,7 @@
   "default_locale": "en",
   "author": "Zhentong Ye",
   "homepage_url": "https://github.com/1235357/agent-continue",
-  "version": "2.2.1",
+  "version": "3.0.0",
   "description": "__MSG_extensionDescription__",
   "minimum_chrome_version": "120",
   "permissions": [
@@ -48,19 +48,21 @@
     "https://chatgpt.com/*"
   ],
   "optional_permissions": [
-    "power"
+    "power",
+    "nativeMessaging"
   ],
   "options_ui": {
     "page": "popup.html?view=full",
     "open_in_tab": true
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; worker-src 'self'; connect-src 'self'"
+    "extension_pages": "script-src 'self'; object-src 'self'; worker-src 'self'; connect-src 'self'; frame-src 'self' http://127.0.0.1:*"
   },
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",
     "48": "icons/icon-48.png",
     "128": "icons/icon-128.png"
-  }
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0ExfuJlOBCn2uH2wDkvD8eH/NwDhZD2Zedj+5Ys1XWG79ciYso4ot6G03gDddrkJOQOTDy+ryv293JiUoAxYZrjkAhl6X3YgZuBNCRP2iFHJdg0egVYhisCUhtKNjYkkaM/k8cX9T0jDuOCE+tgNqaU331JyZmspbZD0F9qTFBPy9uhiHw1BLjJOYG+54zmPT/COHFecy9/ZRlcRzjrAelNpRMo3AfkE8Bs8a+PtliILXPk2rFBjb6NoObE+JzzVb2FQ85DOF71zj/Lh3U3ehutsdRhobspi+UV6IB1pM5A70i0ylWXIdF4FChN4w5e7UJC3iYq4sEgbnOdqrx+e/wIDAQAB"
 }

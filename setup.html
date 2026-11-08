@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title data-i18n="Agent Continue | 设备设置">Agent Continue | Device Setup</title>
+  <link rel="stylesheet" href="devices.css">
+  <link rel="stylesheet" href="setup.css">
+</head>
+<body>
+  <a class="skip-link" href="#setup-title" data-i18n="跳至设备设置">Skip to device setup</a>
+  <header>
+    <div class="brand setup-brand"><img src="icons/icon-32.png" width="32" height="32" alt=""><div><a href="devices.html">Agent Continue</a><h1 data-i18n="设备设置">Device Setup</h1></div></div>
+    <div class="language-field"><label for="language" data-i18n="界面语言">Interface language</label><select id="language" disabled><option value="en" data-i18n="英语">English</option><option value="zh_CN" data-i18n="简体中文">Simplified Chinese</option></select></div>
+  </header>
+  <main>
+    <section id="installSection" aria-labelledby="install-title" hidden>
+      <h2 id="setup-title" tabindex="-1"><span id="install-title" data-i18n="设置 Windows">Set up Windows</span></h2>
+      <p id="availability" class="release-state" role="status" data-i18n="Windows 仅有源码候选版本；尚无已发布安装器。">Windows has a source candidate only; no released installer.</p>
+      <p id="otherInstallPlan" data-i18n="此平台尚未提供已发布的本机安装包。">A released local installer is not available for this platform yet.</p>
+      <div id="windowsAccessField" class="windows-access-field"><label for="windowsAccessScope" data-i18n="Windows 访问权限">Windows access</label><select id="windowsAccessScope" aria-describedby="setupRisk setupGrantBoundary"><option value="current-account" selected data-i18n="当前账户">Current account</option><option value="administrator" data-i18n="管理员（Windows 批准）">Administrator (Windows approval)</option></select></div>
+      <p id="setupRisk" class="notice" data-i18n="授权后，MCP 可按当前账户权限修改文件、执行命令和控制进程。无需管理员批准。">Authorized MCP can modify files, run commands and control processes as your current account. No administrator approval is requested.</p>
+      <p id="setupGrantBoundary" data-i18n="复制不安装、不连接、不授予权限。浏览器及 ChatGPT / Dot 授权仍需分别完成；手动暂停会保留。">Copying does not install, connect or grant access. Browser and ChatGPT / Dot approvals remain separate; a manual pause stays in effect.</p>
+      <label id="installConsentLabel" class="consent" for="installConsent"><input id="installConsent" type="checkbox" aria-describedby="setupRisk setupGrantBoundary"><span data-i18n="我理解并同意上述访问范围。">I understand and agree to this access.</span></label>
+      <p id="installFeedback" class="feedback" role="status" aria-live="polite">Agree to the statement to enable copying.</p>
+      <div id="windowsSourceInstall" hidden>
+        <div id="windowsBrowserInstall">
+          <div class="actions primary-setup-action"><button id="copyWindowsBrowserPowerShell" type="button" disabled data-i18n="复制 PowerShell 命令">Copy PowerShell command</button></div>
+          <p id="windowsBrowserPowerShellFeedback" class="feedback" role="status" aria-live="polite"></p>
+          <div class="setup-result" aria-labelledby="setup-result-title">
+            <h3 id="setup-result-title" data-i18n="目标设备安装">Target device installation</h3>
+            <p id="installDetection" class="feedback" role="status" aria-live="polite">Not checked yet.</p>
+          </div>
+          <p id="windowsExistingDevice" hidden><a id="openBrowserManagedDevices" href="devices.html?mode=browser-managed" data-i18n="已安装？打开设备页">Already installed? Open Devices</a></p>
+          <details id="windowsCommandDetails">
+            <summary data-i18n="查看命令与源码要求">Command and source requirements</summary>
+            <ol id="windowsSetupSteps">
+              <li><strong data-i18n="准备源码与隧道。">Prepare the source and tunnel.</strong> <span data-i18n="仅限全新安装：先取得已审阅并解压的安装源码包、官方隧道 ID 和本机密钥文件路径；命令须在该源码包目录运行。">Fresh installations only: obtain the reviewed, extracted setup source bundle, official tunnel ID and local key-file path. Run the command from that bundle's directory.</span> <a href="#hosted-prepare-title" data-i18n="准备隧道 ID 和运行密钥文件">Prepare the tunnel ID and runtime-key file</a></li>
+              <li><strong data-i18n="在 PowerShell 中运行。">Run in PowerShell.</strong> <span id="windowsRunGuidance" data-i18n="粘贴命令，按提示输入隧道 ID 和密钥文件路径，再输入 REGISTER 注册桥接；留空取消。无需 JSON，不要粘贴密钥内容；此步骤不启动隧道。">Paste the command, supply the tunnel ID and key-file path when prompted, then type REGISTER to register the bridge; leave it blank to cancel. No JSON is needed. Never paste the key itself. This step does not start the tunnel.</span></li>
+              <li><strong data-i18n="在设备页连接。">Connect in Devices.</strong> <span id="windowsConnectGuidance" data-i18n="安装后允许本机控制桥访问，检查状态，再重新连接。最后分别完成 ChatGPT 和 Dot 的插件授权。">After installation, Allow local bridge access, Check status, then Reconnect. Complete plugin authorization separately in ChatGPT and Dot.</span> <a href="devices.html?mode=browser-managed" data-i18n="打开浏览器管理的 Windows 设备">Open browser-managed Windows device</a> · <a href="#chat-connection-title" data-i18n="连接 ChatGPT 和 Dot">Connect ChatGPT and Dot</a></li>
+            </ol>
+            <pre class="handoff-command install-command" tabindex="0"><code id="windowsBrowserPowerShell"></code></pre>
+            <p data-i18n="从已审阅并解压的源码包目录运行安装命令。不安装 AgentContinue EXE；仅浏览器管理模式注册 Chrome 主机。">Run the install command from the reviewed, extracted source bundle. No Agent Continue EXE is installed; only browser-managed mode registers its Chrome host.</p>
+            <p><a href="https://github.com/1235357/agent-continue/releases" target="_blank" rel="noopener noreferrer" data-i18n="Agent Continue 发布页">Agent Continue releases</a> · <span id="windowsReleaseCheck" data-i18n="仅使用明确提供安装 ZIP 和 SHA-256 校验值的版本。解压前，核对 ZIP 的 SHA-256 是否与该版本公布的校验值完全一致。">Use only a release that provides the setup ZIP and its SHA-256 checksum. Before extracting, compare the ZIP hash with the checksum for that exact release.</span></p>
+            <p id="windowsGuidedInputs" data-i18n="引导命令已包含当前扩展 ID，无需导出 JSON。请核对终端显示的扩展 ID，再输入官方隧道 ID 和运行密钥文件的绝对路径。不要粘贴密钥内容。">The guided command includes this extension's ID; no JSON export is needed. Check the extension ID shown in the terminal, then enter the official tunnel ID and absolute path to the runtime-key file. Do not paste the key itself.</p>
+            <p id="windowsCommandScope" data-i18n="只写入当前用户空间，不需要管理员。">Writes only inside the current user space; no administrator elevation is requested.</p>
+            <p data-i18n="计划按 Node 22.13.0 或更高版本生成；安装器运行前会重新核对。">The plan assumes Node 22.13.0 or newer; the installer re-checks before running.</p>
+            <p id="windowsNodeProvisioning" data-i18n="已有兼容的 Node.js 时直接使用；否则确认后会自动下载并校验官方便携 Node ZIP，只为当前用户安装。不运行 EXE/MSI 安装器，不需要管理员权限，不改系统 PATH。">Setup reuses compatible Node.js. Otherwise, after you confirm, it automatically downloads and verifies the official portable Node ZIP and installs it for the current user only. No EXE/MSI installer, administrator access, or system PATH changes.</p>
+            <p id="windowsPolicyHelp" data-i18n="如果 PowerShell 策略阻止脚本，请先核对来源与 SHA-256。受管理电脑请联系管理员；不要绕过策略。">If PowerShell policy blocks the script, verify its source and SHA-256 first. On a managed PC, contact your administrator; do not bypass the policy.</p>
+          </details>
+          <details id="windowsBrowserCmdDetails">
+            <summary data-i18n="改用 CMD 运行">Use CMD instead</summary>
+            <pre class="handoff-command install-command" tabindex="0"><code id="windowsBrowserCmd"></code></pre>
+            <div class="actions"><button id="copyWindowsBrowserCmd" type="button" disabled data-i18n="复制 CMD 命令">Copy CMD command</button></div>
+            <p id="windowsBrowserCmdFeedback" class="feedback" role="status" aria-live="polite"></p>
+          </details>
+          <details id="windowsBrowserRecovery">
+            <summary data-i18n="浏览器管理安装的只读检查">Read-only browser-managed install check</summary>
+            <p id="windowsBrowserRecoveryHelp" data-i18n="安装结果不明时，不要删除目录或重复安装。此只读命令分别检查配置、本机控制桥文件与注册信息，不会连接或重试；检查通过也不证明浏览器启动或对话授权。">If setup is unclear, do not delete the directory or reinstall. This read-only command checks configuration, bridge files and registration separately. It does not connect or retry; a pass is not proof of browser launch or chat authorization.</p>
+            <pre class="handoff-command install-command" tabindex="0"><code id="windowsBrowserInstallerStatusCommand">.\install.ps1 -DeviceAction browser-installer-status -InstallDir "$env:LOCALAPPDATA\AgentContinue"</code></pre>
+          </details>
+        </div>
+        <details id="windowsStandaloneInstall">
+        <summary data-i18n="备用：独立管理器和高级命令">Fallback: standalone manager and advanced commands</summary>
+        <p data-i18n="如果选择独立管理器，不要同时运行上方浏览器管理命令，也不要用它覆盖现有安装。">Use standalone setup instead of browser-managed setup, not alongside it or over an existing installation.</p>
+        <p data-i18n="核对后输入 CONNECT 开始安装并请求连接；留空取消。">Type CONNECT to install and request a connection, or leave it blank to cancel.</p>
+        <pre class="handoff-command install-command" tabindex="0"><code id="windowsGuidedCommand"></code></pre>
+        <div class="actions"><button id="copyWindowsGuidedCommand" type="button" disabled data-i18n="复制 PowerShell 命令">Copy PowerShell command</button></div>
+        <p id="windowsCopyFeedback" class="feedback" role="status" aria-live="polite"></p>
+        <details>
+          <summary data-i18n="独立管理器的 CMD 命令">Standalone CMD command</summary>
+          <pre class="handoff-command install-command" tabindex="0"><code id="windowsGuidedCmdCommand"></code></pre>
+          <div class="actions"><button id="copyWindowsGuidedCmdCommand" type="button" disabled data-i18n="复制 CMD 命令">Copy CMD command</button></div>
+          <p id="windowsCmdCopyFeedback" class="feedback" role="status" aria-live="polite"></p>
+        </details>
+        <p data-i18n="安装成功后，如果终端提示可选配对：输入 PAIR 打开扩展控制面板，或按 Enter 保留连接而不配对。">If the terminal offers pairing after a successful install: Type PAIR to open extension controls; Enter keeps the connection without pairing.</p>
+        <p data-i18n="输入 PAIR 后，同一终端会显示一条临时配对凭证，不会自动打开浏览器。只将整行 ACPAIR1 凭证粘贴到扩展控制面板，不要分享。">PAIR displays a temporary pairing ticket in the same terminal. No browser opens automatically. Paste the entire ACPAIR1 line into the extension controls only. Do not share it.</p>
+        <div class="actions"><button id="openWindowsLocalControls" type="button" aria-controls="localControlDetails" data-i18n="打开扩展控制面板">Open extension controls</button></div>
+        <h4 data-i18n="高级：手动传入参数">Advanced: pass arguments manually</h4>
+        <p><a href="#handoff-title" data-i18n="审阅并导出 Windows 配置请求">Review and export a Windows setup request</a></p>
+        <p data-i18n="下面的直接 Node 命令和高级 CMD 命令需要已有 Node.js 22.13 或更新版本。没有兼容版本时，使用上方任一引导命令，或下方的高级 PowerShell 命令。">The direct Node and advanced CMD commands below require Node.js 22.13 or newer. Without a compatible version, use either guided command above or the advanced PowerShell command below.</p>
+        <p data-i18n="使用实际导出的 JSON 路径、官方隧道 ID 和本机密钥文件路径。只在本机终端输入路径，不要把密钥内容粘贴到扩展或聊天。隧道运行需要校验过的 OpenAI 官方便携客户端。">Use the exported JSON path, official tunnel ID and local key-file path. Enter paths only in your terminal; never paste the key into the extension or chat. The tunnel uses a verified, portable OpenAI client.</p>
+        <h4 data-i18n="Node.js（在 PowerShell 中运行）">Node.js (run in PowerShell)</h4>
+        <pre class="handoff-command install-command" tabindex="0"><code id="windowsNodeCommand">node .\bin.mjs install-local --consent accept-install --install-dir "$env:LOCALAPPDATA\AgentContinue" --setup-request "$HOME\Downloads\agent-continue-setup-request.json" --tunnel-id "YOUR_TUNNEL_ID" --runtime-key-file "C:\path\to\runtime-key.txt"</code></pre>
+        <h4 data-i18n="PowerShell（支持补装便携 Node）">PowerShell (can provision portable Node)</h4>
+        <pre class="handoff-command install-command" tabindex="0"><code id="windowsPowerShellCommand">.\install.ps1 -InstallLocal -Consent accept-install -SetupRequest "$HOME\Downloads\agent-continue-setup-request.json" -TunnelId "YOUR_TUNNEL_ID" -RuntimeKeyFile "C:\path\to\runtime-key.txt"</code></pre>
+        <h4>CMD</h4>
+        <pre class="handoff-command install-command" tabindex="0"><code id="windowsCmdCommand">install.cmd install-local --consent accept-install --install-dir "%LOCALAPPDATA%\AgentContinue" --setup-request "%USERPROFILE%\Downloads\agent-continue-setup-request.json" --tunnel-id "YOUR_TUNNEL_ID" --runtime-key-file "C:\path\to\runtime-key.txt"</code></pre>
+        <h4 data-i18n="安装中断后的检查">If installation stops</h4>
+        <p id="windowsRecoveryHelp" data-i18n="安装结果不明时，不要删除目录或重复安装。使用原安装路径查询首次连接结果，即使没有显示操作 ID 也可以检查。">If the result is unclear, do not delete the directory or reinstall. Check the first connection attempt using the original install path, even if no operation ID was displayed.</p>
+        <pre class="handoff-command install-command" tabindex="0"><code id="windowsInstallerStatusCommand">.\install.ps1 -DeviceAction installer-status -InstallDir "$env:LOCALAPPDATA\AgentContinue"</code></pre>
+        <pre class="handoff-command install-command" tabindex="0"><code id="windowsVerifyCommand">node .\bin.mjs manager-control --install-dir "$env:LOCALAPPDATA\AgentContinue" --action status</code></pre>
+        <h4 data-i18n="暂停与恢复">Pause and reconnect</h4>
+        <pre class="handoff-command install-command" tabindex="0"><code>node .\bin.mjs manager-control --install-dir "$env:LOCALAPPDATA\AgentContinue" --action disconnect-and-pause --consent accept-control
+node .\bin.mjs manager-control --install-dir "$env:LOCALAPPDATA\AgentContinue" --action reconnect --consent accept-control</code></pre>
+        <details>
+          <summary data-i18n="使用便携 Node 时的管理命令">Manage with portable Node</summary>
+          <pre class="handoff-command install-command" tabindex="0"><code>.\install.ps1 -DeviceAction status
+.\install.ps1 -DeviceAction disconnect-and-pause -Consent accept-control
+.\install.ps1 -DeviceAction start -Consent accept-control
+.\install.ps1 -DeviceAction reconnect -Consent accept-control</code></pre>
+        </details>
+        <p data-i18n="需要报告问题时，请提供扩展版本和错误代码；不要上传密钥文件、完整路径或原始终端输出。卸载选项目前只生成计划，不会清理文件；待检查不等于已完成。">For an issue report, share the extension version and error code, not key files, full paths or raw terminal output. The uninstall option currently generates a plan only; it does not remove files. Pending review does not mean completed.</p>
+        </details>
+      </div>
+      <details id="windowsInstallCheck">
+        <summary data-i18n="仅限既有 Chrome 桥接">Existing Chrome bridge only</summary>
+        <h3 data-i18n="安装后检查">Post-install check</h3>
+        <div class="actions">
+          <button id="detectInstall" type="button" aria-controls="installDetection" aria-describedby="installDetection" data-i18n="我已运行，检测">I ran it — check now</button>
+          <a href="devices.html#access-title" data-i18n="打开本机控制与浏览器授权">Open local controls and browser authorization</a>
+        </div>
+      </details>
+    </section>
+    <details id="setupAdvanced" class="advanced">
+      <summary data-i18n="高级：其他平台、JSON 与诊断">Advanced: other platforms, JSON and diagnostics</summary>
+      <section aria-labelledby="target-title">
+        <h2 id="target-title" data-i18n="安装目标">Installation target</h2>
+        <div class="target-field"><label for="target" data-i18n="选择要设置的设备">Choose the device to set up</label><select id="target"><option value="" data-i18n="请选择目标">Select a target</option><option value="windows" selected>Windows</option><option value="macos">macOS</option><option value="linux" data-i18n="本机 Linux">Local Linux</option><option value="linux-server" data-i18n="远程 Linux 服务器">Remote Linux server</option></select></div>
+        <div class="os-switch" role="group" aria-labelledby="install-title">
+          <button id="installOsWindows" type="button" aria-pressed="true">Windows</button>
+          <button id="installOsMacos" type="button" aria-pressed="false">macOS</button>
+          <button id="installOsLinux" type="button" aria-pressed="false">Linux</button>
+        </div>
+        <dl class="status-grid">
+          <dt data-i18n="此浏览器的扩展标识">Extension ID in this browser</dt><dd><code id="extension-id" data-i18n="未知">Unknown</code></dd>
+          <dt data-i18n="此浏览器的桥接权限">Bridge permission in this browser</dt><dd id="browser-permission" data-i18n="未知">Unknown</dd>
+          <dt data-i18n="目标设备安装">Target device installation</dt><dd id="installation-status" data-i18n="未验证">Not verified</dd>
+          <dt data-i18n="对话工具授权">Chat tool authorization</dt><dd id="chat-status" data-i18n="未验证">Not verified</dd>
+        </dl>
+        <p id="target-boundary" class="feedback" data-i18n="目标选择不会检测、连接或控制任何设备。">Target selection does not detect, connect to, or control a device.</p>
+        <a id="localControls" href="#localControlDetails" hidden data-i18n="Windows 本机控制">Windows local controls</a>
+      </section>
+    <section aria-labelledby="access-scope-title">
+      <h2 id="access-scope-title" data-i18n="了解设备访问范围">Understand device access</h2>
+      <p data-i18n="接入目标是完整的账户级文件、终端与进程操作，而不只是查询状态。工具在目标设备上以所选操作系统账户运行；经明确配置为管理员或 root 后，可修改系统文件与设置。">The intended access includes account-level file, terminal and process operations, not just status checks. Tools run on the target device as the selected operating-system account; when explicitly configured as administrator or root, they can modify system files and settings.</p>
+      <p data-i18n="选择或绑定一个对话并不授予设备权限。安装器的系统批准与 ChatGPT 中的工具授权仍是独立步骤；Dot 与普通对话均适用。">Selecting or binding a conversation does not grant device access. Operating-system approval in the installer and tool authorization in ChatGPT remain separate steps for both Dot and ordinary chats.</p>
+      <p data-i18n="Desktop Commander 上游声明遥测默认开启。集成安装器必须在首次运行前处理其安装脚本与隐私配置，并验证关闭状态；本候选版本尚未部署该集成。不要分享原始工具调用历史，其中可能包含命令参数和结果。">Desktop Commander's upstream policy states that telemetry is enabled by default. The integrated installer must handle installation scripts and privacy configuration before first execution and verify the disabled state; this integration is not deployed by this candidate. Do not share raw tool-call history, which can contain command arguments and results.</p>
+    </section>
+    <section aria-labelledby="handoff-title">
+      <h2 id="handoff-title" data-i18n="配置请求">Setup request</h2>
+      <p data-i18n="请求只包含目标平台、当前扩展标识与固定桥接标识。不包含密钥、命令或文件路径，也不授权安装或提权。">The request contains only the target platform, current extension ID and fixed bridge identity. It contains no keys, commands or file paths and does not authorize installation or elevation.</p>
+      <p data-i18n="Windows 与远程 Linux 的源码接收器可使用各自目标的请求生成只读计划。macOS 与本机 Linux 请求目前仅供交接；接收器拒绝其他目标。">The Windows and remote Linux source consumers can generate read-only plans for their respective targets. macOS and local Linux requests are currently handoff metadata only; each consumer rejects other targets.</p>
+      <a id="windowsHandoffLink" href="#windows-handoff-title" hidden data-i18n="Windows 请求交接说明">Windows request handoff instructions</a>
+      <a id="linuxHandoffLink" href="#linux-handoff-title" hidden data-i18n="远程 Linux 请求交接说明">Remote Linux request handoff instructions</a>
+      <div class="actions"><button id="reviewSetup" type="button" disabled data-i18n="审阅配置请求">Review setup request</button></div>
+      <p id="export-feedback" class="feedback" role="status" aria-live="polite" data-i18n="尚未发起导出。">No export initiated.</p>
+    </section>
+    <section aria-labelledby="sequence-title">
+      <h2 id="sequence-title" data-i18n="接入顺序">Connection sequence</h2>
+      <p data-i18n="macOS 官方客户端应通过 brew install openai/tools/tunnel-client 安装；不要绕过 Gatekeeper。安装官方客户端并不等于安装本扩展的原生桥接。stdio 模式下每个隧道仅允许一个活动运行时；替换前先停止旧实例。">On macOS, install the official client with brew install openai/tools/tunnel-client; do not bypass Gatekeeper. Installing the official client does not install this extension's native bridge. In stdio mode, keep only one active runtime per tunnel; stop the old instance before replacing it.</p>
+      <ol>
+        <li data-local-bridge-step data-i18n="核对扩展标识。在目标设备上审阅并安装本机组件；操作系统批准与浏览器权限是独立步骤。扩展不能安装自己的第一个原生主机。">Verify the extension identity. Review and install the local component on the target device; operating-system approval and browser permission are separate steps. The extension cannot install its own first native host.</li>
+        <li data-local-bridge-step data-i18n="本机桥接安装后，可在设备控制页明确申请可选浏览器权限并手动检查状态。浏览器授权不证明安装成功。">After local bridge installation, explicitly request optional browser permission and check status on Devices. Browser approval does not prove installation succeeded.</li>
+        <li id="remoteServerStep" hidden data-i18n="在 Linux 服务器上直接审阅并部署服务组件；本机浏览器桥接权限不是前置条件。此候选版本不提供自动安装器，不会通过 Windows 转发连接。">Review and deploy the service components directly on the Linux server; local browser bridge permission is not a prerequisite. This candidate provides no automatic installer and does not relay connections through Windows.</li>
+        <li data-i18n="在目标设备上配置官方隧道和 MCP。运行密钥留在设备端受保护位置；不要粘贴到扩展、请求文件或聊天里。同一个 stdio 隧道只运行一个实例。">Configure the official tunnel and MCP on the target device. Keep the runtime key in protected device storage, never in the extension, request file or chat. Run only one instance for a stdio tunnel.</li>
+        <li><a href="#chat-connection-title" data-i18n="连接 ChatGPT 和 Dot">Connect ChatGPT and Dot</a></li>
+      </ol>
+    </section>
+    <section aria-labelledby="chat-connection-title">
+      <h2 id="chat-connection-title" data-i18n="连接 ChatGPT 和 Dot">Connect ChatGPT and Dot</h2>
+      <ol>
+        <li>
+          <strong id="hosted-prepare-title" data-i18n="准备专用隧道。">Prepare a dedicated tunnel.</strong>
+          <span data-i18n="在 OpenAI Platform 中创建隧道，并关联将使用该插件的 ChatGPT 工作区。把受限运行密钥保存在目标设备上；终端只接收本机密钥文件的路径。不要把运行密钥粘贴到扩展、对话或配置请求。">Create a tunnel in OpenAI Platform and associate it with the ChatGPT workspace that will use the plugin. Keep the restricted runtime key on the target device and enter only the key-file path in the terminal. Do not paste the runtime key into the extension, a chat, or a setup request.</span>
+        </li>
+        <li>
+          <strong data-i18n="确认设备已连接。">Confirm the device is connected.</strong>
+          <span data-i18n="在目标设备上启动官方隧道并检查状态。使用 Windows 浏览器管理时，在设备页连接；独立管理模式不需要 Chrome 桥接。设备就绪不代表对话已授权。">Connect the official tunnel on the target device and check its status. For browser-managed Windows, connect from Devices; standalone mode does not need the Chrome bridge. A ready device does not mean any chat is authorized.</span>
+        </li>
+        <li>
+          <strong data-i18n="在正确的工作区创建私有插件。">Create a private plugin in the matching workspace.</strong>
+          <a id="hostedPluginLink" href="https://chatgpt.com/plugins" target="_blank" rel="noopener noreferrer" data-i18n="打开 ChatGPT 插件">Open ChatGPT Plugins</a>.
+          <span data-i18n="选择添加自定义 MCP 服务器，将连接类型设为 Tunnel，选中刚才的隧道，再审阅认证和权限设置。不要使用已有生产插件替代测试。">Add a custom MCP server, select Tunnel as the connection type, and choose your tunnel. Review the authentication and access settings. Do not substitute an existing production plugin for testing.</span>
+        </li>
+        <li>
+          <strong data-i18n="分别验收两个入口。">Verify both chat surfaces.</strong>
+          <span data-i18n="在普通 ChatGPT 对话与 Dot 中分别选用该插件。只批准一次读取目标设备上的无敏感测试文本文件，并核对实际 read_file 工具结果中的插件、文件路径和返回内容。不要在请求中提供预期内容；模型回复或另一个入口通过都不能代替本入口的验证。">Select the plugin in an ordinary ChatGPT chat and separately in Dot. Approve only one read of a disposable, non-sensitive text file on the target device. Check the actual read_file tool result for the plugin, file path, and returned contents. Do not include the expected contents in the request. A model reply or a pass on the other surface is not verification.</span>
+        </li>
+      </ol>
+      <details>
+        <summary data-i18n="找不到隧道或工具？">Tunnel or tools missing?</summary>
+        <p data-i18n="隧道未列出：核对目标 ChatGPT 工作区是否已关联，以及创建者是否具有 Tunnels Read + Use 权限。">Tunnel not listed: check the target ChatGPT workspace association and the plugin creator's Tunnels Read + Use permissions.</p>
+        <p data-i18n="插件已创建但没有工具：先确认设备端隧道仍在线，再核对当前对话是否能选用该插件。若 Dot 没有显示插件，Dot 仍未验证；无需为此重装设备端。">Plugin created but tools missing: confirm the device tunnel is still online and check whether this chat offers the plugin. If Dot does not offer the plugin, Dot remains unverified; do not reinstall the device for this reason.</p>
+        <p><a href="https://developers.openai.com/api/docs/guides/secure-mcp-tunnels" target="_blank" rel="noopener noreferrer" data-i18n="OpenAI 官方隧道设置指南">Official OpenAI tunnel setup guide</a></p>
+      </details>
+    </section>
+    <section id="windowsHandoff" aria-labelledby="windows-handoff-title" hidden>
+      <h2 id="windows-handoff-title" tabindex="-1" data-i18n="Windows 请求交接说明">Windows request handoff instructions</h2>
+      <p data-i18n="高级命令需传入已导出 JSON 的绝对路径；引导命令不需要该文件。不要执行 JSON 文件。独立管理模式不需要 Chrome 桥接权限。">Pass the exported JSON's absolute path to an advanced command. Guided setup does not need that file. Do not execute the JSON file. Standalone mode does not need Chrome bridge permission.</p>
+      <div id="firstInstallGuidance" hidden>
+        <p data-i18n="以下为只读状态：只读取本机检查结果，不写入注册表，也不注册或启动本机主机。">Read-only status: only local check results are read; nothing is written to the registry and no native host is registered or started.</p>
+        <pre class="handoff-command" tabindex="0"><code id="firstInstallPreview"></code></pre>
+      </div>
+    </section>
+    <section id="linuxHandoff" aria-labelledby="linux-handoff-title" hidden>
+      <h2 id="linux-handoff-title" tabindex="-1" data-i18n="远程 Linux 请求交接说明">Remote Linux request handoff instructions</h2>
+      <p data-i18n="这是只读源码接收器，不是安装器。请先在服务器上审阅可信引导源码与离线源码包；清单摘要必须来自独立核对，不能用请求文件替代。">This read-only source consumer is not an installer. First review the trusted bootstrap source and offline source package on the server; independently verify the manifest digest rather than treating the request as trust evidence.</p>
+      <pre class="handoff-command" tabindex="0"><code>python3 /reviewed-bootstrap/setup_plan.py \
+  --request-file /absolute/path/agent-continue-setup-request.json \
+  --package-root /absolute/path/reviewed-source \
+  --manifest-sha256 &lt;independently-reviewed-64-character-digest&gt;</code></pre>
+      <p data-i18n="文件路径与清单摘要仅在服务器端输入，不会加入扩展请求。接收器不联网、不执行包内代码，也不安装、启动或恢复隧道。">File paths and the manifest digest are supplied only on the server, not added to the extension request. The consumer does not access the network, execute package code, or install, start or resume a tunnel.</p>
+      <p><code>readyToApply=false</code> <span data-i18n="始终保留。源码校验成功不证明设备已安装、隧道已就绪或对话已授权；后续步骤需要独立验收。">is always retained. Successful source verification does not prove device installation, tunnel readiness or chat authorization; subsequent steps require separate acceptance.</span></p>
+      <p data-i18n="在服务器上运行已核验的安装源码包，使用 Linux 专用隧道和仅保存在服务器上的密钥文件。配置完成不会启动隧道、安装服务或授权对话。">Run the verified setup source bundle on the server, with its own tunnel and a key file stored only on that server. Setup does not start the tunnel, install a service or authorize chats.</p>
+      <pre class="handoff-command" tabindex="0"><code id="linuxServerSetupCommand">node /absolute/setup/bin.mjs setup-server \
+  --install-dir "$HOME/.agent-continue-server" \
+  --setup-request /absolute/path/agent-continue-setup-request.json \
+  --tunnel-id tunnel_REPLACE_WITH_SERVER_TUNNEL_ID \
+  --runtime-key-file /absolute/private/server-runtime-key.txt \
+  --consent full-account</code></pre>
+    </section>
+    <section id="remoteManagement" aria-labelledby="remote-management-title" hidden>
+      <h2 id="remote-management-title" data-i18n="可选远程管理">Optional remote management</h2>
+      <p data-i18n="服务器 MCP 工具数据直接连接官方 OpenAI，无需 Windows 中转或本机浏览器桥接；服务器工具安装不以本机 native 权限为前置条件。">Server MCP tool data goes directly to official OpenAI, without a Windows relay or local browser bridge; local native permission is not a prerequisite for server tool installation.</p>
+      <p data-i18n="浏览器驱动的暂停与重连是独立的可选生命周期管理路径：需要已安装的本机 native manager、允许 nativeMessaging，并准备独立核验的 SSH 主机密钥与用于按需 SSH 认证的 OS agent。此页面不会安装、申请权限或调用 native。">Browser-driven pause and reconnect are a separate optional lifecycle-management path: they require an installed local native manager, allowed nativeMessaging, independently verified SSH host keys and an OS agent ready for on-demand SSH authentication. This page does not install, request permission or call native code.</p>
+      <p data-i18n="可选本机管理器请另行导出与本机系统匹配的本机平台请求，而不是 linux-server 请求；服务器请求仍在服务器使用。setup-manager 不需要本机 OpenAI 运行密钥，也不下载隧道客户端；仅准备私有状态与扩展绑定，本机原生注册仍需单独完成。">For the optional local manager, separately export a matching local-platform request, not the linux-server request; keep the server request for the server. setup-manager needs no local OpenAI runtime key and does not download a tunnel client; it prepares only private state and the extension binding, and native registration remains separate.</p>
+      <pre class="handoff-command" tabindex="0"><code>node /reviewed-bootstrap/bin.mjs setup-manager \
+  --install-dir &lt;absolute-new-local-manager-install-dir&gt; \
+  --consent full-account \
+  --setup-request &lt;absolute-local-platform-request.json&gt;</code></pre>
+      <p data-i18n="仅在本机可信入口审阅并运行源码引导命令。以下路径、主机、端口、账户和摘要不会加入浏览器请求；不要在此页面或聊天中输入主机密钥、私钥或运行密钥。摘要必须来自独立核验，不能把命令本身当作信任证明。">Review and run the source bootstrap command only at a trusted local entry. The paths, host, port, account and digest below are not added to the browser request; do not enter host keys, private keys or runtime keys on this page or in chat. The digest must come from independent verification, not from trusting the command itself.</p>
+      <pre class="handoff-command" tabindex="0"><code>node /reviewed-bootstrap/bin.mjs enroll-ssh \
+  --install-dir &lt;absolute-local-manager-install-dir&gt; \
+  --consent full-account \
+  --ssh-executable &lt;absolute-local-ssh-executable&gt; \
+  --host &lt;verified-server-host&gt; \
+  --port &lt;canonical-decimal-port&gt; \
+  --user &lt;server-os-account&gt; \
+  --remote-node &lt;absolute-posix-node-path&gt; \
+  --remote-install-dir &lt;absolute-posix-server-install-dir&gt; \
+  --known-hosts &lt;absolute-local-known-hosts-file&gt; \
+  --known-hosts-sha256 &lt;independently-reviewed-64-character-digest&gt;</code></pre>
+      <p data-i18n="这是源码指引，没有已发布安装器或可运行的公共 npx 命令，不是现场安装。enroll-ssh 不建立 SSH 连接或启动服务。返回的 deviceUrl 仅选择设备，不表示已连接、已认证或已授权；还需独立验证 SSH 认证、设备可达性、本机注册和对话工具授权。">This is source guidance with no released installer or runnable public npx command, not an on-site installation. enroll-ssh does not establish SSH connections or start services. The returned deviceUrl conveys selection only: the device is not connected, authenticated or authorized by this link; SSH authentication, device reachability, native registration and chat tool authorization need separate verification.</p>
+      <a href="devices.html#access-title" data-i18n="手动前往设备管理与浏览器授权">Manually open device management and browser authorization</a>
+    </section>
+    </details>
+    <section id="managementSection" aria-labelledby="management-title" class="setup-management">
+      <details id="localControlDetails">
+        <summary data-i18n="临时浏览器控制页">Temporary browser controls</summary>
+        <h2 id="management-title" data-i18n="管理面板">Management panel</h2>
+        <p data-i18n="本机运行时就绪不代表 ChatGPT 或 Dot 已授权。">Local runtime readiness does not verify ChatGPT or Dot authorization.</p>
+        <p data-i18n="控制会话将在 15 分钟后结束，也可以在终端按 Enter 或 Ctrl+C 结束。关闭面板或结束会话不会改变隧道连接；已提交的操作仍可能完成。">The control session ends after 15 minutes or when you press Enter or Ctrl+C in the terminal. Closing the panel or ending the session does not change the tunnel connection; an action already submitted may still finish.</p>
+        <h3 data-i18n="重新打开临时控制会话">Reopen a temporary control session</h3>
+        <p data-i18n="如果跳过了配对、未看到配对提示，或会话已结束，请在设备管理器运行时在交互终端执行此命令。">If you skipped pairing, did not see the prompt, or the session ended, run this command in an interactive terminal while the device manager is running.</p>
+        <pre class="handoff-command install-command" tabindex="0"><code id="windowsBrowserControlCommand">.\install.ps1 -DeviceAction browser -Consent accept-control</code></pre>
+        <form id="localControlForm" class="target-field" autocomplete="off">
+          <label for="localControlTicket" data-i18n="终端显示的配对凭证">Pairing ticket from terminal</label>
+          <input id="localControlTicket" class="local-control-address" type="password" autocomplete="off" spellcheck="false" required aria-describedby="localControlStatus">
+          <div class="actions">
+            <button type="submit" data-i18n="打开控制面板">Open controls</button>
+            <button id="closeLocalControl" type="button" data-i18n="关闭控制面板">Close panel</button>
+          </div>
+        </form>
+        <p id="localControlStatus" role="status" aria-live="polite"></p>
+        <div id="localControlButtons" class="actions" hidden>
+          <button id="localControlCheck" type="button" data-i18n="查看本机状态">Check local status</button>
+          <button id="localControlPause" type="button" data-i18n="断开并暂停">Disconnect and pause</button>
+          <button id="localControlReconnect" type="button" data-i18n="重新连接">Reconnect</button>
+        </div>
+        <p id="localControlReceipt" role="status"></p>
+        <p id="localControlRecovery" role="status"></p>
+        <p data-i18n="无法在面板恢复时，可在原设备上用操作编号查询原回执。查询不会重新执行操作。紧急断开可使用终端的暂停命令。">If the panel cannot recover the receipt, query the operation ID on the original device. This does not replay the action. The terminal pause command remains available for urgent disconnection.</p>
+        <pre class="handoff-command install-command" tabindex="0"><code>.\install.ps1 -DeviceAction status -OperationId '&lt;operation ID&gt;'
+.\install.ps1 -DeviceAction disconnect-and-pause -Consent accept-control</code></pre>
+        <iframe id="localControlFrame" title="Agent Continue local transport" sandbox="allow-scripts allow-same-origin" referrerpolicy="no-referrer" hidden></iframe>
+      <dl class="status-grid">
+        <dt data-i18n="本机注册状态">Local registration</dt><dd id="managementRegistered">Unknown</dd>
+        <dt data-i18n="主机可启动">Host startable</dt><dd id="managementHost">Unknown</dd>
+        <dt data-i18n="连接状态">Connection</dt><dd id="managementConnection">Unknown</dd>
+      </dl>
+      </details>
+    </section>
+    <details id="setupResources" class="advanced">
+      <summary data-i18n="官方入口">Official resources</summary>
+    <section aria-labelledby="references-title">
+      <h2 id="references-title" data-i18n="官方入口">Official resources</h2>
+      <ul class="resource-links">
+        <li><a href="https://github.com/openai/tunnel-client" target="_blank" rel="noopener noreferrer" data-i18n="OpenAI 隧道文档">OpenAI tunnel documentation</a></li>
+        <li><a href="https://github.com/wonderwhy-er/DesktopCommanderMCP" target="_blank" rel="noopener noreferrer" data-i18n="Desktop Commander 开源 MCP">Desktop Commander open-source MCP</a></li>
+        <li><a href="https://github.com/wonderwhy-er/DesktopCommanderMCP/blob/main/PRIVACY.md" target="_blank" rel="noopener noreferrer" data-i18n="Desktop Commander 上游隐私说明">Desktop Commander upstream privacy policy</a></li>
+        <li><a href="https://platform.openai.com/settings/organization/tunnels" target="_blank" rel="noopener noreferrer" data-i18n="OpenAI 隧道管理">OpenAI tunnel management</a></li>
+        <li><a href="https://platform.openai.com/settings/organization/api-keys" target="_blank" rel="noopener noreferrer" data-i18n="OpenAI 运行密钥管理">OpenAI runtime key management</a></li>
+        <li><a href="https://github.com/openai/tunnel-client/blob/master/docs/connectors.md" target="_blank" rel="noopener noreferrer" data-i18n="ChatGPT 私有插件连接说明">ChatGPT private plugin connection guide</a></li>
+        <li><a href="https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging" target="_blank" rel="noopener noreferrer" data-i18n="Chrome 原生消息机制">Chrome native messaging</a></li>
+      </ul>
+    </section>
+    </details>
+  </main>
+  <dialog id="setupReview" aria-labelledby="review-title" aria-describedby="review-boundary">
+    <h2 id="review-title" data-i18n="审阅配置请求">Review setup request</h2>
+    <pre id="request-preview" tabindex="0"></pre>
+    <p id="review-boundary" data-i18n="这是未签名的配置数据，不是安装器、批准凭证或完成回执。">This is unsigned configuration data, not an installer, approval credential or completion receipt.</p>
+    <label class="consent" for="exportConsent"><input id="exportConsent" type="checkbox"><span data-i18n="我已核对目标与扩展标识，同意发起本机 JSON 导出。">I checked the target and extension identity and agree to initiate the local JSON export.</span></label>
+    <div class="actions"><button id="cancelSetup" type="button" autofocus data-i18n="取消">Cancel</button><button id="downloadSetup" type="button" disabled data-i18n="导出请求">Export request</button></div>
+  </dialog>
+  <script type="module" src="setup.js"></script>
+</body>
+</html>

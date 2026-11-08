@@ -91,7 +91,14 @@ or of macOS Gatekeeper approval.
 The private [device bootstrap](bootstrap/README.md) now composes this preparation
 with provider/client acquisition and the real browser request producer in one
 `setup` command. It creates a configured profile but does not activate it,
-register a browser host or manufacture an OS/platform authorization.
+register a browser host or manufacture an OS/platform authorization. The current
+source also creates a fixed private adjacent native binding for local targets;
+a real disposable configured-package test reaches an explicitly supplied fixture
+owner through that package's bridge without manually constructing the binding.
+That is not a Chrome native-host registration or a live official tunnel grant.
+Remote Linux does not receive a local Chrome binding. See
+[the current control integration evidence](../docs/DEVICE-CONTROL.md#active-sourcetest-slice--owner-goal-continue)
+for the durable receipt, authenticated local IPC and remaining installation gates.
 
 ### Developer CLI (Not An Installer)
 
@@ -135,6 +142,50 @@ One active stdio client per tunnel ID remains required. The official client's
 `runtimes connect/status/stop` helpers are a possible lifecycle backend, but
 have not yet been adopted or verified by this candidate. Initial OS/native
 installation, activation, pause/resume and login policy remain unfinished.
+
+## Foreground Server Management Entry (Source Candidate)
+
+A headless target does not need a fabricated local Chrome binding. The current
+source includes `desktop-commander/device-server.mjs`, sharing the native owner's
+single channel/controller/journal implementation. Run it only against an owned,
+prepared private state root as the same ordinary OS account. For example, from
+`native/desktop-commander/`:
+
+```sh
+node device-server.mjs serve --state-dir "<absolute-state-directory>"
+```
+
+This remains in the foreground and reports `{"version":1,"status":"listening"}`.
+It starts the management owner only, not the tunnel. A separate local terminal
+can send the fixed lifecycle actions:
+
+```sh
+node device-server.mjs request --state-dir "<absolute-state-directory>" --id "check-1" --action status
+node device-server.mjs request --state-dir "<absolute-state-directory>" --id "connect-1" --action reconnect
+node device-server.mjs request --state-dir "<absolute-state-directory>" --id "pause-1" --action disconnect-and-pause
+```
+
+Reconnect requires the already verified official profile/client/key reference;
+these examples do not provision credentials or authorize execution now. Use a
+fresh ID for a new intent. Repeating the same mutation ID observes its retained
+result without another effect; status with that ID queries its exact receipt.
+No request starts an absent owner, and stale ownership is not silently reclaimed.
+There is no command, endpoint, credential or MCP tool payload in this CLI.
+
+This is the server-local building block for the extension's source-candidate
+SSH management path, not a CLI-only replacement for the browser control center
+or an MCP relay through Windows. The private bootstrap now includes a trusted
+local `enroll-ssh` producer for the existing adjacent target registry and a fixed
+opaque Devices link. Its distinct `setup-manager` prepares the local private
+state/exact extension binding without a local runtime key, client or tunnel
+profile, using a separately exported local-platform request, never the server
+request. Neither command performs protected first installation, SSH authentication,
+owner startup or Chrome registration. See its README for local-manager and
+independently verified host-key prerequisites. Source tests run actual Node
+request/owner processes and an owned finite readiness child on Windows. Windows signal-event
+cleanup is a fixture; real Unix signals, socket permissions, Linux/macOS runtime,
+SSH deployment and interactive-login recovery remain unverified. No service,
+login hook, native registration or production tunnel is installed by this entry.
 
 ## Next Increment: Owned Runtime Control
 

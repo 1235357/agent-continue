@@ -540,6 +540,19 @@ $('keepAwake').addEventListener('change', async () => {
   onConfigurationInput();
 });
 $('theme').addEventListener('change', () => { const theme = $('theme').value; applyTheme(theme); chrome.storage.local.set({ uiTheme: theme }).catch(() => tell(t('主题保存失败。'), true)); });
+// Embedded browsers may reject new extension tabs but permit same-page navigation.
+async function openExtensionPage(url) {
+  try { await chrome.tabs.create({ url }); }
+  catch { location.assign(url); }
+}
+for (const [id, resource] of [['setupWindows', 'setup.html'], ['manageDevices', 'devices.html?mode=browser-managed']]) {
+  $(id).addEventListener('click', async () => {
+    try {
+      await persistDraftNow();
+      await openExtensionPage(chrome.runtime.getURL(resource));
+    } catch { tell(t('无法打开设备设置或控制页面。'), true); }
+  });
+}
 $('expand').addEventListener('click', async () => {
   try {
     await persistDraftNow();
@@ -547,7 +560,7 @@ $('expand').addEventListener('click', async () => {
     if (!tabId && !latestJob && chrome.tabs?.query) tabId = (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id;
     const url = new URL(chrome.runtime.getURL('popup.html')); url.searchParams.set('view', 'full');
     if (Number.isInteger(tabId)) url.searchParams.set('targetTabId', String(tabId));
-    await chrome.tabs.create({ url: url.href });
+    await openExtensionPage(url.href);
   } catch { tell(t('无法打开完整控制台。'), true); }
 });
 $('saveTemplate').addEventListener('click', async () => {

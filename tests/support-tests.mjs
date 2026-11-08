@@ -318,5 +318,7 @@ test('store Description includes the approved plain-text support contacts', () =
     'Bug reports and suggestions: https://github.com/1235357/agent-continue/issues/new/choose',
     "Author's LinkedIn: https://www.linkedin.com/in/tony-zhentong-ye/",
   ]) assert.ok(description.includes(contact), `Missing plain-text description contact: ${contact}`);
-  assert.match(text, /submitted v2\.1\.0 package and its locked listing are unchanged/);
+  assert.match(text, /3\.0\.0, UNRELEASED \/ candidate/);
+  assert.match(text, /Historical v2\.2\.1 is a separate scheduler-only release/);
+  assert.match(text, /does not change a saved Store listing, submit a package, publish a release/);
 });

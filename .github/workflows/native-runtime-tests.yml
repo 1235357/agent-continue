@@ -4,10 +4,146 @@ on:
   push:
     paths:
       - 'native/**'
+      - 'cli.mjs'
+      - 'package-lock.json'
+      - 'package.json'
+      - 'scripts/prepare-npm-payload.mjs'
+      - 'tests/npm-package-tests.mjs'
+      - 'tests/windows-installer-recovery-tests.mjs'
+      - 'tests/npm-native-release-snapshot-tests.mjs'
+      - 'scripts/build-setup-release.py'
+      - 'scripts/build-windows-preview-kit.py'
+      - 'scripts/package.py'
+      - 'docs/WINDOWS-PREVIEW-*.md'
+      - 'manifest.json'
+      - 'setup*'
+      - 'devices*'
+      - 'device-control.js'
+      - 'browser-wake.js'
+      - 'admin-browser.js'
+      - 'background.js'
+      - 'tests/admin-browser-tests.mjs'
+      - 'tests/windows-admin-demand-tests.mjs'
+      - 'tests/windows-admin-intent-tests.mjs'
+      - 'tests/windows-admin-control-*.mjs'
+      - 'tests/windows-admin-control-*.ps1'
+      - 'tests/windows-admin-enrollment-tests.ps1'
+      - 'tests/windows-failed-owner-recovery-tests.ps1'
+      - 'tests/windows-admin-browser-chromium-tests.mjs'
+      - 'tests/windows-admin-session-dispatch-tests.mjs'
+      - 'tests/windows-admin-host-cleanup-tests.mjs'
+      - 'tests/windows-admin-session-chromium-tests.mjs'
+      - 'tests/windows-browser-*-tests.ps1'
+      - 'tests/windows-high-browser-job-tests.mjs'
+      - 'tests/windows-high-browser-job-fixture.ps1'
+      - 'tests/browser-wake-tests.mjs'
+      - 'tests/test_windows_preview_kit.py'
+      - 'tests/guided-extension-control.mjs'
+      - 'tests/windows-browser-native-startup-tests.mjs'
+      - 'scripts/Invoke-WindowsHostedAcceptance.ps1'
+      - 'tests/hosted-windows-launcher-tests.mjs'
+      - 'scripts/prepare-hosted-administrator-probe.mjs'
+      - 'scripts/Read-HostedAdministratorProbe.ps1'
+      - 'tests/hosted-administrator-token-probe-tests.mjs'
+      - 'scripts/Read-WindowsInteractiveSessionEvidence.ps1'
+      - 'scripts/Stage-WindowsAdministratorBundle.ps1'
+      - 'scripts/Invoke-WindowsAdministratorAcceptance.ps1'
+      - 'tests/windows-administrator-acceptance-launcher-tests.mjs'
+      - 'scripts/build-windows-administrator-bundle.mjs'
+      - 'scripts/Write-WindowsAdministratorBundle.ps1'
+      - 'scripts/Test-WindowsAdministratorBundleSmoke.ps1'
+      - 'tests/windows-administrator-bundle-tests.ps1'
+      - 'tests/windows-admin-guided-install-tests.ps1'
+      - 'tests/windows-administrator-installer-tests.ps1'
+      - 'tests/windows-owner-job-tests.ps1'
+      - 'tests/windows-owner-job-fixture.cjs'
+      - 'tests/windows-owner-status-fixture.mjs'
+      - 'tests/windows-owner-recovery-fixture.mjs'
+      - 'tests/windows-interactive-session-evidence-tests.mjs'
+      - 'tests/windows-logon-anchor-fixtures.ps1'
+      - 'tests/setup-release-tests.py'
+      - 'tests/portable-node-acceptance.ps1'
+      - 'tests/installer-failure-tests.ps1'
+      - 'tests/windows-installer-integrity-tests.ps1'
+      - 'tests/windows-signing-tests.mjs'
+      - 'tests/windows-json-reader-tests.ps1'
+      - 'tests/windows-release-cleanup-tests.ps1'
+      - 'tests/native-release-*.mjs'
+      - 'tests/native-release-fixture.ps1'
+      - 'scripts/Sign-WindowsRelease.ps1'
+      - 'scripts/Build-ReleaseNativeLauncher.ps1'
       - '.github/workflows/native-runtime-tests.yml'
   pull_request:
     paths:
       - 'native/**'
+      - 'cli.mjs'
+      - 'package-lock.json'
+      - 'package.json'
+      - 'scripts/prepare-npm-payload.mjs'
+      - 'tests/npm-package-tests.mjs'
+      - 'tests/windows-installer-recovery-tests.mjs'
+      - 'tests/npm-native-release-snapshot-tests.mjs'
+      - 'scripts/build-setup-release.py'
+      - 'scripts/build-windows-preview-kit.py'
+      - 'scripts/package.py'
+      - 'docs/WINDOWS-PREVIEW-*.md'
+      - 'manifest.json'
+      - 'setup*'
+      - 'devices*'
+      - 'device-control.js'
+      - 'browser-wake.js'
+      - 'admin-browser.js'
+      - 'background.js'
+      - 'tests/admin-browser-tests.mjs'
+      - 'tests/windows-admin-demand-tests.mjs'
+      - 'tests/windows-admin-intent-tests.mjs'
+      - 'tests/windows-admin-control-*.mjs'
+      - 'tests/windows-admin-control-*.ps1'
+      - 'tests/windows-admin-enrollment-tests.ps1'
+      - 'tests/windows-failed-owner-recovery-tests.ps1'
+      - 'tests/windows-admin-browser-chromium-tests.mjs'
+      - 'tests/windows-admin-session-dispatch-tests.mjs'
+      - 'tests/windows-admin-host-cleanup-tests.mjs'
+      - 'tests/windows-admin-session-chromium-tests.mjs'
+      - 'tests/windows-browser-*-tests.ps1'
+      - 'tests/windows-high-browser-job-tests.mjs'
+      - 'tests/windows-high-browser-job-fixture.ps1'
+      - 'tests/browser-wake-tests.mjs'
+      - 'tests/test_windows_preview_kit.py'
+      - 'tests/guided-extension-control.mjs'
+      - 'tests/windows-browser-native-startup-tests.mjs'
+      - 'scripts/Invoke-WindowsHostedAcceptance.ps1'
+      - 'tests/hosted-windows-launcher-tests.mjs'
+      - 'scripts/prepare-hosted-administrator-probe.mjs'
+      - 'scripts/Read-HostedAdministratorProbe.ps1'
+      - 'tests/hosted-administrator-token-probe-tests.mjs'
+      - 'scripts/Read-WindowsInteractiveSessionEvidence.ps1'
+      - 'scripts/Stage-WindowsAdministratorBundle.ps1'
+      - 'scripts/Invoke-WindowsAdministratorAcceptance.ps1'
+      - 'tests/windows-administrator-acceptance-launcher-tests.mjs'
+      - 'scripts/build-windows-administrator-bundle.mjs'
+      - 'scripts/Write-WindowsAdministratorBundle.ps1'
+      - 'scripts/Test-WindowsAdministratorBundleSmoke.ps1'
+      - 'tests/windows-administrator-bundle-tests.ps1'
+      - 'tests/windows-admin-guided-install-tests.ps1'
+      - 'tests/windows-administrator-installer-tests.ps1'
+      - 'tests/windows-owner-job-tests.ps1'
+      - 'tests/windows-owner-job-fixture.cjs'
+      - 'tests/windows-owner-status-fixture.mjs'
+      - 'tests/windows-owner-recovery-fixture.mjs'
+      - 'tests/windows-interactive-session-evidence-tests.mjs'
+      - 'tests/windows-logon-anchor-fixtures.ps1'
+      - 'tests/setup-release-tests.py'
+      - 'tests/portable-node-acceptance.ps1'
+      - 'tests/installer-failure-tests.ps1'
+      - 'tests/windows-installer-integrity-tests.ps1'
+      - 'tests/windows-signing-tests.mjs'
+      - 'tests/windows-json-reader-tests.ps1'
+      - 'tests/windows-release-cleanup-tests.ps1'
+      - 'tests/native-release-*.mjs'
+      - 'tests/native-release-fixture.ps1'
+      - 'scripts/Sign-WindowsRelease.ps1'
+      - 'scripts/Build-ReleaseNativeLauncher.ps1'
       - '.github/workflows/native-runtime-tests.yml'
   workflow_dispatch:
 
@@ -34,6 +170,86 @@ jobs:
           package-manager-cache: false
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm test
+      - name: Verify installer failure propagation without unpublished release artifacts
+        working-directory: .
+        # The one public-tarball case requires the original verified Windows
+        # closure and receipt. release.yml runs it without this exclusion.
+        run: node --test --test-skip-pattern "^actual root npm tarball contains verified payload and a runnable CLI$" tests/npm-package-tests.mjs
+      - name: Verify Windows read-only installer recovery and bounded diagnostics
+        if: runner.os == 'Windows'
+        working-directory: .
+        timeout-minutes: 3
+        run: node --test tests/windows-installer-recovery-tests.mjs
+      - name: Verify adjacent Windows source and administrator handoff without installation
+        if: runner.os == 'Windows'
+        working-directory: .
+        run: node --test tests/windows-offline-payload-tests.mjs
+      - name: Verify Windows protected bundle plan and disposable native ACLs
+        if: runner.os == 'Windows'
+        working-directory: .
+        run: powershell.exe -NoLogo -NoProfile -NonInteractive -File ./tests/windows-administrator-bundle-tests.ps1
+      - name: Check Windows administrator bundle builder syntax
+        if: runner.os == 'Windows'
+        working-directory: .
+        run: node --check scripts/build-windows-administrator-bundle.mjs
+      - name: Verify command-only administrator installation and durable failures
+        if: runner.os == 'Windows'
+        working-directory: .
+        timeout-minutes: 4
+        run: npm run test:windows-guided-install
+      - name: Reject unverified mutating installers in PowerShell 5.1 and 7
+        if: runner.os == 'Windows'
+        working-directory: .
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          powershell.exe -NoLogo -NoProfile -NonInteractive -File ./tests/windows-installer-integrity-tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'PowerShell 5.1 installer integrity failed' }
+          & (Join-Path $PSHOME 'pwsh.exe') -NoLogo -NoProfile -NonInteractive -File ./tests/windows-installer-integrity-tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 installer integrity failed' }
+      - name: Verify read-only control projections, durable IDs and native-to-PowerShell contract
+        if: runner.os == 'Windows'
+        working-directory: .
+        timeout-minutes: 4
+        run: npm run test:admin-control-ledger
+      - name: Verify packaged Codex browser identity policy without starting controls
+        if: runner.os == 'Windows'
+        working-directory: .
+        run: powershell.exe -NoLogo -NoProfile -NonInteractive -File ./tests/windows-browser-package-identity-tests.ps1
+      - name: Verify real Windows Job Object descendant shutdown
+        if: runner.os == 'Windows'
+        working-directory: .
+        run: powershell.exe -NoLogo -NoProfile -NonInteractive -File ./tests/windows-owner-job-tests.ps1
+      - name: Check Windows signing plan and refusal paths without a signing key
+        if: runner.os == 'Windows'
+        working-directory: .
+        run: node --test tests/windows-signing-tests.mjs
+      - name: Check Windows session evidence without installing a login hook
+        if: runner.os == 'Windows'
+        working-directory: .
+        shell: pwsh
+        run: |
+          $env:AGENT_CONTINUE_TEST_PWSH = (Join-Path $PSHOME 'pwsh.exe')
+          node --test tests/windows-interactive-session-evidence-tests.mjs
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Verify native release packaging and closed Windows preflight failures
+        working-directory: .
+        run: npm run test:native-release
+      - name: Verify standalone installer ZIP after extraction
+        working-directory: .
+        run: python tests/setup-release-tests.py
+      - name: Windows PowerShell 5.1 portable Node first install and integrity reuse
+        if: runner.os == 'Windows'
+        working-directory: .
+        shell: powershell
+        timeout-minutes: 5
+        run: |
+          $fixture = Join-Path ([IO.Path]::GetTempPath()) ('ac-node-provision-' + [Guid]::NewGuid().ToString('N'))
+          & ./tests/portable-node-acceptance.ps1 -Fixture $fixture -AllowDownload
+          if (-not $?) { throw 'Portable Node acceptance failed' }
+      - name: Check registry failure classification without touching registry
+        working-directory: .
+        run: node --test native/bootstrap/registry-win.test.mjs native/bootstrap/browser-wake-registration.test.mjs
       - name: Zero-dependency bootstrap and installed-tarball acquisition
         shell: pwsh
         working-directory: native/bootstrap
@@ -42,16 +258,131 @@ jobs:
           $env:AGENT_CONTINUE_REAL_CACHE = (npm config get cache).Trim()
           if ($LASTEXITCODE -ne 0) { throw 'CI cache discovery failed' }
           $env:AGENT_CONTINUE_OFFICIAL_CLIENT = '1'
-          node --test --test-concurrency=1 bootstrap.test.mjs client-acquisition.test.mjs device-setup.test.mjs official-assets.test.mjs packed.test.mjs ../../tests/setup-model-tests.mjs
+          node --test --test-concurrency=1 bootstrap.test.mjs browser-control.test.mjs client-acquisition.test.mjs device-setup.test.mjs official-assets.test.mjs packed.test.mjs ../../tests/setup-model-tests.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Bootstrap acceptance failed' }
-      - name: Acquire pinned official Linux runtime for an isolated protocol fixture
-        if: runner.os == 'Linux'
+      - name: Acquire pinned official runtime for isolated protocol fixtures
         shell: pwsh
+        timeout-minutes: 3
         run: ./test-fixtures/fetch-ci-tunnel.ps1
       - name: Generated-profile exchange in the disposable CI runner
         if: runner.os == 'Linux'
         shell: bash
         run: timeout --kill-after=5s 50s node --test tunnel.test.mjs
+      - name: Windows packaged manager IPC and official tunnel loopback exchange
+        if: runner.os == 'Windows'
+        shell: pwsh
+        timeout-minutes: 7
+        run: |
+          $env:TUNNEL_CLIENT_TEST_NPM_CACHE = (npm config get cache).Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'CI cache discovery failed' }
+          $env:TUNNEL_CLIENT_TEST_PACKAGED = '1'
+          node --test --test-concurrency=1 tunnel.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Windows packaged tunnel acceptance failed' }
+      - uses: actions/setup-python@v6
+        if: runner.os == 'Windows'
+        with:
+          python-version: '3.13'
+          architecture: 'x64'
+      - name: Windows guided install, cold CMD provisioning, and pause over loopback
+        if: runner.os == 'Windows'
+        shell: pwsh
+        timeout-minutes: 8
+        run: |
+          python -m pip install --disable-pip-version-check --only-binary=:all: --no-deps pywinpty==2.0.15
+          if ($LASTEXITCODE -ne 0) { throw 'CI ConPTY fixture dependency unavailable' }
+          $env:TUNNEL_CLIENT_TEST_NPM_CACHE = (npm config get cache).Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'CI cache discovery failed' }
+          $env:TUNNEL_CLIENT_TEST_PYTHON = (Get-Command python -CommandType Application | Select-Object -First 1).Source
+          $env:TUNNEL_CLIENT_TEST_GUIDED = '1'
+          $env:TUNNEL_CLIENT_TEST_GUIDED_CMD_COLD = '1'
+          node --test --test-concurrency=1 --test-name-pattern=guided-installer tunnel.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Windows guided installation acceptance failed' }
+      - name: Build and verify the Windows preview kit
+        if: runner.os == 'Windows'
+        working-directory: .
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'CI browser dependencies unavailable' }
+          npm run vendor
+          if ($LASTEXITCODE -ne 0) { throw 'Reviewed browser assets unavailable' }
+          python -m unittest discover -s tests -p test_windows_preview_kit.py
+          if ($LASTEXITCODE -ne 0) { throw 'Windows preview kit regression tests failed' }
+          python scripts/build-windows-preview-kit.py --output dist/windows-preview-kit
+          if ($LASTEXITCODE -ne 0) { throw 'Windows preview kit build failed' }
+      - name: Verify Windows hosted launch handoff and preflight the exact built kit
+        if: runner.os == 'Windows'
+        working-directory: .
+        shell: pwsh
+        run: |
+          $env:AGENT_CONTINUE_HOSTED_PLAN_TEST_KIT = (Get-Item -LiteralPath ./dist/windows-preview-kit/agent-continue-windows-preview-kit.zip).FullName
+          node --test tests/hosted-windows-launcher-tests.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Windows hosted launch handoff failed' }
+      - name: Test guided browser-managed registration and standalone control from the Windows preview kit
+        id: windows-preview-install-acceptance
+        if: runner.os == 'Windows'
+        shell: pwsh
+        timeout-minutes: 9
+        run: |
+          node ../../node_modules/playwright/cli.js install chromium
+          if ($LASTEXITCODE -ne 0) { throw 'CI Chromium fixture unavailable' }
+          $env:TUNNEL_CLIENT_TEST_NPM_CACHE = (npm config get cache).Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'CI cache discovery failed' }
+          $env:TUNNEL_CLIENT_TEST_PYTHON = (Get-Command python -CommandType Application | Select-Object -First 1).Source
+          $env:TUNNEL_CLIENT_TEST_GUIDED_CHROMIUM = '1'
+          $env:TUNNEL_CLIENT_TEST_PREVIEW_KIT = (Get-Item -LiteralPath ../../dist/windows-preview-kit/agent-continue-windows-preview-kit.zip).FullName
+          node --test --test-concurrency=1 '--test-name-pattern=guided-installer-(chromium|browser-managed)' tunnel.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Windows browser-to-device acceptance failed' }
+      - name: Verify Chromium startup and native port recovery
+        id: windows-preview-browser-recovery
+        if: runner.os == 'Windows'
+        run: node --test ../../tests/browser-wake-tests.mjs ../../tests/admin-browser-tests.mjs ../../tests/windows-browser-native-startup-tests.mjs ../../tests/windows-admin-browser-chromium-tests.mjs ../../tests/windows-admin-session-dispatch-tests.mjs ../../tests/windows-admin-host-cleanup-tests.mjs windows-admin-browser-session.test.mjs
+      - name: Verify real medium-token browser peer lifetime when an interactive token exists
+        if: runner.os == 'Windows'
+        timeout-minutes: 3
+        run: |
+          $groups = & "$env:SystemRoot\System32\whoami.exe" /groups /fo csv /nh
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not ($groups -match ',"S-1-16-8192",')) {
+            Write-Output 'NOT OBSERVED: real browser-peer fixture requires an interactive medium token; no elevation or token substitution is attempted.'
+            exit 0
+          }
+          powershell.exe -NoLogo -NoProfile -NonInteractive -File ../../tests/windows-browser-peer-tests.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --test ../../tests/windows-admin-session-chromium-tests.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Check manual high-Job fixture syntax and ACL construction without UAC
+        if: runner.os == 'Windows'
+        run: |
+          $errors = $null
+          $null = [Management.Automation.Language.Parser]::ParseFile((Join-Path (Get-Location) '../../tests/windows-high-browser-job-fixture.ps1'), [ref]$null, [ref]$errors)
+          if ($errors) { throw 'Manual high-Job fixture syntax failed' }
+          node --test ../../tests/windows-high-browser-job-tests.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Output 'The real elevated browser/Job case is explicitly gated and NOT OBSERVED by this unattended CI step.'
+      - name: Verify the local Windows elevation probe without requesting UAC
+        if: runner.os == 'Windows'
+        run: node --test ../../tests/windows-native-elevation-tests.mjs ../../tests/windows-administrator-acceptance-launcher-tests.mjs
+      - name: Verify the fixed administrator demand launcher and enrollment plan
+        if: runner.os == 'Windows'
+        run: |
+          node --test ../../tests/windows-admin-demand-tests.mjs ../../tests/windows-admin-intent-tests.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell.exe -NoLogo -NoProfile -NonInteractive -File ../../tests/windows-admin-enrollment-tests.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell.exe -NoLogo -NoProfile -NonInteractive -File ../../tests/windows-failed-owner-recovery-tests.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify guarded hosted fixture routing without opening a tunnel
+        if: runner.os == 'Windows'
+        run: node --test ../../tests/hosted-managed-process-tests.mjs ../../tests/hosted-catalog-fixture-tests.mjs ../../tests/hosted-administrator-token-probe-tests.mjs
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        with:
+          name: agent-continue-windows-preview-kit
+          path: |
+            dist/windows-preview-kit/agent-continue-windows-preview-kit.zip
+            dist/windows-preview-kit/agent-continue-windows-preview-kit.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
   macos-bootstrap:
     runs-on: macos-latest
     steps:

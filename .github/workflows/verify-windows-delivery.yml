@@ -1,0 +1,266 @@
+name: Verify Windows delivery
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-windows-delivery-main
+  cancel-in-progress: false
+
+jobs:
+  windows-sidecar:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Require canonical manual main and a disposable Windows x64 runner
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $IsWindows -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -ne 'X64' -or
+              $PSVersionTable.PSVersion.Major -lt 7 -or $env:GITHUB_ACTIONS -cne 'true' -or
+              $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:RUNNER_OS -cne 'Windows' -or
+              $env:RUNNER_ARCH -cne 'X64' -or $env:GITHUB_JOB -cne 'windows-sidecar' -or
+              $env:GITHUB_EVENT_NAME -cne 'workflow_dispatch' -or $env:GITHUB_REF -cne 'refs/heads/main' -or
+              $env:GITHUB_REPOSITORY -cne '1235357/agent-continue' -or
+              $env:GITHUB_WORKFLOW_REF -cne '1235357/agent-continue/.github/workflows/verify-windows-delivery.yml@refs/heads/main') {
+            throw 'disposable_canonical_main_verification_runner_required'
+          }
+          $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+          try {
+            if ($identity.IsSystem -or -not [Security.Principal.WindowsPrincipal]::new($identity).IsInRole(
+                [Security.Principal.WindowsBuiltInRole]::Administrator)) {
+              throw 'ci_administrator_parent_required: ordinary build token is created only in the bounded CI adapter'
+            }
+          } finally { $identity.Dispose() }
+
+      - name: Check out canonical main
+        uses: actions/checkout@v7
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: core.autocrlf
+          GIT_CONFIG_VALUE_0: 'false'
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify canonical main checkout and record source
+        run: |
+          @'
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+
+          def git(*arguments):
+              return subprocess.run(["git", "--no-replace-objects", *arguments],
+                                    check=True, capture_output=True, text=True).stdout.strip()
+
+          def verify_main_source(environment, git):
+              repository = "1235357/agent-continue"
+              workflow = repository + "/.github/workflows/verify-windows-delivery.yml@refs/heads/main"
+              if (environment.get("GITHUB_REPOSITORY") != repository
+                      or environment.get("GITHUB_REF") != "refs/heads/main"
+                      or environment.get("GITHUB_EVENT_NAME") != "workflow_dispatch"
+                      or environment.get("GITHUB_WORKFLOW_REF") != workflow):
+                  raise ValueError("canonical_manual_main_required")
+              for field in ("GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT"):
+                  if not re.fullmatch(r"[1-9][0-9]*", environment.get(field, "")):
+                      raise ValueError("verification_run_identity")
+              workflow_sha = environment.get("GITHUB_WORKFLOW_SHA", "")
+              if not re.fullmatch(r"[a-f0-9]{40}", workflow_sha):
+                  raise ValueError("verification_workflow_commit")
+              if (git("remote", "get-url", "origin") not in (
+                      "https://github.com/" + repository, "https://github.com/" + repository + ".git")
+                      or git("rev-parse", "--is-shallow-repository") != "false"):
+                  raise ValueError("canonical_full_checkout_required")
+              head = git("rev-parse", "--verify", "HEAD^{commit}")
+              if (not re.fullmatch(r"[a-f0-9]{40}", head)
+                      or head != git("rev-parse", "--verify", "refs/remotes/origin/main^{commit}")
+                      or git("status", "--porcelain", "--untracked-files=all")):
+                  raise ValueError("clean_main_tip_required")
+              return {"format": "agent-continue-windows-delivery-verification-source", "version": 1,
+                      "repository": repository, "ref": "refs/heads/main", "commit": head,
+                      "workflowRef": workflow, "workflowSha": workflow_sha,
+                      "runId": environment["GITHUB_RUN_ID"], "runAttempt": environment["GITHUB_RUN_ATTEMPT"]}
+
+          receipt = verify_main_source(os.environ, git)
+          Path(os.environ["RUNNER_TEMP"], "agent-continue-verification-source.json").write_text(
+              json.dumps(receipt) + "\n", encoding="utf-8")
+          print("Canonical main source verified: " + receipt["commit"])
+          '@ | python -B -
+          if ($LASTEXITCODE -ne 0) { throw 'Canonical main source verification failed' }
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          architecture: x64
+          package-manager-cache: false
+
+      - name: Test manual verification source contracts
+        run: |
+          python -B -m unittest discover -s tests -p test_windows_delivery_verification_workflow.py
+          if ($LASTEXITCODE -ne 0) { throw 'Manual Windows verification workflow contracts failed' }
+          python -B -m unittest discover -s tests -p test_windows_release_ci_runner.py -k CiWorkflowRoute
+          if ($LASTEXITCODE -ne 0) { throw 'Windows CI workflow route contracts failed' }
+
+      - name: Acquire the pinned official tunnel archive
+        run: ./native/desktop-commander/test-fixtures/fetch-ci-tunnel.ps1
+
+      - name: Acquire pinned Node and populate the exact runtime npm cache
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pinJson = python -B -c "import json, runpy; print(json.dumps(runpy.run_path('scripts/build-setup-release.py')['NODE_PIN']))"
+          if ($LASTEXITCODE -ne 0) { throw 'Portable Node pins unavailable' }
+          $pin = $pinJson | ConvertFrom-Json
+          $nodeZip = Join-Path $env:RUNNER_TEMP 'agent-continue-release-node.zip'
+          Invoke-WebRequest -Uri "https://nodejs.org/dist/v$($pin.version)/node-v$($pin.version)-win-x64.zip" -OutFile $nodeZip
+          if ((Get-FileHash -LiteralPath $nodeZip -Algorithm SHA256).Hash.ToLowerInvariant() -cne $pin.archiveSha256) {
+            throw 'Portable Node archive digest mismatch'
+          }
+          $cache = Join-Path $env:RUNNER_TEMP 'agent-continue-release-npm-cache'
+          npm ci --ignore-scripts --no-audit --no-fund --prefix native/desktop-commander --cache "$cache"
+          if ($LASTEXITCODE -ne 0) { throw 'Locked Windows runtime acquisition failed' }
+
+      - name: Build and smoke test through the ordinary-token CI adapter
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bundle = Join-Path $env:RUNNER_TEMP 'agent-continue-windows-administrator-x64.zip'
+          $nodeZip = Join-Path $env:RUNNER_TEMP 'agent-continue-release-node.zip'
+          $cache = Join-Path $env:RUNNER_TEMP 'agent-continue-release-npm-cache'
+          # A tag-only adapter fails closed; the adapter must explicitly admit this
+          # exact manual route. Never forge event/ref variables or bypass token guards.
+          ./scripts/Invoke-WindowsReleaseOrdinaryTokenCI.ps1 -NodeArchive "$nodeZip" -TunnelArchive "$env:TUNNEL_CLIENT_TEST_ARCHIVE" -NpmCache "$cache"
+          if (-not $?) { throw 'Ordinary-token Windows build and smoke failed' }
+          $report = @(python -B scripts/build-setup-release.py --output dist/native-setup --administrator-bundle "$bundle")
+          if ($LASTEXITCODE -ne 0 -or $report.Count -lt 1) { throw 'Administrator setup closure validation failed' }
+          $report | Write-Output
+          $report[-1] | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'agent-continue-setup-build-receipt.json') -Encoding utf8
+
+      - name: Validate exact sidecars and original build receipts
+        run: |
+          @'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import stat
+
+          def regular_file(path, limit):
+              info = path.lstat()
+              if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or not 0 < info.st_size <= limit
+                      or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT):
+                  raise ValueError("verification_nonregular_or_empty_file")
+
+          def digest(path):
+              result = hashlib.sha256()
+              with path.open("rb") as stream:
+                  for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                      result.update(chunk)
+              return result.hexdigest()
+
+          def unique_keys(pairs):
+              result = {}
+              for key, value in pairs:
+                  if key in result:
+                      raise ValueError("verification_duplicate_receipt_key")
+                  result[key] = value
+              return result
+
+          def read_receipt(path):
+              regular_file(path, 1024 * 1024)
+              result = json.loads(path.read_text(encoding="utf-8-sig"), object_pairs_hook=unique_keys)
+              if not isinstance(result, dict):
+                  raise ValueError("verification_receipt_object_required")
+              return result
+
+          def verify_delivery(root, temp):
+              expected = {"agent-continue-setup.zip", "install.ps1", "SHA256SUMS.txt",
+                          "agent-continue-windows-administrator-x64.zip", "install-administrator.ps1",
+                          "Stage-WindowsAdministratorBundle.ps1"}
+              info = root.lstat()
+              if (not stat.S_ISDIR(info.st_mode)
+                      or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+                      or {path.name for path in root.iterdir()} != expected):
+                  raise ValueError("verification_sidecar_inventory")
+              for name in expected:
+                  regular_file(root / name, 768 * 1024 * 1024 if name.endswith(".zip") else 4 * 1024 * 1024)
+              setup = read_receipt(temp / "agent-continue-setup-build-receipt.json")
+              if (any(setup.get(field) is not True for field in (
+                      "built", "combinedBuilt", "administratorBundleVerified", "administratorStagerPlan"))
+                      or any(setup.get(field) is not False for field in ("installed", "published"))
+                      or setup.get("deliveryContract") != "combined-public"):
+                  raise ValueError("verification_setup_receipt")
+              assets = setup.get("assets")
+              if not isinstance(assets, dict) or set(assets) != expected:
+                  raise ValueError("verification_receipt_inventory")
+              for name, value in assets.items():
+                  if (not isinstance(value, str) or not re.fullmatch(r"[a-f0-9]{64}", value)
+                          or digest(root / name) != value):
+                      raise ValueError("verification_sidecar_digest")
+              bundle = "agent-continue-windows-administrator-x64.zip"
+              ordinary = read_receipt(temp / "agent-continue-release-ordinary-token.json")
+              fields = {"format", "version", "accountSid", "windowsToken", "builderPassed", "smokePassed",
+                        "sha256", "installed", "published"}
+              if (set(ordinary) != fields or ordinary.get("format") != "agent-continue-release-ordinary-token-ci"
+                      or type(ordinary.get("version")) is not int or ordinary["version"] != 1
+                      or not isinstance(ordinary.get("accountSid"), str)
+                      or not re.fullmatch(r"S-1-5-21-(?:[0-9]+-){3}[0-9]+", ordinary["accountSid"])
+                      or ordinary.get("windowsToken") != "standard"
+                      or any(ordinary.get(field) is not True for field in ("builderPassed", "smokePassed"))
+                      or any(ordinary.get(field) is not False for field in ("installed", "published"))):
+                  raise ValueError("verification_ordinary_token_receipt")
+              regular_file(temp / bundle, 768 * 1024 * 1024)
+              if (setup.get("sha256") != assets["agent-continue-setup.zip"]
+                      or setup.get("administratorBundleSha256") != assets[bundle]
+                      or ordinary.get("sha256") != assets[bundle] or digest(temp / bundle) != assets[bundle]):
+                  raise ValueError("verification_original_bundle_readback")
+              source = read_receipt(temp / "agent-continue-verification-source.json")
+              if (source.get("format") != "agent-continue-windows-delivery-verification-source"
+                      or type(source.get("version")) is not int or source["version"] != 1
+                      or source.get("repository") != "1235357/agent-continue" or source.get("ref") != "refs/heads/main"
+                      or source.get("workflowRef") != "1235357/agent-continue/.github/workflows/verify-windows-delivery.yml@refs/heads/main"):
+                  raise ValueError("verification_source_receipt")
+              for field, pattern in (("commit", r"[a-f0-9]{40}"), ("workflowSha", r"[a-f0-9]{40}"),
+                                     ("runId", r"[1-9][0-9]*"), ("runAttempt", r"[1-9][0-9]*")):
+                  if not isinstance(source.get(field), str) or not re.fullmatch(pattern, source[field]):
+                      raise ValueError("verification_source_identity")
+              return assets
+
+          verify_delivery(Path("dist/native-setup"), Path(os.environ["RUNNER_TEMP"]))
+          print("Exact six-file delivery, original ordinary-token/build receipts and source identity verified; no install or publish.")
+          '@ | python -B -
+          if ($LASTEXITCODE -ne 0) { throw 'Windows verification output readback failed' }
+
+      - name: Upload verified Windows delivery sidecars
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-continue-windows-verification-sidecars
+          path: |
+            dist/native-setup/agent-continue-setup.zip
+            dist/native-setup/install.ps1
+            dist/native-setup/SHA256SUMS.txt
+            dist/native-setup/agent-continue-windows-administrator-x64.zip
+            dist/native-setup/install-administrator.ps1
+            dist/native-setup/Stage-WindowsAdministratorBundle.ps1
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload original build receipts and source identity
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-continue-windows-verification-receipts
+          path: |
+            ${{ runner.temp }}/agent-continue-setup-build-receipt.json
+            ${{ runner.temp }}/agent-continue-release-ordinary-token.json
+            ${{ runner.temp }}/agent-continue-verification-source.json
+          if-no-files-found: error
+          retention-days: 14

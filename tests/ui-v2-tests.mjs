@@ -23,6 +23,9 @@ async function createPage({ full = false, enabled = false, uiLanguage, fixture =
   const context = await browser.newContext({ viewport: { width: full ? 1200 : 650, height: full ? 900 : 600 }, locale: 'zh-CN', colorScheme: 'light', acceptDownloads: true });
   await context.route('**/*', async route => {
     const name = new URL(route.request().url()).pathname.slice(1);
+    if (name === 'setup.html' || name === 'devices.html') {
+      return route.fulfill({ status: 200, contentType: 'text/html', body: '<title>Navigation fixture</title><p id="navigationFixture">' + name + '</p>' });
+    }
     if (name === '__test-font.otf' && screenshotFont) return route.fulfill({ status: 200, contentType: 'font/otf', body: await fs.readFile(screenshotFont) });
     if (!resources.has(name)) return route.abort();
     return route.fulfill({ status: 200, contentType: name.endsWith('.html') ? 'text/html' : name.endsWith('.css') ? 'text/css' : 'application/javascript', body: await fs.readFile(path.join(root, name)) });
@@ -90,7 +93,10 @@ async function createPage({ full = false, enabled = false, uiLanguage, fixture =
         },
       },
       permissions: { async request(options) { mock.permissionRequests.push(structuredClone(options)); return mock.grantPower; } },
-      tabs: { async query() { return [{ id: 41 }]; }, async create(options) { mock.tabs.push(options); return { id: 99 }; } },
+      tabs: { async query() { return [{ id: 41 }]; }, async create(options) {
+        if (mock.rejectTabs) throw new Error('SYNTHETIC_PRIVATE_NAVIGATION_ERROR');
+        mock.tabs.push(options); return { id: 99 };
+      } },
     };
     const nativeCreate = URL.createObjectURL.bind(URL);
     URL.createObjectURL = blob => { mock.exports.push(blob); return nativeCreate(blob); };
@@ -156,6 +162,30 @@ async function capture(page, name) {
 }
 
 try {
+  for (const enabled of [false, true]) {
+    const { page, context, errors } = await createPage({ enabled });
+    await page.locator('#tab-settings').click();
+    assert.equal(await page.locator('#setupWindows').count(), 1, 'guided Windows setup is directly available');
+    assert.equal(await page.locator('#manageDevices').count(), 1, 'existing controls have a dedicated entry');
+    const before = await page.evaluate(() => structuredClone(__uiMock.job));
+    for (const [id, destination] of [['setupWindows', 'setup.html'], ['manageDevices', 'devices.html?mode=browser-managed']]) {
+      const count = await page.evaluate(() => __uiMock.tabs.length);
+      await page.locator('#' + id).click();
+      await page.waitForFunction(count => __uiMock.tabs.length === count + 1, count);
+      assert.equal(await page.evaluate(() => __uiMock.tabs.at(-1).url), 'https://ui-fixture.invalid/' + destination);
+    }
+    assert.deepEqual(await page.evaluate(() => __uiMock.job), before);
+    assert.deepEqual(await page.evaluate(() => __uiMock.requests.filter(r => r.type !== 'GET_STATE')), []);
+    assert.deepEqual(await page.evaluate(() => __uiMock.permissionRequests), []);
+    if (!enabled) await capture(page, 'windows-entry-en.png');
+    await page.evaluate(() => { __uiMock.rejectTabs = true; });
+    const fallbackResource = enabled ? 'devices.html?mode=browser-managed' : 'setup.html';
+    await page.locator(enabled ? '#manageDevices' : '#setupWindows').click();
+    await page.waitForURL('https://ui-fixture.invalid/' + fallbackResource);
+    assert.equal(await page.locator('#navigationFixture').textContent(), fallbackResource.split('?')[0]);
+    assert.deepEqual(errors, []);
+    await context.close(); pass(`Windows setup and controls use extension tabs without changing scheduler or permissions (enabled=${enabled})`);
+  }
   for (const enabled of [false, true]) {
     const { page, context } = await createPage({ enabled, availableTargets: [
       { id: 41, title: 'Reused tab ID', url: 'https://chatgpt.com/c/unrelated' },

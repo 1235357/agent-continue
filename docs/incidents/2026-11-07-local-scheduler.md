@@ -78,6 +78,23 @@ not an actual scheduled-send or administrator-runtime acceptance.
 
 ## Delivery Still Unverified
 
+### Explicit Resume Consent, Not Yet Executed (2026-11-07)
+
+The user answered the original-task question: resume the original task while
+retaining its original prompt and interval. This supersedes the requirement to
+obtain resume consent for that scheduler task only; it does not authorize VPN
+resume, native-owner connection or a different conversation binding. Historical
+saved metadata was4728 characters/20minutes; current values still need readback.
+
+A fresh call through the existing trusted browser Agent again returned
+`Local browser use is disabled in Work settings`. No actual scheduler state
+change or send was performed. Do not claim resumed or ask the same consent
+question again. Once browser access is enabled, verify the original task and
+unchanged settings, use its actual Resume action once, then read back running
+state and next scheduled time. Do not substitute Send once now or rewrite the
+saved prompt. Previous manual-Pause observations below are historical, not a
+statement that the user still wants Pause.
+
 Actual post-repair production delivery is still unverified because the original
 manual Pause has not been cleared. Do not infer failure from that intentional
 Pause, or silently resume it to obtain an acceptance result. Worker suspension,

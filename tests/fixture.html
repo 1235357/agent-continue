@@ -50,8 +50,16 @@ function submitFixtureMessage() {
     if (acknowledged) return;
     acknowledged = true;
     const message = document.createElement('div');
-    message.dataset.messageAuthorRole = 'user';
-    message.textContent = text;
+    if (fixture.modernMessages) {
+      message.dataset.chatgptSearchUnitKey = 'fallback-turn-1:0:user';
+      message.dataset.chatgptSearchMessageIds = fixture.reusedModernId ?? 'synthetic-new-user';
+    } else message.dataset.messageAuthorRole = 'user';
+    if (fixture.modernNested) {
+      const body = document.createElement('div');
+      body.dataset.messageAuthorRole = 'user';
+      body.textContent = text;
+      message.append(body);
+    } else message.textContent = text;
     document.querySelector('#history').append(message);
     editor.replaceChildren(document.createElement('p'));
     send.disabled = true;

@@ -10,13 +10,16 @@ import { buildSetupRequest, serializeSetupRequest } from '../../setup-model.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const payloadFiles = [
-  'host.mjs', 'lifecycle.mjs', 'package-lock.json', 'package.json',
-  'process-observation.mjs', 'profile.mjs', 'runtime.mjs', 'setup-cli.mjs',
+  'device-native-host.mjs', 'device-operations.mjs', 'device-owner.mjs', 'device-server.mjs', 'device-ssh.mjs',
+  'host.mjs', 'lifecycle.mjs', 'operation-receipts.mjs', 'package-lock.json', 'package.json',
+  'prepared-process.mjs', 'process-observation.mjs', 'profile.mjs', 'research-handoff.mjs', 'research-runner.mjs', 'runtime.mjs', 'setup-cli.mjs',
   'tunnel-pins.json', 'upstream-pin.json', 'windows-child.mjs', 'windows-process-query.cs',
 ];
 const packageFiles = [
-  'bin.mjs', 'bootstrap.mjs', 'client-acquisition.mjs', 'device-setup.mjs', 'payload-layout.mjs', 'package.json',
-  'README.md', 'LICENSE', 'payload-manifest.json',
+  'bin.mjs', 'bootstrap.mjs', 'browser-control.mjs', 'browser-wake-registration.mjs', 'client-acquisition.mjs', 'device-enrollment.mjs', 'device-setup.mjs', 'payload-layout.mjs', 'package.json',
+  'install-plan.mjs', 'registration-guidance.mjs', 'registration-plan.mjs', 'registration-render.mjs',
+  'registration-status.mjs', 'registration-status-view.mjs', 'registration-execution.mjs', 'registration-writer.mjs', 'registry-win.mjs', 'runtime-precheck.mjs',
+  'README.md', 'LICENSE', 'payload-manifest.json', 'Prepare-ReleaseNative.ps1', 'native-publishers.json', 'install.ps1', 'install.cmd',
   ...payloadFiles.map(name => `payload/${name}`),
 ].sort();
 const receipt = Object.freeze({
@@ -241,7 +244,7 @@ async function packAndInstall(t) {
   const f = fixture(t);
   const { buildPackage } = await import(new URL('./build-package.mjs', import.meta.url));
   const packaged = path.join(f.root, 'package');
-  sameJSON(buildPackage(packaged), { built: true, files: 12 }, 'synchronous_builder_result_mismatch');
+  sameJSON(buildPackage(packaged), { built: true, files: payloadFiles.length }, 'synchronous_builder_result_mismatch');
   const manifest = verifyClosure(packaged);
   const meta = parseJSON(fs.readFileSync(path.join(packaged, 'package.json'), 'utf8'), 'invalid_package_metadata');
   assert.equal(meta.name, 'agent-continue-device-bootstrap');
@@ -292,16 +295,16 @@ async function packAndInstall(t) {
     assert.ok(fs.statSync(bin).mode & 0o111, 'installed_bin_not_executable');
   }
   const installedAPI = await import(pathToFileURL(path.join(installed, 'bootstrap.mjs')));
-  sameJSON(installedAPI.verifyPayload(installed), { files: 12, providerVersion: '0.3.1' },
+  sameJSON(installedAPI.verifyPayload(installed), { files: payloadFiles.length, providerVersion: '0.3.1' },
     'installed_payload_verifier_result_mismatch');
   return { ...f, installed, bin, manifest };
 }
 
-async function command(f, args, expected, code = 0, timeout) {
+async function command(f, args, expected, code = 0, timeout, env) {
   let result;
-  try { result = await f.run([f.bin, ...args], { timeout: timeout ?? 10000 }); }
+  try { result = await f.run([f.bin, ...args], { timeout: timeout ?? 10000, ...(env ? { env } : {}) }); }
   catch (error) {
-    if (['stage', 'acquire', 'setup'].includes(args[0])) f.holdUnconfirmedAcquisition();
+    if (['stage', 'acquire', 'setup', 'setup-manager'].includes(args[0])) f.holdUnconfirmedAcquisition();
     throw error;
   }
   let failureCode = 'unclassified';
@@ -316,7 +319,7 @@ async function command(f, args, expected, code = 0, timeout) {
       'setup_receipt_failed', 'setup_cancelled'].includes(output.error)) failureCode = output.error;
     if (output.error === 'acquisition_exit_unconfirmed') f.holdUnconfirmedAcquisition();
   } catch { /* Never include unvalidated child output in a failure message. */ }
-  if (['stage', 'acquire', 'setup'].includes(args[0])) {
+  if (['stage', 'acquire', 'setup', 'setup-manager'].includes(args[0])) {
     const at = args.indexOf('--install-dir'), destination = args[at + 1];
     if (at > 0 && typeof destination === 'string' && path.isAbsolute(destination) && isWithin(f.root, destination)) {
       const acquisition = path.join(destination, 'acquisition');
@@ -341,12 +344,15 @@ test('actual local npm tarball has exact closure and installed help/version/refu
     const f = await packAndInstall(t);
     const destination = path.join(f.root, 'must not be created \u6d4b\u8bd5');
     const before = inventory(f.root);
-    await command(f, ['help'], { ok: true, commands: ['help', 'version', 'stage', 'acquire', 'setup'] });
+    await command(f, ['help'], { ok: true, commands: ['help', 'version', 'stage', 'acquire', 'setup', 'setup-server', 'setup-manager', 'install-local',
+      'start-manager', 'manager-status', 'manager-control', 'manager-browser', 'enroll-ssh', 'install-plan', 'uninstall', 'register',
+      'register-browser-wake', 'status', 'verify'] });
     await command(f, ['version'], { ok: true, version: '0.3.0' });
     const setupArgs = ['setup', '--install-dir', destination, '--consent', 'no',
       '--setup-request', path.join(f.root, 'missing-request'), '--tunnel-id', 'tunnel_' + 'a'.repeat(32),
       '--runtime-key-file', path.join(f.root, 'missing-key')];
     await command(f, setupArgs, { ok: false, error: 'consent_required' }, 1);
+    await command(f, ['manager-browser', '--install-dir', destination, '--consent', 'no'], { ok: false, error: 'consent_required' }, 1);
     await command(f, [...setupArgs, '--setup-request', 'duplicate'], { ok: false, error: 'invalid_arguments' }, 1);
     await command(f, ['setup', '--install-dir', destination, '--consent', 'full-account'],
       { ok: false, error: 'invalid_arguments' }, 1);
@@ -368,9 +374,98 @@ test('actual local npm tarball has exact closure and installed help/version/refu
       '--offline-cache', path.join(f.root, 'missing-cache')], { ok: false, error: 'invalid_install_path' }, 1);
     assert.equal(fs.existsSync(destination), false, 'invalid_options_created_destination');
     sameJSON(inventory(f.root), before, 'help_version_or_refusal_modified_owned_fixture');
+    const payload = path.join(f.installed, 'payload');
+    const { prepareState } = await import(pathToFileURL(path.join(payload, 'runtime.mjs')));
+    const runState = path.join(f.root, 'research state');
+    prepareState(runState, { consent: 'full-account' });
+    const plan = path.join(f.root, 'research-plan.json'), projectId = crypto.randomUUID(), runId = crypto.randomUUID();
+    const script = "console.log('packed runner output')";
+    fs.writeFileSync(plan, JSON.stringify({ version: 1, projectId, runId, parentRunId: null, revision: hash(script),
+      program: process.execPath, argv: ['-e', script], cwd: f.root, maxOutputBytes: 1024, review: null }), { flag: 'wx' });
+    const runner = path.join(payload, 'research-runner.mjs');
+    const ran = parseJSON((await f.run([runner, 'run', '--state-dir', runState, '--plan', plan], { timeout: 10000 })).stdout,
+      'invalid_packed_research_run');
+    assert.equal(ran.status, 'settled');
+    assert.equal(ran.report.termination.exitCode, 0);
+    const reloaded = parseJSON((await f.run([runner, 'status', '--state-dir', runState, '--project', projectId,
+      '--run', runId], { timeout: 10000 })).stdout, 'invalid_packed_research_status');
+    sameJSON(reloaded, ran, 'packed_research_receipt_mismatch');
+    const commandFile = path.join(f.root, 'prepared-process.json');
+    const shell = process.platform === 'win32' ? path.join(process.env.SystemRoot, 'System32',
+      'WindowsPowerShell', 'v1.0', 'powershell.exe') : '/bin/sh';
+    fs.writeFileSync(commandFile, JSON.stringify({ command: 'echo packed prepared command', shell, timeout_ms: 10000 }));
+    const stager = path.join(payload, 'prepared-process.mjs');
+    const reviewed = parseJSON((await f.run([stager, 'inspect', '--request-file', commandFile])).stdout, 'invalid_review');
+    assert.equal(reviewed.staged, false);
+    const staged = parseJSON((await f.run([stager, 'stage', '--state-dir', runState,
+      '--request-file', commandFile, '--reviewed-sha256', reviewed.agent_continue_process_sha256])).stdout, 'invalid_stage');
+    assert.equal(staged.staged, true);
+    assert.equal(staged.executed, false);
+    assert.ok(fs.existsSync(path.join(runState, 'prepared-processes', staged.agent_continue_operation_id + '.json')));
     t.diagnostic(JSON.stringify({ actualNpmPack: true, actualLocalTarballInstall: true,
       packedFiles: packageFiles.length, payloadFiles: payloadFiles.length,
-      installedBinMetadata: true, installedHelpVersionRefusal: true, registryPublication: false }));
+      installedBinMetadata: true, installedHelpVersionRefusal: true, installedResearchRunner: true,
+      installedPreparedProcess: true, registryPublication: false }));
+  });
+
+test('installed local package prepares a key-free manager with a test acquisition adapter and enrolls through the CLI',
+  { timeout: 300000 }, async t => {
+    const f = await packAndInstall(t), installDir = path.join(f.root, 'manager'), app = path.join(installDir, 'app');
+    const provider = fileURLToPath(new URL('../desktop-commander/node_modules/@wonderwhy-er/desktop-commander/', import.meta.url));
+    const npmDir = path.join(f.root, 'fixture-toolchain', 'npm'), npmBin = path.join(npmDir, 'bin');
+    fs.mkdirSync(npmBin, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(path.join(npmDir, 'package.json'), JSON.stringify({ name: 'npm', version: '0.0.0-fixture' }));
+    const npmCli = path.join(npmBin, 'npm-cli.js'), attempts = path.join(f.root, 'provider-attempts');
+    fs.writeFileSync(npmCli, `const fs=require('node:fs'),path=require('node:path');
+      if(process.argv[2]!=='ci'||!process.argv.includes('--ignore-scripts'))process.exit(81);
+      fs.appendFileSync(${JSON.stringify(attempts)},'1');
+      const source=${JSON.stringify(provider)},output=path.join(process.cwd(),'node_modules','@wonderwhy-er','desktop-commander');
+      fs.mkdirSync(output,{recursive:true});
+      fs.copyFileSync(path.join(source,'package.json'),path.join(output,'package.json'));
+      fs.cpSync(path.join(source,'dist'),path.join(output,'dist'),{recursive:true});\n`);
+    const state = path.join(installDir, 'state'), extensionId = 'b'.repeat(32);
+    const targetPlatform = { win32: 'windows', darwin: 'macos', linux: 'linux' }[process.platform];
+    const requestFile = path.join(f.root, 'local-manager-request.json');
+    const requestBytes = serializeSetupRequest(buildSetupRequest(targetPlatform, extensionId));
+    fs.writeFileSync(requestFile, requestBytes, { flag: 'wx', mode: 0o600 });
+    const prepared = { format: 'agent-continue-manager-setup-result', version: 1, status: 'prepared', providerVersion: '0.3.1',
+      target: targetPlatform, extensionId, nativeHost: 'com.agentcontinue.device_control', requestSha256: hash(requestBytes),
+      prepared: true, localTunnelConfigured: false, activated: false, authenticationVerified: false,
+      nativeRegistrationVerified: false, chatAuthorizationVerified: false, protectedInstallationVerified: false, nativeDependenciesVerified: false };
+    const { setupManager } = await import(pathToFileURL(path.join(f.installed, 'device-setup.mjs')));
+    sameJSON(await setupManager({ installDir, consent: 'full-account', setupRequestFile: requestFile },
+      { npmCli, acquisitionTimeoutMs: 10000 }), prepared, 'installed_manager_api_mismatch');
+    assert.equal(fs.readFileSync(attempts, 'utf8'), '1', 'provider_not_acquired_exactly_once');
+    sameJSON(JSON.parse(fs.readFileSync(path.join(installDir, 'manager-receipt.json'))), prepared, 'manager_receipt_mismatch');
+    const owner = await import(pathToFileURL(path.join(app, 'device-owner.mjs')));
+    const binding = owner.readNativeBinding(path.join(app, 'device-native-binding.json')); binding.assertCurrent();
+    assert.equal(binding.root, state); assert.equal(binding.extensionId, extensionId);
+    assert.equal(fs.existsSync(path.join(installDir, 'client')), false);
+    assert.equal(fs.existsSync(path.join(installDir, 'setup-receipt.json')), false);
+    assert.equal(fs.existsSync(path.join(state, 'binding.json')), false);
+    const knownHosts = path.join(f.root, 'verified known hosts'), knownBytes = 'server.example ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixtureOnly\n';
+    fs.writeFileSync(knownHosts, knownBytes, { mode: 0o600 });
+    const descriptor = { host: 'server.example', port: 22, user: 'researcher', node: '/usr/bin/node',
+      entry: '/srv/research/app/device-server.mjs', stateRoot: '/srv/research/state', knownHosts, knownHostsSha256: hash(knownBytes) };
+    const target = hash(JSON.stringify([extensionId, descriptor]));
+    const args = ['enroll-ssh', '--install-dir', installDir, '--consent', 'full-account', '--ssh-executable', process.execPath,
+      '--host', descriptor.host, '--port', '22', '--user', descriptor.user, '--remote-node', descriptor.node,
+      '--remote-install-dir', '/srv/research', '--known-hosts', knownHosts, '--known-hosts-sha256', descriptor.knownHostsSha256];
+    await command(f, args, { ok: true, format: 'agent-continue-ssh-enrollment-result', version: 1, status: 'enrolled', target,
+      deviceUrl: 'chrome-extension://' + extensionId + '/devices.html?target=' + target,
+      sshAuthenticationVerified: false, ownerReachabilityVerified: false, nativeRegistrationVerified: false,
+      chatAuthorizationVerified: false, activated: false });
+    const registry = path.join(app, 'device-ssh-targets.json'), bytes = fs.readFileSync(registry);
+    owner.readSshTarget(registry, extensionId, target).assertCurrent();
+    assert.equal(fs.lstatSync(registry).nlink, 1);
+    await command(f, args, { ok: false, error: 'enrollment_exists' }, 1);
+    assert.ok(fs.readFileSync(registry).equals(bytes), 'duplicate_cli_changed_enrolled_target');
+    assert.equal(fs.existsSync(path.join(state, 'device-channel.json')), false);
+    assert.equal(fs.existsSync(path.join(state, 'device-operations.jsonl')), false);
+    assert.equal(fs.existsSync(path.join(state, 'tunnel.yaml')), false);
+    t.diagnostic(JSON.stringify({ actualLocalTarballManagerSetup: true, actualLocalTarballEnroll: true,
+      providerFixtureCopyOnly: true, localKeyRequired: false, tunnelClientAcquired: false, payloadReaderAccepted: true,
+      realSsh: false, nativeRegistration: false, toolAuthorization: false }));
   });
 
 test('outer CLI closure cannot authorize fixture deletion after an unconfirmed nested acquisition exit', async t => {
@@ -669,6 +764,16 @@ test('opt-in: installed tarball configures real pinned device from browser reque
         assert.equal(document.control_plane.base_url, 'https://api.openai.com');
         assert.equal(document.control_plane.api_key, 'file:' + key);
         assert.equal(fs.existsSync(path.join(state, 'health.url')), false);
+        const nativeBinding = path.join(installDir, 'app', 'device-native-binding.json');
+        if (request.nativeHost === null) assert.equal(fs.existsSync(nativeBinding), false);
+        else {
+          const { readNativeBinding } = await import(pathToFileURL(path.join(installDir, 'app', 'device-owner.mjs')).href);
+          const prepared = readNativeBinding(nativeBinding);
+          assert.equal(prepared.extensionId, request.extensionId); assert.equal(prepared.root, state); prepared.assertCurrent();
+        }
+        for (const name of ['device-channel.json', 'device-operations.jsonl', 'device-operations.lease', 'controller.lease']) {
+          assert.equal(fs.existsSync(path.join(state, name)), false);
+        }
         t.diagnostic(JSON.stringify({ actualInstalledBinSetup: true, realBrowserProducer: true,
           keyContentsNotNeededForConfiguration: true, ...setupReceipt }));
       } else t.diagnostic('Official client opt-in absent: real-client acquisition not executed');
@@ -727,4 +832,67 @@ test('opt-in: installed tarball configures real pinned device from browser reque
     await t.test('bounded actual staged MCP initialize/list/owned-file roundtrip',
       { timeout: 75000 },
       async child => fileRoundtrip(child, f, runtime, app, officialClient ? path.join(installDir, 'state') : undefined));
+  });
+
+test('packed tarball carries the registration modules and runs status/verify read-only',
+  { timeout: 300000 }, async t => {
+    const f = await packAndInstall(t);
+    const load = name => import(pathToFileURL(path.join(f.installed, name)));
+    const expected = {
+      'registration-status.mjs': ['STATUS_FORMAT', 'VERIFY_FORMAT', 'buildRegistrationStatus',
+        'executeStatusCommand', 'renderStatusJson', 'renderStatusText', 'renderVerifyJson',
+        'renderVerifyText', 'statusFromReport'],
+      'registration-status-view.mjs': ['BINDING_STATES', 'REGISTERED_STATES', 'STATUS_FORMAT',
+        'STATUS_VIEW_FORMAT', 'buildStatusView', 'buildUnknownStatusView', 'resolveStatusView'],
+      'registration-guidance.mjs': ['buildFirstInstallGuidance', 'buildPendingFirstInstallGuidance'],
+      'registration-render.mjs': ['renderRegistrationDisplay'],
+    };
+    for (const [name, exports] of Object.entries(expected)) {
+      sameJSON(Object.keys(await load(name)).sort(), [...exports].sort(), `packed_${name}_exports_mismatch`);
+    }
+    const root = path.join(f.root, 'packed precheck root'), app = path.join(root, 'app');
+    const state = path.join(root, 'state');
+    fs.mkdirSync(app, { recursive: true }); fs.mkdirSync(state, { recursive: true });
+    const extensionId = 'c'.repeat(32);
+    fs.writeFileSync(path.join(app, 'device-native-binding.json'), JSON.stringify({
+      format: 'agent-continue-native-binding', version: 1, extensionId, stateRoot: state }) + '\n');
+    const marker = fs.readFileSync(path.join(app, 'device-native-binding.json'));
+    fs.writeFileSync(path.join(root, 'payload-manifest.json'), JSON.stringify({ format: 'agent-continue-payload', version: 1,
+      files: [{ path: 'device-native-binding.json', bytes: marker.length, sha256: hash(marker) }] }) + '\n');
+    fs.writeFileSync(path.join(root, 'native-host.json'), JSON.stringify({
+      name: 'com.agentcontinue.device_control', description: 'Agent Continue device lifecycle bridge',
+      path: path.join(app, 'device-native-host.mjs'), type: 'stdio',
+      allowed_origins: ['chrome-extension://' + extensionId + '/'] }) + '\n');
+    const queries = [];
+    const registry = { get: plan => { queries.push(plan.hive + '/' + plan.view); return null; } };
+    const stub = () => ({ ok: true, reason: 'syntax stubbed for the packed read-only probe' });
+    const deps = { registry, verifySyntax: stub };
+    const statusApi = await load('registration-status.mjs');
+    const status = statusApi.executeStatusCommand(['status', '--install-dir', root, '--json'], deps);
+    assert.equal(status.exitCode, 0, 'packed_status_exit');
+    const statusReport = parseJSON(status.output, 'packed_status_invalid_json');
+    assert.equal(statusReport.format, 'agent-continue-registration-status', 'packed_status_format');
+    assert.equal(statusReport.registered, 'not-registered', 'packed_status_registry_state');
+    assert.equal(queries.length, 4, 'packed_status_registry_queries');
+    const verify = statusApi.executeStatusCommand(['verify', '--install-dir', root, '--json'], deps);
+    assert.equal(verify.exitCode, 0, 'packed_verify_exit_on_consistent_root');
+    assert.equal(parseJSON(verify.output, 'packed_verify_invalid_json').format,
+      'agent-continue-registration-verify', 'packed_verify_format');
+    const binStatus = await f.run([f.bin, 'status', '--install-dir', root, '--json'], { timeout: 60000 });
+    assert.equal(binStatus.code, 0, 'packed_bin_status_exit');
+    assert.equal(binStatus.signal, null);
+    assert.equal(binStatus.stderrBytes, 0, 'packed_bin_status_stderr');
+    const binReport = parseJSON(binStatus.stdout, 'packed_bin_status_invalid_json');
+    assert.equal(binReport.format, 'agent-continue-registration-status', 'packed_bin_status_format');
+    for (const key of ['root', 'installed', 'binding', 'registered', 'hostStartable', 'failed', 'counts']) {
+      assert.ok(Object.hasOwn(binReport, key), `packed_bin_status_missing_${key}`);
+    }
+    const binVerify = await f.run([f.bin, 'verify', '--install-dir', root, '--json'], { timeout: 60000 });
+    assert.equal(binVerify.code, 1, 'packed_bin_verify_exit_on_empty_root');
+    assert.equal(binVerify.stderrBytes, 0, 'packed_bin_verify_stderr');
+    assert.equal(parseJSON(binVerify.stdout, 'packed_bin_verify_invalid_json').format,
+      'agent-continue-registration-verify', 'packed_bin_verify_format');
+    t.diagnostic(JSON.stringify({ packedRegistrationModules: 4, packedStatusExit: status.exitCode,
+      packedVerifyExit: verify.exitCode, packedBinStatusExit: binStatus.code,
+      packedBinVerifyExit: binVerify.code, registryWrites: 0 }));
   });

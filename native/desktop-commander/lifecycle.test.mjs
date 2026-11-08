@@ -13,6 +13,8 @@ const source = new URL('./lifecycle.mjs', import.meta.url);
 const exists = fs.existsSync(source);
 test('owned runtime controller exists', () => assert.ok(exists));
 const check = (name, run) => test(name, { skip: !exists }, run);
+const expectedStatus = (paused, runtime, ready) => ({ paused, runtime, ready,
+  pauseMode: paused ? 'stay-disconnected' : 'running', loginRecoveryAvailable: false, chatAuthorization: 'not-observed' });
 
 async function fixture(t, { health = true, stop = true } = {}) {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'agentcontinue-lifecycle-'));
@@ -35,7 +37,7 @@ async function fixture(t, { health = true, stop = true } = {}) {
   const profile = await import(pathToFileURL(path.join(copy, 'profile.mjs')).href);
   profile.writeTunnelProfile(root, { tunnelId: 'tunnel_' + 'a'.repeat(32), runtimeKeyFile: key, tunnelExecutable: executable });
   const { openController } = await import(pathToFileURL(path.join(copy, 'lifecycle.mjs')).href);
-  const children = [], launches = [], pauseAtSignal = [], probes = [];
+  const children = [], launches = [], pauseAtSignal = [], intentsAtSignal = [], probes = [];
   let controller, expectedUnknownCleanup = false;
   const services = {
     readyTimeoutMs: 150, stopTimeoutMs: 80, pollIntervalMs: 10,
@@ -50,7 +52,9 @@ async function fixture(t, { health = true, stop = true } = {}) {
       };
       child.kill = signal => {
         assert.equal(signal, 'SIGTERM');
-        pauseAtSignal.push(JSON.parse(fs.readFileSync(path.join(root, 'lifecycle.json'), 'utf8')).paused);
+        const saved = JSON.parse(fs.readFileSync(path.join(root, 'lifecycle.json'), 'utf8'));
+        pauseAtSignal.push(saved.paused);
+        intentsAtSignal.push(saved);
         if (stop) queueMicrotask(child.finish);
         return true;
       };
@@ -75,7 +79,7 @@ async function fixture(t, { health = true, stop = true } = {}) {
     }
     await fs.promises.rm(base, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   });
-  return { root, base, key, executable, launches, children, probes, pauseAtSignal,
+  return { root, base, key, executable, launches, children, probes, pauseAtSignal, intentsAtSignal,
     allowUnknownCleanup() { expectedUnknownCleanup = true; },
     open(overrides = {}) { controller = openController(root, { ...services, ...overrides }); return controller; },
     openController, services };
@@ -84,7 +88,7 @@ async function fixture(t, { health = true, stop = true } = {}) {
 check('opening defaults to paused and repeated status never starts or changes intent', async t => {
   const f = await fixture(t), c = f.open();
   const initial = await c.status();
-  assert.deepEqual(initial, { paused: true, runtime: 'stopped', ready: false, chatAuthorization: 'not-observed' });
+  assert.deepEqual(initial, expectedStatus(true, 'stopped', false));
   await c.status();
   assert.equal(f.launches.length, 0); assert.equal(f.probes.length, 0);
   assert.equal(fs.existsSync(path.join(f.root, 'lifecycle.json')), false);
@@ -97,9 +101,58 @@ check('second owner rejects without reclaiming the existing lease', async t => {
   assert.deepEqual(fs.readFileSync(path.join(f.root, 'controller.lease')), before);
 });
 
+check('deferred saved intent checks startup authorization again after asynchronous launch resolution', async t => {
+  const f = await fixture(t);
+  const first = f.open();
+  await first.reconnect();
+  await first.dispose();
+  let release, authorized = true;
+  const c = f.open({ deferStartup: true, launch: () => new Promise(resolve => { release = resolve; }) });
+  assert.deepEqual(await c.status(), expectedStatus(false, 'stopped', false));
+  const startup = c.startSavedIntent(() => authorized);
+  authorized = false;
+  release({ configured: true, command: f.executable, args: [] });
+  await startup;
+  assert.equal(f.launches.length, 1, 'no second child was started');
+  assert.deepEqual(await c.status(), expectedStatus(false, 'stopped', false));
+});
+
+check('a successful automatic wake leaves the running intent file in place', async t => {
+  const f = await fixture(t), first = f.open();
+  await first.reconnect();
+  await first.dispose();
+  const file = path.join(f.root, 'lifecycle.json');
+  const before = fs.statSync(file, { bigint: true });
+  const controller = f.open({ deferStartup: true });
+  await controller.startSavedIntent();
+  const after = fs.statSync(file, { bigint: true });
+  assert.equal(after.ino, before.ino);
+  assert.equal(after.mtimeNs, before.mtimeNs);
+  assert.deepEqual(await controller.status(), expectedStatus(false, 'running', true));
+  assert.equal(f.launches.length, 2);
+});
+
+check('a durable pause published during automatic wake is never overwritten', async t => {
+  const f = await fixture(t), first = f.open();
+  await first.reconnect();
+  await first.dispose();
+  let release;
+  const controller = f.open({ deferStartup: true, launch: () => new Promise(resolve => { release = resolve; }) });
+  const starting = controller.startSavedIntent();
+  const pause = '{"format":"agent-continue-lifecycle","version":1,"paused":true}\n';
+  const file = path.join(f.root, 'lifecycle.json'), temporary = file + '.outside';
+  fs.writeFileSync(temporary, pause);
+  fs.renameSync(temporary, file);
+  release({ configured: true });
+  await starting;
+  assert.equal(fs.readFileSync(file, 'utf8'), pause);
+  assert.deepEqual(await controller.status(), expectedStatus(true, 'stopped', false));
+  assert.equal(f.launches.length, 1);
+});
+
 check('reconnect starts exactly one fixed hidden official-client launch and reuses it', async t => {
   const f = await fixture(t), c = f.open();
-  assert.deepEqual(await c.reconnect(), { paused: false, runtime: 'running', ready: true, chatAuthorization: 'not-observed' });
+  assert.deepEqual(await c.reconnect(), expectedStatus(false, 'running', true));
   const first = f.launches[0];
   assert.equal(first.command, f.executable);
   assert.deepEqual(first.args.slice(0, 3), ['run', '--profile-file', path.join(f.root, 'tunnel.yaml')]);
@@ -113,9 +166,138 @@ check('reconnect starts exactly one fixed hidden official-client launch and reus
 
 check('pause persists before signaling and status never clears it', async t => {
   const f = await fixture(t), c = f.open(); await c.reconnect();
-  assert.deepEqual(await c.pause(), { paused: true, runtime: 'stopped', ready: false, chatAuthorization: 'not-observed' });
+  assert.deepEqual(await c.pause(), expectedStatus(true, 'stopped', false));
   assert.deepEqual(f.pauseAtSignal, [true]);
   await c.status(); await c.status(); assert.equal(f.launches.length, 1);
+});
+
+const temporaryPause = loginGeneration => ({
+  format: 'agent-continue-lifecycle', version: 2, paused: true, resumeOnLogin: true, loginGeneration,
+});
+
+check('missing or invalid login evidence never changes pause intent or launches', async t => {
+  const f = await fixture(t);
+  let login = null;
+  const c = f.open({ readInteractiveLoginGeneration: () => login });
+  const file = path.join(f.root, 'lifecycle.json');
+  await c.pause();
+  const original = fs.readFileSync(file);
+  for (login of [null, '9', -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(() => c.pauseUntilLogin(), /login_recovery_unavailable/);
+    assert.equal((await c.resumeAfterInteractiveLogin()).paused, true);
+    assert.equal((await c.status()).loginRecoveryAvailable, false);
+    assert.deepEqual(fs.readFileSync(file), original);
+  }
+  assert.equal(f.launches.length, 0);
+});
+
+check('temporary pause survives owner replacement and only a later trusted login resumes once', async t => {
+  const f = await fixture(t);
+  let login = 18;
+  const options = { readInteractiveLoginGeneration: () => login };
+  const c = f.open(options), file = path.join(f.root, 'lifecycle.json');
+  await c.reconnect();
+  const stopped = await c.pauseUntilLogin();
+  assert.equal(stopped.pauseMode, 'until-next-login');
+  assert.equal(stopped.loginRecoveryAvailable, true);
+  assert.deepEqual(f.intentsAtSignal, [temporaryPause(18)]);
+  const original = fs.readFileSync(file);
+  await c.dispose();
+  const replacement = f.open(options);
+  for (login of [17, 18, null]) {
+    assert.equal((await replacement.resumeAfterInteractiveLogin()).paused, true);
+    assert.deepEqual(fs.readFileSync(file), original);
+  }
+  assert.throws(() => replacement.resumeAfterInteractiveLogin(19), /invalid_login_recovery_arguments/);
+  login = 19;
+  assert.equal((await replacement.status()).paused, true, 'status cannot resume');
+  assert.equal(f.launches.length, 1);
+  const resumed = await replacement.resumeAfterInteractiveLogin();
+  assert.equal(resumed.pauseMode, 'running');
+  assert.equal(resumed.ready, true);
+  assert.equal(f.launches.length, 2);
+  await replacement.resumeAfterInteractiveLogin();
+  assert.equal(f.launches.length, 2);
+});
+
+check('login recovery is single-start and yields to newer intent, evidence loss, or disposal', async t => {
+  for (const change of ['unavailable', 'persistent', 'temporary', 'disposing']) {
+    const f = await fixture(t);
+    let login = 8;
+    const entered = Promise.withResolvers(), launch = Promise.withResolvers();
+    const c = f.open({ readInteractiveLoginGeneration: () => login,
+      launch: () => { entered.resolve(); return launch.promise; } });
+    await c.pauseUntilLogin();
+    login = 9;
+    const recovery = c.resumeAfterInteractiveLogin();
+    await entered.promise;
+    await assert.rejects(c.resumeAfterInteractiveLogin(), /operation_busy/);
+    let closing;
+    if (change === 'unavailable') login = null;
+    if (change === 'persistent') await c.pause();
+    if (change === 'temporary') await c.pauseUntilLogin();
+    if (change === 'disposing') closing = c.dispose();
+    launch.resolve({ configured: true });
+    const result = await recovery;
+    await closing;
+    assert.equal(result.paused, true);
+    assert.equal(result.pauseMode, change === 'persistent' ? 'stay-disconnected' : 'until-next-login');
+    assert.equal(f.launches.length, 0);
+    if (change === 'temporary') {
+      assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.root, 'lifecycle.json'), 'utf8')), temporaryPause(9));
+    }
+  }
+});
+
+check('a failed saved-running launch cannot overwrite a newer temporary pause', async t => {
+  const f = await fixture(t), file = path.join(f.root, 'lifecycle.json');
+  const launch = Promise.withResolvers();
+  fs.writeFileSync(file, '{"format":"agent-continue-lifecycle","version":1,"paused":false}\n');
+  const c = f.open({ readInteractiveLoginGeneration: () => 42, launch: () => launch.promise });
+  await c.pauseUntilLogin();
+  launch.reject(new Error('tunnel_credentials_incomplete'));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), temporaryPause(42));
+  assert.equal((await c.status()).pauseMode, 'until-next-login');
+  assert.equal(f.launches.length, 0);
+});
+
+check('a later temporary pause wins while recovery waits for the old core to exit', async t => {
+  const f = await fixture(t), file = path.join(f.root, 'lifecycle.json');
+  let login = 12, observation = 'unconfirmed';
+  const reached = Promise.withResolvers(), exit = Promise.withResolvers();
+  const c = f.open({ readInteractiveLoginGeneration: () => login, async hasExited() {
+    if (observation === 'recovery') { reached.resolve(); return exit.promise; }
+    return observation === 'confirmed';
+  } });
+  await c.reconnect();
+  assert.equal((await c.pauseUntilLogin()).runtime, 'unknown');
+  login = 13;
+  observation = 'recovery';
+  const pending = c.resumeAfterInteractiveLogin();
+  await reached.promise;
+  assert.equal(f.launches.length, 1);
+  observation = 'confirmed';
+  assert.equal((await c.pauseUntilLogin()).runtime, 'stopped');
+  exit.resolve(true);
+  assert.equal((await pending).paused, true);
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), temporaryPause(13));
+  assert.equal(f.launches.length, 1);
+});
+
+check('invalid or noncanonical temporary intent never creates an owner lease', async t => {
+  const f = await fixture(t), file = path.join(f.root, 'lifecycle.json');
+  for (const invalid of [
+    { ...temporaryPause(3), paused: false }, { ...temporaryPause(3), resumeOnLogin: false },
+    { ...temporaryPause(3), loginGeneration: -1 }, { ...temporaryPause(3), loginGeneration: '3' },
+    { ...temporaryPause(3), extra: true }, { version: 2, ...temporaryPause(3) },
+  ]) {
+    const bytes = JSON.stringify(invalid) + '\n';
+    fs.writeFileSync(file, bytes);
+    assert.throws(() => f.open(), /invalid_lifecycle_state/);
+    assert.equal(fs.readFileSync(file, 'utf8'), bytes);
+    assert.equal(fs.existsSync(path.join(f.root, 'controller.lease')), false);
+  }
 });
 
 check('pause interrupts readiness and reconnect cannot overtake it', async t => {
@@ -131,7 +313,7 @@ check('pause interrupts readiness and reconnect cannot overtake it', async t => 
 
 check('a readiness timeout retains the same live child instead of retrying the launch', async t => {
   const f = await fixture(t, { health: false }), c = f.open();
-  assert.deepEqual(await c.reconnect(), { paused: false, runtime: 'running', ready: false, chatAuthorization: 'not-observed' });
+  assert.deepEqual(await c.reconnect(), expectedStatus(false, 'running', false));
   await c.reconnect(); assert.equal(f.launches.length, 1);
 });
 
@@ -146,10 +328,10 @@ check('unconfirmed stop retains paused ownership and forbids release or replacem
   f.children[0].finish();
 });
 
-check('unexpected child exit is failed, not an automatic reconnect or a cleared pause', async t => {
-  const f = await fixture(t), c = f.open(); await c.reconnect();
+check('unexpected child exit with restart disabled is failed, not an automatic reconnect or a cleared pause', async t => {
+  const f = await fixture(t), c = f.open({ maxRestarts: 0 }); await c.reconnect();
   f.children[0].finish();
-  assert.deepEqual(await c.status(), { paused: false, runtime: 'failed', ready: false, chatAuthorization: 'not-observed' });
+  assert.deepEqual(await c.status(), expectedStatus(false, 'failed', false));
   assert.equal(f.launches.length, 1);
 });
 
@@ -205,10 +387,163 @@ check('status neither reads keys nor exports raw local paths or error strings', 
   } finally { fs.readFileSync = read; }
 });
 
-check('dispose pauses and releases its own lease; reopening preserves pause', async t => {
-  const f = await fixture(t), c = f.open(); await c.reconnect(); await c.dispose();
+check('dispose stops its own run and preserves exact running user intent; reopening resumes it', async t => {
+  const f = await fixture(t), c = f.open(); await c.reconnect();
+  const file = path.join(f.root, 'lifecycle.json'), before = fs.readFileSync(file);
+  await c.dispose();
   assert.equal(fs.existsSync(path.join(f.root, 'controller.lease')), false);
-  assert.equal((await f.open().status()).paused, true);
+  assert.deepEqual(fs.readFileSync(file), before);
+  assert.deepEqual(f.pauseAtSignal, [false]);
+  const reopened = f.open();
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline && f.launches.length < 2) await new Promise(resolve => setTimeout(resolve, 25));
+  assert.equal(f.launches.length, 2, 'a persisted resume intent starts the tunnel without a user action');
+  const observed = await reopened.status();
+  assert.equal(observed.paused, false); assert.equal(observed.runtime !== 'stopped', true);
+});
+
+check('dispose never creates missing intent and preserves an explicit manual pause byte-for-byte', async t => {
+  const f = await fixture(t), file = path.join(f.root, 'lifecycle.json');
+  const empty = f.open(); await empty.dispose();
+  assert.equal(fs.existsSync(file), false);
+  const c = f.open(); await c.reconnect(); await c.pause();
+  const before = fs.readFileSync(file); await c.dispose();
+  assert.deepEqual(fs.readFileSync(file), before);
+  assert.equal((await f.open().status()).paused, true); assert.equal(f.launches.length, 1);
+});
+
+check('definitive exit evidence survives disposal but is never reused by a new run', async t => {
+  const f = await fixture(t);
+  let observations = 0, allowExit = true, cleanup = false;
+  const c = f.open({ hasExited: async () => {
+    observations++;
+    if (cleanup) return true;
+    if (allowExit) { allowExit = false; return true; }
+    throw new Error('process_observation_failed');
+  } });
+  try {
+    await c.reconnect();
+    assert.equal((await c.pause()).runtime, 'stopped');
+    assert.equal((await c.status()).runtime, 'stopped');
+    assert.equal(observations, 1);
+    assert.equal((await c.reconnect()).ready, true);
+    assert.equal((await c.pause()).runtime, 'unknown');
+    assert.ok(observations > 1);
+  } finally {
+    cleanup = true;
+    await c.dispose();
+  }
+  assert.equal(fs.existsSync(path.join(f.root, 'controller.lease')), false);
+});
+
+check('dispose never writes intent while stopping an in-flight readiness launch', async t => {
+  const f = await fixture(t); let requested;
+  const probing = new Promise(resolve => { requested = resolve; });
+  const c = f.open({ fetch: () => { requested(); return new Promise(() => {}); } });
+  const started = c.reconnect(); await probing;
+  const file = path.join(f.root, 'lifecycle.json'), before = fs.readFileSync(file);
+  const disposing = c.dispose();
+  await assert.rejects(c.reconnect(), /operation_busy/);
+  const observed = await started; assert.equal(observed.ready, false);
+  await disposing;
+  assert.deepEqual(fs.readFileSync(file), before); assert.equal(f.launches.length, 1);
+  assert.equal(f.children[0].exitCode, 0);
+});
+
+check('explicit pause during disposal still persists before the shared stop settles', async t => {
+  const f = await fixture(t, { stop: false }), c = f.open(); await c.reconnect();
+  const disposing = c.dispose(), file = path.join(f.root, 'lifecycle.json');
+  const paused = c.pause();
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).paused, true);
+  f.children[0].finish(); await paused; await disposing;
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).paused, true);
+  assert.deepEqual(f.pauseAtSignal, [false]);
+});
+
+check('unconfirmed disposal preserves running intent and does not release or relaunch', async t => {
+  const f = await fixture(t, { stop: false }), c = f.open(); await c.reconnect();
+  const file = path.join(f.root, 'lifecycle.json'), before = fs.readFileSync(file);
+  await assert.rejects(c.dispose(), /stop_unconfirmed/);
+  assert.deepEqual(fs.readFileSync(file), before);
+  assert.equal(fs.existsSync(path.join(f.root, 'controller.lease')), true);
+  await assert.rejects(c.reconnect(), /stop_unconfirmed/);
+  assert.equal(f.launches.length, 1); f.children[0].finish();
+});
+
+check('disposal signals a live owned launcher even when its provider could not be captured', async t => {
+  const f = await fixture(t); f.allowUnknownCleanup();
+  const c = f.open({ observeCore: async () => null });
+  assert.equal((await c.reconnect()).runtime, 'unknown');
+  await assert.rejects(c.dispose(), /stop_unconfirmed/);
+  assert.equal(f.children[0].exitCode, 0);
+  assert.equal(fs.existsSync(path.join(f.root, 'controller.lease')), true);
+});
+
+check('corrupt intent does not prevent signaling an owned launcher or authorize lease release', async t => {
+  const f = await fixture(t), c = f.open();
+  await c.reconnect();
+  const state = path.join(f.root, 'lifecycle.json'), original = fs.readFileSync(state);
+  const child = f.children[0];
+  child.kill = signal => { assert.equal(signal, 'SIGTERM'); child.finish(); return true; };
+  fs.writeFileSync(state, '{}');
+  try {
+    await assert.rejects(c.dispose(), /invalid_lifecycle_state/);
+    assert.equal(child.exitCode, 0);
+    assert.equal(fs.existsSync(path.join(f.root, 'controller.lease')), true);
+  } finally { fs.writeFileSync(state, original); }
+});
+
+check('disposal reserves its transition before a reentrant uncertain-core observation', async t => {
+  const f = await fixture(t); let coreExited = false, attempt = false, reentrant;
+  const c = f.open({ hasExited: async () => {
+    if (attempt) { attempt = false; reentrant = c.reconnect().then(() => 'unexpected-success', error => error.message); }
+    return coreExited;
+  } });
+  await c.reconnect(); assert.equal((await c.pause()).runtime, 'unknown');
+  attempt = true;
+  try {
+    await assert.rejects(c.dispose(), /stop_unconfirmed/);
+    assert.equal(await reentrant, 'operation_busy');
+    assert.equal(f.launches.length, 1);
+  } finally { coreExited = true; }
+});
+
+check('a later explicit pause shares the existing stop timer and cannot extend its budget', async t => {
+  const f = await fixture(t, { stop: false }), c = f.open(); await c.reconnect();
+  const original = globalThis.setTimeout, timers = [];
+  globalThis.setTimeout = function(callback, milliseconds, ...args) {
+    timers.push(milliseconds); return Reflect.apply(original, this, [callback, milliseconds, ...args]);
+  };
+  let disposing, paused;
+  try {
+    disposing = c.dispose();
+    assert.equal(timers.length, 1); const initial = [...timers];
+    paused = c.pause(); assert.deepEqual(timers, initial); assert.deepEqual(f.pauseAtSignal, [false]);
+  } finally { globalThis.setTimeout = original; f.children[0].finish(); }
+  await Promise.all([disposing, paused]);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(f.root, 'lifecycle.json'), 'utf8')).paused, true);
+});
+
+check('a reentrant explicit pause while signaling shares one shutdown stop', async t => {
+  const f = await fixture(t), c = f.open(); await c.reconnect();
+  const child = f.children[0], kill = child.kill; let entered = false, nested;
+  child.kill = function(...args) {
+    if (!entered) { entered = true; nested = c.pause(); }
+    return Reflect.apply(kill, this, args);
+  };
+  await c.dispose(); await nested;
+  assert.equal(f.pauseAtSignal.length, 1); assert.equal(f.launches.length, 1);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(f.root, 'lifecycle.json'), 'utf8')).paused, true);
+});
+
+check('disposal reservation also blocks reentrant reconnect when core exit is confirmed', async t => {
+  const f = await fixture(t); let enabled = false, reentrant;
+  const c = f.open({ hasExited: async () => {
+    if (enabled) { enabled = false; reentrant = c.reconnect().then(() => 'unexpected-success', error => error.message); }
+    return true;
+  } });
+  await c.reconnect(); enabled = true; await c.dispose();
+  assert.equal(await reentrant, 'operation_busy'); assert.equal(f.launches.length, 1);
 });
 
 check('parent exit without confirmed core exit is unknown and cannot release or replace', async t => {
@@ -231,7 +566,7 @@ check('a late successful readiness response cannot undo a newer pause', async t 
   const pausing = c.pause();
   answer({ status: 200, body: { cancel: async () => {} } });
   await Promise.all([connecting, pausing]);
-  assert.deepEqual(await c.status(), { paused: true, runtime: 'stopped', ready: false, chatAuthorization: 'not-observed' });
+  assert.deepEqual(await c.status(), expectedStatus(true, 'stopped', false));
 });
 
 check('reconnect reservation precedes an asynchronous old-core observation', async t => {

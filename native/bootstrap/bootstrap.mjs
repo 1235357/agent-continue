@@ -154,14 +154,17 @@ export async function verifyProviderStage(installDir, packageRoot = here) {
     const module = await import(pathToFileURL(path.join(app, 'runtime.mjs')).href);
     const result = module.verifyUpstream(), pin = providerPin(app);
     if (!exact(result, ['version', 'verifiedFiles']) || result.version !== PROVIDER.version || result.verifiedFiles !== pin.files) fail('provider_stage_invalid');
+    verifyFiles(app, manifest, false); verifyLock(app);
+    if (regular(receiptFile, 16384).toString('utf8') !== encode(stageReceipt())) fail('provider_stage_invalid');
     return { providerVersion: PROVIDER.version, files: RUNTIME_FILES.length };
   } catch { fail('provider_stage_invalid'); }
 }
 
 function findNpm(supplied) {
-  const candidates = supplied ? [supplied] : [process.env.npm_execpath,
+  const candidates = supplied ? [supplied] : [
     path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
-    path.resolve(path.dirname(process.execPath), '../lib/node_modules/npm/bin/npm-cli.js')];
+    path.resolve(path.dirname(process.execPath), '../lib/node_modules/npm/bin/npm-cli.js'),
+    process.env.npm_execpath];
   for (const candidate of candidates.filter(Boolean)) {
     try {
       if (!path.isAbsolute(candidate)) continue;
@@ -256,6 +259,10 @@ export async function stageRuntime(options, trusted = {}) {
       fs.writeFileSync(path.join(app, record.path), regular(path.join(packageRoot, 'payload', record.path)), { flag: 'wx', mode: 0o600 });
     }
     verifyFiles(app, manifest, true);
+    // The staged payload manifest is the install root's own integrity truth;
+    // precheck compares every app file against this byte-for-byte copy.
+    fs.writeFileSync(path.join(root, 'payload-manifest.json'),
+      regular(path.join(packageRoot, 'payload-manifest.json'), 65536), { flag: 'wx', mode: 0o600 });
     for (const name of ['home', 'temp', 'cache', 'logs']) fs.mkdirSync(path.join(acquisition, name), { mode: 0o700 });
     for (const name of ['user.npmrc', 'global.npmrc']) fs.writeFileSync(path.join(acquisition, name), '', { flag: 'wx', mode: 0o600 });
     const home = path.join(acquisition, 'home'), temp = path.join(acquisition, 'temp');

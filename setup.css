@@ -1,0 +1,66 @@
+.setup-brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.setup-brand img { flex: 0 0 32px; }
+.setup-brand > div { min-width: 0; }
+.setup-brand a { font-weight: 600; text-decoration: none; }
+.target-field { max-width: 480px; margin-top: 16px; }
+.target-field label { display: block; margin-bottom: 6px; color: #525b64; }
+.windows-access-field { max-width: 400px; margin-top: 12px; }
+.windows-access-field label { display: block; margin-bottom: 4px; color: #525b64; }
+.windows-access-field select { min-width: 0; max-width: 100%; }
+.resource-links { padding-left: 20px; }
+.resource-links li + li { margin-top: 8px; }
+.handoff-command { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 ui-monospace, Consolas, monospace; }
+#request-preview { margin: 16px 0; padding: 12px; border: 1px solid #cfd5da; border-radius: 4px; max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 ui-monospace, Consolas, monospace; }
+#reviewSetup { background: #17654b; border-color: #17654b; color: #fff; }
+#reviewSetup:disabled { background: #526b60; border-color: #526b60; color: #fff; }
+.os-switch { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 0; }
+.os-switch button { flex: 1 1 auto; min-width: 96px; }
+.os-switch button[aria-pressed="true"] { background: #17654b; border-color: #17654b; color: #fff; }
+.os-switch button[aria-pressed="true"]:hover:not(:disabled) { background: #124f3b; }
+.install-label { margin-top: 16px; color: #525b64; }
+.local-control-address { box-sizing: border-box; width: 100%; padding: 8px; font: inherit; }
+#localControlButtons[hidden] { display: none; }
+#localControlReceipt { overflow-wrap: anywhere; }
+#installSection h3 { margin: 24px 0 0; font-size: 16px; line-height: 1.4; }
+#installSection { padding-top: 20px; }
+#installSection .feedback { min-height: 0; }
+#installSection .feedback:empty { margin-top: 0; }
+#installConsentLabel { margin-bottom: 8px; }
+#installFeedback { margin-top: 0; font-size: 12px; }
+.primary-setup-action { margin-top: 8px; }
+#copyWindowsBrowserPowerShell { background: #17654b; border-color: #17654b; color: #fff; }
+#copyWindowsBrowserPowerShell:hover:not(:disabled) { background: #124f3b; }
+#copyWindowsBrowserPowerShell:disabled { background: #526b60; border-color: #526b60; color: #fff; }
+.setup-result { margin-top: 16px; }
+#installSection .setup-result h3 { margin: 0; font-size: 13px; }
+#installDetection { margin-top: 2px; overflow-wrap: anywhere; }
+#windowsExistingDevice { margin-top: 8px; }
+#windowsSetupSteps { margin: 12px 0 0; padding-left: 24px; }
+#windowsSetupSteps li { padding-left: 4px; }
+#windowsSetupSteps strong { display: block; }
+#installSection details { margin-top: 12px; }
+#installSection summary { min-height: 44px; padding: 10px 0; cursor: pointer; overflow-wrap: anywhere; }
+#setupAdvanced > section { border-radius: 0; }
+.setup-management { padding: 16px 0; }
+.setup-management summary { cursor: pointer; font-weight: 600; }
+.setup-management h2 { margin-top: 16px; }
+@media (max-width: 520px) {
+  header { padding-top: 8px; padding-bottom: 8px; gap: 4px; }
+  .setup-brand { gap: 8px; }
+  .setup-brand h1 { font-size: 18px; }
+  .language-field { width: 132px; margin-left: auto; }
+  .language-field label { font-size: 11px; }
+  #installSection { padding-top: 12px; }
+  .windows-access-field { margin-top: 8px; }
+  #installSection .release-state, #setupRisk { margin-top: 8px; }
+  #installSection .notice { padding: 6px 10px; font-size: 13px; line-height: 1.5; }
+  #installConsentLabel { margin-top: 10px; margin-bottom: 4px; }
+  #installFeedback { line-height: 1.4; }
+  #setupGrantBoundary { font-size: 12px; }
+}
+@media (prefers-color-scheme: dark) {
+  .target-field label { color: #bdc6cd; }
+  .windows-access-field label { color: #bdc6cd; }
+  #request-preview { border-color: #59636a; }
+  .install-label { color: #bdc6cd; }
+}

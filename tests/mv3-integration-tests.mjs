@@ -195,11 +195,94 @@ async function recoveryDiagnostics(worker, control) {
 try {
   let session = await launch(); context = session.context;
   let { worker, control, id } = session;
+  // CDP-attached default contexts do not opt into download events by default.
+  // This browser/profile is disposable; never change a user's download policy.
+  const downloads = path.join(profile, 'downloads');
+  await fs.mkdir(downloads, { recursive: true });
+  const downloadPolicy = await browser.newBrowserCDPSession();
+  await downloadPolicy.send('Browser.setDownloadBehavior', { behavior: 'allowAndName', downloadPath: downloads, eventsEnabled: true });
   const manifest = await worker.evaluate(() => chrome.runtime.getManifest());
   assert.equal(manifest.manifest_version, 3);
   assert.deepEqual(manifest.host_permissions, ['https://chatgpt.com/*']);
   assert.equal((await state(control)).ok, true, 'Full extension page must pass sender authorization.');
   pass('Real extension: manifest/service worker load and full-control-page runtime messages are authorized.');
+
+  assert.ok(manifest.optional_permissions.includes('nativeMessaging'));
+  assert.equal(manifest.permissions.includes('nativeMessaging'), false);
+  // Navigation persists the existing draft; seed that ordinary saved state so
+  // the checks below still reject any device, permission or scheduler writes.
+  await worker.evaluate(config => chrome.storage.local.set({ config }), (await state(control)).config);
+  const storedBeforeDevices = await worker.evaluate(() => chrome.storage.local.get(null));
+  await control.locator('#tab-settings').click();
+  const openedDevices = context.waitForEvent('page', { timeout: 15000 });
+  await control.getByRole('button', { name: 'Open device controls', exact: true }).click();
+  const devices = await openedDevices;
+  await devices.waitForFunction(() => !document.querySelector('[data-action="status"]')?.disabled);
+  assert.equal(devices.url(), `chrome-extension://${id}/devices.html?mode=browser-managed`);
+  assert.equal(await devices.title(), 'Agent Continue | Devices');
+  assert.equal(await devices.locator('#device-advanced').getAttribute('open'), null);
+  await devices.locator('#device-advanced > summary').click();
+  assert.equal(await devices.locator('#extension-id').innerText(), id);
+  assert.equal(await devices.evaluate(() => chrome.permissions.contains({ permissions: ['nativeMessaging'] })), false);
+  assert.equal(await devices.locator('#permission').innerText(), 'Not granted');
+  assert.equal(await devices.locator('#registration').innerText(), 'Not checked');
+  assert.equal(await devices.locator('[data-action="reconnect"]').isDisabled(), true);
+  assert.equal(await devices.locator('#grantPermission').isDisabled(), true);
+  await devices.locator('[data-action="status"]').click();
+  await devices.waitForFunction(() => document.querySelector('#feedback').textContent.includes('no permission prompt or native bridge request was sent'));
+  assert.equal(await devices.locator('#registration').innerText(), 'Not checked');
+  assert.deepEqual(await worker.evaluate(() => chrome.storage.local.get(null)), storedBeforeDevices);
+  assert.equal((await state(control)).job?.enabled || false, false);
+  await devices.getByRole('link', { name: 'Windows command setup and local controls', exact: true }).click();
+  await devices.waitForFunction(() => !document.querySelector('#language')?.disabled);
+  assert.equal(devices.url(), `chrome-extension://${id}/setup.html`);
+  assert.equal(await devices.locator('#setupAdvanced').getAttribute('open'), null);
+  await devices.locator('#setupAdvanced > summary').click();
+  assert.equal(await devices.locator('#extension-id').innerText(), id);
+  await devices.waitForFunction(() => document.querySelector('#browser-permission').textContent === 'Not granted');
+  assert.equal(await devices.locator('#target').inputValue(), 'windows');
+  assert.equal(await devices.locator('#reviewSetup').isDisabled(), false);
+  await devices.locator('#target').selectOption('windows');
+  await devices.locator('#reviewSetup').click();
+  const expectedSetup = { format: 'agent-continue-device-setup', version: 1, target: 'windows', extensionId: id, nativeHost: 'com.agentcontinue.device_control' };
+  assert.deepEqual(JSON.parse(await devices.locator('#request-preview').innerText()), expectedSetup);
+  assert.equal(await devices.locator('#downloadSetup').isDisabled(), true);
+  await devices.locator('#exportConsent').check();
+  // noDefaults deliberately omits Playwright's download routing. Observe the
+  // owned browser's native events and read the completed file, not UI feedback.
+  const setupDownload = new Promise((resolve, reject) => {
+    let guid;
+    const cleanup = () => { clearTimeout(timeout); downloadPolicy.off('Browser.downloadWillBegin', began); downloadPolicy.off('Browser.downloadProgress', progressed); };
+    const began = event => {
+      if (event.suggestedFilename !== 'agent-continue-setup-request.json') return;
+      guid = event.guid;
+      if (!/^[a-f0-9-]{36}$/i.test(guid)) { cleanup(); reject(new Error('Unexpected owned download identifier')); }
+    };
+    const progressed = event => {
+      if (event.guid !== guid) return;
+      if (event.state === 'completed') { cleanup(); resolve(path.join(downloads, guid)); }
+      else if (event.state === 'canceled') { cleanup(); reject(new Error('Owned setup download was canceled')); }
+    };
+    const timeout = setTimeout(() => { cleanup(); reject(new Error('Owned setup download did not complete')); }, 30000);
+    downloadPolicy.on('Browser.downloadWillBegin', began);
+    downloadPolicy.on('Browser.downloadProgress', progressed);
+  });
+  await devices.locator('#downloadSetup').click();
+  const exportedSetup = await setupDownload.catch(async error => {
+    console.error('Synthetic setup export diagnostic', { feedback: await devices.locator('#export-feedback').innerText(),
+      dialogOpen: await devices.locator('#setupReview').evaluate(element => element.open) });
+    throw error;
+  });
+  assert.deepEqual(JSON.parse(await fs.readFile(exportedSetup, 'utf8')), expectedSetup);
+  await fs.unlink(exportedSetup);
+  assert.equal(await devices.locator('#installation-status').innerText(), 'Not verified');
+  assert.equal(await devices.locator('#chat-status').innerText(), 'Not verified');
+  assert.equal(await devices.evaluate(() => chrome.permissions.contains({ permissions: ['nativeMessaging'] })), false);
+  assert.deepEqual(await worker.evaluate(() => chrome.storage.local.get(null)), storedBeforeDevices);
+  assert.equal((await state(control)).job?.enabled || false, false);
+  await devices.close();
+  pass('Real MV3 Devices navigation loads under extension CSP; native access stays ungranted, Check requests no permission and changes no scheduler storage.');
+  pass('Real MV3 setup handoff exports the actual extension identity through explicit review and consent, without native permission or scheduler changes; installation and chat grants stay unverified.');
 
   const dot = await newTestPage(context); await dot.goto('https://chatgpt.com/dots/home');
   const ordinary = await newTestPage(context); await ordinary.goto('https://chatgpt.com/c/mv3-fixture');

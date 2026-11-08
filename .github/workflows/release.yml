@@ -5,7 +5,7 @@ on:
     tags:
       - 'v*'
 
-# Repository contents access is sufficient to create release assets.
+# Repository contents access is sufficient to create a release.
 # No personal access token or third-party publishing service is needed.
 permissions:
   contents: write
@@ -15,7 +15,147 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  windows-sidecar:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: pwsh
+    outputs:
+      sidecar-sha256: ${{ steps.sidecars.outputs.sidecar-sha256 }}
+    steps:
+      - name: Require a disposable GitHub-hosted Windows x64 runner
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $IsWindows -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -ne 'X64' -or
+              $env:RUNNER_ENVIRONMENT -cne 'github-hosted') {
+            throw 'disposable_github_windows_x64_required'
+          }
+          $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+          try {
+            if ($identity.IsSystem -or -not [Security.Principal.WindowsPrincipal]::new($identity).IsInRole(
+                [Security.Principal.WindowsBuiltInRole]::Administrator)) {
+              throw 'ci_administrator_parent_required: ordinary build token is created only in the bounded CI adapter'
+            }
+          } finally { $identity.Dispose() }
+
+      - name: Check out the tagged revision
+        uses: actions/checkout@v7
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: core.autocrlf
+          GIT_CONFIG_VALUE_0: 'false'
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify release source on canonical main
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python -B scripts/check_release_source.py "$env:RELEASE_TAG"
+          if ($LASTEXITCODE -ne 0) { throw 'Release source verification failed' }
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          architecture: x64
+          package-manager-cache: false
+
+      - name: Test Windows release contracts and installer closure
+        run: |
+          python -B -m unittest discover -s tests -p test_windows_release_workflow.py
+          if ($LASTEXITCODE -ne 0) { throw 'Windows release workflow contracts failed' }
+          python -B -m unittest discover -s tests -p test_windows_release_ci_runner.py
+          if ($LASTEXITCODE -ne 0) { throw 'Windows ordinary-token CI adapter contracts failed' }
+          python -B -m unittest discover -s tests -p test_release_installer_pin.py
+          if ($LASTEXITCODE -ne 0) { throw 'Installer pin contracts failed' }
+          python -B tests/setup-release-tests.py
+          if ($LASTEXITCODE -ne 0) { throw 'Setup release contracts failed' }
+          node --check scripts/build-windows-administrator-bundle.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Administrator builder syntax failed' }
+
+      - name: Acquire the pinned official tunnel archive
+        run: ./native/desktop-commander/test-fixtures/fetch-ci-tunnel.ps1
+
+      - name: Acquire pinned Node and populate the exact runtime npm cache
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pinJson = python -B -c "import json, runpy; print(json.dumps(runpy.run_path('scripts/build-setup-release.py')['NODE_PIN']))"
+          if ($LASTEXITCODE -ne 0) { throw 'Portable Node pins unavailable' }
+          $pin = $pinJson | ConvertFrom-Json
+          $nodeZip = Join-Path $env:RUNNER_TEMP 'agent-continue-release-node.zip'
+          Invoke-WebRequest -Uri "https://nodejs.org/dist/v$($pin.version)/node-v$($pin.version)-win-x64.zip" -OutFile $nodeZip
+          if ((Get-FileHash -LiteralPath $nodeZip -Algorithm SHA256).Hash.ToLowerInvariant() -cne $pin.archiveSha256) {
+            throw 'Portable Node archive digest mismatch'
+          }
+          $cache = Join-Path $env:RUNNER_TEMP 'agent-continue-release-npm-cache'
+          npm ci --ignore-scripts --no-audit --no-fund --prefix native/desktop-commander --cache "$cache"
+          if ($LASTEXITCODE -ne 0) { throw 'Locked Windows runtime acquisition failed' }
+
+      - name: Build and smoke test the reviewed Windows x64 administrator runtime
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bundle = Join-Path $env:RUNNER_TEMP 'agent-continue-windows-administrator-x64.zip'
+          $nodeZip = Join-Path $env:RUNNER_TEMP 'agent-continue-release-node.zip'
+          $cache = Join-Path $env:RUNNER_TEMP 'agent-continue-release-npm-cache'
+          # The disposable runner parent is admin; both unchanged guards run in a
+          # fresh standard-account child with sealed inputs and no Actions environment.
+          ./scripts/Invoke-WindowsReleaseOrdinaryTokenCI.ps1 -NodeArchive "$nodeZip" -TunnelArchive "$env:TUNNEL_CLIENT_TEST_ARCHIVE" -NpmCache "$cache"
+          $report = @(python -B scripts/build-setup-release.py --output dist/native-setup --administrator-bundle "$bundle")
+          if ($LASTEXITCODE -ne 0) { throw 'Administrator setup closure validation failed' }
+          $report | Write-Output
+          $report[-1] | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'agent-continue-setup-build-receipt.json') -Encoding utf8
+
+      - name: Validate setup build receipt and sidecar inventory
+        id: sidecars
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $receipt = Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'agent-continue-setup-build-receipt.json') -Raw | ConvertFrom-Json
+          if ($receipt.built -cne $true -or $receipt.combinedBuilt -cne $true -or $receipt.deliveryContract -cne 'combined-public' -or
+              $receipt.administratorBundleVerified -cne $true -or
+              $receipt.administratorStagerPlan -cne $true -or $receipt.installed -cne $false -or $receipt.published -cne $false) {
+            throw 'Administrator setup build receipt is incomplete or activated'
+          }
+          $expected = @('agent-continue-setup.zip', 'install.ps1', 'SHA256SUMS.txt',
+            'agent-continue-windows-administrator-x64.zip', 'install-administrator.ps1', 'Stage-WindowsAdministratorBundle.ps1')
+          $files = @(Get-ChildItem -LiteralPath dist/native-setup -Force)
+          if ($files.Count -ne $expected.Count -or (Compare-Object -CaseSensitive $expected @($files.Name)) -or
+              @($files | Where-Object { $_.PSIsContainer -or $_.Length -lt 1 -or ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) }).Count) {
+            throw 'Administrator sidecar inventory mismatch'
+          }
+          $digest = (Get-FileHash -LiteralPath dist/native-setup/agent-continue-windows-administrator-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($receipt.administratorBundleSha256 -cne $digest) { throw 'Administrator bundle readback mismatch' }
+          $sums = (Get-FileHash -LiteralPath dist/native-setup/SHA256SUMS.txt -Algorithm SHA256).Hash.ToLowerInvariant()
+          "sidecar-sha256=$sums" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
+
+      - name: Upload verified Windows sidecars
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-continue-windows-release-sidecars
+          path: |
+            dist/native-setup/agent-continue-setup.zip
+            dist/native-setup/install.ps1
+            dist/native-setup/SHA256SUMS.txt
+            dist/native-setup/agent-continue-windows-administrator-x64.zip
+            dist/native-setup/install-administrator.ps1
+            dist/native-setup/Stage-WindowsAdministratorBundle.ps1
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload the original Windows build receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-continue-windows-build-receipt
+          path: ${{ runner.temp }}/agent-continue-setup-build-receipt.json
+          if-no-files-found: error
+          retention-days: 14
+
   release:
+    needs: windows-sidecar
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -25,16 +165,13 @@ jobs:
       - name: Check out the tagged revision
         uses: actions/checkout@v7
         with:
-          persist-credentials: false
           fetch-depth: 0
+          persist-credentials: false
 
-      - name: Verify canonical release source
+      - name: Verify release source on canonical main
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: python3 scripts/check_release_source.py "$RELEASE_TAG"
-
-      - name: Test release provenance and immutable publication
-        run: python3 -m unittest discover -s tests -p test_release_source.py
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -60,15 +197,13 @@ jobs:
           manifest = json.loads(Path("manifest.json").read_text(encoding="utf-8"))
           package = json.loads(Path("package.json").read_text(encoding="utf-8"))
           lock = json.loads(Path("package-lock.json").read_text(encoding="utf-8"))
-          versions = {
-              "manifest.json": manifest["version"],
-              "package.json": package["version"],
-              "package-lock.json": lock["version"],
-              "package-lock.json root package": lock["packages"][""]["version"],
-          }
-          for filename, actual in versions.items():
-              if actual != version:
-                  raise SystemExit(f"{filename}: {actual!r} does not match {tag!r}.")
+          # manifest.json is the extension release version; package.json is the
+          # separate npm CLI version and only has to agree with its lockfile.
+          if manifest["version"] != version:
+              raise SystemExit(f"manifest.json: {manifest['version']!r} does not match {tag!r}.")
+          npm_version = package["version"]
+          if npm_version != lock["version"] or npm_version != lock["packages"][""]["version"]:
+              raise SystemExit("package.json and both package-lock.json versions must match.")
 
           changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
           heading = re.search(r"^## \[" + re.escape(version) + r"\].*$", changelog, re.M)
@@ -79,11 +214,21 @@ jobs:
               "\n\n### Installation\n\n"
               f"Download `agent-continue-{version}.zip`, extract it, and load its "
               "`AgentContinue` directory in Chrome or Edge developer mode. "
-              "No Node.js or build tools are required for installation.\n\n"
+              "No Node.js or build tools are required to install the extension.\n\n"
               f"`agent-continue-{version}-store.zip` is the matching store-upload package. "
               "`SHA256SUMS` contains both archive checksums. "
               "The interface defaults to English; Simplified Chinese is available in Settings. "
               "Automated tests use synthetic pages and do not guarantee permanent website compatibility.\n"
+              "\n### Optional Windows x64 device runtime\n\n"
+              "Device control is separate from extension installation. The optional runtime includes "
+              "pinned portable Node.js, the official OpenAI tunnel client, and locked provider dependencies. "
+              "`agent-continue-setup.zip`, `install.ps1`, `install-administrator.ps1`, "
+              "`Stage-WindowsAdministratorBundle.ps1`, and `agent-continue-windows-administrator-x64.zip` "
+              "are one matching delivery set, checked by `SHA256SUMS.txt`. "
+              "The administrator path requires explicit Windows consent; the standard-account path remains available. "
+              "Installing the extension alone does not install, activate, or authorize this runtime. "
+              "CI build, Plan, and standard-token smoke checks do not establish protected installation, "
+              "live ChatGPT/Dot authorization, signing, or Store publication.\n"
           )
           Path(os.environ["RUNNER_TEMP"], "agent-continue-release-notes.md").write_text(notes, encoding="utf-8")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
@@ -96,6 +241,127 @@ jobs:
       - name: Build verified offline PDF resources
         run: npm run vendor
 
+      - name: Verify native release policy and npm snapshot contracts
+        run: npm run test:native-release
+
+      - name: Verify extracted source installer delivery
+        run: |
+          python3 -m unittest discover -s tests -p test_release_installer_pin.py
+          python3 tests/setup-release-tests.py
+
+      - name: Download verified Windows sidecars
+        uses: actions/download-artifact@v4
+        with:
+          name: agent-continue-windows-release-sidecars
+          path: dist/native-setup
+
+      - name: Download the original Windows build receipt
+        uses: actions/download-artifact@v4
+        with:
+          name: agent-continue-windows-build-receipt
+          path: dist/build-receipts
+
+      - name: Verify downloaded Windows sidecar closure
+        env:
+          WINDOWS_SIDECAR_SHA256: ${{ needs.windows-sidecar.outputs.sidecar-sha256 }}
+        run: |
+          python3 -B - <<'PY'
+          import importlib.util
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import stat
+          import zipfile
+
+          spec = importlib.util.spec_from_file_location("setup_release", "scripts/build-setup-release.py")
+          release = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(release)
+
+          def verify_windows_sidecars(root, expected_digest, repo):
+              required = {"agent-continue-setup.zip", "install.ps1", "SHA256SUMS.txt",
+                          release.ADMIN_ARCHIVE, release.ADMIN_INSTALLER, release.ADMIN_STAGER}
+              if root.is_symlink() or not root.is_dir() or {p.name for p in root.iterdir()} != required:
+                  raise ValueError("sidecar_inventory")
+              for name in required:
+                  path = root / name
+                  info = path.lstat()
+                  if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size < 1:
+                      raise ValueError("sidecar_inventory")
+              sums_path = root / "SHA256SUMS.txt"
+              if (not re.fullmatch(r"[a-f0-9]{64}", expected_digest)
+                      or release.file_digest(sums_path) != expected_digest):
+                  raise ValueError("sidecar_digest")
+
+              def checksums(data):
+                  result = {}
+                  for line in data.decode("ascii").splitlines():
+                      match = re.fullmatch(r"([a-f0-9]{64})  ([A-Za-z0-9_./@+-]+)", line)
+                      if not match:
+                          raise ValueError("sidecar_checksum_format")
+                      digest, name = match.groups()
+                      if name in result or any(part in ("", ".", "..") for part in name.split("/")):
+                          raise ValueError("sidecar_checksum_path_or_duplicate")
+                      result[name] = digest
+                  if not result:
+                      raise ValueError("sidecar_checksum_empty")
+                  return result
+
+              outer = checksums(sums_path.read_bytes())
+              for name in required - {"SHA256SUMS.txt"}:
+                  if name not in outer or release.file_digest(root / name) != outer[name]:
+                      raise ValueError("sidecar_checksum_download")
+              with zipfile.ZipFile(root / "agent-continue-setup.zip") as archive:
+                  names = archive.namelist()
+                  if len(names) != len(set(names)) or "SHA256SUMS.txt" not in names:
+                      raise ValueError("sidecar_checksum_zip_inventory")
+                  inner = checksums(archive.read("SHA256SUMS.txt"))
+                  if set(names) != set(inner) | {"SHA256SUMS.txt"}:
+                      raise ValueError("sidecar_checksum_zip_inventory")
+                  payload = {name: archive.read(name) for name in inner}
+              if (set(outer) != set(inner) | {"agent-continue-setup.zip", release.ADMIN_ARCHIVE}
+                      or any(outer[name] != digest or release.sha256(payload[name]) != digest
+                             for name, digest in inner.items())):
+                  raise ValueError("sidecar_checksum_source")
+              for name in ("install.ps1", release.ADMIN_INSTALLER, release.ADMIN_STAGER):
+                  if payload.get(name) != (root / name).read_bytes():
+                      raise ValueError("sidecar_checksum_readback")
+
+              version = json.loads((repo / "manifest.json").read_text(encoding="utf-8"))["version"]
+              stager = (repo / "scripts" / release.ADMIN_STAGER).read_bytes()
+              helper = release.pin_installer((repo / "native/bootstrap" / release.ADMIN_INSTALLER).read_bytes(), version)
+              helper = release.pin_administrator_hash(helper, "acAdministratorBundleSha256", outer[release.ADMIN_ARCHIVE])
+              helper = release.pin_administrator_hash(helper, "acAdministratorStagerSha256", release.sha256(stager))
+              parent = release.pin_installer((repo / "native/bootstrap/install.ps1").read_bytes(), version)
+              parent = release.pin_administrator_hash(parent, "acAdministratorInstallerSha256", release.sha256(helper))
+              if (payload["install.ps1"] != parent or payload[release.ADMIN_INSTALLER] != helper
+                      or payload[release.ADMIN_STAGER] != stager):
+                  raise ValueError("sidecar_installer_pin")
+              # Data-only source/runtime closure verification, never installation or activation.
+              release.verify_administrator_bundle(root / release.ADMIN_ARCHIVE, payload, repo)
+
+          verify_windows_sidecars(Path("dist/native-setup"), os.environ["WINDOWS_SIDECAR_SHA256"], Path.cwd())
+          print("Exact Windows sidecar set, job digest, checksums, installer pins and runtime closure verified.")
+          PY
+
+      - name: Verify actual npm delivery package
+        env:
+          AGENT_CONTINUE_WINDOWS_RELEASE_DIR: ${{ github.workspace }}/dist/native-setup
+          AGENT_CONTINUE_WINDOWS_RELEASE_RECEIPT: ${{ github.workspace }}/dist/build-receipts/agent-continue-setup-build-receipt.json
+        run: npm run test:package
+
+      - name: Build matching npm CLI archive
+        env:
+          AGENT_CONTINUE_WINDOWS_RELEASE_DIR: ${{ github.workspace }}/dist/native-setup
+          AGENT_CONTINUE_WINDOWS_RELEASE_RECEIPT: ${{ github.workspace }}/dist/build-receipts/agent-continue-setup-build-receipt.json
+        run: |
+          mkdir -p dist/npm-cli
+          npm_config_pack_destination="$PWD/dist/npm-cli" npm pack
+          test "$(find dist/npm-cli -maxdepth 1 -name '*.tgz' | wc -l)" -eq 1
+          cd dist/npm-cli
+          sha256sum *.tgz > NPM-SHA256SUMS.txt
+          sha256sum --check NPM-SHA256SUMS.txt
+
       - name: Install the Chromium test browser
         run: npx playwright install --with-deps chromium
 
@@ -104,28 +370,23 @@ jobs:
 
       - name: Package the loadable extension
         run: |
-          python3 scripts/package.py
-          python3 scripts/package.py --store
+          python3 scripts/package.py --windows-release
           python3 -m unittest discover -s tests -p test_package.py
 
-      - name: Check ZIP integrity and embedded version
+      - name: Check GitHub and Store payloads are byte-identical
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           python3 - <<'PY'
-          import json
           import os
-          import zipfile
+          import sys
           from pathlib import Path
+          sys.path.insert(0, "scripts")
+          from package import verify_distribution_pair
 
           version = os.environ["RELEASE_VERSION"]
-          artifact = Path("dist", f"agent-continue-{version}.zip")
-          with zipfile.ZipFile(artifact) as archive:
-              if archive.testzip() is not None:
-                  raise SystemExit("The extension ZIP failed its integrity check.")
-              manifest = json.loads(archive.read("AgentContinue/manifest.json"))
-              if manifest["version"] != version:
-                  raise SystemExit("The packaged manifest version does not match the tag.")
+          verify_distribution_pair(Path("dist", f"agent-continue-{version}.zip"),
+                                   Path("dist", f"agent-continue-{version}-store.zip"), version)
           PY
 
       - name: Generate and verify SHA-256 checksums
@@ -136,7 +397,7 @@ jobs:
           sha256sum "agent-continue-${RELEASE_VERSION}.zip" "agent-continue-${RELEASE_VERSION}-store.zip" > SHA256SUMS
           sha256sum --check SHA256SUMS
 
-      - name: Create the GitHub Release
+      - name: Create the GitHub Release without replacing assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -146,13 +407,19 @@ jobs:
           archive="dist/agent-continue-${RELEASE_VERSION}.zip"
           store="dist/agent-continue-${RELEASE_VERSION}-store.zip"
           notes="${RUNNER_TEMP}/agent-continue-release-notes.md"
-          if ! known_tags="$(gh api --paginate "repos/${GH_REPO}/releases?per_page=100" --jq '.[].tag_name')"; then
-            echo 'Release lookup failed; refusing to publish.' >&2
+          # A tag-specific lookup only returns published releases. Use the
+          # authenticated list so an existing draft also blocks publication.
+          if ! existing="$(gh api --paginate "repos/${GH_REPO}/releases?per_page=100" --jq '.[].tag_name')"; then
+            printf '%s\n' 'Could not verify that this release tag is unused; no release was created.' >&2
             exit 1
           fi
-          if grep -Fqx -- "$RELEASE_TAG" <<< "$known_tags"; then
-            echo 'Existing release or draft must be reconciled without replacing assets.' >&2
+          if grep -Fqx -- "$RELEASE_TAG" <<< "$existing"; then
+            printf '%s\n' 'Existing release or draft must be reconciled without replacing its assets.' >&2
             exit 1
           fi
           gh release create "$RELEASE_TAG" "$archive" "$store" dist/SHA256SUMS \
+            dist/native-setup/agent-continue-setup.zip dist/native-setup/install.ps1 \
+            dist/native-setup/install-administrator.ps1 dist/native-setup/Stage-WindowsAdministratorBundle.ps1 \
+            dist/native-setup/agent-continue-windows-administrator-x64.zip \
+            dist/native-setup/SHA256SUMS.txt dist/npm-cli/*.tgz dist/npm-cli/NPM-SHA256SUMS.txt \
             --verify-tag --title "Agent Continue ${RELEASE_TAG}" --notes-file "$notes"

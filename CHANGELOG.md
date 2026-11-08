@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.0.0] - Unreleased / Windows Candidate
+
+The upcoming combined Windows identity is 3.0.0. This source entry is not a GitHub/npm publication, Chrome Web Store submission/approval, installed-version receipt or completed final-artifact acceptance. Preserve the separately released scheduler v2.2.1 and its assets.
+
+- Update canonical privacy and English Store source copy for scheduled prompts plus optional, explicitly authorized Windows file/shell/process tools. Keep English default and Simplified Chinese optional; update both READMEs without reclassifying historical scheduler releases.
+- Disclose selected-account, account-wide access rather than an installation-folder sandbox; distinguish current-account privileges, administrator UAC, optional browser `nativeMessaging` and OpenAI workspace/app/conversation grants.
+- Describe official-tunnel command/result sensitivity and local runtime-key handling: path-only terminal input, current-account file references and the administrator's protected credential copy. No-key claims apply only to scheduler/file import.
+- State the actual telemetry configuration: the pinned upstream provider includes telemetry, while the wrapper disables it in both isolated configuration and environment before import and validates that policy; setup dependency acquisition disables npm lifecycle scripts. Do not turn this into a no-network claim.
+- Separate content-reduced scheduler diagnostics from sensitive local tool history, warning-level tunnel logs, prepared-command files, durable operation receipts, setup associations and administrator control archives. Explain records retained by Clear Data and original-ID reconciliation of uncertain operations.
+- Document separate scheduler/device Pause, local Revoke versus OpenAI revocation, manual Pause/Revoke precedence, opt-in administrator browser-reopen restoration and the limits of undo/shutdown/removal. The setup uninstall option produces a plan, not completed removal.
+- Retain developer contact zhentongye2028@u.northwestern.edu, the existing GitHub/Issues and author LinkedIn links, and voluntary sharing of reviewed diagnostics only; never raw runtime history or credentials.
+
+Checkpoint60 records ordinary-web administrator command/file/owned-process proof and an actual GUI Pause/stopped receipt for the dedicated ec7 runtime. New-runtime Revoke, reconnect/browser-reopen restoration, authenticated Dot, current-account installation, existing-install adoption and final-artifact acceptance remain open, along with matching public artifact/download and Store submission checks. This documentation-only update does not operate the runtime or complete those gates; see [Runtime Acceptance](docs/RUNTIME-ACCEPTANCE.md).
+
 ## [2.2.1] - 2026-11-06
 
 - In opt-in Extension Priority mode, refill the configured prompt once more if composer text changes again during authorization. Do not dispatch more than once.

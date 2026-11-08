@@ -80,7 +80,25 @@ check('built package is private, dependency-free and has no lifecycle hooks', t 
   assert.equal(Object.keys(meta.dependencies || {}).length, 0);
   for (const hook of ['preinstall', 'install', 'postinstall', 'prepare', 'prepack', 'postpack']) assert.equal(meta.scripts?.[hook], undefined);
   assert.equal(meta.bin['agent-continue-device'], 'bin.mjs');
-  assert.equal(api.verifyPayload(packaged).files, 12);
+  assert.equal(api.verifyPayload(packaged).files, 21);
+});
+
+check('built payload includes the native bridge dependency closure but never a device binding or channel secret', t => {
+  const { packaged } = fixture(t), payload = path.join(packaged, 'payload');
+  const names = fs.readdirSync(payload).sort();
+  for (const name of ['device-native-host.mjs', 'device-operations.mjs', 'device-owner.mjs', 'device-server.mjs', 'device-ssh.mjs']) {
+    assert.ok(names.includes(name), 'missing native source: ' + name);
+    assert.deepEqual(fs.readFileSync(path.join(payload, name)), fs.readFileSync(path.resolve(here, '../desktop-commander', name)));
+  }
+  for (const name of names.filter(name => name.endsWith('.mjs'))) {
+    const text = fs.readFileSync(path.join(payload, name), 'utf8');
+    for (const match of text.matchAll(/(?:from\s*|import\s*\()(['"])(\.\/[^'"\n]+\.mjs)\1/g)) {
+      assert.ok(names.includes(match[2].slice(2)), 'missing imported runtime source: ' + match[2]);
+    }
+  }
+  for (const name of ['device-native-binding.json', 'device-channel.json', 'device-operations.jsonl']) {
+    assert.equal(names.includes(name), false);
+  }
 });
 
 check('builder canonicalizes a CRLF bin hashbang before npm can rewrite the installed file', t => {
@@ -315,7 +333,7 @@ check('provider stage verification checks canonical receipt, copied bytes and in
   const { root, packaged, installDir } = fixture(t);
   await api.stageRuntime({ installDir, consent: 'acquire-provider' }, composition(packaged, inventoryNpm(root)));
   assert.equal(typeof api.verifyProviderStage, 'function');
-  assert.deepEqual(await api.verifyProviderStage(installDir, packaged), { providerVersion: '0.3.1', files: 12 });
+  assert.deepEqual(await api.verifyProviderStage(installDir, packaged), { providerVersion: '0.3.1', files: 21 });
   const receiptFile = path.join(installDir, 'receipt.json'), bytes = fs.readFileSync(receiptFile);
   fs.appendFileSync(receiptFile, ' ');
   await assert.rejects(api.verifyProviderStage(installDir, packaged), /^Error: provider_stage_invalid$/);
@@ -323,6 +341,28 @@ check('provider stage verification checks canonical receipt, copied bytes and in
   const runtimeFile = path.join(installDir, 'app', 'host.mjs');
   fs.appendFileSync(runtimeFile, '\nchanged');
   await assert.rejects(api.verifyProviderStage(installDir, packaged), /^Error: provider_stage_invalid$/);
+});
+
+check('provider stage rechecks payload and receipt after its awaited runtime import', async t => {
+  for (const kind of ['payload', 'receipt']) {
+    const { root, packaged, installDir } = fixture(t);
+    await api.stageRuntime({ installDir, consent: 'acquire-provider' }, composition(packaged, inventoryNpm(root)));
+    const read = fs.readFileSync, receiptFile = path.join(installDir, 'receipt.json'); let changed = false, scheduled = false;
+    fs.readFileSync = function(file, ...args) {
+      const bytes = Reflect.apply(read, this, [file, ...args]);
+      if (String(file) === receiptFile && !scheduled) {
+        scheduled = true;
+        queueMicrotask(() => {
+          fs.appendFileSync(kind === 'receipt' ? receiptFile : path.join(installDir, 'app', 'host.mjs'), 'changed');
+          changed = true;
+        });
+      }
+      return bytes;
+    };
+    try { await assert.rejects(api.verifyProviderStage(installDir, packaged), /^Error: provider_stage_invalid$/, kind); }
+    finally { fs.readFileSync = read; }
+    assert.equal(changed, true, kind);
+  }
 });
 
 check('cancellation before receipt commit and publication errors leave no final receipt', async t => {

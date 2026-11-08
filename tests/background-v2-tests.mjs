@@ -44,6 +44,7 @@ async function harness(seed = {}) {
       .map(tab => [tab.id, { title: 'Synthetic conversation', autoDiscardable: true, ...copy(tab) }])),
     injections: [], tabUpdates: [], tabGets: [], accessLevels: [], powerCalls: [],
     permissionGranted: seed.permissionGranted ?? false,
+    alarmCreateNoop: seed.alarmCreateNoop ?? false,
   };
   const area = name => ({
     async get(key) { return { [key]: copy(state[name][key]) }; },
@@ -57,7 +58,7 @@ async function harness(seed = {}) {
     alarms: {
       async get(name) { return state.alarms.get(name); },
       async clear(name) { return state.alarms.delete(name); },
-      async create(name, value) { state.alarms.set(name, { name, ...value }); },
+      async create(name, value) { if (!state.alarmCreateNoop) state.alarms.set(name, { name, ...value }); },
       onAlarm: event(),
     },
     permissions: { async contains() { return state.permissionGranted; } },
@@ -659,6 +660,19 @@ await scenario('Unexpected page exceptions cannot copy prompt content into opera
   assert.equal(h.state.alarms.size, 0);
 });
 
+await scenario('Clear Data preserves unresolved administrator operation and Pause evidence', async () => {
+  const journal = { version: 1, operations: [{ bundleSha256: 'a'.repeat(64), operationId: 'b'.repeat(32),
+    control: 'connect', target: 'c'.repeat(32) + ':idle', outcome: 'unconfirmed', state: 'reserved',
+    progress: null, createdAt: 1 }] };
+  const pause = { operationId: 'd'.repeat(32), outcome: 'unconfirmed' };
+  const h = await harness({ local: { windowsAdministratorControlJournalV1: journal,
+    windowsAdministratorPauseLastV1: pause, windowsAdministratorBrowserRestoreV1: true } });
+  await h.message({ type: 'CLEAR_DATA' });
+  assert.deepEqual(h.state.local.windowsAdministratorControlJournalV1, journal);
+  assert.deepEqual(h.state.local.windowsAdministratorPauseLastV1, pause);
+  assert.equal(h.state.local.windowsAdministratorBrowserRestoreV1, undefined);
+});
+
 await scenario('English validation and queued sends preserve user-owned Chinese text', async () => {
   const h = await harness({ language: 'en' });
   assert.throws(() => readConfig({ prompt: '测试', sendMethod: 'invalid' }), {
@@ -815,6 +829,274 @@ await scenario('Concurrent timing diagnostics retain all four bounded observatio
   assert.equal((await second).ok, true);
   assert.equal(h.state.local.logs.length, originalLogCount + 4);
   assert.equal(h.state.session.job.enabled, false);
+});
+
+await scenario('Already-running Resume repairs a lost heartbeat without resetting the current run', async () => {
+  const h = await harness();
+  await h.start({ intervalMinutes: 20 });
+  const before = copy(h.state.session.job);
+  h.state.alarms.delete(alarmName);
+  const resumed = await h.message({ type: 'RESUME' });
+  assert.equal(resumed.ok, true);
+  assert.equal(h.state.alarms.get(alarmName)?.periodInMinutes, 1);
+  for (const key of ['id', 'runId', 'phase', 'runDeadline', 'nextAt', 'prompt', 'queueIndex', 'sentCount']) {
+    assert.deepEqual(h.state.session.job[key], before[key], `${key} must not reset during alarm repair`);
+  }
+  assert.equal(h.sends().length, 0, 'Repair must not submit immediately');
+  await h.tick();
+  assert.equal(h.sends().length, 1, 'The repaired alarm must drive the next scheduled round');
+  await h.message({ type: 'PAUSE' });
+});
+
+await scenario('Failed Resume alarm creation revokes enabled state and a later Resume can recover', async () => {
+  const h = await harness();
+  await h.start({ mode: 'queue-loop', queue: [{ text: 'SYNTHETIC_FIRST' }, { text: 'SYNTHETIC_SECOND' }] });
+  await h.message({ type: 'SEND_NOW' });
+  await h.message({ type: 'PAUSE' });
+  const before = copy(h.state.session.job);
+  const create = h.chrome.alarms.create;
+  h.chrome.alarms.create = async () => { throw new Error('Synthetic create failure'); };
+  const failed = await h.message({ type: 'RESUME' });
+  assert.equal(failed.ok, false);
+  assert.equal(h.state.session.job.enabled, false, 'No enabled state without a usable heartbeat');
+  assert.equal(h.state.local.resumeJob.enabled, false);
+  assert.equal(h.state.session.job.nextAt, null);
+  assert.equal(h.state.alarms.size, 0);
+  for (const key of ['id', 'prompt', 'queue', 'queueIndex', 'sentCount', 'intervalMinutes']) {
+    assert.deepEqual(h.state.session.job[key], before[key], `${key} must survive failed Resume`);
+  }
+  assert.equal(h.sends().length, 1);
+  h.chrome.alarms.create = create;
+  assert.equal((await h.message({ type: 'RESUME' })).ok, true);
+  assert.equal(h.state.alarms.get(alarmName)?.periodInMinutes, 1);
+  await h.tick();
+  assert.equal(h.sends().length, 2);
+  assert.equal(h.sends()[1].args[0].prompt, 'SYNTHETIC_SECOND');
+  await h.message({ type: 'PAUSE' });
+});
+
+await scenario('Resume alarm lookup failure leaves the original task paused', async () => {
+  const h = await harness();
+  await h.start();
+  await h.message({ type: 'PAUSE' });
+  h.chrome.alarms.get = async () => { throw new Error('Synthetic lookup failure'); };
+  assert.equal((await h.message({ type: 'RESUME' })).ok, false);
+  assert.equal(h.state.session.job.enabled, false);
+  assert.equal(h.state.local.resumeJob.enabled, false);
+  assert.equal(h.sends().length, 0);
+});
+
+await scenario('Resume rejects a resolved alarm creation with no periodic readback', async () => {
+  const h = await harness();
+  await h.start();
+  await h.message({ type: 'PAUSE' });
+  h.chrome.alarms.create = async () => {};
+  assert.equal((await h.message({ type: 'RESUME' })).ok, false);
+  assert.equal(h.state.session.job.enabled, false);
+  assert.equal(h.state.local.resumeJob.enabled, false);
+  assert.equal(h.sends().length, 0);
+});
+
+await scenario('Already-running Resume replaces an invalid one-shot alarm', async () => {
+  const h = await harness();
+  await h.start();
+  h.state.alarms.set(alarmName, { name: alarmName, scheduledTime: Date.now() + 60000 });
+  assert.equal((await h.message({ type: 'RESUME' })).ok, true);
+  assert.equal(h.state.alarms.get(alarmName)?.periodInMinutes, 1);
+  assert.equal(h.sends().length, 0);
+  await h.message({ type: 'PAUSE' });
+});
+
+await scenario('An already-enabled task is paused when its heartbeat cannot be repaired', async () => {
+  const h = await harness();
+  await h.start();
+  h.state.alarms.delete(alarmName);
+  h.chrome.alarms.create = async () => { throw new Error('Synthetic repair failure'); };
+  assert.equal((await h.message({ type: 'RESUME' })).ok, false);
+  assert.equal(h.state.session.job.enabled, false);
+  assert.equal(h.state.local.resumeJob.enabled, false);
+  assert.equal(h.sends().length, 0);
+});
+
+await scenario('Pause during heartbeat repair wins and cannot trigger an immediate send', async () => {
+  const h = await harness();
+  await h.start();
+  await h.message({ type: 'PAUSE' });
+  const captured = deferred();
+  const release = deferred();
+  const create = h.chrome.alarms.create;
+  h.chrome.alarms.create = async (...args) => {
+    captured.resolve();
+    await release.promise;
+    return create(...args);
+  };
+  const resuming = h.message({ type: 'RESUME' });
+  await captured.promise;
+  const pausing = h.message({ type: 'PAUSE' });
+  release.resolve();
+  await resuming;
+  assert.equal((await pausing).ok, true);
+  assert.equal(h.state.session.job.enabled, false);
+  assert.equal(h.state.local.resumeJob.enabled, false);
+  assert.equal(h.state.alarms.size, 0);
+  assert.equal(h.sends().length, 0);
+});
+
+await scenario('Heartbeat repair keeps an actual in-flight send authorized and accounts for it once', async () => {
+  const h = await harness();
+  await h.start();
+  const result = deferred();
+  h.pageResult = async args => args.mode === 'send' ? result.promise : { status: 'ready' };
+  const sending = h.message({ type: 'SEND_NOW' });
+  await until(() => h.sends().length === 1);
+  const before = copy(h.state.session.job);
+  h.state.alarms.delete(alarmName);
+  assert.equal((await h.message({ type: 'RESUME' })).ok, true);
+  for (const key of ['runId', 'runDeadline', 'phase', 'nextAt', 'sentCount']) {
+    assert.deepEqual(h.state.session.job[key], before[key]);
+  }
+  assert.equal((await h.message({ type: 'CHECK_RUN', runId: before.runId }, h.sender())).allowed, true);
+  result.resolve({ status: 'sent' });
+  assert.equal((await sending).job.sentCount, 1);
+  assert.equal(h.sends().length, 1);
+  await h.message({ type: 'PAUSE' });
+});
+
+for (const outcome of ['last-queue-item', 'stop-marker']) {
+  await scenario(`Resume repair cannot undo intervening automatic pause: ${outcome}`, async () => {
+    const h = await harness();
+    await h.start(outcome === 'last-queue-item'
+      ? { mode: 'queue-once', queue: [{ text: 'SYNTHETIC_ONLY_ITEM' }] } : {});
+    const pageResult = deferred();
+    h.pageResult = async () => pageResult.promise;
+    const sending = h.message({ type: 'SEND_NOW' });
+    await until(() => h.sends().length === 1);
+    const captured = deferred();
+    const release = deferred();
+    const get = h.chrome.storage.session.get;
+    let intercept = true;
+    h.chrome.storage.session.get = async key => {
+      const value = await get(key);
+      if (key === 'job' && intercept) {
+        intercept = false;
+        captured.resolve();
+        await release.promise;
+      }
+      return value;
+    };
+    const resuming = h.message({ type: 'RESUME' });
+    await captured.promise;
+    pageResult.resolve({ status: outcome === 'last-queue-item' ? 'sent' : 'done' });
+    await delay(5);
+    release.resolve();
+    await resuming;
+    await sending;
+    assert.equal(h.state.session.job.enabled, false, 'Repair must not undo automatic completion/pause');
+    assert.equal(h.state.local.resumeJob.enabled, false);
+    assert.equal(h.state.alarms.size, 0);
+    assert.equal(h.sends().length, 1);
+  });
+}
+
+await scenario('Startup alarm readback failure preserves reachable Pause and later explicit repair', async () => {
+  const first = await harness();
+  await first.start();
+  const h = await harness({ session: copy(first.state.session), local: copy(first.state.local), alarmCreateNoop: true });
+  assert.equal(h.state.session.job.enabled, false);
+  assert.equal(h.state.local.resumeJob.enabled, false);
+  assert.equal((await h.message({ type: 'PAUSE' })).ok, true);
+  h.state.alarmCreateNoop = false;
+  assert.equal((await h.message({ type: 'RESUME' })).ok, true);
+  await h.tick();
+  assert.equal(h.sends().length, 1);
+  await h.message({ type: 'PAUSE' });
+});
+
+await scenario('Resume activation storage rejection revokes session authority before returning failure', async () => {
+  const h = await harness();
+  await h.start();
+  await h.message({ type: 'PAUSE' });
+  const set = h.chrome.storage.local.set;
+  let rejectActivation = true;
+  h.chrome.storage.local.set = async value => {
+    if (value.resumeJob?.enabled && rejectActivation) {
+      rejectActivation = false;
+      throw new Error('Synthetic activation persistence failure');
+    }
+    return set(value);
+  };
+  assert.equal((await h.message({ type: 'RESUME' })).ok, false);
+  assert.equal(h.state.session.job.enabled, false);
+  assert.equal(h.state.local.resumeJob.enabled, false);
+  assert.equal(h.sends().length, 0);
+});
+
+await scenario('Failed Resume cannot retain a stale running recovery record when rollback storage rejects', async () => {
+  const h = await harness();
+  await h.start();
+  await h.message({ type: 'PAUSE' });
+  const set = h.chrome.storage.local.set;
+  h.chrome.storage.local.set = async value => {
+    if (value.resumeJob?.enabled === false) throw new Error('Synthetic rollback persistence failure');
+    return set(value);
+  };
+  h.chrome.alarms.create = async () => { throw new Error('Synthetic alarm failure'); };
+  assert.equal((await h.message({ type: 'RESUME' })).ok, false);
+  assert.equal(h.state.session.job.enabled, false);
+  assert.notEqual(h.state.local.resumeJob?.enabled, true, 'Stale running recovery must be invalidated');
+  assert.equal(h.state.session.job.prompt, 'SYNTHETIC_CONTINUE');
+  assert.equal(h.sends().length, 0);
+});
+
+await scenario('Already-enabled Resume reconciles a stale paused recovery record without resetting the run', async () => {
+  const h = await harness();
+  await h.start();
+  const before = copy(h.state.session.job);
+  h.state.local.resumeJob = { ...copy(before), enabled: false };
+  assert.equal((await h.message({ type: 'RESUME' })).ok, true);
+  assert.deepEqual(h.state.session.job, before);
+  assert.deepEqual(h.state.local.resumeJob, before);
+  assert.equal(h.sends().length, 0);
+  await h.message({ type: 'PAUSE' });
+});
+
+await scenario('Alarm-clear failure cannot prevent Pause resource cleanup or revive sending', async () => {
+  const h = await harness({ permissionGranted: true });
+  await h.start({ keepAwake: true });
+  h.chrome.alarms.clear = async () => { throw new Error('Synthetic clear failure'); };
+  assert.equal((await h.message({ type: 'PAUSE' })).ok, true);
+  assert.equal(h.state.session.job.enabled, false);
+  assert.equal(h.state.local.resumeJob.enabled, false);
+  assert.equal(h.state.tabs.get(7).autoDiscardable, true);
+  assert.equal(h.state.powerCalls.at(-1).method, 'release');
+  assert.equal(h.state.session.job.autoDiscardableChanged, false);
+  await h.tick({ due: false });
+  assert.equal(h.sends().length, 0);
+});
+
+await scenario('Pause retains failed discard restoration ownership for a later cleanup attempt', async () => {
+  const h = await harness();
+  await h.start();
+  h.beforeTabUpdate = async () => { throw new Error('Synthetic tab update failure'); };
+  assert.equal((await h.message({ type: 'PAUSE' })).ok, true);
+  assert.equal(h.state.tabs.get(7).autoDiscardable, false);
+  assert.equal(h.state.session.job.autoDiscardableChanged, true);
+  h.beforeTabUpdate = null;
+  assert.equal((await h.message({ type: 'PAUSE' })).ok, true);
+  assert.equal(h.state.tabs.get(7).autoDiscardable, true);
+  assert.equal(h.state.session.job.autoDiscardableChanged, false);
+});
+
+await scenario('Resume cannot discard the restoration obligation left by a failed Pause cleanup', async () => {
+  const h = await harness();
+  await h.start();
+  h.beforeTabUpdate = async () => { throw new Error('Synthetic tab update failure'); };
+  await h.message({ type: 'PAUSE' });
+  h.beforeTabUpdate = null;
+  assert.equal((await h.message({ type: 'RESUME' })).ok, true);
+  assert.equal((await h.message({ type: 'PAUSE' })).ok, true);
+  assert.equal(h.state.tabs.get(7).autoDiscardable, true);
+  assert.equal(h.state.session.job.autoDiscardableChanged, false);
 });
 
 const failed = results.filter(result => result.status === 'FAIL');

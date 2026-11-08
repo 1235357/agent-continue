@@ -57,14 +57,18 @@ export async function pageAction(args) {
   const stopSelector = 'button[data-testid="stop-button"], button[aria-label="Stop streaming"], button[aria-label="Stop generating"], button[aria-label="Stop response"], button[aria-label="停止生成"], button[aria-label="停止输出"], button[aria-label="停止流式传输"], button[aria-label*="Stop" i], button[aria-label*="停止" i]';
   const busySelector = '.typing-indicator, ' + stopSelector;
   const sendSelector = 'button[data-testid="send-button"], button[data-testid="composer-submit-button"], button[data-testid="fruitjuice-send-button"], button[data-testid*="send" i], button[data-testid*="submit" i], button[aria-label="Send prompt"], button[aria-label="Send message"], button[aria-label="发送提示"], button[aria-label="发送消息"], button[aria-label="Send"], button[aria-label="发送"], button[aria-label*="Send" i], button[aria-label*="发送" i], button[type="submit"]';
+  const modernSelector = role => `[data-chatgpt-search-unit-key$=":${role}"][data-chatgpt-search-message-ids]`;
   const userSelector = isDot
     ? '[data-message-author-role="user"], article.message-row.self .message-body'
-    : '[data-message-author-role="user"]';
+    : `[data-message-author-role="user"], ${modernSelector('user')}`;
   const assistantSelector = isDot
     ? '[data-message-author-role="assistant"], article.message-row:not(.self) .message-body'
-    : '[data-message-author-role="assistant"]';
+    : `[data-message-author-role="assistant"], ${modernSelector('assistant')}`;
 
-  const messageKey = element => element?.getAttribute('data-message-id') || element?.closest('[data-message-id]')?.getAttribute('data-message-id') || element?.getAttribute('data-testid') || element?.id || null;
+  const modernMessageKey = element => element?.getAttribute('data-chatgpt-search-message-ids')?.trim().split(/\s+/)[0] || null;
+  const messageKey = element => element?.getAttribute('data-message-id') || element?.closest('[data-message-id]')?.getAttribute('data-message-id') || modernMessageKey(element) || element?.getAttribute('data-testid') || element?.id || null;
+  const messageNodes = role => [...new Set([...document.querySelectorAll(role === 'user' ? userSelector : assistantSelector)]
+    .map(node => !isDot && node.closest?.(modernSelector(role)) || node))];
 
   const identity = () => {
     if (!isDot) return null;
@@ -76,7 +80,7 @@ export async function pageAction(args) {
   };
 
   const assistantState = () => {
-    const messages = [...document.querySelectorAll(assistantSelector)];
+    const messages = messageNodes('assistant');
     return { assistantToken: messageKey(messages.at(-1)), assistantCount: messages.length };
   };
 
@@ -236,7 +240,7 @@ export async function pageAction(args) {
   const beforeMessages = new Set();
   const beforeKeys = new Set();
   const rememberVisibleHistory = () => {
-    for (const node of document.querySelectorAll(userSelector)) {
+    for (const node of messageNodes('user')) {
       beforeMessages.add(node);
       const key = messageKey(node);
       if (key) beforeKeys.add(key);
@@ -595,12 +599,13 @@ export async function pageAction(args) {
     const confirmDeadline = Math.min(Date.now() + 6500, args.runDeadline);
     while (Date.now() < confirmDeadline) {
       if (!samePage()) return result('unknown', '提交后会话地址变化，无法确认结果；请检查后再继续。');
-      const messages = [...document.querySelectorAll(userSelector)];
+      const messages = messageNodes('user');
       const last = messages.at(-1);
       // A same-text row buried under later activity cannot be attributed to this dispatch.
       // A known row stays historical even if its message key hydrates or changes.
       const lastKey = messageKey(last);
-      if (last && !beforeMessages.has(last) && (!lastKey || !beforeKeys.has(lastKey)) && clean(textOf(last)) === clean(prompt)) {
+      const modernReceipt = !isDot && last?.getAttribute('data-chatgpt-search-unit-key')?.endsWith(':user');
+      if (last && (!modernReceipt || modernMessageKey(last)) && !beforeMessages.has(last) && (!lastKey || !beforeKeys.has(lastKey)) && clean(textOf(last)) === clean(prompt)) {
         return result('sent', useKeyboardOnly ? '已通过 Ctrl+Enter 提交，并在会话中确认新消息。' : '已确认发送并在会话中确认新消息。');
       }
       await wait(180);

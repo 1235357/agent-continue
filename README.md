@@ -1,19 +1,28 @@
 # Agent Continue
 
-English | [简体中文](README.zh-CN.md)
+English | [简体中文](https://github.com/1235357/agent-continue/blob/main/README.zh-CN.md)
 
-Schedule your own prompts in one existing ChatGPT or Your dot conversation, with local controls to start, pause, resume, and inspect activity.
+Schedule your own prompts in one existing ChatGPT or Your dot conversation. The upcoming Windows-enabled release also offers separately installed, explicitly authorized file, shell and process tools.
 
-**v2.2.1 release documentation · Manifest V3 · Free and MIT-licensed**
+**3.0.0 upcoming Windows release: UNRELEASED / candidate. Manifest V3. Free and MIT-licensed.**
 
-[Chrome Web Store](https://chromewebstore.google.com/detail/jpioilmpbolfokedaefmbfbjeaahfdkl) · [GitHub Releases](https://github.com/1235357/agent-continue/releases) · [Source](https://github.com/1235357/agent-continue) · [Changelog](CHANGELOG.md) · [Privacy](PRIVACY.md)
+[Chrome Web Store](https://chromewebstore.google.com/detail/jpioilmpbolfokedaefmbfbjeaahfdkl) · [GitHub Releases](https://github.com/1235357/agent-continue/releases) · [Source](https://github.com/1235357/agent-continue) · [Changelog](https://github.com/1235357/agent-continue/blob/main/CHANGELOG.md) · [Privacy](https://github.com/1235357/agent-continue/blob/main/PRIVACY.md)
 
-This document describes v2.2.1 scheduling and acknowledgement fixes, alongside developer support, schema 3 diagnostics, and the existing single-submit behavior. GitHub releases may ship ahead of Chrome Web Store review. Store availability and downloadable versions are determined by their respective listings; neither this README nor a GitHub release establishes store approval or the version installed in your browser.
+The separately released v2.2.1 remains scheduler-only, including its acknowledgement fixes, developer support and schema 3 diagnostics. The Windows candidate is not a replacement for those published assets. This README does not establish a 3.0.0 release, npm publication, Store submission/approval or installed version. GitHub release availability and Chrome Web Store review are separate; consult the respective listing and your browser's extension details.
 
-Development has resumed. This patch is scheduler-only; Windows device-control
-and administrator-runtime work remain separate, unreleased candidates. The
-[development handoff](docs/DEVELOPMENT-HANDOFF.md) contains historical checkpoints,
-not proof that those candidates have passed current acceptance.
+## Windows Device Setup (3.0.0 Unreleased)
+
+Choose current-account or administrator scope, consent to the stated access, then copy and run the reviewed PowerShell or CMD setup command from the verified, extracted source bundle. Copying does not run it. The guided commands can download, verify and extract official portable Node.js after consent if a compatible version is missing. Current delivery is command-only, not the retired custom Agent Continue launcher/EXE/MSI route; Node.js, the official OpenAI tunnel client and upstream dependencies still run outside the browser. See the repository's [setup commands and scope choices](https://github.com/1235357/agent-continue/blob/main/native/bootstrap/README.md#windows-command-installation). A public 3.0.0 installer/npm route is not established by this source documentation.
+
+**Once connected and authorized, a conversation can read/write files, execute shell commands and manage processes across the selected Windows account, not just the installation folder. This is not a sandbox.** Current-account setup uses existing privileges. Administrator setup separately requests Windows elevation (UAC), stages a protected Program Files runtime, and registers its browser host and administrator-owner task. Standalone current-account setup does not register a browser host; browser-managed current-account setup uses HKCU, and administrator enrollment uses protected HKLM registration. Optional browser `nativeMessaging`, Windows approval and OpenAI conversation authorization are separate grants. Installation is not chat authorization. The administrator installer finishes paused; the consented fresh-administrator flow can then request one connection from the unchanged initiating Setup page. Standalone current-account setup can request one connection with tunnel inputs and connection consent (`CONNECT` in the guided prompt); browser-managed guided setup confirms `REGISTER` without starting the tunnel in that step. Installation and connection may require separate UAC approvals.
+
+Hosted tools need your configured OpenAI workspace/app, official tunnel and a runtime-key file protected on the device. Enter only the file path in the local terminal, not the key in the extension, clipboard, copied command or chat. Current-account configuration references the original file; administrator binding copies it to the protected local `<bundle-root>.secrets/runtime.key`. The original remains your responsibility. Tool arguments and sensitive results, including file contents, command output and process details, travel through OpenAI, not a developer relay. Access controls do not eliminate plaintext secrets on disk/in memory or make this traffic local-only.
+
+The pinned Desktop Commander dependency has upstream telemetry, enabled by default independently. The wrapper disables it with both `telemetryEnabled: false` and `DESKTOP_COMMANDER_DISABLE_TELEMETRY=1` before provider imports, validates that policy on launch, and acquires dependencies with npm lifecycle scripts disabled. This is not a claim that all device traffic is blocked. Local tool history can retain arguments/results; warning-level tunnel logs, prepared commands when used, and durable device/administrator records are distinct from the content-reduced extension activity export. Some control evidence survives Clear Data. Review [Windows data handling](https://github.com/1235357/agent-continue/blob/main/PRIVACY.md#optional-windows-access-and-approvals) before enabling access.
+
+Device Pause is separate from scheduler Pause; ordinary Disconnect and pause does not stop the separate administrator runtime. Check exact native stop outcomes, not only request acknowledgements. Revoke denies future starts for that installation; revoke OpenAI chat/key access separately. Administrator browser-reopen restoration is off unless opted in and may restore only still-authorized saved-running intent, never override manual Pause/Revoke. These controls cannot undo earlier changes, retract results or necessarily stop detached programs. Clearing extension data/uninstalling the extension does not remove native runtimes, task/host registrations, protected credentials or Windows history. The setup uninstall option currently creates a plan, not completed removal.
+
+Checkpoint65 records actual dedicated current-account installation, read-only existing-install adoption, and browser readback of a reachable, paused bridge. Checkpoint64 independently cross-checked ordinary ChatGPT and Dot administrator command/file/owned-process results; an earlier GUI Pause was also observed. These are bounded tests, not permanent readiness or blanket acceptance. Whole-browser administrator saved-running restoration, final installation Revoke, hosted Windows build verification and matching public artifacts/submission remain delivery gates in [Runtime Acceptance](https://github.com/1235357/agent-continue/blob/main/docs/RUNTIME-ACCEPTANCE.md). Read current status before acting; this documentation does not reconnect anything. [Development handoff](https://github.com/1235357/agent-continue/blob/main/docs/DEVELOPMENT-HANDOFF.md) preserves dated results and their limits.
 
 ## Developer and Support
 
@@ -25,21 +34,21 @@ not proof that those candidates have passed current acceptance.
 
 Open **Developer & support** from the support link in Settings or Activity to view these contacts and the installed extension version. The page defaults to English and offers Simplified Chinese. For a bug report, manually provide the extension version, browser version, operating system, and steps to reproduce with synthetic prompts. Describe the expected and actual behavior, and select ordinary ChatGPT, Your dot, or **Not applicable / extension interface** for an interface, settings, or import problem. The separate **Suggestion** form does not require a conversation target or logs.
 
-If diagnostics would help, manually export them from Activity or the support page and review the JSON file before sharing it. Both use schema 3, include the installed extension version, and omit stored free-text messages and unknown fields. You may attach a sanitized copy in the GitHub issue's optional diagnostics field. **GitHub issues and their attachments are public.** Remove identifying data, private prompts, conversation URLs, credentials, cookies, and documents from all report text and attachments. Do not attach configuration backups. Logs can reveal task timing and status; an export is not guaranteed to be anonymous. Exporting logs does not upload them or contact support automatically.
+If diagnostics would help, manually export them from Activity or the support page and review the JSON file before sharing it. Both use schema 4, include the installed extension version, and omit stored free-text messages and unknown fields. You may attach a sanitized copy in the GitHub issue's optional diagnostics field. **GitHub issues and their attachments are public.** Remove identifying data, private prompts, conversation URLs, credentials, cookies, and documents from all report text and attachments. Do not attach configuration backups, runtime keys, raw tool history, prepared commands or native state directories. Logs can reveal task timing and status; an export is not guaranteed to be anonymous. Exporting logs does not upload them or contact support automatically.
 
-Logs are timestamped locally, but diagnostic exports use relative millisecond timings by default, without exact timestamps or the export time. Only the support page offers **Include exact timestamps**, off by default; the Activity export has no exact-timestamp option. Relative timings can also identify activity patterns. See [diagnostic export details and privacy limits](PRIVACY.md#diagnostic-log-export).
+Logs are timestamped locally, but diagnostic exports use relative millisecond timings by default, without exact timestamps or the export time. Only the support page offers **Include exact timestamps**, off by default; the Activity export has no exact-timestamp option. Relative timings can also identify activity patterns. A `timing-probe` diagnostic can retain `kind`, `status`, numeric `durationMs`/`firstMs` bounded to 0–120000 ms, and actual boolean `hidden`, `ok` and `allowed` values. These locally collected fields reveal page visibility and probe/authorization outcomes when present; omitting message text is not a claim of no data collection. See [diagnostic export details and privacy limits](https://github.com/1235357/agent-continue/blob/main/PRIVACY.md#diagnostic-log-export).
 
-![English control console with synthetic demonstration data](docs/store-2.1.0-en-console.png)
+![English control console with synthetic demonstration data](https://raw.githubusercontent.com/1235357/agent-continue/main/docs/store-2.1.0-en-console.png)
 
-The screenshot shows the v2.1.0 console with synthetic content, not a private conversation or evidence of a v2.2.1 installation.
+The screenshot shows the v2.1.0 console with synthetic content, not a private conversation or evidence of a v2.2.1 or 3.0.0 installation.
 
-## Install
+## Scheduler Installation
 
 Use the [Chrome Web Store listing](https://chromewebstore.google.com/detail/jpioilmpbolfokedaefmbfbjeaahfdkl), or select an available packaged ZIP from [GitHub Releases](https://github.com/1235357/agent-continue/releases).
 
 For a packaged ZIP, extract it to a permanent folder, open `chrome://extensions` or `edge://extensions`, enable Developer mode, and choose **Load unpacked**. Select the `AgentContinue` folder containing `manifest.json`. Do not select the ZIP or its parent folder. Chromium 120 or later is declared in the manifest; this is not a claim that every browser/platform combination has been tested.
 
-GitHub's automatic source archives are not prepared installation packages: PDF resources must be assembled using the repository's development instructions. See [CONTRIBUTING.md](CONTRIBUTING.md) and [VALIDATION.md](VALIDATION.md) for build and validation scope.
+GitHub's automatic source archives are not prepared installation packages: PDF resources must be assembled using the repository's development instructions. See [CONTRIBUTING.md](https://github.com/1235357/agent-continue/blob/main/CONTRIBUTING.md) and [VALIDATION.md](https://github.com/1235357/agent-continue/blob/main/VALIDATION.md) for build and validation scope.
 
 ## Start a Task
 
@@ -53,7 +62,7 @@ The interface defaults to English. Select Simplified Chinese in **Settings → L
 
 Resume retains the original task's prompt, target, interval, and counters. To apply edited settings, bind and start a new task; its counters reset. Importing a document alone does not start a task or send a message.
 
-## Current Capabilities
+## Scheduler Capabilities
 
 | Area | Behavior |
 | --- | --- |
@@ -65,14 +74,14 @@ Resume retains the original task's prompt, target, interval, and counters. To ap
 | Background operation | Does not activate the target tab or use the system clipboard |
 | Local interface | English and Simplified Chinese; system, light, and dark themes; prompt text hidden until explicitly shown |
 | Records | Up to 200 locally timestamped activity entries; diagnostic JSON exports default to relative timings and omit stored free-text messages |
-| Support | Developer contacts, installed version, and schema 3 diagnostics; exact-timestamp export requires support-page opt-in |
+| Support | Developer contacts, installed version, and schema 4 diagnostics; exact-timestamp export requires support-page opt-in |
 | Recovery | Saved task recovery when the original target is uniquely identified; no automatic opening of a missing target |
 
 ### One Submission Mechanism per Attempt
 
 Each attempt requires a current background permit and uses one submission mechanism. In automatic mode, Your dot uses Ctrl+Enter; ordinary ChatGPT uses a send button when found, otherwise Enter. With opt-in Extension Priority, automatic mode first uses an available Send button in the target composer. Explicit button-only and Ctrl+Enter-only modes are also available. There is no subsequent switch to another mechanism within that attempt.
 
-By default, an existing draft is preserved. To let the configured prompt replace unsent text, pause the task, enable **Extension priority: allow replacing unsent text** in Settings, and start a new task. Resuming keeps the original settings. This mode never submits existing attachments or bypasses pause and target checks. See [Extension Priority](docs/COMPOSER-PRIORITY.md).
+By default, an existing draft is preserved. To let the configured prompt replace unsent text, pause the task, enable **Extension priority: allow replacing unsent text** in Settings, and start a new task. Resuming keeps the original settings. This mode never submits existing attachments or bypasses pause and target checks. See [Extension Priority](https://github.com/1235357/agent-continue/blob/main/docs/COMPOSER-PRIORITY.md).
 
 A matching new user-message marker is required for confirmation. An empty composer or a busy indicator alone is not success. If confirmation is unavailable, the result remains **unknown**, the confirmed-send count does not increase, and no immediate retry occurs. A later attempt may occur after the full normal interval. This is not exactly-once delivery: an unconfirmed message may already have reached ChatGPT. Pause and inspect the conversation when the result is uncertain. Pausing cannot retract a submission already dispatched.
 
@@ -82,17 +91,17 @@ Confirmation is a page-level observation, not a service receipt. A known node re
 
 The computer and browser must be running, and the target page must remain executable and signed in. Alarm-based scheduling, background ports, and tab discard protection do not guarantee exact timing or prevent all freezing. Missed intervals are not replayed in a burst. Optional idle-sleep prevention uses the `power` permission; it does not override manual sleep or lid-close behavior.
 
-Page changes can break compatibility. This extension sends messages; it does not extend account quotas or model context, and it does not guarantee that an agent continues working or completes a goal. Test and browser-validation records have the specific scope stated in [VALIDATION.md](VALIDATION.md), not permanent live-site acceptance.
+Page changes can break compatibility. This extension sends messages; it does not extend account quotas or model context, and it does not guarantee that an agent continues working or completes a goal. Test and browser-validation records have the specific scope stated in [VALIDATION.md](https://github.com/1235357/agent-continue/blob/main/VALIDATION.md), not permanent live-site acceptance.
 
 ## Local File Import
 
 Text and Markdown files, structured text, HTML, DOCX, and text-based PDF are processed locally. HTML is reduced to text without executing its scripts; DOCX and PDF import extract text rather than preserve layout. PDF parsing uses bundled PDF.js resources, not an online converter or runtime CDN. Scanned PDFs need OCR elsewhere; legacy `.doc`, encrypted documents, and password-protected PDFs are not supported.
 
-Limits: 5 MiB per file, 100,000 characters per prompt, 50 queue items and 600,000 queue characters in total; DOCX body XML is limited to 4 MiB and PDF import to 100 pages. Encoding detection and reading order can be imperfect. Review extracted text before using sensitive or layout-dependent documents. See [File Formats](docs/FILE_FORMATS.md).
+Limits: 5 MiB per file, 100,000 characters per prompt, 50 queue items and 600,000 queue characters in total; DOCX body XML is limited to 4 MiB and PDF import to 100 pages. Encoding detection and reading order can be imperfect. Review extracted text before using sensitive or layout-dependent documents. See [File Formats](https://github.com/1235357/agent-continue/blob/main/docs/FILE_FORMATS.md).
 
 ## Privacy and Permissions
 
-No extension account, API key, developer backend, analytics telemetry, or cloud synchronization is used. ChatGPT sign-in is still required on the target website. When you authorize sending, your prompt is submitted to ChatGPT and handled under that service's policies.
+Prompt scheduling/file import require no separate extension account or API key and use no developer-operated collection backend, analytics telemetry or cloud synchronization. ChatGPT sign-in is still required on the target website. Submitted prompts are handled under that service's policies. Optional hosted Windows tools instead require the local runtime key and separate grants described above, and send tool arguments/results through OpenAI. The telemetry configuration and Windows records are described in [PRIVACY.md](https://github.com/1235357/agent-continue/blob/main/PRIVACY.md#windows-telemetry-logs-and-durable-records), not covered by a scheduler-only no-key claim.
 
 | Permission | Purpose |
 | --- | --- |
@@ -102,10 +111,11 @@ No extension account, API key, developer backend, analytics telemetry, or cloud 
 | `storage` | Store configuration, prompts, queues, templates, language, theme, logs, and recovery state locally |
 | `alarms` | Wake the scheduler for due checks |
 | Optional `power` | Prevent system idle sleep when explicitly enabled |
+| Optional `nativeMessaging` (3.0.0 candidate) | Reach the separately installed Windows bridge for bounded status/lifecycle controls and prepared-process reference checks; not installation, elevation or a chat grant |
 
-Stable v2.2.1 does not request `nativeMessaging` and does not include the unshipped device-control, setup/onboarding, or native-messaging candidates.
+Historical stable v2.2.1 does not request `nativeMessaging` or include Windows control. The upcoming 3.0.0 manifest adds that optional permission without all-site, Cookie, clipboard or debugger permissions. This browser permission boundary is not a sandbox for separately authorized Windows tools. Setup can copy its command through the clipboard API after a user gesture; scheduler sending does not use the clipboard.
 
-Local storage is not encrypted. Hiding prompt text reduces accidental on-screen exposure but is not a security boundary. Configuration exports omit prompt and queue bodies unless explicitly included. Clearing local data does not remove original files, exported files, or messages already sent to ChatGPT. See [PRIVACY.md](PRIVACY.md) for storage, deletion, and disclosure details.
+Local storage is not encrypted. Hiding prompt text reduces accidental on-screen exposure but is not a security boundary. Configuration exports omit prompt and queue bodies unless explicitly included. Clear Data retains the language preference and durable device/control evidence, removes the administrator browser-restore preference, and does not issue Windows Pause/Revoke. It does not remove native state, original files, exported files or data already sent to ChatGPT. See [PRIVACY.md](https://github.com/1235357/agent-continue/blob/main/PRIVACY.md) for storage, deletion and disclosure details.
 
 ## Project
 

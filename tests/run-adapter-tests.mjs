@@ -213,6 +213,69 @@ try {
     }
   });
 
+  for (const reusedId of [false, true]) {
+    await scenario(`Modern ChatGPT message units ${reusedId ? 'reject a reused historical ID' : 'confirm a new user receipt'}`, async ({page,args}) => {
+      await page.evaluate(({ reusedId, prompt }) => {
+        fixture.modernMessages = true;
+        for (const node of document.querySelectorAll('[data-message-author-role]')) {
+          const role = node.getAttribute('data-message-author-role');
+          node.removeAttribute('data-message-author-role');
+          node.dataset.chatgptSearchUnitKey = `fallback-turn-0:0:${role}`;
+          node.dataset.chatgptSearchMessageIds = `synthetic-old-${role}`;
+          if (role === 'user' && reusedId) node.textContent = prompt;
+        }
+        if (reusedId) fixture.reusedModernId = 'synthetic-old-user';
+      }, { reusedId, prompt: args.prompt });
+      const outcome = await page.evaluate(pageAction,args);
+      assert.equal(outcome.status, reusedId ? 'unknown' : 'sent', JSON.stringify(outcome));
+      assert.equal(await page.evaluate(() => fixture.sendClicks),1);
+      assert.equal(outcome.assistantCount,1);
+      assert.equal(outcome.assistantToken,'synthetic-old-assistant');
+    });
+  }
+
+  for (const messageId of ['', '   ', 'synthetic-old-user']) {
+    await scenario(`Modern historical clones cannot confirm with ${messageId.trim() ? 'nested legacy bodies' : `empty ID ${JSON.stringify(messageId)}`}`, async ({page,args}) => {
+      await page.evaluate(({ messageId, prompt }) => {
+        fixture.modernMessages = true;
+        fixture.reusedModernId = messageId;
+        fixture.modernNested = Boolean(messageId.trim());
+        for (const node of [...document.querySelectorAll('[data-message-author-role]')]) {
+          const role = node.getAttribute('data-message-author-role');
+          const wrapper = document.createElement('div');
+          wrapper.dataset.chatgptSearchUnitKey = `fallback-turn-0:0:${role}`;
+          wrapper.dataset.chatgptSearchMessageIds = role === 'user' ? messageId : 'synthetic-old-assistant';
+          node.replaceWith(wrapper);
+          if (role === 'user') node.textContent = prompt;
+          wrapper.append(node);
+          if (!fixture.modernNested) node.removeAttribute('data-message-author-role');
+        }
+      }, { messageId, prompt: args.prompt });
+      const outcome = await page.evaluate(pageAction,args);
+      assert.equal(outcome.status,'unknown',JSON.stringify(outcome));
+      assert.equal(outcome.assistantCount,1);
+      assert.equal(await page.evaluate(() => fixture.sendClicks),1);
+    });
+  }
+
+  await scenario('Modern repeated message-ID tokens retain a stable assistant and new user receipt', async ({page,args}) => {
+    await page.evaluate(() => {
+      fixture.modernMessages = true;
+      fixture.reusedModernId = ' synthetic-new-user synthetic-new-user ';
+      for (const node of document.querySelectorAll('[data-message-author-role]')) {
+        const role = node.getAttribute('data-message-author-role');
+        node.removeAttribute('data-message-author-role');
+        node.dataset.chatgptSearchUnitKey = `fallback-turn-0:0:${role}`;
+        node.dataset.chatgptSearchMessageIds = ` synthetic-old-${role} synthetic-old-${role} `;
+      }
+    });
+    const outcome = await page.evaluate(pageAction,args);
+    assert.equal(outcome.status,'sent',JSON.stringify(outcome));
+    assert.equal(outcome.assistantToken,'synthetic-old-assistant');
+    assert.equal(outcome.assistantCount,1);
+    assert.equal(await page.evaluate(() => fixture.sendClicks),1);
+  });
+
   await scenario('Background send preserves the other tab input and focused element', async ({context,page,args}) => {
     const foreground=await context.newPage();
     await foreground.goto('https://local-foreground.invalid/work');
