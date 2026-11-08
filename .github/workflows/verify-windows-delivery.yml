@@ -112,6 +112,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Windows CI workflow route contracts failed' }
           python -B -m unittest discover -s tests -p test_setup_release_plan.py
           if ($LASTEXITCODE -ne 0) { throw 'Setup release Plan diagnostics contracts failed' }
+          python -B -m unittest discover -s tests -p test_fetch_ci_tunnel.py
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned download retry and watchdog contracts failed' }
 
       - name: Acquire the pinned official tunnel archive
         run: ./native/desktop-commander/test-fixtures/fetch-ci-tunnel.ps1

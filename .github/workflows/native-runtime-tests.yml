@@ -70,6 +70,8 @@ on:
       - 'tests/windows-release-cleanup-tests.ps1'
       - 'tests/native-release-*.mjs'
       - 'tests/native-release-fixture.ps1'
+      - 'tests/test_fetch_ci_tunnel.py'
+      - 'tests/fetch-ci-tunnel-fixture.ps1'
       - 'scripts/Sign-WindowsRelease.ps1'
       - 'scripts/Build-ReleaseNativeLauncher.ps1'
       - '.github/workflows/native-runtime-tests.yml'
@@ -142,6 +144,8 @@ on:
       - 'tests/windows-release-cleanup-tests.ps1'
       - 'tests/native-release-*.mjs'
       - 'tests/native-release-fixture.ps1'
+      - 'tests/test_fetch_ci_tunnel.py'
+      - 'tests/fetch-ci-tunnel-fixture.ps1'
       - 'scripts/Sign-WindowsRelease.ps1'
       - 'scripts/Build-ReleaseNativeLauncher.ps1'
       - '.github/workflows/native-runtime-tests.yml'
@@ -170,6 +174,16 @@ jobs:
           package-manager-cache: false
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm test
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Verify pinned download retries and finite process watchdogs offline
+        working-directory: .
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          python -B -m unittest discover -s tests -p test_fetch_ci_tunnel.py
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned download retry and watchdog contracts failed' }
       - name: Verify installer failure propagation without unpublished release artifacts
         working-directory: .
         # The one public-tarball case requires the original verified Windows
