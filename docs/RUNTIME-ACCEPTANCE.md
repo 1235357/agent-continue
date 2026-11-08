@@ -1,5 +1,30 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Public Release And Store Metadata Rejection (Checkpoint107)
+
+Release12/run42531571521 published v3.0.1 from canonical main2159a8c. Public
+download hashes: standard ZIP ba2cc259cd4e646dd856e163e4114186e0a881961f7c87d76382be0a6196e1c1;
+Store ZIP 4186ab3a439054eeafda0505f3e5713735fbe439e8825d8f5d931e8b540278ad.
+Actual pair verification found250 matching members; original CI Windows receipt
+and six exact sidecars were verified without rewriting receipts. Actual Store
+upload/submission succeeded before Google rejected that3.0.1 draft on November8
+at16:57 CST. Gmail and Status both cite Yellow Argon keyword spam, routingFZSL,
+specifically the English local-document format enumeration. Historical Pending review
+is superseded, not current. No code/security finding was cited; no broad approval
+can be inferred either. No appeal or binary replacement.
+
+Metadata-only correction removes the enumeration and reduces the Store Description
+from10,060 to3,131 characters while retaining Windows capability, separate approvals,
+OpenAI data transmission, Pause/Revoke, uninstall limitations and support contacts.
+Detailed implementation disclosures remain in Not Store Copy and PRIVACY.md.
+34 focused tests passed, including a new regression that first failed on old copy.
+Store save/readback and a new submission receipt remain separate next gates.
+The r11 test runtime stays revoked/not running; no settled operations replayed.
+
+The published notes retain nativeCI69's180-second current-account cold portable-Node
+offline-cache provisioning deadline limitation. Successful prepackaged administrator
+delivery does not establish every installation path or indefinite reliability.
+
 ## Full Windows Delivery Verified Before Tagging (Checkpoint106)
 
 Manual Windows delivery10/run42530851995, job128884487996, succeeded in5m46s

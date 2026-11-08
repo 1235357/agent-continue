@@ -52,7 +52,7 @@ test('privacy disclosure names the actual default and opt-in report fields', () 
 
 test('privacy and listing disclose actual timing-probe fields and enums', () => {
   const policy = read('PRIVACY.md');
-  const listing = read('docs/STORE-LISTING.en.md').split('## Description')[1].split('## Single Purpose')[0];
+  const listing = read('docs/STORE-LISTING.en.md').split('## Detailed Review Reference (Not Store Copy)')[1].split('## Permission Justifications')[0];
   for (const kind of ['authorization', 'page-timers']) {
     for (const status of ['result', 'invalid-result', 'api-rejected', 'watchdog-expired']) {
       const report = buildActivityExport({ now: 200, extensionVersion: '3.0.0', logs: [{ at: 100,

@@ -308,6 +308,19 @@ test('language saves cannot overlap or be re-enabled by a concurrent export rend
   assert.equal(page.node('language-status').hidden, true);
 });
 
+test('store Description is concise and avoids the rejected file-format keyword list', () => {
+  const text = fs.readFileSync(new URL('../docs/STORE-LISTING.en.md', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  const description = text.split('## Description\n')[1]?.split('\n## Single Purpose')[0];
+  assert.ok(description);
+  assert.ok(description.trim().length <= 4000, 'Keep Store copy separate from detailed review notes');
+  assert.doesNotMatch(description, /local text, Markdown, structured text, HTML, DOCX, or text-based PDF/i);
+  assert.doesNotMatch(description, /\b(?:DOCX|PDF|HTML|Markdown)\b/);
+  for (const boundary of ['not a sandbox', 'Pause', 'Revoke', 'OpenAI', 'not guaranteed', 'separate local runtime',
+    'may not stop detached programs', 'Revoke OpenAI conversation access and runtime keys separately']) {
+    assert.ok(description.includes(boundary), `Missing concise disclosure: ${boundary}`);
+  }
+});
+
 test('store Description includes the approved plain-text support contacts', () => {
   const text = fs.readFileSync(new URL('../docs/STORE-LISTING.en.md', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
   const description = text.split('## Description\n')[1]?.split('\n## Single Purpose')[0];

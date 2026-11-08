@@ -14,11 +14,47 @@ Schedule ChatGPT prompts and optionally connect Windows file, shell and process 
 
 ## Description
 
+Schedule your own prompts in a chosen ChatGPT or Your dot conversation. Repeat a prompt, work through a queue, set an interval and pause whenever needed. You can type a prompt or import text from a local document. The interface defaults to English, with Simplified Chinese available in Settings; your own content is not translated.
+
+The computer and browser must stay running, with the target conversation open and signed in. Website changes, sleep and background throttling can delay or prevent a send. Delivery is not guaranteed. The extension does not increase account quotas or guarantee that an AI task finishes. If a submission is uncertain, inspect the conversation before continuing.
+
+Optional Windows control
+
+Connect a separate local runtime to let an authorized conversation read and write files, run PowerShell commands and manage processes. Setup requires your configured OpenAI app and tunnel, a local runtime key, and the relevant browser, Windows and conversation approvals. Current-account tools use your existing privileges; administrator access requires Windows elevation. This is not a sandbox: authorized tools can affect the selected account's files and system. The extension alone does not install or authorize these tools.
+
+Windows tool arguments and results travel through OpenAI's official tunnel and can include sensitive content. Prompts submitted by the scheduler also go to OpenAI. There is no developer-operated data collection backend. Local settings and activity records remain on your device, but local storage is not encrypted. Runtime tool history can retain commands, paths and results. Optional diagnostic exports include activity metadata; review them before sharing.
+
+Scheduler Pause and device Pause are separate. Use the administrator connection's own Pause or Revoke controls when that runtime is enabled, and verify the resulting status. Reopening the browser must not override manual Pause or Revoke. Pause or Revoke may not stop detached programs. Revoke OpenAI conversation access and runtime keys separately. Stopping access cannot undo earlier actions or retract transmitted data. Removing the extension does not remove a separately installed runtime or its credentials and history.
+
+Read the setup and privacy information before enabling Windows control:
+https://github.com/1235357/agent-continue
+https://github.com/1235357/agent-continue/blob/main/PRIVACY.md
+
+Free and open source under the MIT license.
+
+Developer: Zhentong Ye
+Email: zhentongye2028@u.northwestern.edu
+Open-source project: https://github.com/1235357/agent-continue
+Bug reports and suggestions: https://github.com/1235357/agent-continue/issues/new/choose
+Author's LinkedIn: https://www.linkedin.com/in/tony-zhentong-ye/
+
+For a bug report, include the version, reproduction steps and expected versus actual behavior. Sanitized logs are optional. GitHub issues are public: never attach keys, private conversations or raw tool history. Support links do not upload data automatically.
+
+Independent personal project; not an official OpenAI product. The university email does not imply university endorsement or support.
+
+## Single Purpose
+
+Support user-directed ChatGPT workflows through scheduled user-authored prompts and optional, explicitly authorized Windows file/shell/process tools. Local imports, queues, status checks, setup and device lifecycle controls support that workflow. Browser permission, OS elevation and conversation authorization remain separate requirements; this combined-purpose statement does not establish Store-policy approval.
+
+## Detailed Review Reference (Not Store Copy)
+
+The following implementation details support disclosure review and maintenance. They are not part of the Store Description. Keep technical enumerations here and in the canonical privacy policy rather than appending them to consumer-facing listing text.
+
 Agent Continue supports user-directed workflows in ChatGPT: schedule your own prompts in one chosen ChatGPT or Your dot conversation on chatgpt.com, and optionally connect separately installed Windows file, shell and process tools. Scheduling and device connections have separate controls and authorization.
 
 Repeat one prompt, loop a queue, or run a queue once. Set an interval from 1 to 10080 minutes, optionally time the next send after a reply ends, and configure quiet hours, stop markers, or a confirmed-send limit. The default repeats one prompt every 20 minutes and attempts to interrupt an active response when due; waiting for idle is an option.
 
-Type your prompt or import local text, Markdown, structured text, HTML, DOCX, or text-based PDF. Document parsing takes place locally with bundled resources. Text extraction does not preserve every layout, and scanned PDFs require OCR elsewhere. Prompt text is hidden until explicitly revealed. Local templates and up to 200 activity entries help manage repeated work.
+Type your prompt or import text from a local document. Document parsing takes place locally with bundled resources. Text extraction does not preserve every layout, and scanned documents require OCR elsewhere. Prompt text is hidden until explicitly revealed. Local templates and up to 200 activity entries help manage repeated work.
 
 The interface defaults to English and offers a Simplified Chinese language switch. Your language preference is stored locally; your prompts and custom content are not translated. The Developer & support page shows the developer contacts and installed extension version and offers the same language choices.
 
@@ -63,10 +99,6 @@ Logs are timestamped locally; exports default to relative millisecond timings wi
 GitHub issues and their attachments are public. Remove identifying data, private prompts, conversation URLs, credentials, cookies, and documents from report text and attachments. Do not attach runtime keys, raw tool history, prepared commands or native state directories. Task timing and status may remain identifying, so exported logs are not guaranteed to be anonymous. Support sharing is optional; links do not automatically upload diagnostics or grant developer access.
 
 This is an independent personal project, not an official OpenAI product. A university email address does not imply university endorsement or technical support.
-
-## Single Purpose
-
-Support user-directed ChatGPT workflows through scheduled user-authored prompts and optional, explicitly authorized Windows file/shell/process tools. Local imports, queues, status checks, setup and device lifecycle controls support that workflow. Browser permission, OS elevation and conversation authorization remain separate requirements; this combined-purpose statement does not establish Store-policy approval.
 
 ## Permission Justifications
 

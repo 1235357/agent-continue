@@ -2,6 +2,33 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Public 3.0.1 Release; Store Metadata Rejection (Checkpoint107)
+
+GitHub Release v3.0.1 is published from immutable main2159a8c. Release12,
+run42531571521, passed its Windows and Ubuntu jobs. Actual public downloads
+were verified: extension ZIP ba2cc259cd4e646dd856e163e4114186e0a881961f7c87d76382be0a6196e1c1;
+Store ZIP 4186ab3a439054eeafda0505f3e5713735fbe439e8825d8f5d931e8b540278ad.
+The pair contains250 byte-identical members. The original Windows receipt and
+six release sidecars also verified; the npm tarball is not an npm-registry publication.
+
+That exact Store ZIP was uploaded as3.0.1 and a real submission receipt appeared.
+Google then rejected the draft at16:57 CST on November8,2026: Yellow Argon,
+keyword spam, routingFZSL. Actual Gmail and Store Status name the English file-format
+enumeration as excessive keywords. This supersedes the earlier Pending review
+snapshot; it is not a Windows-code finding or approval of the remaining features.
+No appeal was submitted. Remediation is metadata-only: replace the10,060-character
+Description with3,131 characters of plain functional copy, retain material Windows
+scope/data-flow/Pause/Revoke/uninstall disclosures and approved support contacts,
+and keep detailed implementation fields in a separate Not Store Copy section.
+34 focused support/public-documentation checks pass. Save/readback and resubmission
+must still obtain their own platform receipt; do not rebuild or overwritev3.0.1 assets.
+
+Known limit retained in the public release notes: nativeCI69's current-account
+cold portable-Node/offline-cache setup reached its180-second acquisition deadline.
+That does not prove network failure or a product deadlock; prepackaged administrator
+delivery is a separate path. Do not claim every install path passed. The r11 runtime
+remains revoked/not running. No production VPN/MCP/IDE/research changes.
+
 ### Full Windows Delivery Verification Passed (Checkpoint106)
 
 Manual verification10/run42530851995, Windows job128884487996, completed
