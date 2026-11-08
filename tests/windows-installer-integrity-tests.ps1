@@ -20,13 +20,20 @@ if ($policy.Count -eq 1) { . ([scriptblock]::Create($policy[0].Extent.Text)) }
 
 $main = @($ast.EndBlock.Statements | Where-Object { $_ -is [Management.Automation.Language.TryStatementAst] })
 if ($main.Count -ne 1) { throw 'installer_entry_ambiguous' }
-$moduleGate = @($main[0].Body.Statements | Where-Object {
-    $_ -is [Management.Automation.Language.IfStatementAst] -and $_.Clauses[0].Item1.Extent.Text -match '\$PSVersionTable'
+$sumsGate = @($main[0].Body.Statements | Where-Object {
+    $_ -is [Management.Automation.Language.IfStatementAst] -and
+    $_.Clauses[0].Item1.Extent.Text -match "ContainsKey\('ExpectedSumsSha256'\)"
 })
-if ($moduleGate.Count -ne 1) { throw 'installer_preflight_boundary_missing' }
-# Run only statements before even module loading, excluding the installer's trap.
+if ($sumsGate.Count -ne 1) { throw 'installer_preflight_boundary_missing' }
+$moduleCalls = @($main[0].Body.FindAll({ param($n)
+    $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -ceq 'Initialize-InstallerModules'
+}, $true))
+if ($moduleCalls.Count -ne 3 -or @($moduleCalls | Where-Object {
+    $_.Extent.StartOffset -le $sumsGate[0].Extent.EndOffset
+}).Count) { throw 'checksum_pin_guard_missing' }
+# Run only integrity preflight, not later parameter processing or module loading.
 $prefix = [scriptblock]::Create((@($main[0].Body.Statements | Where-Object {
-    $_.Extent.StartOffset -lt $moduleGate[0].Extent.StartOffset
+    $_.Extent.EndOffset -le $sumsGate[0].Extent.EndOffset
 } | ForEach-Object { $_.Extent.Text }) -join "`n"))
 $resolver = @($definitions | Where-Object Name -CEQ 'Resolve-Payload')
 if ($resolver.Count -ne 1) { throw 'payload_resolver_missing' }
@@ -40,13 +47,6 @@ $expansion = @($resolver[0].FindAll({ param($n)
 if ($archiveGate.Count -ne 1 -or $expansion.Count -ne 2 -or
     $archiveGate[0].Extent.EndOffset -ge $expansion[1].Extent.StartOffset) { throw 'archive_gate_not_before_expansion' }
 $archiveCheck = [scriptblock]::Create($archiveGate[0].Extent.Text)
-$sumsGate = @($main[0].Body.Statements | Where-Object {
-    $_ -is [Management.Automation.Language.IfStatementAst] -and
-    $_.Clauses[0].Item1.Extent.Text -match "ContainsKey\('ExpectedSumsSha256'\)"
-})
-if ($sumsGate.Count -ne 1 -or $sumsGate[0].Extent.EndOffset -ge $moduleGate[0].Extent.StartOffset) {
-    throw 'checksum_pin_guard_missing'
-}
 $checkSumsArgument = [scriptblock]::Create('param([string]$ExpectedSumsSha256)' + "`n" + $sumsGate[0].Extent.Text)
 
 $script:checks = 0

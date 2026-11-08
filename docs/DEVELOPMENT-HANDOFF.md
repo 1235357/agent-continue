@@ -2,6 +2,47 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Ordinary-Token Delivery And Refusal Startup (Checkpoint94)
+
+Verify Windows delivery8 on495e76c actually SUCCEEDED (run42510504503,
+Windows job128822322218,6m23s). The disposable ordinary-token child completed
+the combined build and stdio smoke; exact six assets, original build/token
+receipts and source identity were verified. IAB downloaded both artifacts;
+their ZIP digests match the UI: receipts571363ae200fbc961dd691e7c643d2da9d22d060e66341fafc5d2a07a5791dcc,
+sidecars2904abf7ca32ac306326c80554c98f343a3122389dd73286f1bce358a7dbe0fc.
+CI8 administrator ZIP ef4529bcb4d5c508f63433cd328bd8e8c8e041c473d57658199a7dfbc693b68c
+is NOT local r9; never mix the sets. This is a verified build, not installation,
+whole-browser acceptance, Release publication or Store submission.
+
+Native57 Windows128822009450 failed the ORIGINAL valid/invalid guided CMD
+refusal cases at20s. The valid case captured interactive_terminal_required on
+stderr and no fixture change. Its separate3s parser/module probe again ended
+after TLS. Error emission establishes refusal, not when it occurred or whether
+the original process stalled on import or shutdown. The complete root cause
+remains unresolved. Native-release53/53 and earlier steps passed; later skipped
+steps are not accepted. Original timeout/write/consent assertions stay intact.
+
+Source inspection identified unnecessary eager module imports before argument
+and redirected-input refusal. They are now initialized after cheap refusal
+checks, still by exact PS5.1 OS paths before JSON/hash/archive operations.
+A child-only Import-Module shadow proves7 real PS5.1 refusal cases do not
+explicitly import Utility/Archive: RED on old source, GREEN after the change.
+Management may still autoload for filesystem cmdlets. Independent review found
+adjacent ZIP hashing before initialization; initialization now follows the stdin
+guard immediately, before that hashing helper. A new actual PS5.1 regression
+disables autoload, explicitly loads Management and verifies the real initializer
+can restore Utility hashing/JSON and Archive resolution. This is bounded
+fail-fast evidence, not a claim the CI57 stall has been reproduced locally.
+Parent expanded ZIP45/45 passed24.207s; integrity remains166/166 in both
+PS5.1 and PS7; installer recovery/offline67/67 passed41.014s.
+After the review correction, parent full ZIP46/46 passed26.108s and workflow
+contracts25/25 passed0.678s. Independent recheck found the P2 resolved, no new
+scoped source issue; its test executions are not claimed as the reviewer's.
+The unchanged ZIP suite now runs once early in native CI, after Python setup
+and before lengthy acquisition/ledger phases. No coverage or child deadline
+was removed. Parent guided-install/adoption/recovery chain also exited0.
+New source requires a fresh matching candidate/build, not reuse of r9/CI8 pins.
+
 ### CI56 Diagnostic Contract Correction (Checkpoint93)
 
 d057862bd5ea2d23753a922f9566ff340b958e1c is pushed and observed in IAB.

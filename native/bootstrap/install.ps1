@@ -65,9 +65,22 @@ $script:acPayloadRoot = ''
 $script:acRemote = $false
 $script:acKeepTemp = $false
 $script:acExistingBrowserInstall = $false
+$script:acModulesInitialized = $false
 # Stamped in release artifacts; a source checkout deliberately stays unpinned.
 $script:acReleaseTag = ''
 $script:acAdministratorInstallerSha256 = ''
+
+function Initialize-InstallerModules {
+    if ($script:acModulesInitialized) { return }
+    # PS7 parents can pass their PSModulePath to PS5.1. Load OS modules only
+    # after cheap refusal checks, before the first hashing/archive/JSON use.
+    if ($PSVersionTable.PSEdition -eq 'Desktop') {
+        foreach ($module in @('Microsoft.PowerShell.Utility', 'Microsoft.PowerShell.Archive')) {
+            Import-Module (Join-Path $PSHOME ("Modules\$module\$module.psd1")) -ErrorAction Stop
+        }
+    }
+    $script:acModulesInitialized = $true
+}
 
 function Assert-BrowserSetupContinuationInput {
     param([string]$Id, [bool]$Administrator, [bool]$Apply, [bool]$InstallLocal,
@@ -493,14 +506,6 @@ try {
         throw 'payload_integrity_unverified'
     }
 
-    # Node/Python parents can pass a PowerShell 7 PSModulePath to PS5.1.
-    # Resolve the OS-supplied hashing/archive modules explicitly, not by PATH.
-    if ($PSVersionTable.PSEdition -eq 'Desktop') {
-        foreach ($module in @('Microsoft.PowerShell.Utility', 'Microsoft.PowerShell.Archive')) {
-            Import-Module (Join-Path $PSHOME ("Modules\$module\$module.psd1")) -ErrorAction Stop
-        }
-    }
-
     if ($PSBoundParameters.ContainsKey('BrowserSetupId')) {
         Assert-BrowserSetupContinuationInput -Id $BrowserSetupId -Administrator ([bool]$Administrator) -Apply ([bool]$Apply) `
             -InstallLocal ([bool]$InstallLocal) -BrowserManaged ([bool]$BrowserManaged) `
@@ -532,6 +537,7 @@ try {
             if ($ExtensionId -cnotmatch '\A[a-p]{32}\z') { throw 'invalid_extension_id' }
             if (-not $script:acExistingBrowserInstall) {
             if ($Host.Name -cne 'ConsoleHost' -or [Console]::IsInputRedirected) { throw 'interactive_terminal_required' }
+            Initialize-InstallerModules
             if (-not (Get-AdjacentSetupArchive) -and
                 -not (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'bin.mjs') -PathType Leaf) -and
                 -not ($script:acReleaseTag -and $ExpectedSumsSha256)) { throw 'payload_incomplete' }
@@ -566,6 +572,7 @@ try {
             if (-not $SetupRequest -or -not (Test-Path -LiteralPath $SetupRequest -PathType Leaf)) { throw 'install_file_missing' }
             $requestInfo = Get-Item -LiteralPath $SetupRequest -Force
             if ($requestInfo.Length -gt 16384 -or ($requestInfo.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'setup_request_invalid' }
+            Initialize-InstallerModules
             try { $request = Get-Content -LiteralPath $SetupRequest -Raw | ConvertFrom-Json; $requestedId = $request.extensionId }
             catch { throw 'setup_request_invalid' }
             if ($request.format -cne 'agent-continue-device-setup' -or $request.version -ne 1 -or
@@ -578,6 +585,8 @@ try {
         $Apply = $true
     }
     }
+
+    Initialize-InstallerModules
 
     function Write-Result([hashtable]$Value) { [Console]::Out.WriteLine(($Value | ConvertTo-Json -Compress -Depth 8)) }
 

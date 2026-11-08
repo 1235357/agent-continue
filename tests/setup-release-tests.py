@@ -754,6 +754,85 @@ class SetupReleaseCliContractTests(unittest.TestCase):
 
 
 class SetupReleaseTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows PowerShell explicit OS-module initialization")
+    def test_guided_module_initialization_precedes_adjacent_hashing(self):
+        source = (REPO / "native/bootstrap/install.ps1").read_text(encoding="utf-8-sig")
+        refusal = source.index("if ($Host.Name -cne 'ConsoleHost' -or [Console]::IsInputRedirected)")
+        initialize = source.index("Initialize-InstallerModules", refusal)
+        adjacent = source.index("(Get-AdjacentSetupArchive)", refusal)
+        self.assertLess(initialize, adjacent, "valid guided ZIP hashing needs OS Utility first")
+        with tempfile.TemporaryDirectory(prefix="ac-guided-modules-") as temporary:
+            root = Path(temporary).resolve()
+            payload = root / "inert.txt"
+            payload.write_bytes(b"not executable")
+            code = """
+$ErrorActionPreference = 'Stop'
+$PSModuleAutoLoadingPreference = 'None'
+Import-Module ([IO.Path]::Combine($PSHOME,'Modules/Microsoft.PowerShell.Management/Microsoft.PowerShell.Management.psd1')) -ErrorAction Stop
+$tokens=$null; $errors=$null
+$ast=[Management.Automation.Language.Parser]::ParseFile($env:AC_MODULE_INSTALLER,[ref]$tokens,[ref]$errors)
+if ($errors.Count) { throw 'parse_failed' }
+$definition=$ast.FindAll({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -ceq 'Initialize-InstallerModules'},$true)
+if ($definition.Count -ne 1) { throw 'initializer_missing' }
+. ([scriptblock]::Create($definition[0].Extent.Text))
+if (Get-Command Get-FileHash -ErrorAction SilentlyContinue) { throw 'utility_already_loaded' }
+Initialize-InstallerModules
+$hash=Get-FileHash -LiteralPath $env:AC_MODULE_FIXTURE -Algorithm SHA256
+$json=ConvertFrom-Json -InputObject '{"ok":true}'
+if ($hash.Hash -cne $env:AC_MODULE_EXPECTED -or -not $json.ok -or
+    -not (Get-Command Expand-Archive -ErrorAction Stop)) { throw 'module_resolution_failed' }
+[Console]::Out.WriteLine('exact-os-modules-ready')
+"""
+            env = {**os.environ, "AC_MODULE_INSTALLER": str(REPO / "native/bootstrap/install.ps1"),
+                "AC_MODULE_FIXTURE": str(payload), "AC_MODULE_EXPECTED": hashlib.sha256(payload.read_bytes()).hexdigest().upper(),
+                "PSModulePath": str(root / "absent-modules"), "PSModuleAnalysisCachePath": "NUL"}
+            ps = str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe")
+            result = subprocess.run([ps, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", code],
+                cwd=root, env=env, capture_output=True, text=True, timeout=20)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(result.stdout.strip(), "exact-os-modules-ready")
+            self.assertEqual(result.stderr, "")
+
+    @unittest.skipUnless(os.name == "nt", "Windows PowerShell refusal before module loading")
+    def test_refused_guided_input_does_not_load_installer_modules(self):
+        source = (REPO / "native/bootstrap/install.ps1").read_text(encoding="utf-8-sig")
+        anchor = "$script:acPath = $env:PATH"
+        self.assertEqual(source.count(anchor), 1)
+        with tempfile.TemporaryDirectory(prefix="ac-refusal-import-") as temporary:
+            root = Path(temporary).resolve()
+            marker = root / "module-imported.txt"
+            probe = root / "install.ps1"
+            # A child-only command shadow makes premature imports observable;
+            # the original installer and the machine's system modules stay intact.
+            hook = "function Import-Module { [IO.File]::WriteAllText('" + str(marker).replace("'", "''") + \
+                "', 'unexpected import'); throw 'module_import_before_refusal' }\n"
+            probe.write_text(source.replace(anchor, hook + anchor), encoding="utf-8-sig")
+            ps = str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe")
+            local = root / "local"
+            local.mkdir()
+            env = {**os.environ, "LOCALAPPDATA": str(local), "PSModuleAnalysisCachePath": "NUL"}
+            guided = ["-InstallLocal", "-Consent", "accept-install", "-PromptForConnection", "-ExtensionId", "a" * 32]
+            cases = [
+                (guided, "interactive_terminal_required"),
+                (guided[:-1] + ["z" * 32], "invalid_extension_id"),
+                (guided + ["-BrowserManaged"], "interactive_terminal_required"),
+                (guided + ["-Verify"], "invalid_manager_arguments"),
+                (["-InstallLocal", "-PromptForConnection", "-ExtensionId", "a" * 32], "consent_required"),
+                (["-Administrator", "-Apply", "-PromptForConnection"], "consent_required"),
+                (["-Administrator", "-Apply", "-Consent", "accept-administrator-browser-installation",
+                  "-PromptForConnection", "-ExtensionId", "z" * 32], "invalid_extension_id"),
+            ]
+            for args, code in cases:
+                with self.subTest(code=code, args=args):
+                    result = subprocess.run([ps, "-NoLogo", "-NoProfile", "-File", str(probe), *args],
+                        cwd=root, env=env, input="must not be read\n", capture_output=True, text=True, timeout=20)
+                    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                    self.assertEqual(result.stderr.strip(), "agent_continue_install_failed: " + code)
+                    self.assertEqual(result.stdout, "")
+                    self.assertFalse(marker.exists(), "refusal loaded installer modules")
+                    self.assertFalse((local / "AgentContinue").exists())
+                    self.assertFalse((local / "AgentContinueToolchain").exists())
+
     def check_guided_cmd(self, ps, extracted, root):
         sandbox = root / "guided-cmd"
         local = sandbox / "AppData/Local"

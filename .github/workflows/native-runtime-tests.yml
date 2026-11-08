@@ -192,6 +192,9 @@ jobs:
       - name: Verify bounded bootstrap suite coverage
         working-directory: .
         run: python -B -m unittest discover -s tests -p test_windows_release_workflow.py
+      - name: Verify standalone installer ZIP after extraction
+        working-directory: .
+        run: python tests/setup-release-tests.py
       - name: Verify pinned download retries and finite process watchdogs offline
         working-directory: .
         shell: pwsh
@@ -278,9 +281,6 @@ jobs:
       - name: Verify native release packaging and closed Windows preflight failures
         working-directory: .
         run: npm run test:native-release
-      - name: Verify standalone installer ZIP after extraction
-        working-directory: .
-        run: python tests/setup-release-tests.py
       - name: Windows PowerShell 5.1 portable Node first install and integrity reuse
         if: runner.os == 'Windows'
         working-directory: .

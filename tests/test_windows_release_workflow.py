@@ -47,6 +47,16 @@ class WindowsReleaseWorkflowTests(unittest.TestCase):
     def setUp(self):
         self.source = WORKFLOW.read_text(encoding="utf-8")
 
+    def test_standalone_zip_refusals_run_once_before_expensive_native_phases(self):
+        source = (ROOT / ".github/workflows/native-runtime-tests.yml").read_text(encoding="utf-8")
+        core = job(source, "core")
+        name = "Verify standalone installer ZIP after extraction"
+        self.assertEqual(core.count("- name: " + name), 1)
+        self.assertEqual(step(core, name).strip(), "working-directory: .\n        run: python tests/setup-release-tests.py")
+        self.assertLess(core.index("uses: actions/setup-python@v6"), core.index("- name: " + name))
+        self.assertLess(core.index("- name: " + name), core.index("- name: Verify pinned download retries"))
+        self.assertLess(core.index("- name: " + name), core.index("- name: Verify read-only control projections"))
+
     def test_native_bootstrap_phases_cover_each_original_file_once_with_bounded_children(self):
         ordinary = (ROOT / ".github/workflows/native-runtime-tests.yml").read_text(encoding="utf-8")
         core = job(ordinary, "core")

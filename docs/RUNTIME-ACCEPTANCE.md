@@ -1,5 +1,31 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Delivery8 Passed; Refusal Startup Under Verification (Checkpoint94)
+
+2026-11-08 UTC: IAB observed Verify Windows delivery8/run42510504503 SUCCESS
+on495e76c; ordinary-token child combined build/stdio smoke and six-file/source/
+original receipt verification passed. Downloaded artifact digests match UI:
+receipts571363ae200fbc961dd691e7c643d2da9d22d060e66341fafc5d2a07a5791dcc;
+sidecars2904abf7ca32ac306326c80554c98f343a3122389dd73286f1bce358a7dbe0fc.
+Not a publication, installed-runtime or whole-browser recovery proof.
+
+Native57 Windows128822009450 failed two original guided CMD20s cases. Valid
+case stderr contained interactive_terminal_required; no fixture changes.
+Separate diagnostic timeout after TLS is not an original-process trace.
+No claim of a solved root cause. The installer now defers exact OS-module
+imports until after cheap refusal guards. Seven actual child-only import-shadow
+cases were RED before/GREEN after; these observe explicit Utility/Archive calls,
+not absence of implicit Management loading. Independent review identified
+adjacent ZIP hashing before initialization; the call now directly follows the
+stdin guard and precedes that helper, with an added actual OS-module regression.
+Local expanded ZIP45/45 passed24.207s before that review correction,
+PS5.1+PS7 integrity166/166 each, recovery/offline67/67 passed41.014s.
+After the review correction, parent ZIP46/46 passed26.108s; workflow contracts
+25/25 passed0.678s. Cold source recheck resolves the prior P2; no further scoped
+finding. CI runs the same ZIP suite once early, without changed child limits.
+Retain20s limit, no replay, no production or old paused r8 mutation. Future
+CI, fresh artifact and hosted lifecycle gates remain open.
+
 ## CI56 Probe Contract, Not A New Product Timeout Fix (Checkpoint93)
 
 Native56 Windows128818849476 on d057862 passed the original guided CMD cases,
