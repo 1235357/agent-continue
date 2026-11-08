@@ -24,6 +24,7 @@ function fixture(t) {
   const parent = fs.realpathSync(os.tmpdir());
   const root = fs.mkdtempSync(path.join(parent, 'ac-installer-recovery-'));
   const children = new Set();
+  children.started = 0;
   activePowerShell.set(root, children);
   t.after(async () => {
     // A case timeout must close its child before removing that child's fixture.
@@ -60,9 +61,17 @@ async function runPowerShell(t, root, body, phase = 'fixture') {
   t.signal.throwIfAborted();
   const children = activePowerShell.get(root);
   assert.ok(children, 'fixture must remain open until its PowerShell child closes');
+  assert.equal(children.started++, 0, 'a recovery case must use only one cold PowerShell child within its 20s budget');
   const script = path.join(root, 'harness.ps1');
+  const milestones = path.join(root, 'milestones.txt');
   fs.writeFileSync(script, `$ErrorActionPreference = 'Stop'
+$fixtureClock = [Diagnostics.Stopwatch]::StartNew()
+function Write-FixtureMilestone([string]$Name) {
+    [IO.File]::AppendAllText(${quote(milestones)}, ($Name + '=' + $fixtureClock.ElapsedMilliseconds + [Environment]::NewLine))
+}
+Write-FixtureMilestone 'entry'
 Import-Module (Join-Path $PSHOME 'Modules\\Microsoft.PowerShell.Utility\\Microsoft.PowerShell.Utility.psd1')
+Write-FixtureMilestone 'utility-imported'
 $env:PROCESSOR_ARCHITECTURE = 'AMD64'
 $env:PROCESSOR_ARCHITEW6432 = ''
 ${body}`, 'utf8');
@@ -96,7 +105,8 @@ ${body}`, 'utf8');
   });
   const result = await run.closed;
   process.stderr.write(`[installer-recovery] end ${label} elapsed_ms=${Math.round(performance.now() - started)}`
-    + ` status=${result.status} signal=${result.signal} error=${result.error?.code || 'none'}\n`);
+    + ` status=${result.status} signal=${result.signal} error=${result.error?.code || 'none'}`
+    + ` milestones_ms=${JSON.stringify(fs.existsSync(milestones) ? fs.readFileSync(milestones, 'utf8').trim() : 'not-entered')}\n`);
   assert.ifError(result.error);
   assert.equal(result.signal, null);
   t.signal.throwIfAborted();
@@ -106,17 +116,21 @@ ${body}`, 'utf8');
 function loadFunctions(names) {
   return `
 $source = [IO.File]::ReadAllText(${quote(installer)})
+Write-FixtureMilestone 'source-read'
 $tokens = $null; $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$errors)
 if ($errors.Count) { throw 'installer_parse_failed' }
+Write-FixtureMilestone 'source-parsed'
 $definitions = @($ast.FindAll({ param($node)
     $node -is [Management.Automation.Language.FunctionDefinitionAst]
 }, $true))
+Write-FixtureMilestone 'definitions-found'
 foreach ($name in @(${names.map(quote).join(', ')})) {
     $definition = @($definitions | Where-Object { $_.Name -ceq $name })
     if ($definition.Count -ne 1) { throw 'fixture_definition_invalid' }
     . ([scriptblock]::Create($definition[0].Extent.Text))
 }
+Write-FixtureMilestone 'functions-loaded'
 `;
 }
 
@@ -131,8 +145,10 @@ for (const code of codes) {
 $json = ${quote(JSON.stringify({ ok: false, error: code }))}
 $script:acNode = ${quote(process.execPath)}
 $script:acPayloadRoot = ${quote(root)}
+Write-FixtureMilestone 'bootstrap-start'
 try { $null = Invoke-Bootstrap @('verify'); throw 'fixture_expected_failure' }
 catch { $invoked = Get-InstallFailureCode $_.Exception.Message }
+Write-FixtureMilestone 'bootstrap-finished'
 [Console]::WriteLine((@{
     direct = (Get-InstallFailureCode ${quote(code)})
     bootstrap = (Get-BootstrapFailureCode $json 7)
@@ -299,25 +315,29 @@ foreach ($definition in ($definitions | Where-Object { $replacements.ContainsKey
 }
 $copy = Join-Path $global:scenario.root 'install.ps1'
 [IO.File]::WriteAllText($copy, $source)
-$before = @(Get-ChildItem -LiteralPath $global:scenario.local -Recurse -Force | ForEach-Object {
-    @{ path = $_.FullName; length = $(if ($_ -is [IO.FileInfo]) { $_.Length } else { 0 }); ticks = $(if ($_ -is [IO.FileInfo]) { $_.LastWriteTimeUtc.Ticks } else { 0 })
-       hash = $(if ($_ -is [IO.FileInfo]) { (Microsoft.PowerShell.Utility\\Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash } else { '' }) }
-}) | ConvertTo-Json -Compress -Depth 8
-[IO.File]::WriteAllText((Join-Path $global:scenario.root 'before.json'), $before)
-& $copy ${args}
-exit $LASTEXITCODE
+function Get-FixtureCacheSnapshot {
+    $rows = @(Get-ChildItem -LiteralPath $global:scenario.local -Recurse -Force | ForEach-Object {
+        @{ path = $_.FullName; length = $(if ($_ -is [IO.FileInfo]) { $_.Length } else { 0 }); ticks = $(if ($_ -is [IO.FileInfo]) { $_.LastWriteTimeUtc.Ticks } else { 0 })
+           hash = $(if ($_ -is [IO.FileInfo]) { (Microsoft.PowerShell.Utility\\Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash } else { '' }) }
+    })
+    return (ConvertTo-Json -InputObject $rows -Compress -Depth 8)
+}
+[IO.File]::WriteAllText((Join-Path $global:scenario.root 'before.json'), (Get-FixtureCacheSnapshot))
+Write-FixtureMilestone 'wrapper-start'
+try {
+    & $copy ${args}
+    $wrapperExit = $LASTEXITCODE
+} finally {
+    # The wrapper can exit nonzero; read back in this child, not another cold host.
+    [IO.File]::WriteAllText((Join-Path $global:scenario.root 'after.json'), (Get-FixtureCacheSnapshot))
+    Write-FixtureMilestone 'cache-readback-finished'
+}
+exit $wrapperExit
 `, 'wrapper');
   assert.ok(fs.existsSync(path.join(root, 'before.json')), result.stderr || 'fixture setup did not finish');
-  const before = JSON.parse(fs.readFileSync(path.join(root, 'before.json'), 'utf8') || 'null');
-  const after = await runPowerShell(t, root, `
-$rows = @(Get-ChildItem -LiteralPath ${quote(local)} -Recurse -Force | ForEach-Object {
-    @{ path = $_.FullName; length = $(if ($_ -is [IO.FileInfo]) { $_.Length } else { 0 }); ticks = $(if ($_ -is [IO.FileInfo]) { $_.LastWriteTimeUtc.Ticks } else { 0 })
-       hash = $(if ($_ -is [IO.FileInfo]) { (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash } else { '' }) }
-})
-[Console]::WriteLine((ConvertTo-Json -InputObject $rows -Compress -Depth 8))`, 'cache-readback');
-  assert.equal(after.status, 0, after.stderr);
-  const normalize = value => (value === null ? [] : Array.isArray(value) ? value : [value]);
-  assert.deepEqual(normalize(JSON.parse(after.stdout)), normalize(before), 'inspection must not modify the fixture cache or installation');
+  assert.ok(fs.existsSync(path.join(root, 'after.json')), result.stderr || 'fixture readback did not finish');
+  const readback = name => JSON.parse(fs.readFileSync(path.join(root, name), 'utf8'));
+  assert.deepEqual(readback('after.json'), readback('before.json'), 'inspection must not modify the fixture cache or installation');
   const trace = fs.existsSync(traceFile)
     ? fs.readFileSync(traceFile, 'utf8').trim().split(/\r?\n/).map(line => JSON.parse(line)) : [];
   assert.equal(trace.some(row => row.kind.startsWith('forbidden-')), false);
@@ -425,16 +445,16 @@ exit $LASTEXITCODE`, 'browser-status');
   assert.equal(fs.existsSync(path.join(root, 'local')), false);
 });
 
-test('browser-managed installer observation refuses operation IDs and mutating flags before Node dispatch', windows, async t => {
-  const root = fixture(t), copy = path.join(root, 'install.ps1');
-  fs.copyFileSync(installer, copy);
-  fs.writeFileSync(path.join(root, 'bin.mjs'), 'console.log("unexpected-node-dispatch");\n');
-  for (const flags of ['-OperationId aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', '-Apply', '-Consent accept-control']) {
+for (const flags of ['-OperationId aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', '-Apply', '-Consent accept-control']) {
+  test(`browser-managed installer observation refuses ${flags.split(' ')[0]} before Node dispatch`, windows, async t => {
+    const root = fixture(t), copy = path.join(root, 'install.ps1');
+    fs.copyFileSync(installer, copy);
+    fs.writeFileSync(path.join(root, 'bin.mjs'), 'console.log("unexpected-node-dispatch");\n');
     const result = await runPowerShell(t, root, `
 & ${quote(copy)} -DeviceAction browser-installer-status -NodePath ${quote(process.execPath)} ${flags}
 exit $LASTEXITCODE`, `browser-refusal-${flags.split(' ')[0]}`);
     assert.equal(result.status, 1);
     assert.equal(result.stdout, '');
     assert.equal(result.stderr.trim(), 'agent_continue_install_failed: invalid_manager_arguments');
-  }
-});
+  });
+}

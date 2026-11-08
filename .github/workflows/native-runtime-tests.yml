@@ -175,7 +175,7 @@ jobs:
         # The one public-tarball case requires the original verified Windows
         # closure and receipt. release.yml runs it without this exclusion.
         run: node --test --test-skip-pattern "^actual root npm tarball contains verified payload and a runnable CLI$" tests/npm-package-tests.mjs
-      # These disjoint top-level prefix groups cover all recovery cases (10/13/12)
+      # These disjoint top-level prefix groups cover all recovery cases (12/13/12)
       # without sharing one 3-minute PowerShell startup budget. Each group retains
       # that limit; every case/child retains its 20s/15s bound. Use positive prefixes
       # because Node also matches test-name patterns against the synthetic root.
