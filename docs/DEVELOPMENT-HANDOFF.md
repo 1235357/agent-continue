@@ -30,6 +30,12 @@ reparse rejection. No product guard or15s/20s timeout was relaxed. The precise
 CI38 short-name cause is still unconfirmed until hosted rerun; the local volume
 does not allocate8.3 aliases, so extended-path aliases reproduce the failure class.
 
+The fixture correction was pushed as99d73d089e069afe47d579f0cb4daf6b2fc6392b.
+Native workflow push/PR filters omitted that exact test file, so it did not
+automatically rerun. Added the precise file to both filters; the new contract
+failed for both events before the fix, and the release-workflow suite passed
+21/21 afterward. Hosted native rerun remains a separate pending receipt.
+
 The r8 test installation remains revoked with its original Revoke stopped.
 Reauthorization has been requested but not received; do not reconnect or infer
 new authority from old grants. Current-account hosted operation, actual browser

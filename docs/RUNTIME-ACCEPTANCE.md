@@ -21,6 +21,10 @@
   names, while extended-path aliases deterministically reproduce the old guard
   failure. Containment/naming/reparse checks and15s/20s budgets remain intact.
   Formal delivery7 remains a separate successful build.
+- Fixture correction99d73d0 was pushed and read back. Its native workflow had
+  omitted this file from both push and PR filters; exact matching is now added.
+  The new contract failed both event subtests before correction; the complete
+  release-workflow suite passed21/21. A new hosted native pass is not yet proven.
 - Actual Revoke ee5180ab1aa742b5a30eb02d584ef528 remains stopped and the test
   installation revoked. Reauthorization request is unanswered. Preserve this
   state; current-account hosted calls, whole-browser restoration and final Dot

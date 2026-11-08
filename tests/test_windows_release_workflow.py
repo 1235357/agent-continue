@@ -47,6 +47,14 @@ class WindowsReleaseWorkflowTests(unittest.TestCase):
     def setUp(self):
         self.source = WORKFLOW.read_text(encoding="utf-8")
 
+    def test_offline_payload_fixture_changes_trigger_native_checks(self):
+        ordinary = (ROOT / ".github/workflows/native-runtime-tests.yml").read_text(encoding="utf-8")
+        for event in ("push", "pull_request"):
+            with self.subTest(event=event):
+                trigger = re.search(r"^  " + event + r":\n(.*?)(?=^  [\w-]+:|\Z)", ordinary, re.M | re.S)
+                self.assertIsNotNone(trigger)
+                self.assertIn("      - 'tests/windows-offline-payload-tests.mjs'", trigger.group(1))
+
     def test_public_npm_gate_receives_original_builder_receipt_and_keeps_the_real_tarball_case(self):
         windows = job(self.source, "windows-sidecar")
         upload = step(windows, "Upload the original Windows build receipt")
