@@ -22,6 +22,13 @@ The latest71 package/site/release checks passed in49.480s on c819ac1. Release,
 Store review submission and the remaining real lifecycle/one-action gates remain
 open; the current test installation is still revoked.
 
+Native43 run42481716562 first attempt stopped earlier in the uninstall-result
+negative test: expected exit1, observed null, with an8-second child timeout.
+It did not reach the owner correction. One rerun of only that failed Windows
+job was requested on the same18fd15a commit; attempt2 was actually In progress.
+No timeout or assertion was relaxed. Do not record the ACL correction or full
+native suite as cloud-passed until that rerun provides evidence.
+
 ### Cloud ACL Diagnostics Follow-up (Checkpoint77)
 
 Native40, run42479430126 on531149c, failed the same protected-state fixture

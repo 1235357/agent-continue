@@ -15,6 +15,11 @@
   no production ACL assertion or installed runtime changed. Hosted rerun pending.
 - Parent71 package/site/release tests passed in49.480s on c819ac1. This does not
   establish native43, hosted whole-browser recovery, release or review submission.
+- Native43 first attempt failed an earlier uninstall-result negative case
+  (expected exit1, observed null; child timeout8s) before the owner correction
+  ran. Same-source failed-Windows-job attempt2 is In progress, requested once;
+  no assertion or timeout change. Proof:
+  .artifacts/ordinary-chat-acceptance-20261108/native43-bounded-rerun.png.
 
 ## Cloud ACL Diagnostic Recovery (Checkpoint77)
 
