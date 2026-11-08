@@ -2,6 +2,23 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Cloud ACL Diagnostics Follow-up (Checkpoint77)
+
+Native40, run42479430126 on531149c, failed the same protected-state fixture
+assertion after the stop-receipt assertion. The raw log emitted no ACL diagnostic;
+this is not an ACL-root-cause result. The diagnostic helper had a reproduced
+short/long-parent comparison defect: two equivalent path cases failed before
+the correction. The corrected helper passed8/8 pure path/scope cases independently
+in Windows PowerShell5.1 and PowerShell7. It now emits bounded fixed status/phase
+markers even when collection skips or fails, while preserving the original
+assertion. No product ACL, installed runtime or registration changed. Its next
+cloud run is still needed to identify the actual permission difference.
+
+The installation remains revoked pending the unanswered same-installation
+reauthorization question. Actual whole-browser reopen recovery, remaining hosted
+acceptance, GitHub3.0.0 Release and Store review submission remain open. The r17
+Store3.0.0 upload is a draft, not a review receipt or published version.
+
 ### Final Source Regression And Store Draft Refresh (Checkpoint76)
 
 Main fbd8d58247e416da54a63042769e5961980fbc2f was pushed and read back.

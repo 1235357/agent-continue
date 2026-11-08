@@ -327,26 +327,75 @@ function Assert-PauseResult($Result, [string]$Id, [string]$State) {
     }
 }
 
+function Get-FixtureStateDiagnosticRoot([string]$ScratchRoot, [string]$StateRoot, [string]$ResolvedScratch) {
+    $root = [IO.Path]::GetFullPath($StateRoot)
+    if ([IO.Path]::GetDirectoryName($root) -ine [IO.Path]::GetFullPath($ScratchRoot).TrimEnd('\')) { return $null }
+    # Compare the original pair, then rebase both traversal and output on the resolved scratch.
+    return [IO.Path]::Combine($ResolvedScratch, [IO.Path]::GetFileName($root))
+}
+
+function Test-FixtureStateDiagnosticRoot {
+    $raw = 'C:\Users\RUNNER~1\AppData\Local\Temp\ac-admin-bundle-test-' + ('a' * 32)
+    $resolved = $raw.Replace('RUNNER~1','runneradmin')
+    $cases = @(
+        @{Name='unchanged parent'; Scratch=$raw; State="$raw\native.state"; Resolved=$raw; Expected="$raw\native.state"}
+        @{Name='short-to-long parent'; Scratch=$raw; State="$raw\native.state"; Resolved=$resolved; Expected="$resolved\native.state"}
+        @{Name='long-to-short parent'; Scratch=$resolved; State="$resolved\native.state"; Resolved=$raw; Expected="$raw\native.state"}
+        @{Name='foreign parent'; Scratch=$raw; State='C:\outside\native.state'; Resolved=$resolved; Expected=$null}
+        @{Name='prefix sibling'; Scratch=$raw; State="$raw-other\native.state"; Resolved=$resolved; Expected=$null}
+        @{Name='scratch itself'; Scratch=$raw; State=$raw; Resolved=$resolved; Expected=$null}
+        @{Name='nested state'; Scratch=$raw; State="$raw\nested\native.state"; Resolved=$resolved; Expected=$null}
+        @{Name='parent traversal'; Scratch=$raw; State="$raw\..\native.state"; Resolved=$resolved; Expected=$null}
+    )
+    $failed = 0
+    foreach ($case in $cases) {
+        $actual = Get-FixtureStateDiagnosticRoot $case.Scratch $case.State $case.Resolved
+        if ($actual -cne $case.Expected) { $failed++; Write-Output ('FAIL diagnostic path: ' + $case.Name) }
+    }
+    if ($failed) { throw ('diagnostic_path_regression_failed:' + $failed) }
+    Write-Output ('PASS diagnostic path normalization and scope: ' + $cases.Count + ' pure cases')
+}
+
 function Write-FixtureStateAclDiagnostic([string]$StateRoot) {
+    [Console]::WriteLine('DIAG fixture-state-acl {"status":"started"}')
+    $phase = 'scratch-attributes'
     try {
         if (([IO.File]::GetAttributes($scratch) -band [IO.FileAttributes]::ReparsePoint) -or
-            [IO.Path]::GetFileName($scratch) -cnotmatch '\Aac-admin-bundle-test-[a-f0-9]{32}\z') { return }
+            [IO.Path]::GetFileName($scratch) -cnotmatch '\Aac-admin-bundle-test-[a-f0-9]{32}\z') {
+            [Console]::WriteLine('DIAG fixture-state-acl {"status":"skipped","reason":"scratch-scope"}')
+            return
+        }
+        $phase = 'scratch-resolution'
         $resolvedScratch = (Resolve-Path -LiteralPath $scratch -ErrorAction Stop).ProviderPath.TrimEnd('\')
-        $root = [IO.Path]::GetFullPath($StateRoot)
-        if ([IO.Path]::GetDirectoryName($root) -ine $resolvedScratch) { return }
+        $root = Get-FixtureStateDiagnosticRoot $scratch $StateRoot $resolvedScratch
+        if (-not $root) {
+            [Console]::WriteLine('DIAG fixture-state-acl {"status":"skipped","reason":"state-scope"}')
+            return
+        }
+        $phase = 'expected-descriptor'
         $baseline = New-SealedAcl $true $true
         $expected = [Security.AccessControl.RawSecurityDescriptor]::new($baseline.GetSecurityDescriptorBinaryForm(),0)
         $pending = [Collections.Generic.Stack[string]]::new()
         $pending.Push($root)
         $remaining = 16
         while ($pending.Count -and $remaining-- -gt 0) {
+            $phase = 'member-path'
             $member = [IO.Path]::GetFullPath($pending.Pop())
-            if (-not $member.StartsWith($resolvedScratch + '\', [StringComparison]::OrdinalIgnoreCase)) { continue }
+            if (-not $member.StartsWith($resolvedScratch + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                [Console]::WriteLine('DIAG fixture-state-acl {"status":"skipped","reason":"member-scope"}')
+                continue
+            }
+            $phase = 'member-attributes'
             $attributes = [IO.File]::GetAttributes($member)
             if (($attributes -band [IO.FileAttributes]::ReparsePoint) -or
-                -not ($attributes -band [IO.FileAttributes]::Directory)) { continue }
+                -not ($attributes -band [IO.FileAttributes]::Directory)) {
+                [Console]::WriteLine('DIAG fixture-state-acl {"status":"skipped","reason":"member-type-or-reparse"}')
+                continue
+            }
+            $phase = 'member-descriptor'
             $acl = [IO.Directory]::GetAccessControl($member)
             $actual = [Security.AccessControl.RawSecurityDescriptor]::new($acl.GetSecurityDescriptorBinaryForm(),0)
+            $phase = 'descriptor-metadata'
             $descriptors = @{}
             foreach ($entry in @(@('expected',$expected), @('actual',$actual))) {
                 $aces = @()
@@ -373,16 +422,20 @@ function Write-FixtureStateAclDiagnostic([string]$StateRoot) {
                 actualAceCount=$(if ($null -eq $actual.DiscretionaryAcl) { -1 } else { $actual.DiscretionaryAcl.Count })
                 expectedAces=$descriptors.expected; actualAces=$descriptors.actual
             } | ConvertTo-Json -Depth 5 -Compress)))
+            $phase = 'child-enumeration'
             foreach ($child in ([IO.Directory]::EnumerateDirectories($member) | Select-Object -First 16)) {
                 $pending.Push($child)
             }
         }
+        if ($pending.Count) { [Console]::WriteLine('DIAG fixture-state-acl {"status":"skipped","reason":"member-budget"}') }
     } catch {
         # Diagnostics must not replace the original assertion or disclose raw errors.
+        [Console]::WriteLine(('DIAG fixture-state-acl {"status":"failed","phase":"' + $phase + '"}'))
     }
 }
 
 try {
+    Test-FixtureStateDiagnosticRoot
     if ($NodeArchive) {
         $nodeFolder = Join-Path $scratch 'official-node'
         $null = [IO.Directory]::CreateDirectory($nodeFolder)

@@ -1,5 +1,21 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Cloud ACL Diagnostic Recovery (Checkpoint77)
+
+- Native40 run42479430126 on531149c failed at the same state ACL assertion.
+  There were no diagnostic lines in the actual raw log. Evidence:
+  .artifacts/ordinary-chat-acceptance-20261108/native40-bundle-failure.txt.
+- Reproduced a diagnostic-only path comparison defect: equivalent Windows
+  short/long parents could silently skip collection. Two cases failed under
+  the old guard; the corrected8-case path/scope suite passed independently in
+  PowerShell5.1 and7. No local ACL-creation probe was executed or retried.
+- Added fixed bounded start/skip/failure-phase markers. The original sealed_acl
+  assertion still fails closed; no runtime ACL or production state changed.
+  Actual ACL mismatch and the hosted result of this correction remain pending.
+- Full goal remains active. The exact test installation remains revoked;
+  same-installation reauthorization is unanswered. No3.0.0 Release or Store
+  review receipt is established by the existing r17 draft upload.
+
 ## Final Source Regression And r17 Store Draft (Checkpoint76)
 
 - Pushed/read-back main fbd8d58247e416da54a63042769e5961980fbc2f passed the full
