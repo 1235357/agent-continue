@@ -25,11 +25,16 @@ const entryAuditFixture = fileURLToPath(new URL('./windows-admin-control-entry-a
 const supportFixture = fileURLToPath(new URL('./windows-admin-control-support-tests.ps1', import.meta.url));
 const windows = { skip: process.platform !== 'win32', timeout: 65_000 };
 
-function runFixture(fixture) {
+function runFixture(fixture, batch) {
   const systemRoot = process.env.SystemRoot;
   assert.ok(systemRoot && path.isAbsolute(systemRoot), 'SystemRoot must identify the trusted Windows directory');
   const powershell = path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-  const result = spawnSync(powershell, ['-NoProfile', '-NonInteractive', '-File', fixture], {
+  const args = ['-NoProfile', '-NonInteractive', '-File', fixture];
+  if (batch !== undefined) {
+    assert.ok(fixture === ledgerFixture && ['read', 'publication'].includes(batch), 'control_ledger_batch');
+    args.push('-Batch', batch);
+  }
+  const result = spawnSync(powershell, args, {
     cwd: path.dirname(fixture),
     encoding: 'utf8',
     windowsHide: true,
@@ -266,11 +271,76 @@ test('source-only token-aware fixtures retain the independent oracle and both ex
   assert.match(entry, /\$held\.IsClosed/);
 });
 
-test('Windows administrator control ledger: scratch-only PS5.1 fixture (not protected acceptance)', windows, () => {
-  const output = runFixture(ledgerFixture);
-  assert.match(output, /PASS exhaustive read-state matrix: 6144 combinations/);
-  assert.match(output, /PASS immutable publication transition matrix: 363 cases/);
-  assert.match(output, /PASS control ledger scratch-only fixture: assertions=\d+; readCombinations=6144; publicationCases=363; protectedAcceptance=false/);
+function validateLedgerBatch(result, batch) {
+  const common = { version: 1, batch, canonicalCases: 0, readCombinations: 0, evidenceControls: 0,
+    publicationCases: 0, damagedHistoryCases: 0, selectedSidGuard: false, inputGuards: false, executionGuards: false,
+    protectedAcceptance: false };
+  const expected = batch === 'read' ? { ...common, canonicalCases: 33, readCombinations: 6144, evidenceControls: 3 } :
+    batch === 'publication' ? { ...common, publicationCases: 363, damagedHistoryCases: 66,
+      selectedSidGuard: true, inputGuards: true, executionGuards: true } : null;
+  assert.ok(expected && result && typeof result === 'object' && !Array.isArray(result), 'control_ledger_batch_manifest');
+  assert.ok(Object.keys(result).length === Object.keys(expected).length + 1 &&
+    Object.entries(expected).every(([key, value]) => Object.hasOwn(result, key) && result[key] === value) &&
+    Number.isSafeInteger(result.assertions) && result.assertions > 0, 'control_ledger_batch_coverage');
+}
+
+for (const batch of ['read', 'publication']) {
+  test(`Windows administrator control ledger ${batch}: scratch-only PS5.1 fixture (not protected acceptance)`, windows, () => {
+    const output = runFixture(ledgerFixture, batch);
+    const manifests = [...output.matchAll(/^LEDGER_BATCH (\{[^\r\n]*\})\r?$/gm)];
+    assert.equal(manifests.length, 1, 'control_ledger_batch_manifest_count');
+    let result;
+    try { result = JSON.parse(manifests[0][1]); } catch { assert.fail('control_ledger_batch_manifest_json'); }
+    validateLedgerBatch(result, batch);
+    assert.match(output, /^DIAG control-ledger phase=cleanup count=1\r?$/m);
+  });
+}
+
+test('source-only ledger batches retain disjoint exact coverage and reject partial manifests', () => {
+  assert.equal(typeof validateLedgerBatch, 'function');
+  const read = { version: 1, batch: 'read', canonicalCases: 33, readCombinations: 6144, evidenceControls: 3,
+    publicationCases: 0, damagedHistoryCases: 0, selectedSidGuard: false, inputGuards: false, executionGuards: false,
+    assertions: 1, protectedAcceptance: false };
+  const publication = { ...read, batch: 'publication', canonicalCases: 0, readCombinations: 0, evidenceControls: 0,
+    publicationCases: 363, damagedHistoryCases: 66, selectedSidGuard: true, inputGuards: true, executionGuards: true };
+  for (const result of [read, publication]) {
+    assert.doesNotThrow(() => validateLedgerBatch(result, result.batch));
+    for (const field of Object.keys(result)) {
+      const invalid = { ...result };
+      delete invalid[field];
+      assert.throws(() => validateLedgerBatch(invalid, result.batch));
+      assert.throws(() => validateLedgerBatch({ ...result, [field]: 'unverified' }, result.batch));
+    }
+    assert.throws(() => validateLedgerBatch({ ...result, extra: true }, result.batch));
+    assert.throws(() => validateLedgerBatch(result, result.batch === 'read' ? 'publication' : 'read'));
+    assert.throws(() => validateLedgerBatch(result, 'all'));
+  }
+  for (const [field, total] of Object.entries({ canonicalCases: 33, readCombinations: 6144, evidenceControls: 3,
+    publicationCases: 363, damagedHistoryCases: 66 })) {
+    assert.equal(read[field] + publication[field], total);
+    assert.equal(Number(read[field] > 0) + Number(publication[field] > 0), 1);
+    assert.throws(() => validateLedgerBatch({ ...read, [field]: read[field] + 1 }, 'read'));
+  }
+});
+
+test('source-only ledger batch selectors preserve child bounds and reject unknown routes before spawn', () => {
+  for (const batch of ['read', 'publication']) {
+    const run = vm.runInNewContext(`(${runFixture.toString()})`, {
+      assert, path: path.win32, ledgerFixture: 'C:\\fixture\\ledger.ps1', process: { env: { SystemRoot: 'C:\\Windows' } },
+      spawnSync(_exe, args, options) {
+        assert.equal(args.slice(-2).join('|'), '-Batch|' + batch);
+        assert.equal(options.timeout, 60_000);
+        return { stdout: '', stderr: '', status: 0, signal: null };
+      },
+    });
+    run('C:\\fixture\\ledger.ps1', batch);
+  }
+  const run = vm.runInNewContext(`(${runFixture.toString()})`, {
+    assert, path: path.win32, ledgerFixture: 'C:\\fixture\\ledger.ps1', process: { env: { SystemRoot: 'C:\\Windows' } },
+    spawnSync() { assert.fail('invalid batch must not spawn'); },
+  });
+  for (const batch of ['all', 'READ', '', 'other']) assert.throws(() => run('C:\\fixture\\ledger.ps1', batch));
+  assert.throws(() => run('C:\\fixture\\peer.ps1', 'read'));
 });
 
 test('Windows administrator control pure identity serializers (not OS identity proof)', windows, () => {

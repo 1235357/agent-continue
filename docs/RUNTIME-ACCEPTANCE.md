@@ -1,5 +1,30 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Entry Projection And Fixture Preparation (Checkpoint81)
+
+- Implemented setupEntryMetadata plus a read-only JSON CLI after complete asset
+  validation. Six fields pin exact entry/list hashes without a self-hash cycle.
+  Parent observed18 RED failures before implementation, then81/81 entry/release
+  checks passed after the independent test-ordering finding was corrected.
+- Full npm test exited0. Devices65, Setup63, ordinary adapter22, Dot48, keyboard12,
+  UI34, MV313 and ProseMirror5 passed. Packaging32, release-source7 and pin13
+  checks passed. This is controlled test evidence, not current website control.
+- Test-only native remedy preserves two ledger60s/65s children and exact6144
+  read/363 publication/66 damaged-history cases. Preparation is bounded10s
+  inside the bridge's30s tests; semantic children retain3200ms. Completion,
+  extraction/source hashes and helper JSON must pass independently of the wire's
+  expected unknown response. Review-driven overlapping-span and semantic-parser
+  regression fixes were first reproduced RED. Parent17 pure checks and both PS5.1 parser-only
+  checks passed; no local native/ACL fixture execution or production change.
+- Actual hosted Windows completion is pending. Prepared-helper semantics do not
+  establish cold installed-stager latency. The publication batch may still time
+  out; no further partition or timeout increase is assumed justified.
+- Entry downloading/launcher, extension metadata injection, resolver checksum
+  pin consumption, Current-account automatic continuation, reauthorized live
+  whole-browser/hosted acceptance and final release/submission remain open.
+  Store authentication works;3.0.0 is Draft,2.1.0 remains Published public.
+  No password/key files were read and no settled operation was replayed.
+
 ## Final Source And Native44 Evidence (Checkpoint80)
 
 - Pushed/read-back main0d1ef2e8405bb8c038aa48f21dec002fad36aba6 passed the

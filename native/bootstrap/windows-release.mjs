@@ -178,6 +178,14 @@ export function validateWindowsRelease(releaseRoot, expectedMetadata) {
   return metadata;
 }
 
+export function setupEntryMetadata(releaseDirectory, buildReceipt, releaseVersion) {
+  const metadata = validateWindowsRelease(releaseDirectory, metadataFromBuildReceipt(buildReceipt, releaseVersion));
+  return Object.freeze({ format: 'agent-continue-windows-setup-entry', version: 1,
+    releaseTag: metadata.releaseTag,
+    entryUrl: `https://github.com/1235357/agent-continue/releases/download/${metadata.releaseTag}/install.ps1`,
+    entrySha256: metadata.assets['install.ps1'], sumsSha256: metadata.assets['SHA256SUMS.txt'] });
+}
+
 export function stageWindowsRelease(releaseDirectory, bootstrapRoot, metadata) {
   metadata = validateWindowsRelease(releaseDirectory, metadata);
   const releaseRoot = path.join(directory(bootstrapRoot), 'windows-release');

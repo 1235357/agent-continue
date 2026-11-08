@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { metadataFromBuildReceipt, stageWindowsRelease } from '../native/bootstrap/windows-release.mjs';
+import { metadataFromBuildReceipt, stageWindowsRelease, setupEntryMetadata } from '../native/bootstrap/windows-release.mjs';
 import { buildPackage } from '../native/bootstrap/build-package.mjs';
 import { RUNTIME_FILES } from '../native/bootstrap/payload-layout.mjs';
 import { verifyPayload } from '../native/bootstrap/bootstrap.mjs';
@@ -121,11 +121,21 @@ export function prepareCompatibilityPayload(bootstrapRoot = target) {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const flags = new Map(), args = process.argv.slice(2);
-    for (let index = 0; index < args.length; index += 2) {
-      const flag = args[index], value = args[index + 1];
+    for (let index = 0; index < args.length; index++) {
+      const flag = args[index];
+      if (flag === '--setup-entry-json') {
+        if (flags.has(flag)) throw new Error('invalid_arguments');
+        flags.set(flag, true);
+        continue;
+      }
+      const value = args[++index];
       if (!['--combined-release-dir', '--combined-release-receipt'].includes(flag) || flags.has(flag) ||
           typeof value !== 'string' || !value || value.startsWith('--')) throw new Error('invalid_arguments');
       flags.set(flag, value);
+    }
+    const setupEntryJson = flags.has('--setup-entry-json');
+    if (setupEntryJson && (!flags.has('--combined-release-dir') || !flags.has('--combined-release-receipt'))) {
+      throw new Error('invalid_arguments');
     }
     const releaseDirectory = flags.get('--combined-release-dir') ?? process.env.AGENT_CONTINUE_WINDOWS_RELEASE_DIR;
     if (!releaseDirectory) throw new Error('combined_release_directory_required');
@@ -135,9 +145,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const info = regular(receiptFile, 'invalid_combined_release_receipt');
     if (info.size <= 0n || info.size > 65536n) throw new Error('invalid_combined_release_receipt');
     const buildReceipt = JSON.parse(fs.readFileSync(receiptFile, 'utf8'));
-    const prepared = prepareNpmPayload({ releaseDirectory, buildReceipt });
-    const compatibilityPayload = prepareCompatibilityPayload();
-    console.log(JSON.stringify({ ...prepared, compatibilityPayloadFiles: compatibilityPayload.files }));
+    if (setupEntryJson) {
+      const releaseVersion = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8')).version;
+      console.log(JSON.stringify(setupEntryMetadata(releaseDirectory, buildReceipt, releaseVersion)));
+    } else {
+      const prepared = prepareNpmPayload({ releaseDirectory, buildReceipt });
+      const compatibilityPayload = prepareCompatibilityPayload();
+      console.log(JSON.stringify({ ...prepared, compatibilityPayloadFiles: compatibilityPayload.files }));
+    }
   } catch (error) {
     console.error(/^[a-z_]{1,80}$/.test(error.message) ? error.message : 'combined_release_preparation_failed');
     process.exitCode = 1;

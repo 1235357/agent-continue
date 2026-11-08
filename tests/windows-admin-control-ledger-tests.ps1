@@ -1,9 +1,10 @@
 #Requires -Version 5.1
 [CmdletBinding()]
-param()
+param([ValidateSet('all','read','publication')][string]$Batch='all')
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
+if ($Batch -cnotin @('all','read','publication')) { throw 'control_ledger_batch' }
 function Write-LedgerPhase(
     [ValidateSet('entry','source-extracted','canonical-bytes','matrix-connect','matrix-resume-saved','matrix-revoke',
         'matrix-complete','evidence-guards','publication-connect','publication-resume-saved','publication-revoke',
@@ -48,6 +49,12 @@ Write-LedgerPhase 'source-extracted' $definitions.Count
 $script:Assertions = 0
 $script:MatrixCases = 0
 $script:PublicationCases = 0
+$script:CanonicalCases = 0
+$script:EvidenceControls = 0
+$script:DamagedHistoryCases = 0
+$script:SelectedSidGuard = $false
+$script:InputGuards = $false
+$script:ExecutionGuards = $false
 $script:StorageCalls = 0
 $script:NewFiles = [Collections.Generic.List[object]]::new()
 $script:AclChecks = [Collections.Generic.List[object]]::new()
@@ -205,6 +212,7 @@ function Assert-PublishRefused([string]$Directory,[string]$Control,[string]$Stat
 }
 
 try {
+    if ($Batch -cin @('all','read')) {
     Write-LedgerPhase 'canonical-bytes' 0
     foreach ($control in $controls) {
         foreach ($state in $states) {
@@ -219,6 +227,7 @@ try {
             } else {
                 Assert-Throws { Get-AdministratorControlReceiptBytes $digest $id $control $state } ($control + '/' + $state + ': action-specific state')
             }
+            $script:CanonicalCases++
         }
     }
     Write-Output 'PASS canonical version/digest/ID/control/state bytes, LF, and action-specific enums'
@@ -314,13 +323,16 @@ try {
             Assert-Receipt $directory $control 'unconfirmed' ('terminal cannot hide corrupt sibling: ' + $state)
             Write-RawReceipt $directory $control $state
         }
+        $script:EvidenceControls++
     }
     $directory = New-FixtureDirectory
     $null = [IO.Directory]::CreateDirectory((Get-ReceiptPath $directory 'reserved'))
     Assert-Receipt $directory 'connect' 'unconfirmed' 'directory cannot masquerade as record'
     Write-Output 'PASS corrupt/noncanonical/schema/identity/action/ACL/inaccessible evidence fails closed without repair'
     Write-LedgerPhase 'evidence-guards' $controls.Count
+    }
 
+    if ($Batch -cin @('all','publication')) {
     # Each row is a valid ordered prefix and its complete set of new appendable
     # states. Existing exact records may be read back or refused, never rewritten.
     foreach ($control in $controls) {
@@ -383,10 +395,16 @@ try {
         $directory = New-FixtureDirectory
         Write-RawReceipt $directory $control 'reserved'
         Write-RawReceipt $directory $control 'fenced'
-        foreach ($state in $states) { Assert-PublishRefused $directory $control $state 'contradictory history cannot be extended or acknowledged' }
+        foreach ($state in $states) {
+            Assert-PublishRefused $directory $control $state 'contradictory history cannot be extended or acknowledged'
+            $script:DamagedHistoryCases++
+        }
         $directory = New-FixtureDirectory
         Write-RawReceipt $directory $control 'reserved' '{'
-        foreach ($state in $states) { Assert-PublishRefused $directory $control $state 'corrupt history cannot be extended or acknowledged' }
+        foreach ($state in $states) {
+            Assert-PublishRefused $directory $control $state 'corrupt history cannot be extended or acknowledged'
+            $script:DamagedHistoryCases++
+        }
     }
     Write-Output ('PASS immutable publication transition matrix: ' + $script:PublicationCases + ' cases, plus damaged/contradictory histories')
     Write-LedgerPhase 'publication-complete' $script:PublicationCases
@@ -401,6 +419,7 @@ try {
     Assert-True (@($script:NewFiles | Where-Object { $_.Private -or $_.Sid -cne $sid }).Count -eq 0) 'public publication helper carries selected reader SID'
     $publicPath = Get-ReceiptPath $directory 'reserved'
     Assert-True (@($script:AclChecks | Where-Object { $_.Path -ceq $publicPath -and -not $_.Private -and $_.Sid -ceq $sid }).Count -ge 1) 'reader checks public receipt with selected SID'
+    $script:SelectedSidGuard = $true
 
     $directory = New-FixtureDirectory
     $vault = New-FixtureDirectory
@@ -435,6 +454,7 @@ try {
         Assert-PublishRefused $directory 'connect' $badState 'invalid publication state'
     }
     Write-Output 'PASS strict lowercase IDs/digests, closed controls/states, and invalid-input storage guards'
+    $script:InputGuards = $true
     Write-LedgerPhase 'input-guards' $controls.Count
 
     Write-LedgerPhase 'execution-guards' 0
@@ -493,10 +513,18 @@ try {
     },$true))
     Assert-True ($flushes.Count -ge 1) 'execution function contains explicit Flush(true)'
     Write-Output 'PASS execution CreateNew/private-helper/Flush(true), same-ID busy, distinct-ID concurrency, exclusive stale-file reuse without deletion'
+    $script:ExecutionGuards = $true
     Write-LedgerPhase 'execution-guards' 1
+    }
     Write-Output ('PASS control ledger scratch-only fixture: assertions=' + $script:Assertions +
         '; readCombinations=' + $script:MatrixCases + '; publicationCases=' + $script:PublicationCases +
         '; protectedAcceptance=false')
+    $coverage = [ordered]@{version=1;batch=$Batch;canonicalCases=$script:CanonicalCases;
+        readCombinations=$script:MatrixCases;evidenceControls=$script:EvidenceControls;
+        publicationCases=$script:PublicationCases;damagedHistoryCases=$script:DamagedHistoryCases;
+        selectedSidGuard=$script:SelectedSidGuard;inputGuards=$script:InputGuards;executionGuards=$script:ExecutionGuards;
+        assertions=$script:Assertions;protectedAcceptance=$false}
+    Write-Output ('LEDGER_BATCH ' + (ConvertTo-Json -InputObject $coverage -Compress))
     Write-LedgerPhase 'complete' $script:MatrixCases
 } finally {
     Write-LedgerPhase 'cleanup' 0

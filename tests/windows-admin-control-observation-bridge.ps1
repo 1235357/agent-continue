@@ -1,26 +1,74 @@
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName='Semantic')]
 param(
-    [Parameter(Mandatory=$true)][string]$Digest,
-    [Parameter(Mandatory=$true)][string]$Operation,
-    [Parameter(Mandatory=$true)][string]$Control,
-    [ValidateSet('receipt','absent','corrupt','mismatch','extra','bad-progress')][string]$Fixture='receipt'
+    [Parameter(Mandatory=$true,ParameterSetName='Prepare')][switch]$Prepare,
+    [Parameter(Mandatory=$true)][string]$PreparedRoot,
+    [Parameter(Mandatory=$true)][string]$FixtureTempRoot,
+    [Parameter(Mandatory=$true,ParameterSetName='Semantic')][string]$Digest,
+    [Parameter(Mandatory=$true,ParameterSetName='Semantic')][string]$Operation,
+    [Parameter(Mandatory=$true,ParameterSetName='Semantic')][string]$Control,
+    [Parameter(Mandatory=$true,ParameterSetName='Semantic')][string]$SourceSha256,
+    [Parameter(Mandatory=$true,ParameterSetName='Semantic')][string]$PayloadSha256,
+    [Parameter(ParameterSetName='Semantic')][ValidateSet('receipt','absent','corrupt','mismatch','extra','bad-progress')][string]$Fixture='receipt'
 )
 $ErrorActionPreference='Stop'
-[Console]::Error.WriteLine('OBSERVATION_FIXTURE entry')
-$stager=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../scripts/Stage-WindowsAdministratorBundle.ps1'))
-$tokens=$errorsFound=$null
-$ast=[Management.Automation.Language.Parser]::ParseFile($stager,[ref]$tokens,[ref]$errorsFound)
-if ($errorsFound.Count) { throw 'stager_parse' }
-[Console]::Error.WriteLine('OBSERVATION_FIXTURE source-parsed')
+function Get-FixtureHash([byte[]]$Bytes) {
+    $hash=[Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($hash.ComputeHash($Bytes)).Replace('-','').ToLowerInvariant() }
+    finally { $hash.Dispose() }
+}
+function Assert-PreparedRoot {
+    $root=[IO.Path]::GetFullPath($PreparedRoot)
+    $parent=[IO.Path]::GetFullPath($FixtureTempRoot).TrimEnd('\')
+    if (-not [IO.Path]::IsPathRooted($PreparedRoot) -or -not [IO.Path]::IsPathRooted($FixtureTempRoot) -or
+        $root -ine $PreparedRoot -or [IO.Path]::GetDirectoryName($root) -ine $parent -or
+        [IO.Path]::GetFileName($root) -cnotmatch '\Aac-observation-fixture-[a-f0-9]{32}\z') { throw 'fixture_scope' }
+    foreach ($path in @($parent,$root)) {
+        for ($cursor=[IO.DirectoryInfo]::new($path); $null -ne $cursor; $cursor=$cursor.Parent) {
+            if (-not $cursor.Exists -or ($cursor.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'fixture_scope' }
+        }
+    }
+}
+Assert-PreparedRoot
+$stager=[IO.Path]::GetFullPath([IO.Path]::Combine($PSScriptRoot,'..','scripts','Stage-WindowsAdministratorBundle.ps1'))
+$payloadFile=[IO.Path]::Combine($PreparedRoot,'helpers.ps1')
 $names=@('Test-AdministratorControlFields','Assert-AdministratorControlIdentity','Get-AdministratorControlStates',
     'Get-AdministratorControlReceiptBytes','Get-AdministratorControlProgressBytes',
     'Assert-AdministratorControlObservationParameters','Read-AdministratorBrowserControlStatus')
-foreach ($name in $names) {
-    $nodes=@($ast.FindAll({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -ceq $name},$true))
-    if ($nodes.Count -ne 1) { throw 'fixture_function' }
-    . ([scriptblock]::Create($nodes[0].Extent.Text))
+if ($Prepare) {
+    [Console]::Error.WriteLine('OBSERVATION_FIXTURE prepare-entry')
+    $sourceBytes=[IO.File]::ReadAllBytes($stager)
+    $text=[Text.UTF8Encoding]::new($false,$true).GetString($sourceBytes).TrimStart([char]0xfeff)
+    $tokens=$errorsFound=$null
+    $ast=[Management.Automation.Language.Parser]::ParseInput($text,[ref]$tokens,[ref]$errorsFound)
+    if ($errorsFound.Count) { throw 'stager_parse' }
+    [Console]::Error.WriteLine('OBSERVATION_FIXTURE source-parsed')
+    $definitions=@($ast.FindAll({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst]},$true))
+    $parts=@(); $functions=@()
+    foreach ($name in $names) {
+        $nodes=@($definitions | Where-Object { $_.Name -ceq $name })
+        if ($nodes.Count -ne 1) { throw 'fixture_function' }
+        $extent=$nodes[0].Extent
+        $parts+=$extent.Text
+        $functions+=@{name=$name;start=$extent.StartOffset;end=$extent.EndOffset;
+            sha256=(Get-FixtureHash ([Text.Encoding]::UTF8.GetBytes($extent.Text)))}
+    }
+    $payload=[Text.Encoding]::UTF8.GetBytes($parts -join [char]10)
+    $stream=[IO.File]::Open($payloadFile,'CreateNew','Write','None')
+    try { $stream.Write($payload,0,$payload.Length); $stream.Flush($true) } finally { $stream.Dispose() }
+    $manifest=@{version=1;sourceSha256=(Get-FixtureHash $sourceBytes);payloadSha256=(Get-FixtureHash $payload);functions=$functions}
+    [Console]::WriteLine((ConvertTo-Json -InputObject $manifest -Depth 5 -Compress))
+    [Console]::Error.WriteLine('OBSERVATION_FIXTURE prepare-complete')
+    return
 }
-[Console]::Error.WriteLine('OBSERVATION_FIXTURE helpers-ready')
+[Console]::Error.WriteLine('OBSERVATION_FIXTURE entry')
+if ($SourceSha256 -cnotmatch '\A[a-f0-9]{64}\z' -or $PayloadSha256 -cnotmatch '\A[a-f0-9]{64}\z') { throw 'fixture_manifest' }
+$attributes=[IO.File]::GetAttributes($payloadFile)
+if ($attributes -band ([IO.FileAttributes]::ReparsePoint -bor [IO.FileAttributes]::Directory)) { throw 'fixture_scope' }
+if ((Get-FixtureHash ([IO.File]::ReadAllBytes($stager))) -cne $SourceSha256 -or
+    (Get-FixtureHash ([IO.File]::ReadAllBytes($payloadFile))) -cne $PayloadSha256) { throw 'fixture_manifest' }
+[Console]::Error.WriteLine('OBSERVATION_FIXTURE source-verified')
+. $payloadFile
+[Console]::Error.WriteLine('OBSERVATION_FIXTURE prepared-source-loaded')
 
 # Virtual selected-SID receipt seam only. Never read an installed bundle or dispatch it.
 $sid='S-1-5-21-1-2-3-1001'

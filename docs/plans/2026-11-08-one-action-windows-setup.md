@@ -72,7 +72,19 @@ These are product-imposed steps to simplify, unlike mandatory nativeMessaging,
 Windows UAC and chat-platform approvals. No changed live installation or complete
 one-action delivery is claimed by this source review.
 
-## Entry Bootstrap Design (Not Implemented)
+## Entry Bootstrap Design (Projection Implemented; Acquisition Pending)
+
+Checkpoint81 implements only setupEntryMetadata and the read-only
+prepare-npm-payload.mjs --setup-entry-json mode. It verifies the completed
+six-asset closure before emitting the six-field entry/list-hash descriptor.
+Parent observed the missing-feature RED (18 failures), then81/81 entry/release
+checks passed after implementation and review fixes. The new22 entry tests are
+included in test:setup. The regression now requires build-order markers to exist
+before comparing their positions; malformed/invalid CLI receipts produce no
+partial success output. Generated input files may be absent in a clean checkout.
+This does not yet inject metadata into extension packages, download or launch an
+entry script, pin the resolver's remote checksum list, continue Current account
+setup or establish public asset availability.
 
 ### Problem
 
@@ -89,7 +101,11 @@ Acquire only the exact final release entry script, verify its hash and single
 literal release stamp, then invoke it by absolute path. Reuse Resolve-Payload for
 the payload ZIP instead of adding another downloader. Derive a closed metadata
 record from the completed combined Windows build receipt: format, version1,
-releaseTag, entryUrl and entrySha256. Bind it to the extension release version,
+releaseTag, entryUrl, entrySha256 and sumsSha256. The outer sums digest pins the
+whole payload closure; the entry passes it into Resolve-Payload, which verifies
+the downloaded list before trusting a listed ZIP digest or extracting files.
+Do not stamp this digest into the entry/ZIP/list that it authenticates.
+Bind the tuple to the extension release version,
 the fixed repository and exact install.ps1 asset; reject latest/raw/branch URLs,
 overrides, query strings and fragments. Building a tuple does not establish
 public asset availability.
@@ -114,21 +130,47 @@ verified local closure. No missing metadata fallback may invent a public URL.
 ### Detailed Implementation And Acceptance
 
 Proposed source boundaries: native/bootstrap/windows-release.mjs projects the
-validated build receipt; scripts/prepare-npm-payload.mjs exposes a read-only
-setup-entry JSON mode without staging npm; scripts/package.py injects canonical
+validated build receipt only after read-only validateWindowsRelease verifies
+the actual six-file asset closure; scripts/prepare-npm-payload.mjs exposes a
+read-only setup-entry JSON mode without staging npm or compatibility payloads;
+scripts/package.py injects canonical
 extension-only setup-entry-release.js bytes identically in both distributions.
 A pure setup-entry.js command builder is shared by setup.js previews and
 setup-client.js post-BEGIN output, retaining the exact extension and setup IDs.
-Only the install.ps1 early adjacency rejection gets a narrow valid stamped-
-release exception; incomplete unstamped source still fails.
+The builder has explicit scope and remote/local mode inputs. Missing metadata
+disables remote generation before permissions, BEGIN or clipboard work; an
+explicit Advanced local command remains available. There is no local fallback
+after a remote verification failure. Only the install.ps1 early adjacency
+rejection gets a narrow valid stamped-release exception; incomplete unstamped
+source and partial adjacent bundle errors still fail.
 
 The command must launch fixed Windows PowerShell with NoProfile, remain
 interactive for existing guided inputs, preserve policy/UAC, and contain no
-credentials. Use a unique private temporary directory, bounded download time
-and4MiB entry size, SHA-256 and data-only exact stamp checks before invocation.
-Hold the verified entry stable while invoking its absolute path. Remove inherited
-payload-base overrides only inside the bootstrap process. Preserve exit failures,
-no-replay, cancellation and installer-retained recovery payloads; no blind retry.
+credentials. Entry acquisition has a90-second total deadline and a streamed4MiB
+limit. Permit at most three redirects, HTTPS/default443 only, no user information;
+the initial fixed github.com asset may redirect only to github.com,
+release-assets.githubusercontent.com or objects.githubusercontent.com. Validate
+every hop; reject credentials, downgrade and other destinations.
+
+The local file protocol is create-new storage below a validated non-reparse
+temporary ancestry, with current-user/SYSTEM/Administrators-only directory access.
+Random naming is not the access-control guarantee. Read hash and data-only single
+literal stamp from one file handle, then retain a read-only handle that denies
+write/delete sharing through the child lifetime. Invoke a separate fixed OS
+Windows PowerShell process with NoProfile, interactive inherited console and
+absolute -File plus explicit arguments. No iex/ScriptBlock.Create entry execution,
+NonInteractive, ExecutionPolicy Bypass, policy mutation or execution fallback.
+Capture and propagate the immediate child exit code; cleanup errors must not mask
+it. Remove inherited payload-base overrides only inside the bootstrap process.
+Preserve no-replay, cancellation and installer-retained recovery payloads.
+
+The complete expanded CMD command, including executable path, encoding and
+quoting, must fit below8191 characters. This is not the administrator helper's
+separate30000-character direct-child limit. If the complete bootstrap cannot fit,
+stop implementation of the CMD transport and revise this design; do not silently
+drop verification. Use the strict existing Expand-VerifiedSetupArchive path for
+remote payloads as well. Entry network bounds do not establish bounds for legacy
+payload or Node acquisition; those routes require separately measured limits.
 
 Required tests: arbitrary CWD including spaces/apostrophes; unchanged CWD;
 PowerShell/CMD argument equivalence and command-size limits; hash mismatch,
@@ -141,9 +183,10 @@ localization, cancellation, scope and rendered layout regressions.
 
 No verified published tuple exists at this checkpoint. The candidate release
 availability/validation sequence needs an explicit reviewed plan before this
-flow can be called public clean-machine delivery. No bootstrap implementation,
+flow can be called public clean-machine delivery. Apart from the bounded
+projection/read-only CLI slice above, the bootstrap is not implemented. No
 installation, public asset publication or live connection was performed by this
-design review.
+design and source work.
 
 Checkpoint66: main synchronization through41d79c4 is real, but the second hosted
 Windows verification still failed a later test admission/effect race. Same-PID

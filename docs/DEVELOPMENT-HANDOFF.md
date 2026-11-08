@@ -2,6 +2,44 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Entry Projection And Bounded Fixture Preparation (Checkpoint81)
+
+The one-action setup plan now has an implemented six-field release-entry
+projection and read-only --setup-entry-json CLI. It validates the actual complete
+Windows release closure before emitting the exact-tag entry URL, entry digest
+and checksum-list digest. The checksum-list pin is outside the self-included
+entry/ZIP closure, avoiding a hash cycle. It is not yet consumed by a downloaded
+installer or extension package. Current-account continuation remains open.
+
+Parent reproduced18 missing-feature RED failures, then81/81 entry/release checks
+passed. Independent review found a false-positive indexOf ordering assertion;
+the corrected test first requires all markers. Invalid/malformed CLI receipts
+now prove nonzero exit, no partial output and unchanged fixture files. Clean-CI
+tests no longer require generated files to exist. New entry tests join test:setup.
+The full npm test command exited0; Devices65, Setup63, ordinary adapter22, Dot48,
+Dot keyboard12, UI34, MV313 and ProseMirror5 checks passed. Parent packaging32,
+release-source7 and installer-pin13 tests also passed. These are not live calls.
+
+Native44's fixture remedy is test-only: read/publication ledger children each
+retain60s/65s, exact6144+363 coverage,66 damaged-history refusals and all guards.
+The bridge extracts seven exact source bodies in a separately bounded10s
+preparation, inside the unchanged30s test; semantic children retain3200ms. Stale
+source/manifests, child failure, missing completion and invalid helper JSON fail
+outside the native catch. Independent review found and parent reproduced two
+guard gaps: overlapping enlarged spans with recomputed hashes, and ParseInput
+missing from the semantic-source prohibition. Non-overlap checks and both-parser
+mutation regressions close these reported cases; the producer's AST remains the
+definition-boundary oracle. Parent17 pure checks and both absolute-path PS5.1
+parse-only checks passed. Actual hosted completion remains unverified; the
+publication batch may still exceed its bound. See the fixture preparation plan.
+
+The direct-quoted bootstrap size experiment is only an unexecuted prototype in
+.artifacts/entry-bootstrap-design-20261108. Do not promote its measured string
+lengths to correct PowerShell/CMD, ACL, file-sharing or installer behavior.
+The installed preview/runtime remains unchanged and the test installation
+remains revoked. Store login is verified; Draft3.0.0 is not Published2.1.0.
+No new Release or Store review submission. Full Windows delivery goal is active.
+
 ### Final Source Passed; Native Timeout Boundaries Located (Checkpoint80)
 
 Unique main0d1ef2e8405bb8c038aa48f21dec002fad36aba6 was pushed and read back.
