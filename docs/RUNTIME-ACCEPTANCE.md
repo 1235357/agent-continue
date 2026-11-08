@@ -1,5 +1,21 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Confirmed Inherited Fixture Owner Mismatch (Checkpoint78)
+
+- Native42 run42481191782 on c819ac1 emitted state-write-complete, then located
+  the error in Assert-InheritedPrivateAcl via Read-PriorReadOnlyWindow. Earlier
+  creation-failure attribution is superseded by this actual call-site evidence.
+- The inherited receipt directory has an Administrators owner, while the test
+  substituted the account's user SID for the expected owner. DACL count3 and
+  inherited flags19 are present; protection is correctly false. Explicit sealed
+  directories match their expected owner. Evidence:
+  .artifacts/ordinary-chat-acceptance-20261108/native42-acl-owner-diagnostic.txt.
+- The fixture now selects WindowsIdentity.Owner, which Microsoft defines as the
+  default owner SID applied to new objects. It refuses an unavailable owner;
+  no production ACL assertion or installed runtime changed. Hosted rerun pending.
+- Parent71 package/site/release tests passed in49.480s on c819ac1. This does not
+  establish native43, hosted whole-browser recovery, release or review submission.
+
 ## Cloud ACL Diagnostic Recovery (Checkpoint77)
 
 - Native40 run42479430126 on531149c failed at the same state ACL assertion.

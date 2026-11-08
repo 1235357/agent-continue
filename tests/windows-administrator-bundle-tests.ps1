@@ -636,7 +636,11 @@ try {
     }
     Write-Output 'PASS first acceptance refuses both existing targets and partial reservations'
     $me = [Security.Principal.WindowsIdentity]::GetCurrent()
-    try { $administratorsSid = $me.User.Value } finally { $me.Dispose() }
+    try {
+        # Inherited objects use the token's default owner, not necessarily its user SID.
+        if ($null -eq $me.Owner) { throw 'fixture_owner_unavailable' }
+        $administratorsSid = $me.Owner.Value
+    } finally { $me.Dispose() }
     $systemSid = 'S-1-5-18'
     $usersSid = 'S-1-5-32-545'
     $enrollment = Join-Path $scratch 'interrupted-browser-enrollment'

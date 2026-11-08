@@ -2,6 +2,26 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Inherited Fixture Owner Cause Identified (Checkpoint78)
+
+Native42 run42481191782 on c819ac1 proves state creation completed. Its actual
+failure is Assert-InheritedPrivateAcl line8, called by Read-PriorReadOnlyWindow
+line27. The inherited receipt directory has three expected role/mask entries
+with inherited flags and an unprotected DACL, but its actual owner is
+Administrators while the fixture expected the current user. Explicitly sealed
+directories still match. Evidence:
+.artifacts/ordinary-chat-acceptance-20261108/native42-acl-owner-diagnostic.txt.
+
+Corrected only the fixture's owner substitution to WindowsIdentity.Owner, the
+token's default owner for new objects, instead of WindowsIdentity.User. A missing
+owner is an error, not a skip. Microsoft's definition is documented at
+https://learn.microsoft.com/en-us/dotnet/api/system.security.principal.windowsidentity.owner.
+Production ACL assertions and installed state are unchanged. The hosted rerun
+must establish the correction and any later failure; native42 remains a failure.
+The latest71 package/site/release checks passed in49.480s on c819ac1. Release,
+Store review submission and the remaining real lifecycle/one-action gates remain
+open; the current test installation is still revoked.
+
 ### Cloud ACL Diagnostics Follow-up (Checkpoint77)
 
 Native40, run42479430126 on531149c, failed the same protected-state fixture
