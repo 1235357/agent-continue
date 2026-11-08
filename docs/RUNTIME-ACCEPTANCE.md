@@ -1,5 +1,30 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Final Source And Native44 Evidence (Checkpoint80)
+
+- Pushed/read-back main0d1ef2e8405bb8c038aa48f21dec002fad36aba6 passed the
+  parent's final complete npm test. Actual Extension checks101 run42484414122
+  succeeded in4m49s. This supersedes checkpoint79's pending extension result.
+- Actual native44 run42484414150 Windows job128743054982 failed in6m17s.
+  Protected ACL step13 passed34s. Both token-aware projection and fixed-entry
+  fixtures passed1.984s/4.274s. Step17 passed22/25; three tests failed at two
+  timeout boundaries. Do not call the full native workflow passed.
+- Ledger stdout reached matrix-complete count6144, evidence-guards count3, then
+  publication-connect count99 before spawn-timeout at60s. The marker is a last
+  completed lower bound, not the exact operation or a demonstrated product bug.
+- Both observation tests now reject their child failures outside the production
+  catch: killed=true, SIGTERM, duration3229/3225ms, phases=[entry]. The helper
+  had not reached source-parsed within3,200ms. The old negative semantic result
+  therefore was not evidence of completing its intended corruption checks.
+  A prepared-source semantic fixture must not be described as cold installed
+  performance; actual runtime latency requires separate evidence.
+- No deadline/assertion/matrix was relaxed and no blind rerun was requested.
+  Evidence: .artifacts/ordinary-chat-acceptance-20261108/native44-control-failure-diagnostics.txt
+  and native44-terminal-failure.png. Later native steps were skipped.
+- Installed preview/runtime, production and external original scheduler were
+  not changed. Store3.0.0 remains a draft, published2.1.0 remains unchanged;
+  no new GitHub Release or Store review submission. Full goal remains active.
+
 ## Later Native43 Control Failures (Checkpoint79)
 
 - Attempt2 of run42481716562 (Windows job128736015717,18fd15a) failed in6m36s,
@@ -32,8 +57,13 @@
   failures retain bounded fixed phases/counts. No production guard, deadline,
   matrix size or cleanup rule changed; actual native rerun remains required.
   Independent diagnostic review found no actionable issue and exercised six
-  mocked executor failures; these are not native/ACL executions. Full final
-  product regression is still tracked separately from these scoped results.
+  mocked executor failures; these are not native/ACL executions.
+- Parent final npm test on0d1ef2e exited0, including Devices65/65, Setup63/63,
+  Dot adapter48/48, Dot keyboard12/12, MV313/13 and ProseMirror5/5. Source was
+  pushed/read back on unique main. Native44 run42484414150 and Extension
+  checks101 run42484414122 were actually In progress; do not promote either
+  to passed before reading its terminal result. Installed live lifecycle and
+  publication remain separate from this complete local product run.
 - In-app Store readback remains Draft3.0.0 and Published2.1.0. Test installation
   remains revoked. Reauthorization, whole-browser recovery, final-artifact
   hosted gates, GitHub Release and Store review submission remain open.

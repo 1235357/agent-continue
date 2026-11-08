@@ -2,6 +2,43 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Final Source Passed; Native Timeout Boundaries Located (Checkpoint80)
+
+Unique main0d1ef2e8405bb8c038aa48f21dec002fad36aba6 was pushed and read back.
+Parent final npm test exited0 on that source. Actual Extension checks101,
+run42484414122, completed successfully in4m49s. No installed preview changed.
+
+Actual native44 Windows job128743054982, run42484414150, failed in6m17s.
+Protected bundle/ACL passed again in34s. Both corrected token-aware fixtures
+passed: typed projection1.984s and fixed sealed entry/ACK4.274s. Step17 completed
+22/25 tests with three failures at two timeout boundaries, not new identity
+failures. Ledger diagnostic output proves all6,144 read combinations completed,
+then evidence guards completed; the last stored publication marker was
+publication-connect count99 before the60s child timeout. This is a progress
+lower bound, not the exact stalled operation or proof of an implementation bug.
+
+Both observation semantic tests failed their new external completion check:
+duration3229/3225ms, killed=true, SIGTERM, phases=[entry], before source-parsed.
+This proves fixture startup/source extraction did not finish inside the3,200ms
+executor budget; the negative fixture no longer false-passes merely because an
+executor failure became wire-level unconfirmed. Production cold installed
+latency remains unmeasured by these source-extraction fixtures. No budget was
+increased and no same-source rerun was requested. Evidence:
+.artifacts/ordinary-chat-acceptance-20261108/native44-control-failure-diagnostics.txt
+and native44-terminal-failure.png in the same directory. Later native steps were
+skipped; the whole native workflow is not passed.
+
+Next source work must distinguish fixture preparation from measured semantic
+execution and investigate the exhaustive batch's cost without deleting cases or
+relaxing product identity/deadline guards. The entry-bootstrap implementation
+design is recorded, not implemented, in the one-action setup plan. Fresh Current
+account guided setup's early adjacent-payload rejection also needs the exact
+stamped-release exception. Current-account automatic connection, published asset
+availability, exact-installation reauthorization, live whole-browser recovery,
+GitHub3.0.0 Release and Store review submission remain open. Store readback still
+shows Draft3.0.0 and Published2.1.0. Passwords/keys and production systems remain
+untouched; the full goal remains active.
+
 ### ACL Gate Passed; Later Control Fixtures Classified (Checkpoint79)
 
 Native43 run42481716562, attempt2 Windows job128736015717, finished failed in
@@ -32,8 +69,13 @@ remain in closed Advanced; a transient attempt cannot overwrite a newer journal
 snapshot. Parent71 packaging/site/release tests passed48.965s; nine pure token
 summary/diagnostic checks and four PS5.1 parse-only checks passed. Independent
 diagnostic review found no actionable issues and checked six additional mocked
-executor failures. These are not native fixture executions. Full final product
-regression and the next hosted native result remain separately tracked.
+executor failures. These are not native fixture executions. The parent reran
+the full npm test command on the final0d1ef2e source and observed exit0, including
+Devices65/65, Setup63/63, Dot adapter48/48, Dot keyboard12/12, MV313/13 and
+official ProseMirror5/5. These fixtures do not establish installed hosted
+lifecycle acceptance. Native44 run42484414150 and Extension checks101
+run42484414122 were actually In progress on pushed/read-back0d1ef2e; their
+terminal results remain separate evidence.
 
 Token-aware fixtures now distinguish the C# peer's valid-SID capture contract
 from the narrower PS caller helper, preserving exact refusal and lifetime checks.

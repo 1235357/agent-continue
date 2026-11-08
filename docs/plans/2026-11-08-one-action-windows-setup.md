@@ -72,6 +72,79 @@ These are product-imposed steps to simplify, unlike mandatory nativeMessaging,
 Windows UAC and chat-platform approvals. No changed live installation or complete
 one-action delivery is claimed by this source review.
 
+## Entry Bootstrap Design (Not Implemented)
+
+### Problem
+
+The copied default command still assumes an extracted local directory. The
+release-stamped installer already has a remote payload resolver, but fresh
+Current account guided setup checks for an adjacent payload before reaching it.
+Simply replacing the relative path with a URL would not close that gate. This
+design concerns acquisition only; Current account automatic connection remains
+a separate contract and must not borrow the administrator scope's authority.
+
+### Technical Plan
+
+Acquire only the exact final release entry script, verify its hash and single
+literal release stamp, then invoke it by absolute path. Reuse Resolve-Payload for
+the payload ZIP instead of adding another downloader. Derive a closed metadata
+record from the completed combined Windows build receipt: format, version1,
+releaseTag, entryUrl and entrySha256. Bind it to the extension release version,
+the fixed repository and exact install.ps1 asset; reject latest/raw/branch URLs,
+overrides, query strings and fragments. Building a tuple does not establish
+public asset availability.
+
+Build ordering must stay acyclic:
+administrator bundle/stager -> pinned helper -> final entry -> setup ZIP/sums
+-> completed receipt -> extension-only entry metadata -> GitHub/Store ZIP pair.
+The actual setup payload fixed lists exclude extension files. Do not inject
+metadata into shared install-plan.mjs or mutate checked-in source during a build.
+The checked-in metadata module should export null until packaging projects a
+verified local closure. No missing metadata fallback may invent a public URL.
+
+### Alternatives
+
+- Keep relative commands in Advanced as an explicit local-bundle fallback, not
+  as a completed clean-machine experience.
+- Do not add a second archive downloader, unpinned latest/raw execution, a custom
+  EXE/MSI installer, or an unverified npm publication claim.
+- Do not remove the administrator-only BrowserSetupId guard to fake a Current
+  account continuation. That flow needs its own receipt and consent contract.
+
+### Detailed Implementation And Acceptance
+
+Proposed source boundaries: native/bootstrap/windows-release.mjs projects the
+validated build receipt; scripts/prepare-npm-payload.mjs exposes a read-only
+setup-entry JSON mode without staging npm; scripts/package.py injects canonical
+extension-only setup-entry-release.js bytes identically in both distributions.
+A pure setup-entry.js command builder is shared by setup.js previews and
+setup-client.js post-BEGIN output, retaining the exact extension and setup IDs.
+Only the install.ps1 early adjacency rejection gets a narrow valid stamped-
+release exception; incomplete unstamped source still fails.
+
+The command must launch fixed Windows PowerShell with NoProfile, remain
+interactive for existing guided inputs, preserve policy/UAC, and contain no
+credentials. Use a unique private temporary directory, bounded download time
+and4MiB entry size, SHA-256 and data-only exact stamp checks before invocation.
+Hold the verified entry stable while invoking its absolute path. Remove inherited
+payload-base overrides only inside the bootstrap process. Preserve exit failures,
+no-replay, cancellation and installer-retained recovery payloads; no blind retry.
+
+Required tests: arbitrary CWD including spaces/apostrophes; unchanged CWD;
+PowerShell/CMD argument equivalence and command-size limits; hash mismatch,
+oversized/truncated entry and wrong/missing/duplicate stamp causing zero entry
+invocations or payload downloads; invalid metadata/source-only receipts/version
+mismatch rejected before copy/download; stamped-entry-only reaching the existing
+resolver while existing closure guards remain effective; no source mutation or
+dependency cycle; matching GitHub/Store metadata bytes; existing consent,
+localization, cancellation, scope and rendered layout regressions.
+
+No verified published tuple exists at this checkpoint. The candidate release
+availability/validation sequence needs an explicit reviewed plan before this
+flow can be called public clean-machine delivery. No bootstrap implementation,
+installation, public asset publication or live connection was performed by this
+design review.
+
 Checkpoint66: main synchronization through41d79c4 is real, but the second hosted
 Windows verification still failed a later test admission/effect race. Same-PID
 observation now handles that race without repeating Start. Mobile fallback-font
