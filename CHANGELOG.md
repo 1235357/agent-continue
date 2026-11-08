@@ -1,8 +1,8 @@
 # Changelog
 
-## [3.0.0] - Unreleased / Windows Candidate
+## [3.0.0] - 2026-11-08
 
-The upcoming combined Windows identity is 3.0.0. This source entry is not a GitHub/npm publication, Chrome Web Store submission/approval, installed-version receipt or completed final-artifact acceptance. Preserve the separately released scheduler v2.2.1 and its assets.
+The combined Windows source version is 3.0.0. GitHub/npm publication, Chrome Web Store submission/approval and installed-version receipts are recorded separately. The scheduler v2.2.1 release and its assets remain unchanged.
 
 - Update canonical privacy and English Store source copy for scheduled prompts plus optional, explicitly authorized Windows file/shell/process tools. Keep English default and Simplified Chinese optional; update both READMEs without reclassifying historical scheduler releases.
 - Disclose selected-account, account-wide access rather than an installation-folder sandbox; distinguish current-account privileges, administrator UAC, optional browser `nativeMessaging` and OpenAI workspace/app/conversation grants.
@@ -17,7 +17,7 @@ The upcoming combined Windows identity is 3.0.0. This source entry is not a GitH
 - Wire fresh current-account setup through its own native installation proof, one-time connection reservation and original-ID reconciliation. Require fresh document-local installation-and-connection consent; do not adopt or unpause existing installations, borrow administrator transport, or restore an old install-only consent flag.
 - Include the current-account continuation module in both extension ZIP layouts and update English/Chinese setup copy and privacy disclosures for the distinct installation and connection actions.
 
-Checkpoint97 records actual r11 installation, a full shared-app quit/reopen, and saved-running recovery without another Connect click. Ordinary ChatGPT and Dot both returned matching administrator/file/owned-process results, independently checked on the host. Devices Pause and Revoke each produced matching stopped receipts; the test installation is left revoked. These bounded observations do not guarantee all future recovery or prove current-account hosted operation, public-release acquisition, publication or Store approval. See [Runtime Acceptance](docs/RUNTIME-ACCEPTANCE.md). This candidate is not yet a published3.0.0 release.
+Checkpoint97 records actual r11 installation, a full shared-app quit/reopen, and saved-running recovery without another Connect click. Ordinary ChatGPT and Dot both returned matching administrator/file/owned-process results, independently checked on the host. Devices Pause and Revoke each produced matching stopped receipts; the test installation is left revoked. These bounded observations do not guarantee all future recovery or prove current-account hosted operation, public-release acquisition, publication or Store approval. See [Runtime Acceptance](docs/RUNTIME-ACCEPTANCE.md) for separate release and review receipts.
 
 ## [2.2.1] - 2026-11-06
 

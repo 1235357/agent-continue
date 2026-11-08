@@ -101,10 +101,14 @@ Before submission, reconcile actual privacy-form categories with the finalized p
 
 These are listing-copy links, not evidence of a 3.0.0 upload, approval, publication or installation.
 
+## Reviewer Test Instructions (500-Character Form)
+
+Use your own ChatGPT test account; no developer credentials. Select a test chat, set a harmless prompt, Send once now; verify one matching message and Pause. Switch EN/ZH; prompt text stays unchanged. Optional Windows tools: follow Settings > Setup and https://github.com/1235357/agent-continue . Consent to current-account or administrator setup with your own tunnel/key, then authorize a test chat. Use only temporary files/owned processes; test Pause and Revoke in Devices. No keys supplied here.
+
 ## Release Scope and Remaining Gates (Not Store Copy)
 
 Upcoming 3.0.0 combines the scheduler and optional Windows candidate. Historical v2.2.0 support/schema 3 changes and v2.2.1 scheduler fixes remain scheduler-only; they did not request nativeMessaging. The permission table above is for the upcoming combined candidate, not those older releases.
 
-Checkpoint85 records a fresh browser Connect on the same r8 test installation, actual ordinary ChatGPT and Dot administrator command/file/owned-process proof, and browser Pause with a stopped receipt and independent process readback. That test runtime is paused. Whole-browser saved-running restoration, current-account fresh-install continuation, existing-install adoption and final-artifact acceptance remain separate open gates. Complete matching extension/setup/npm artifact verification, actual public downloads and the real new Store submission receipt separately. See the repository's [Runtime Acceptance](https://github.com/1235357/agent-continue/blob/main/docs/RUNTIME-ACCEPTANCE.md); do not replay settled operations or turn historical Ready into a current state.
+Checkpoint97 records actual r11 full-app saved-running recovery, ordinary ChatGPT and Dot administrator command/file/owned-process results, and matching Pause/Revoke stopped receipts with independent host readback. The test runtime is revoked and not running. These bounded observations do not establish current-account hosted operation, automatic adoption of an existing installation or indefinite recovery reliability. Complete matching extension/setup/npm artifact verification, actual public downloads and the real new Store submission receipt separately. See the repository's [Runtime Acceptance](https://github.com/1235357/agent-continue/blob/main/docs/RUNTIME-ACCEPTANCE.md); do not replay settled operations or turn historical Ready into a current state.
 
 GitHub release availability is independent of Chrome Web Store review. Publishing a GitHub release does not establish store approval, a saved store-listing update, or the version installed in a user's browser. Existing single-submit behavior and scheduling limits remain in effect; this documentation makes no defect-free or live-site compatibility guarantee.

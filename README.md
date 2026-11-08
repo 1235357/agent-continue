@@ -2,15 +2,15 @@
 
 English | [简体中文](https://github.com/1235357/agent-continue/blob/main/README.zh-CN.md)
 
-Schedule your own prompts in one existing ChatGPT or Your dot conversation. The upcoming Windows-enabled release also offers separately installed, explicitly authorized file, shell and process tools.
+Schedule your own prompts in one existing ChatGPT or Your dot conversation. The Windows-enabled version also offers separately installed, explicitly authorized file, shell and process tools.
 
-**3.0.0 upcoming Windows release: UNRELEASED / candidate. Manifest V3. Free and MIT-licensed.**
+**3.0.0 Windows-enabled release source. Manifest V3. Free and MIT-licensed.**
 
 [Chrome Web Store](https://chromewebstore.google.com/detail/jpioilmpbolfokedaefmbfbjeaahfdkl) · [GitHub Releases](https://github.com/1235357/agent-continue/releases) · [Source](https://github.com/1235357/agent-continue) · [Changelog](https://github.com/1235357/agent-continue/blob/main/CHANGELOG.md) · [Privacy](https://github.com/1235357/agent-continue/blob/main/PRIVACY.md)
 
-The separately released v2.2.1 remains scheduler-only, including its acknowledgement fixes, developer support and schema 3 diagnostics. The Windows candidate is not a replacement for those published assets. This README does not establish a 3.0.0 release, npm publication, Store submission/approval or installed version. GitHub release availability and Chrome Web Store review are separate; consult the respective listing and your browser's extension details.
+The separately released v2.2.1 remains scheduler-only, including its acknowledgement fixes, developer support and schema 3 diagnostics; its published assets are preserved. Source version, GitHub release availability, npm publication, Chrome Web Store review and your installed version are separate states. Consult the respective listing and your browser's extension details rather than treating this README as a publication or installation receipt.
 
-## Windows Device Setup (3.0.0 Unreleased)
+## Windows Device Setup (3.0.0)
 
 Choose current-account or administrator scope, consent to the stated access, then copy and run the reviewed PowerShell or CMD setup command from the verified, extracted source bundle. Copying does not run it. The guided commands can download, verify and extract official portable Node.js after consent if a compatible version is missing. Current delivery is command-only, not the retired custom Agent Continue launcher/EXE/MSI route; Node.js, the official OpenAI tunnel client and upstream dependencies still run outside the browser. See the repository's [setup commands and scope choices](https://github.com/1235357/agent-continue/blob/main/native/bootstrap/README.md#windows-command-installation). A public 3.0.0 installer/npm route is not established by this source documentation.
 
@@ -22,7 +22,7 @@ The pinned Desktop Commander dependency has upstream telemetry, enabled by defau
 
 Device Pause is separate from scheduler Pause; ordinary Disconnect and pause does not stop the separate administrator runtime. Check exact native stop outcomes, not only request acknowledgements. Revoke denies future starts for that installation; revoke OpenAI chat/key access separately. Administrator browser-reopen restoration is off unless opted in and may restore only still-authorized saved-running intent, never override manual Pause/Revoke. These controls cannot undo earlier changes, retract results or necessarily stop detached programs. Clearing extension data/uninstalling the extension does not remove native runtimes, task/host registrations, protected credentials or Windows history. The setup uninstall option currently creates a plan, not completed removal.
 
-Checkpoint65 records actual dedicated current-account installation, read-only existing-install adoption, and browser readback of a reachable, paused bridge. Checkpoint64 independently cross-checked ordinary ChatGPT and Dot administrator command/file/owned-process results; an earlier GUI Pause was also observed. These are bounded tests, not permanent readiness or blanket acceptance. Whole-browser administrator saved-running restoration, final installation Revoke, hosted Windows build verification and matching public artifacts/submission remain delivery gates in [Runtime Acceptance](https://github.com/1235357/agent-continue/blob/main/docs/RUNTIME-ACCEPTANCE.md). Read current status before acting; this documentation does not reconnect anything. [Development handoff](https://github.com/1235357/agent-continue/blob/main/docs/DEVELOPMENT-HANDOFF.md) preserves dated results and their limits.
+Checkpoint97 records actual r11 full-app quit/reopen and saved-running recovery without another Connect click. Ordinary ChatGPT and Dot each returned matching administrator, file roundtrip and owned-process results, independently checked on the host. Devices Pause and Revoke produced matching stopped receipts; that test installation is left revoked and not running. These bounded tests do not guarantee future recovery or establish current-account hosted operation, automatic adoption, public-release acquisition or Store approval. Matching release artifacts and review-submission receipts are tracked separately in [Runtime Acceptance](https://github.com/1235357/agent-continue/blob/main/docs/RUNTIME-ACCEPTANCE.md). Read current status before acting; this documentation does not reconnect anything. [Development handoff](https://github.com/1235357/agent-continue/blob/main/docs/DEVELOPMENT-HANDOFF.md) preserves dated results and their limits.
 
 ## Developer and Support
 
@@ -111,9 +111,9 @@ Prompt scheduling/file import require no separate extension account or API key a
 | `storage` | Store configuration, prompts, queues, templates, language, theme, logs, and recovery state locally |
 | `alarms` | Wake the scheduler for due checks |
 | Optional `power` | Prevent system idle sleep when explicitly enabled |
-| Optional `nativeMessaging` (3.0.0 candidate) | Reach the separately installed Windows bridge for bounded status/lifecycle controls and prepared-process reference checks; not installation, elevation or a chat grant |
+| Optional `nativeMessaging` (3.0.0) | Reach the separately installed Windows bridge for bounded status/lifecycle controls and prepared-process reference checks; not installation, elevation or a chat grant |
 
-Historical stable v2.2.1 does not request `nativeMessaging` or include Windows control. The upcoming 3.0.0 manifest adds that optional permission without all-site, Cookie, clipboard or debugger permissions. This browser permission boundary is not a sandbox for separately authorized Windows tools. Setup can copy its command through the clipboard API after a user gesture; scheduler sending does not use the clipboard.
+Historical stable v2.2.1 does not request `nativeMessaging` or include Windows control. The 3.0.0 manifest adds that optional permission without all-site, Cookie, clipboard or debugger permissions. This browser permission boundary is not a sandbox for separately authorized Windows tools. Setup can copy its command through the clipboard API after a user gesture; scheduler sending does not use the clipboard.
 
 Local storage is not encrypted. Hiding prompt text reduces accidental on-screen exposure but is not a security boundary. Configuration exports omit prompt and queue bodies unless explicitly included. Clear Data retains the language preference and durable device/control evidence, removes the administrator browser-restore preference, and does not issue Windows Pause/Revoke. It does not remove native state, original files, exported files or data already sent to ChatGPT. See [PRIVACY.md](https://github.com/1235357/agent-continue/blob/main/PRIVACY.md) for storage, deletion and disclosure details.
 

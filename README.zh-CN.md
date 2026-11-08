@@ -2,15 +2,15 @@
 
 [English](README.md) | 简体中文
 
-向一个已有的 ChatGPT 或 Your dot 会话定时发送自定义提示词。即将推出的 Windows 版本还提供需单独安装、明确授权的文件、Shell 与进程工具。
+向一个已有的 ChatGPT 或 Your dot 会话定时发送自定义提示词。Windows 版本还提供需单独安装、明确授权的文件、Shell 与进程工具。
 
-**3.0.0 Windows 版本：尚未发布（UNRELEASED / candidate）· Manifest V3 · 免费 · MIT 开源**
+**3.0.0 Windows 版本源码 · Manifest V3 · 免费 · MIT 开源**
 
 [Chrome 应用商店](https://chromewebstore.google.com/detail/jpioilmpbolfokedaefmbfbjeaahfdkl) · [GitHub Releases](https://github.com/1235357/agent-continue/releases) · [源码](https://github.com/1235357/agent-continue) · [更新记录](CHANGELOG.md) · [隐私说明（英文）](PRIVACY.md)
 
-已单独发布的 v2.2.1 仍仅含调度、发送确认修复、开发者支持及 schema 3 诊断，不含 Windows 控制，也不能用新候选替换其公开资产。本文不代表 3.0.0 已发布到 GitHub/npm、已提交商店、通过审核或安装。公开下载、商店状态和浏览器已安装版本是不同证据，需分别核对。
+已单独发布的 v2.2.1 仍仅含调度、发送确认修复、开发者支持及 schema 3 诊断，不含 Windows 控制，其公开资产保持不变。源码版本、GitHub 发布、npm 发布、商店审核与浏览器已安装版本是不同状态；请分别核对对应页面和扩展详情，不能把本说明当成发布或安装回执。
 
-## Windows 设备设置（3.0.0 未发布）
+## Windows 设备设置（3.0.0）
 
 选择当前账户或管理员范围，明确同意访问后，从已核验、解压的源码安装包复制并运行 PowerShell 或 CMD 命令；复制不等于执行。没有兼容 Node.js 时，引导命令可在同意后下载、校验并解压官方便携 Node。当前交付采用命令式安装，不使用已退役的自制 Agent Continue 启动器或 EXE/MSI 安装路线；Node.js、OpenAI 官方隧道客户端及上游依赖仍在浏览器外执行。详见公开仓库中的[安装命令与范围选择](https://github.com/1235357/agent-continue/blob/main/native/bootstrap/README.md#windows-command-installation)。本文不证明公开 3.0.0 安装器或 npm 路径已经可用。
 
@@ -22,7 +22,7 @@
 
 设备暂停与调度暂停相互独立；普通“断开并暂停”不停止独立的管理员运行时。管理员 Pause 请求停止，需核对原生回执与实际状态，不能把请求确认当成已经停止。Revoke 禁止该安装未来启动；OpenAI 会话访问或运行密钥需另行撤销。管理员浏览器重开恢复默认关闭，仅明确启用后恢复仍获授权的原运行意图，不得覆盖人工 Pause/Revoke。控制不能撤回已传结果、撤销既有文件修改，也不保证终止主动分离的程序。清空扩展数据或卸载扩展不会移除 Windows 运行时、任务／主机注册、受保护凭据或工具历史；设置页卸载选项目前只生成计划，不执行清理。
 
-Checkpoint65 已记录专用当前账户的实际安装、只读接纳既有安装，以及浏览器回读“桥接可达、已暂停”。Checkpoint64 独立核对了普通 ChatGPT 与 Dot 的管理员命令、文件和自有进程结果；此前也观察到真实 GUI Pause。这些是有范围的测试，不代表永久就绪或全项验收。完整浏览器重开后的管理员运行意图恢复、最终安装级 Revoke、托管 Windows 构建验证及匹配公开资产／商店提交仍是交付门槛。操作前需读取当前状态；本文不重连或重放操作。详见[运行时验收](https://github.com/1235357/agent-continue/blob/main/docs/RUNTIME-ACCEPTANCE.md)及保留日期与验证范围的[交接记录](https://github.com/1235357/agent-continue/blob/main/docs/DEVELOPMENT-HANDOFF.md)。
+Checkpoint97 已记录 r11 的真实完整应用退出、重开及运行意图恢复，未再次点击 Connect。普通 ChatGPT 与 Dot 分别返回匹配的管理员权限、文件写读和自有进程结果，并在本机独立核对；Devices Pause 与 Revoke 均有匹配的停止回执，该测试安装最终已撤销且未运行。这些有范围的测试不保证未来每次恢复，也不证明当前账户托管操作、自动接管既有安装、公开制品下载或商店审核通过。匹配发布资产及提交审核回执在[运行时验收](https://github.com/1235357/agent-continue/blob/main/docs/RUNTIME-ACCEPTANCE.md)中单独记录。操作前需读取当前状态；本文不重连或重放操作。[交接记录](https://github.com/1235357/agent-continue/blob/main/docs/DEVELOPMENT-HANDOFF.md)保留日期与验证范围。
 
 ## 开发者与支持
 
