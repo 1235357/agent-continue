@@ -2,6 +2,41 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Prepared 3.0.2 And Windows CI Startup Failure (Checkpoint110)
+
+The owner-requested removal of the default npm install elapsed-time cap is pushed
+on canonical main as a5cb34e. Extension3.0.2 preparation changes only the manifest
+version and corresponding English/Chinese documentation; npm CLI0.3.0 and all
+browser permissions remain unchanged. The prepared-source label is not a GitHub
+Release, Store submission/approval or installed-version receipt. Existing3.0.1
+assets and its corrected pending Store review are not replaced or withdrawn.
+
+Full local `npm test` completed with exit0 against the prepared3.0.2 source.
+This includes34/34 UI-v2,13/13 MV3 integration and5/5 ProseMirror MV3 scenarios,
+all on synthetic fixtures, not a new live ChatGPT/Dot due-alarm observation.
+Raw output: .artifacts/ordinary-chat-acceptance-20261108/checkpoint110-version302-npm-test.log.
+Focused public/support checks passed34/34 after the listing-source version update;
+`python -B -m unittest discover -s tests -p test_package.py` passed34/34 in46.518s.
+No final3.0.2 package, release tag, Store revision or installed version follows
+from these local regression results.
+
+Actual native CI73, run42534926117, Windows job128897002486 failed after9m15s.
+Its guided-installer-paired fixture failed at20.662s with
+terminal_timeout_1_control_only; acquisition.observed=false is absence of an
+accepted diagnostic, not proof that npm started or failed. The earlier packaged
+manager loopback step passed172.850s. Do not confuse either duration with the
+removed production install cutoff. Independent source review confirmed that the
+fixture discards startup handshake facts on failure and rejects harmless SGR
+prefixes; the SGR refusal would use a different error and is not a proven cause
+of this timeout. Preserve that uncertainty rather than declaring CI repaired.
+
+The installed IAB scheduler still showed Paused, confirmed1send at limit,20min
+and159characters. This was read-only, not a new timed send. Native toolbar opened
+the full console as tab21, but the documented browser API refused that exact
+chrome-extension URL by policy. No alternate transport, storage mutation or
+blind Start/Send was used to bypass it. The live due-alarm gate remains open;
+the external Chrome original task and production connections were not changed.
+
 ### Owner Removes Provider Install Time Cap (Checkpoint109)
 
 The owner's latest explicit instruction supersedes earlier advice to retain the

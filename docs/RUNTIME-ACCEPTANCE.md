@@ -1,5 +1,29 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Prepared 3.0.2 Regression And CI Startup Evidence (Checkpoint110)
+
+Full local `npm test` exited0 on the prepared3.0.2 source, including34UI-v2,
+13MV3 integration and5ProseMirror MV3 scenarios. These are synthetic test pages,
+not a newly observed scheduled message on the live ChatGPT service. Permissions
+and npm CLI0.3.0 are unchanged. Version preparation does not publish or install.
+Log: .artifacts/ordinary-chat-acceptance-20261108/checkpoint110-version302-npm-test.log.
+Focused public/support checks34/34 and offline packaging unittests34/34 passed.
+Packaging tests took46.518s; no final3.0.2 artifact was installed or published.
+
+Native CI73 for a5cb34e, run42534926117/job128897002486, failed9m15s. The first
+guided prompt timed out20.662s with terminal_timeout_1_control_only and no accepted
+acquisition diagnostic. A source review identified two separate fixture defects:
+harmless SGR prefixes are refused before cursor queries, and failure diagnostics
+omit startup counters. Neither proves this CI timeout's root cause. The previous
+packaged-manager exchange passed172.850s; no claimed180s install failure follows.
+
+Actual IAB popup readback: Paused,1confirmed send at configured limit,20min,
+159character prompt. Opening the full console produced tab21, but acquiring that
+chrome-extension page through the documented browser API was explicitly blocked
+by its URL policy. No alternate transport or direct storage writes were used.
+No new Start/Send, platform grant, native connection or production change occurred.
+Live due-alarm/count/limit-Pause and exact-new-artifact acceptance remain open.
+
 ## Provider Install Has No Default Total Deadline (Checkpoint109)
 
 Per the owner's explicit instruction, remove the fixed180-second npm acquisition

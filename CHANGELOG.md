@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## [3.0.2] - 2026-11-08 (prepared)
+
+Prepared source only. GitHub release, Chrome Web Store submission/approval and
+installed-version receipts for 3.0.2 remain pending. The root npm CLI version
+remains independently 0.3.0.
 
 - Remove the fixed 180-second total cutoff from provider dependency installation.
   Normal setup waits for npm completion, an actual error or explicit user
