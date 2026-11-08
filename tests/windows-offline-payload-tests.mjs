@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const installer = fileURLToPath(new URL('../native/bootstrap/install.ps1', import.meta.url));
@@ -13,14 +13,101 @@ const windows = { skip: process.platform !== 'win32', timeout: 20000 };
 const ps = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
 const quote = value => `'${value.replaceAll("'", "''")}'`;
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
+const activePowerShell = new Map();
 
-function run(t, { members, mutation = '', uninstall = false, extracted = false, administrator = false } = {}) {
+function fixtureRoot(t) {
   const parent = fs.realpathSync(os.tmpdir()), root = fs.mkdtempSync(path.join(parent, 'ac-offline-payload-'));
-  t.after(() => {
+  const children = new Set();
+  children.started = 0;
+  activePowerShell.set(root, children);
+  t.after(async () => {
+    activePowerShell.delete(root);
+    const running = [...children];
+    for (const run of running) run.child.kill();
+    await Promise.all(running.map(run => run.closed));
     assert.equal(path.dirname(root), parent);
     assert.equal(fs.realpathSync(root), root);
     fs.rmSync(root, { recursive: true, force: true });
   });
+  return root;
+}
+
+async function runPowerShell(t, root, body, prelude = '') {
+  t.signal.throwIfAborted();
+  const children = activePowerShell.get(root);
+  assert.ok(children, 'fixture must remain open until its PowerShell child closes');
+  assert.equal(children.started++, 0, 'an offline case must use only one cold PowerShell child within its 20s budget');
+  const script = path.join(root, 'harness.ps1');
+  const milestones = path.join(root, 'milestones.txt');
+  fs.writeFileSync(script, `$ErrorActionPreference='Stop'
+$fixtureClock = [Diagnostics.Stopwatch]::StartNew()
+function Write-FixtureMilestone([string]$Name) {
+  [IO.File]::AppendAllText(${quote(milestones)}, ($Name + '=' + $fixtureClock.ElapsedMilliseconds + [Environment]::NewLine))
+}
+Write-FixtureMilestone 'entry'
+${prelude}
+$fixtureAutoloadVariable = $ExecutionContext.SessionState.PSVariable.Get('PSModuleAutoLoadingPreference')
+$fixtureAutoloadDefined = $null -ne $fixtureAutoloadVariable
+$fixtureAutoloadPreference = if ($fixtureAutoloadDefined) { $fixtureAutoloadVariable.Value } else { $null }
+try {
+  # Bootstrap alone disables discovery; the fixture body keeps its original preference.
+  $PSModuleAutoLoadingPreference = 'None'
+  # Join-Path itself would require implicit Management discovery here.
+  $utilityModule = [IO.Path]::Combine($PSHOME, 'Modules\\Microsoft.PowerShell.Utility\\Microsoft.PowerShell.Utility.psd1')
+  $managementModule = [IO.Path]::Combine($PSHOME, 'Modules\\Microsoft.PowerShell.Management\\Microsoft.PowerShell.Management.psd1')
+  $archiveModule = [IO.Path]::Combine($PSHOME, 'Modules\\Microsoft.PowerShell.Archive\\Microsoft.PowerShell.Archive.psd1')
+  Write-FixtureMilestone 'utility-import-start'
+  Import-Module $utilityModule -ErrorAction Stop
+  Write-FixtureMilestone 'utility-imported'
+  Write-FixtureMilestone 'management-import-start'
+  Import-Module $managementModule -ErrorAction Stop
+  Write-FixtureMilestone 'management-imported'
+  Write-FixtureMilestone 'archive-import-start'
+  Import-Module $archiveModule -ErrorAction Stop
+  Write-FixtureMilestone 'archive-imported'
+} finally {
+  if ($fixtureAutoloadDefined) { $PSModuleAutoLoadingPreference = $fixtureAutoloadPreference }
+  else { $ExecutionContext.SessionState.PSVariable.Remove('PSModuleAutoLoadingPreference') }
+}
+Write-FixtureMilestone 'autoload-restored'
+Write-FixtureMilestone 'body-start'
+${body}`, 'utf8');
+  const started = performance.now();
+  const label = `case=${JSON.stringify(t.name)}`;
+  process.stderr.write(`[offline-payload] start ${label} timeout_ms=15000\n`);
+  const run = {};
+  run.closed = new Promise(resolve => {
+    let result;
+    run.child = execFile(ps, ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', script], {
+      encoding: 'utf8', windowsHide: true, timeout: 15000, signal: t.signal,
+      env: { SystemRoot: process.env.SystemRoot, WINDIR: process.env.WINDIR,
+        PATH: path.join(process.env.SystemRoot, 'System32'), TEMP: path.join(root, 'temp'), TMP: path.join(root, 'temp'), OS: 'Windows_NT',
+        LOCALAPPDATA: path.join(root, 'local'), APPDATA: path.join(root, 'roaming'),
+        PSModulePath: path.join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/Modules') },
+    }, (error, stdout, stderr) => {
+      result = { stdout, stderr, error: error?.killed || typeof error?.code !== 'number' ? error : null };
+    });
+    // Abort may notify before OS exit; cleanup must wait for the child's close.
+    run.child.once('close', (status, signal) => {
+      children.delete(run);
+      resolve({ ...result, status, signal });
+    });
+    children.add(run);
+  });
+  const result = await run.closed;
+  const diagnostic = `[offline-payload] end ${label} elapsed_ms=${Math.round(performance.now() - started)}`
+    + ` status=${result.status} signal=${result.signal} error=${result.error?.code || 'none'}`
+    + ` milestones_ms=${JSON.stringify(fs.existsSync(milestones) ? fs.readFileSync(milestones, 'utf8').trim() : 'not-entered')}`;
+  process.stderr.write(diagnostic + '\n');
+  assert.ifError(result.error);
+  assert.equal(result.signal, null, diagnostic);
+  t.signal.throwIfAborted();
+  assert.equal(result.status, 0, diagnostic + '\n' + result.stdout + result.stderr);
+  return result;
+}
+
+async function run(t, { members, mutation = '', uninstall = false, extracted = false, administrator = false } = {}) {
+  const root = fixtureRoot(t);
   const release = path.join(root, 'release'), temp = path.join(root, 'temp');
   fs.mkdirSync(release); fs.mkdirSync(temp);
   const fixture = members || { 'bin.mjs': 'throw new Error("fixture must never execute");\n',
@@ -38,13 +125,12 @@ function run(t, { members, mutation = '', uninstall = false, extracted = false, 
   }
   const encoded = Object.entries(fixture).map(([name, bytes]) => ({ name, data: Buffer.from(bytes).toString('base64'), sha256: hash(bytes) }));
   fs.writeFileSync(path.join(root, 'members.json'), JSON.stringify(encoded));
-  const script = path.join(root, 'harness.ps1');
-  fs.writeFileSync(script, `
-$ErrorActionPreference='Stop'
-Import-Module (Join-Path $PSHOME 'Modules\\Microsoft.PowerShell.Utility\\Microsoft.PowerShell.Utility.psd1')
-Import-Module (Join-Path $PSHOME 'Modules\\Microsoft.PowerShell.Archive\\Microsoft.PowerShell.Archive.psd1')
+  const result = await runPowerShell(t, root, `
+Write-FixtureMilestone 'compression-start'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 Add-Type -AssemblyName System.IO.Compression
+Write-FixtureMilestone 'compression-ready'
+Write-FixtureMilestone 'archive-create-start'
 $release=${quote(release)}
 $archive=Join-Path $release 'agent-continue-setup.zip'
 $rows=ConvertFrom-Json ([IO.File]::ReadAllText(${quote(path.join(root, 'members.json'))}))
@@ -56,16 +142,21 @@ try {
     finally { $stream.Dispose() }
   }
 } finally { $zip.Dispose() }
+Write-FixtureMilestone 'archive-created'
 $lines=@($rows | ForEach-Object { $_.sha256+'  '+$_.name })
 $lines+=((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()+'  agent-continue-setup.zip')
 ${administrator ? `$lines+=${quote(hash(runtimeBytes) + '  ' + runtimeName)}` : ''}
 $sums=Join-Path $release 'SHA256SUMS.txt'
 [IO.File]::WriteAllText($sums,($lines -join "\n")+"\n",[Text.Encoding]::ASCII)
 ${extracted ? `[IO.File]::WriteAllText((Join-Path $release 'bin.mjs'),${quote(fixture['bin.mjs'] || '')})` : ''}
+Write-FixtureMilestone 'mutation-start'
 ${mutation}
+Write-FixtureMilestone 'mutation-complete'
+Write-FixtureMilestone 'source-parse-start'
 $tokens=$null; $errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseFile(${quote(installer)},[ref]$tokens,[ref]$errors)
 if($errors.Count) { throw 'installer_parse_failed' }
+Write-FixtureMilestone 'source-parsed'
 $names=@('Assert-FileDigest','Get-AdjacentSetupArchive','Get-AdjacentAdministratorParameters','Expand-VerifiedSetupArchive','Resolve-Payload','Assert-Payload')
 $definitions=@()
 foreach($fn in $ast.FindAll({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst]},$true)) {
@@ -77,11 +168,14 @@ $definitions+=('function Invoke-FixtureCleanup {'+[Environment]::NewLine+$cleanu
 $helpers=Join-Path $release 'fixture-helpers.ps1'
 [IO.File]::WriteAllText($helpers,($definitions -join [Environment]::NewLine))
 . $helpers
+Write-FixtureMilestone 'helpers-loaded'
 function Invoke-WebRequest { $script:network++; throw 'fixture_network_forbidden' }
 function Expand-Archive {
   param([string]$LiteralPath,[string]$DestinationPath,[switch]$Force)
   $script:expanded++
+  Write-FixtureMilestone 'expand-start'
   Microsoft.PowerShell.Archive\\Expand-Archive @PSBoundParameters
+  Write-FixtureMilestone 'expand-complete'
 }
 $script:network=0; $script:expanded=0; $script:acTemp=''; $script:acRemote=$false
 $script:acKeepTemp=$false; $script:acPath=$env:PATH; $script:acTls=[Net.ServicePointManager]::SecurityProtocol
@@ -90,38 +184,113 @@ ${administrator ? `$script:acAdministratorInstallerSha256=${quote(hash(fixture['
 $Uninstall=$${uninstall}; $PayloadBase='https://example.invalid/must-not-be-contacted'
 $result=@{}
 try {
+  Write-FixtureMilestone 'resolve-start'
   $script:acPayloadRoot=Resolve-Payload
+  Write-FixtureMilestone 'payload-resolved'
   $result.checked=Assert-Payload
+  Write-FixtureMilestone 'payload-checked'
   $result.local=($script:acPayloadRoot -ne $release)
   $result.temp=$script:acTemp
-  ${administrator ? `$parameters=Get-AdjacentAdministratorParameters (Join-Path $script:acPayloadRoot 'install-administrator.ps1')
+  ${administrator ? `Write-FixtureMilestone 'administrator-handoff-start'
+  $parameters=Get-AdjacentAdministratorParameters (Join-Path $script:acPayloadRoot 'install-administrator.ps1')
+  Write-FixtureMilestone 'administrator-handoff-checked'
   $result.originalArchive=($parameters.Archive -ceq (Join-Path $release '${runtimeName}'))
   $result.originalStager=($parameters.Stager -ceq (Join-Path $release 'Stage-WindowsAdministratorBundle.ps1'))
   $result.runtimeCopied=(Test-Path -LiteralPath (Join-Path $script:acPayloadRoot '${runtimeName}'))
   $result.archivePin=$parameters.ExpectedSha256
   $result.stagerPin=$parameters.ExpectedStagerSha256` : ''}
-} catch { $result.error=$_.Exception.Message }
+} catch { $result.error=$_.Exception.Message; Write-FixtureMilestone 'payload-error' }
 finally {
+  Write-FixtureMilestone 'cleanup-start'
   if($script:acTemp) {
     if([IO.Path]::GetDirectoryName($script:acTemp) -ine ${quote(temp)} -or
        [IO.Path]::GetFileName($script:acTemp) -cnotmatch '^agent-continue-[a-f0-9]{32}$') { throw 'fixture_cleanup_scope' }
   }
   Invoke-FixtureCleanup
+  Write-FixtureMilestone 'cleanup-complete'
 }
 $result.network=$script:network; $result.expanded=$script:expanded
 $result.cleaned=(-not $script:acTemp -or -not (Test-Path -LiteralPath $script:acTemp))
+Write-FixtureMilestone 'result-ready'
 [Console]::WriteLine(($result | ConvertTo-Json -Compress))
-`, 'utf8');
-  const result = spawnSync(ps, ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', script], {
-    encoding: 'utf8', windowsHide: true, timeout: 15000,
-    env: { SystemRoot: process.env.SystemRoot, WINDIR: process.env.WINDIR,
-      PATH: path.join(process.env.SystemRoot, 'System32'), TEMP: temp, TMP: temp, OS: 'Windows_NT',
-      LOCALAPPDATA: path.join(root, 'local'), APPDATA: path.join(root, 'roaming'),
-      PSModulePath: path.join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/Modules') },
-  });
-  assert.ifError(result.error);
-  assert.equal(result.status, 0, result.stdout + result.stderr);
+`);
   return JSON.parse(result.stdout.trim());
+}
+
+test('offline fixture imports complete modules with implicit discovery disabled', windows, async t => {
+  const root = fixtureRoot(t);
+  fs.mkdirSync(path.join(root, 'temp'));
+  const result = await runPowerShell(t, root, `
+$stream = [IO.MemoryStream]::new([Text.Encoding]::UTF8.GetBytes('fixture'))
+try { $hash = (Microsoft.PowerShell.Utility\\Get-FileHash -InputStream $stream -Algorithm SHA256).Hash }
+finally { $stream.Dispose() }
+$json = Microsoft.PowerShell.Utility\\ConvertFrom-Json '{"value":"fixture"}'
+$safePath = Microsoft.PowerShell.Management\\Join-Path ${quote(root)} 'harness.ps1'
+$safeItem = Microsoft.PowerShell.Management\\Get-Item -LiteralPath $safePath
+$zipPath = Microsoft.PowerShell.Management\\Join-Path ${quote(root)} 'probe.zip'
+$destination = Microsoft.PowerShell.Management\\Join-Path ${quote(root)} 'expanded'
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+Add-Type -AssemblyName System.IO.Compression
+$zip = [IO.Compression.ZipFile]::Open($zipPath, [IO.Compression.ZipArchiveMode]::Create)
+try {
+  $entry = $zip.CreateEntry('probe.txt'); $stream = $entry.Open()
+  try { $bytes = [Text.Encoding]::UTF8.GetBytes('fixture'); $stream.Write($bytes, 0, $bytes.Length) }
+  finally { $stream.Dispose() }
+} finally { $zip.Dispose() }
+Microsoft.PowerShell.Archive\\Expand-Archive -LiteralPath $zipPath -DestinationPath $destination
+$discoveryBlocked = $false
+try { $null = Get-Command Get-Item }
+catch {
+  if ($_.Exception.Message -cne 'fixture_implicit_command_discovery_forbidden') { throw }
+  $discoveryBlocked = $true
+}
+[Console]::WriteLine((@{
+  utilityPath = (Get-Module Microsoft.PowerShell.Utility).Path
+  managementPath = (Get-Module Microsoft.PowerShell.Management).Path
+  archivePath = (Get-Module Microsoft.PowerShell.Archive).Path
+  autoload = $PSModuleAutoLoadingPreference
+  hash = $hash; jsonValue = $json.value; safePath = $safeItem.FullName
+  expanded = [IO.File]::ReadAllText([IO.Path]::Combine($destination, 'probe.txt'))
+  discoveryBlocked = $discoveryBlocked
+} | ConvertTo-Json -Compress))`, `
+$PSModuleAutoLoadingPreference = 'None'
+function Get-Command { throw 'fixture_implicit_command_discovery_forbidden' }
+`);
+  assert.equal(result.stderr, '');
+  const { utilityPath, managementPath, archivePath, safePath, ...actual } = JSON.parse(result.stdout);
+  for (const [name, actualPath] of [['Utility', utilityPath], ['Management', managementPath], ['Archive', archivePath]]) {
+    assert.equal(actualPath.toLowerCase(), path.join(path.dirname(ps),
+      `Modules/Microsoft.PowerShell.${name}/Microsoft.PowerShell.${name}.psd1`).toLowerCase());
+  }
+  assert.equal(fs.realpathSync.native(safePath).toLowerCase(),
+    fs.realpathSync.native(path.join(root, 'harness.ps1')).toLowerCase());
+  assert.deepEqual(actual, {
+    autoload: 'None', hash: hash('fixture').toUpperCase(), jsonValue: 'fixture',
+    expanded: 'fixture', discoveryBlocked: true,
+  });
+  const milestones = fs.readFileSync(path.join(root, 'milestones.txt'), 'utf8').trim().split(/\r?\n/);
+  assert.deepEqual(milestones.map(line => line.split('=')[0]), [
+    'entry', 'utility-import-start', 'utility-imported', 'management-import-start', 'management-imported',
+    'archive-import-start', 'archive-imported', 'autoload-restored', 'body-start',
+  ]);
+  assert.ok(milestones.every(line => /^[a-z-]+=\d+$/.test(line)));
+});
+
+for (const preference of [null, 'All', 'ModuleQualified']) {
+  test(`offline fixture restores ${preference ?? 'unset'} autoload preference before its body`, windows, async t => {
+    const root = fixtureRoot(t);
+    fs.mkdirSync(path.join(root, 'temp'));
+    const result = await runPowerShell(t, root, `
+$variable = $ExecutionContext.SessionState.PSVariable.Get('PSModuleAutoLoadingPreference')
+[Console]::WriteLine((@{
+  defined = $null -ne $variable
+  preference = if ($null -ne $variable) { [string]$variable.Value } else { $null }
+} | ConvertTo-Json -Compress))`, preference === null
+      ? "$ExecutionContext.SessionState.PSVariable.Remove('PSModuleAutoLoadingPreference')"
+      : `$PSModuleAutoLoadingPreference = ${quote(preference)}`);
+    assert.equal(result.stderr, '');
+    assert.deepEqual(JSON.parse(result.stdout), { defined: preference !== null, preference });
+  });
 }
 
 test('guided preflight accepts a verified adjacent ZIP instead of requiring extracted bin', () => {
@@ -130,8 +299,8 @@ test('guided preflight accepts a verified adjacent ZIP instead of requiring extr
   assert.match(preflight, /Get-AdjacentSetupArchive/);
 });
 
-test('verified adjacent source ZIP resolves and passes read-only payload checks without executing source', windows, t => {
-  const result = run(t);
+test('verified adjacent source ZIP resolves and passes read-only payload checks without executing source', windows, async t => {
+  const result = await run(t);
   assert.equal(result.error, undefined, JSON.stringify(result));
   assert.equal(result.checked, 3);
   assert.equal(result.local, true);
@@ -147,8 +316,8 @@ for (const [name, mutation, error] of [
   ['directory archive', 'Remove-Item -LiteralPath $archive; New-Item -ItemType Directory -Path $archive | Out-Null', 'payload_path_invalid'],
   ['redirected parent', "$saved=$release+'.saved'; Move-Item -LiteralPath $release -Destination $saved; New-Item -ItemType Junction -Path $release -Target $saved | Out-Null", 'payload_path_invalid'],
 ]) {
-  test(`adjacent ${name} fails before extraction or network`, windows, t => {
-    const result = run(t, { mutation });
+  test(`adjacent ${name} fails before extraction or network`, windows, async t => {
+    const result = await run(t, { mutation });
     assert.equal(result.error, error, JSON.stringify(result));
     assert.equal(result.expanded, 0);
     assert.equal(result.network, 0);
@@ -157,39 +326,39 @@ for (const [name, mutation, error] of [
 }
 
 for (const name of ['../escape.txt', 'payload/../../escape.txt', 'payload/CON.txt', 'payload/custom.exe']) {
-  test(`digest-verified unsafe member ${name} is rejected before expansion`, windows, t => {
-    const result = run(t, { members: { 'bin.mjs': '// never executed', [name]: 'unsafe' } });
+  test(`digest-verified unsafe member ${name} is rejected before expansion`, windows, async t => {
+    const result = await run(t, { members: { 'bin.mjs': '// never executed', [name]: 'unsafe' } });
     assert.equal(result.error, 'payload_path_invalid', JSON.stringify(result));
     assert.equal(result.expanded, 0); assert.equal(result.network, 0); assert.equal(result.cleaned, true);
   });
 }
 
-test('uninstall refuses archived-only payload without extraction or fetch', windows, t => {
-  const result = run(t, { uninstall: true });
+test('uninstall refuses archived-only payload without extraction or fetch', windows, async t => {
+  const result = await run(t, { uninstall: true });
   assert.equal(result.error, 'uninstall_inspection_unavailable');
   assert.equal(result.expanded, 0); assert.equal(result.network, 0);
 });
 
-test('bad adjacent archive cannot fall back to an existing extracted entry', windows, t => {
-  const result = run(t, { extracted: true, mutation: "[IO.File]::AppendAllText($archive,'tampered')" });
+test('bad adjacent archive cannot fall back to an existing extracted entry', windows, async t => {
+  const result = await run(t, { extracted: true, mutation: "[IO.File]::AppendAllText($archive,'tampered')" });
   assert.equal(result.error, 'payload_digest_mismatch');
   assert.equal(result.expanded, 0); assert.equal(result.network, 0);
 });
 
-test('existing Assert-Payload rejects changed extracted source before any execution', windows, t => {
-  const result = run(t, { mutation: "$lines[0]=('0'*64)+'  bin.mjs'; [IO.File]::WriteAllText($sums,($lines -join [Environment]::NewLine)+[Environment]::NewLine)" });
+test('existing Assert-Payload rejects changed extracted source before any execution', windows, async t => {
+  const result = await run(t, { mutation: "$lines[0]=('0'*64)+'  bin.mjs'; [IO.File]::WriteAllText($sums,($lines -join [Environment]::NewLine)+[Environment]::NewLine)" });
   assert.equal(result.error, 'payload_digest_mismatch');
   assert.equal(result.expanded, 1); assert.equal(result.network, 0); assert.equal(result.cleaned, true);
 });
 
-test('missing adjacent archive retains remote legacy route, intercepted before any network', windows, t => {
-  const result = run(t, { mutation: 'Remove-Item -LiteralPath $archive' });
+test('missing adjacent archive retains remote legacy route, intercepted before any network', windows, async t => {
+  const result = await run(t, { mutation: 'Remove-Item -LiteralPath $archive' });
   assert.equal(result.error, 'fixture_network_forbidden');
   assert.equal(result.network, 1); assert.equal(result.expanded, 0); assert.equal(result.cleaned, true);
 });
 
-test('administrator handoff binds verified original sidecars without copying or executing the runtime', windows, t => {
-  const result = run(t, { administrator: true });
+test('administrator handoff binds verified original sidecars without copying or executing the runtime', windows, async t => {
+  const result = await run(t, { administrator: true });
   assert.equal(result.error, undefined, JSON.stringify(result));
   assert.equal(result.originalArchive, true);
   assert.equal(result.originalStager, true);
@@ -213,8 +382,8 @@ for (const [name, mutation, error] of [
   ['tampered stager', "[IO.File]::AppendAllText((Join-Path $release 'Stage-WindowsAdministratorBundle.ps1'),'changed')", 'payload_digest_mismatch'],
   ['missing setup ZIP', 'Remove-Item -LiteralPath $archive', 'payload_integrity_unverified'],
 ]) {
-  test(`declared local administrator closure rejects ${name} without remote fallback`, windows, t => {
-    const result = run(t, { administrator: true, mutation });
+  test(`declared local administrator closure rejects ${name} without remote fallback`, windows, async t => {
+    const result = await run(t, { administrator: true, mutation });
     assert.equal(result.error, error, JSON.stringify(result));
     assert.equal(result.network, 0); assert.equal(result.cleaned, true);
   });
