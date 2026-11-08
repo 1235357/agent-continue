@@ -26,7 +26,13 @@ function Read-ExactProcess([string]$Dir, [string]$Role) {
     $watch = [Diagnostics.Stopwatch]::StartNew()
     do {
         if ([IO.File]::Exists($file)) {
-            $value = [IO.File]::ReadAllText($file)
+            $value = $null
+            try { $value = [IO.File]::ReadAllText($file) }
+            catch [IO.IOException] {
+                # Exists can observe the PID file before its writer closes it.
+                $errorCode = $_.Exception.HResult -band 0xffff
+                if ($errorCode -ne 32 -and $errorCode -ne 33) { throw }
+            }
             if ($value -match '\A[1-9][0-9]{0,8}\z') {
                 $process = [Diagnostics.Process]::GetProcessById([int]$value)
                 $null = $process.Handle
@@ -52,6 +58,40 @@ $scratch = Join-Path $parent ('ac-owner-job-' + [Guid]::NewGuid().ToString('N'))
 $null = [IO.Directory]::CreateDirectory($scratch)
 $outside = $null
 try {
+    # Force the CI race before exercising the three real Job Object scenarios.
+    $publication = Join-Path $scratch 'publication-race'
+    $null = [IO.Directory]::CreateDirectory($publication)
+    $publicationFile = Join-Path $publication 'outside.pid'
+    $publicationLiteral = $publicationFile.Replace("'", "''")
+    $writerCode = @"
+`$stream = [IO.File]::Open('$publicationLiteral',[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+try {
+    `$bytes = [Text.Encoding]::ASCII.GetBytes('$PID')
+    `$stream.Write(`$bytes,0,`$bytes.Length)
+    `$stream.Flush()
+    [Console]::Out.WriteLine('pid-file-locked')
+    [Console]::Out.Flush()
+    Start-Sleep -Milliseconds 500
+} finally { `$stream.Dispose() }
+"@
+    $writerPlan = [Diagnostics.ProcessStartInfo]::new((Join-Path $PSHOME 'powershell.exe'),
+        ('-NoLogo -NoProfile -NonInteractive -EncodedCommand ' + [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($writerCode))))
+    $writerPlan.UseShellExecute = $false
+    $writerPlan.CreateNoWindow = $true
+    $writerPlan.RedirectStandardOutput = $true
+    $writer = [Diagnostics.Process]::Start($writerPlan)
+    try {
+        $ready = $writer.StandardOutput.ReadLineAsync()
+        if (-not $ready.Wait(7000) -or $ready.Result -cne 'pid-file-locked') { throw 'publication lock witness missing' }
+        $publicationProcess = Read-ExactProcess $publication 'outside'
+        try { if ($publicationProcess.Id -ne $PID) { throw 'publication identity mismatch' } }
+        finally { $publicationProcess.Dispose() }
+        if (-not $writer.WaitForExit(7000) -or $writer.ExitCode -ne 0) { throw 'publication writer failed' }
+        Write-Output 'PASS pid-publication: locked PID file retries until its exact process is readable'
+    } finally {
+        if (-not $writer.HasExited) { $writer.Kill(); $null = $writer.WaitForExit(7000) }
+        $writer.Dispose()
+    }
     $outside = [Diagnostics.Process]::Start((New-TestLaunch $scratch 'outside'))
     $witness = Read-ExactProcess $scratch 'outside'
     try { if ($witness.Id -ne $outside.Id) { throw 'unrelated fixture identity mismatch' } }

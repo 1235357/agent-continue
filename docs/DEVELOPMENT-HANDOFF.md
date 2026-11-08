@@ -2,6 +2,28 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Actual CI52 PID Publication Race Reproduced (Checkpoint90)
+
+Pushed main b0aaf969530159c5d3d17007328da0a8eac3861d ran as Native52,
+Windows job128802233349. Its control-ledger suite actually passed38/38 in
+87.37s total, with the exhaustive read child47.30s inside its unchanged60s
+bound. An early UI-based timeout diagnosis was incorrect and was explicitly
+corrected after reading the complete official log. The next real Job Object
+fixture failed: ReadAllText observed grandchild.pid while its writer held it.
+Evidence is local checkpoint90-ci52-windows-log.txt. Later skipped steps,
+including the corrected CMD-cache case, remain unaccepted for this run.
+
+A new scratch-only writer holds the PID file with FileShare.None. The original
+reader reproduced the same sharing exception RED. It now waits only on Windows
+sharing/lock violations32/33 within the original7s bound; all other I/O errors
+still throw. The new writer readiness and exit waits are also bounded7s.
+The final parent run passed all four cases in3.83s: locked publication, Revoke,
+root-exit and broker-loss. The three real Job scenarios retain every descendant
+membership/exit assertion and the unrelated-process survival assertion.
+This changes tests only, not the production Job implementation or permissions.
+Another hosted result is required. r8 remains paused; settled Connect/probes are
+not replayed. No Release, npm publication or Store review submission is implied.
+
 ### Hosted53 Passed; CMD Fixture Engine Cache Corrected (Checkpoint89)
 
 Main e86ecb5852b453625366876cfc1ef75a37fbcb24 is pushed and verified in IAB;

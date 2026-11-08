@@ -1,5 +1,21 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Actual PID Publication Race, Not Ledger Timeout (Checkpoint90)
+
+- Native52 Windows128802233349 on b0aaf969 passed ledger38/38; its47.30s read
+  child stayed below60s. The87.37s suite duration was not a timeout. The earlier
+  UI-based diagnosis was corrected from the complete official raw log.
+- The next real Job fixture failed on a sharing violation reading grandchild.pid.
+  A new scratch writer with FileShare.None reproduced the exact exception RED.
+  The reader now retries only sharing/lock codes32/33 under the same7s deadline.
+  Writer readiness/exit are bounded7s; other exceptions and exact PID checks stay.
+  Parent final four-case run passed3.83s. Revoke/root-exit/broker-loss still check
+  all retained descendants exited and the unrelated process survived. No actual
+  installed-runtime source or permission changed. New hosted proof remains needed.
+- CI52 downstream skips are not passes. r8 remains deliberately paused; no
+  settled operation, web probe, production connection or original task replay.
+  Whole-browser/final-artifact gates, Release and Store submission remain open.
+
 ## Hosted53 Clearance And Guided CMD Cache Fixture (Checkpoint89)
 
 - Pushed/observed e86ecb5852b453625366876cfc1ef75a37fbcb24. Native51 Windows
