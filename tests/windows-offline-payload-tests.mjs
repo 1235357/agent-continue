@@ -15,8 +15,56 @@ const quote = value => `'${value.replaceAll("'", "''")}'`;
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const activePowerShell = new Map();
 
+const normalizeFixtureLongPath = `
+  if ($longPath.StartsWith('\\\\?\\UNC\\', [StringComparison]::OrdinalIgnoreCase)) {
+    $longPath = '\\\\' + $longPath.Substring(8)
+  } elseif ($longPath.StartsWith('\\\\?\\', [StringComparison]::Ordinal)) {
+    $longPath = $longPath.Substring(4)
+  }
+`;
+
+const fixtureCleanupScope = temp => `
+  if($script:acTemp) {
+    if (-not ('FixtureLongPath' -as [type])) {
+      Add-Type @'
+using System.Runtime.InteropServices;
+using System.Text;
+public static class FixtureLongPath {
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  public static extern uint GetLongPathName(string path, StringBuilder result, uint capacity);
+}
+'@
+    }
+    $canonicalCleanup = @()
+    foreach ($inputPath in @(${quote(temp)}, $script:acTemp)) {
+      if (-not [IO.Path]::IsPathRooted($inputPath)) { throw 'fixture_cleanup_scope' }
+      # Check before resolving: canonicalization must never hide a junction.
+      $item = Get-Item -LiteralPath $inputPath -Force -ErrorAction Stop
+      if ($item -isnot [IO.DirectoryInfo]) { throw 'fixture_cleanup_scope' }
+      for ($cursor = $item; $null -ne $cursor; $cursor = $cursor.Parent) {
+        if ($cursor.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'fixture_cleanup_scope' }
+      }
+      $buffer = [Text.StringBuilder]::new(32768)
+      $length = [FixtureLongPath]::GetLongPathName([IO.Path]::GetFullPath($inputPath), $buffer, $buffer.Capacity)
+      if ($length -eq 0 -or $length -ge $buffer.Capacity) { throw 'fixture_cleanup_scope' }
+      $longPath = $buffer.ToString()
+      ${normalizeFixtureLongPath}
+      $canonicalCleanup += $longPath
+    }
+    if ([IO.Path]::GetDirectoryName($canonicalCleanup[1]) -ine $canonicalCleanup[0] -or
+        [IO.Path]::GetFileName($canonicalCleanup[1]) -cnotmatch '\\Aagent-continue-[a-f0-9]{32}\\z') {
+      throw 'fixture_cleanup_scope'
+    }
+    if ([IO.Path]::GetDirectoryName($script:acTemp) -ine $canonicalCleanup[0]) { Write-FixtureMilestone 'cleanup-parent-alias' }
+    if ([IO.Path]::GetFileName($script:acTemp) -cne [IO.Path]::GetFileName($canonicalCleanup[1])) { Write-FixtureMilestone 'cleanup-leaf-alias' }
+    $script:acTemp = $canonicalCleanup[1]
+    $env:TEMP = $canonicalCleanup[0]; $env:TMP = $canonicalCleanup[0]
+    Write-FixtureMilestone 'cleanup-scope-verified'
+  }
+`;
+
 function fixtureRoot(t) {
-  const parent = fs.realpathSync(os.tmpdir()), root = fs.mkdtempSync(path.join(parent, 'ac-offline-payload-'));
+  const parent = fs.realpathSync.native(os.tmpdir()), root = fs.mkdtempSync(path.join(parent, 'ac-offline-payload-'));
   const children = new Set();
   children.started = 0;
   activePowerShell.set(root, children);
@@ -202,10 +250,7 @@ try {
 } catch { $result.error=$_.Exception.Message; Write-FixtureMilestone 'payload-error' }
 finally {
   Write-FixtureMilestone 'cleanup-start'
-  if($script:acTemp) {
-    if([IO.Path]::GetDirectoryName($script:acTemp) -ine ${quote(temp)} -or
-       [IO.Path]::GetFileName($script:acTemp) -cnotmatch '^agent-continue-[a-f0-9]{32}$') { throw 'fixture_cleanup_scope' }
-  }
+  ${fixtureCleanupScope(temp)}
   Invoke-FixtureCleanup
   Write-FixtureMilestone 'cleanup-complete'
 }
@@ -216,6 +261,122 @@ Write-FixtureMilestone 'result-ready'
 `);
   return JSON.parse(result.stdout.trim());
 }
+
+test('offline cleanup extended-prefix normalization preserves drive and UNC roots', windows, async t => {
+  const root = fixtureRoot(t);
+  fs.mkdirSync(path.join(root, 'temp'));
+  const cases = [
+    ['C:\\temp\\fixture', 'C:\\temp\\fixture'],
+    ['\\\\?\\C:\\temp\\fixture', 'C:\\temp\\fixture'],
+    ['\\\\server\\share\\temp', '\\\\server\\share\\temp'],
+    ['\\\\?\\UNC\\server\\share\\temp', '\\\\server\\share\\temp'],
+  ];
+  const result = await runPowerShell(t, root, `
+$cases = ConvertFrom-Json ${quote(JSON.stringify(cases))}
+$observed = @()
+foreach ($case in $cases) {
+  $longPath = $case[0]
+  ${normalizeFixtureLongPath}
+  if ($longPath -cne $case[1]) { throw 'fixture_extended_prefix_mismatch' }
+  $observed += $longPath
+}
+[Console]::WriteLine((@{paths=$observed} | ConvertTo-Json -Compress))
+`);
+  assert.equal(result.stderr, '');
+  assert.deepEqual(JSON.parse(result.stdout).paths, cases.map(([, expected]) => expected));
+});
+
+test('offline cleanup accepts only verified fixture directory aliases', windows, async t => {
+  const root = fixtureRoot(t), temp = path.join(root, 'temp');
+  fs.mkdirSync(temp);
+  const directory = path.join(temp, 'agent-continue-' + 'a'.repeat(32));
+  fs.mkdirSync(directory);
+  const canonical = fs.realpathSync.native(directory);
+  const result = await runPowerShell(t, root, `
+Add-Type @'
+using System.Runtime.InteropServices;
+using System.Text;
+public static class FixtureShortPath {
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  public static extern uint GetShortPathName(string path, StringBuilder result, uint capacity);
+}
+'@
+$buffer = [Text.StringBuilder]::new(32768)
+$length = [FixtureShortPath]::GetShortPathName(${quote(directory)}, $buffer, $buffer.Capacity)
+if ($length -eq 0 -or $length -ge $buffer.Capacity) { throw 'fixture_short_path_query_failed' }
+$short = $buffer.ToString()
+# Extended paths are aliases even on volumes where 8.3 names are disabled.
+$aliases = @(${quote(directory)}, $short, ${quote(path.toNamespacedPath(directory))})
+$observed = @()
+foreach ($alias in $aliases) {
+  $script:acTemp = $alias
+  $item = Get-Item -LiteralPath $alias -Force
+  $observation = @{raw=$alias; rawParent=[IO.Path]::GetDirectoryName($alias)
+    rawLeaf=[IO.Path]::GetFileName($alias); itemName=$item.Name; itemFullName=$item.FullName}
+  try { ${fixtureCleanupScope(temp)} }
+  catch { [Console]::Error.WriteLine(($observation | ConvertTo-Json -Compress)); throw }
+  $observation.verified = $script:acTemp
+  $observed += $observation
+}
+# Exercise the unchanged installer finally against the verified canonical path.
+$ast = [Management.Automation.Language.Parser]::ParseFile(${quote(installer)}, [ref]$null, [ref]$null)
+$outer = @($ast.EndBlock.Statements | Where-Object { $_ -is [Management.Automation.Language.TryStatementAst] })[-1]
+$cleanup = @($outer.Finally.Statements | ForEach-Object { $_.Extent.Text }) -join [Environment]::NewLine
+$script:acPath = $env:PATH; $script:acTls = [Net.ServicePointManager]::SecurityProtocol; $script:acKeepTemp = $false
+& ([scriptblock]::Create($cleanup))
+[Console]::WriteLine((@{aliases=$observed} | ConvertTo-Json -Depth 4 -Compress))
+`);
+  assert.equal(result.stderr, '');
+  const observed = JSON.parse(result.stdout).aliases;
+  assert.equal(observed.length, 3);
+  for (const alias of observed) {
+    assert.equal(alias.verified.toLowerCase(), canonical.toLowerCase());
+  }
+  assert.equal(fs.existsSync(directory), false, 'the unchanged installer cleanup must remove the verified directory');
+  t.diagnostic(JSON.stringify(observed));
+});
+
+test('offline cleanup refuses wrong scope and reparse directories before deletion', windows, async t => {
+  const root = fixtureRoot(t), temp = path.join(root, 'temp');
+  fs.mkdirSync(temp);
+  const leaf = 'agent-continue-' + 'b'.repeat(32);
+  const outside = path.join(root, 'outside'), target = path.join(outside, leaf);
+  fs.mkdirSync(target, { recursive: true });
+  fs.writeFileSync(path.join(target, 'keep.txt'), 'must survive');
+  const junction = path.join(temp, leaf), parentJunction = path.join(root, 'redirected-temp');
+  fs.symlinkSync(target, junction, 'junction');
+  fs.symlinkSync(outside, parentJunction, 'junction');
+  const wrongName = path.join(temp, 'not-a-payload');
+  fs.mkdirSync(wrongName);
+  fs.writeFileSync(path.join(wrongName, 'keep.txt'), 'must survive');
+  const cases = [
+    ['outside', target, temp], ['wrong-name', wrongName, temp],
+    ['temp-root', temp, temp], ['leaf-junction', junction, temp],
+    ['parent-junction', path.join(parentJunction, leaf), parentJunction],
+  ];
+  const result = await runPowerShell(t, root, `
+$cases = ConvertFrom-Json ${quote(JSON.stringify(cases))}
+$rejected = @()
+foreach ($case in $cases) {
+  $script:acTemp = $case[1]
+  $expected = $case[2]
+  $refused = $false
+  try {
+    & ([scriptblock]::Create(${quote(fixtureCleanupScope('$EXPECTED').replaceAll(quote('$EXPECTED'), '$expected'))}))
+  } catch {
+    if ($_.Exception.Message -cne 'fixture_cleanup_scope') { throw }
+    $refused = $true
+  }
+  if (-not $refused) { throw ('fixture_unsafe_cleanup_admitted:' + $case[0]) }
+  $rejected += $case[0]
+}
+[Console]::WriteLine((@{rejected=$rejected} | ConvertTo-Json -Compress))
+`);
+  assert.equal(result.stderr, '');
+  assert.deepEqual(JSON.parse(result.stdout).rejected, cases.map(([name]) => name));
+  assert.equal(fs.readFileSync(path.join(target, 'keep.txt'), 'utf8'), 'must survive');
+  assert.equal(fs.readFileSync(path.join(wrongName, 'keep.txt'), 'utf8'), 'must survive');
+});
 
 test('offline fixture imports complete modules with implicit discovery disabled', windows, async t => {
   const root = fixtureRoot(t);

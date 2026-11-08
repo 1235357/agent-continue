@@ -1,5 +1,31 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Final Source Regression And r17 Store Draft (Checkpoint76)
+
+- Pushed/read-back main fbd8d58247e416da54a63042769e5961980fbc2f passed the full
+  npm test command after the final native-call deadline fix. Extension checks93
+  run42477125044 succeeded in4m45s. Administrator-control401/401 and the70 Python
+  packaging/site/release tests also passed; synthetic browser-restart coverage
+  does not establish live hosted recovery.
+- Refreshed Store draft3.0.0 to r17, Store ZIP SHA256
+  d5d62b994e2029e66f686195064d5025be1378251be4b192577ff3fa8fd5e95e.
+  The public/Store pair check and all247 installed-member hashes passed. The
+  sole r16-to-r17 member change was CHANGELOG.md. Actual Package page confirms
+  Draft3.0.0 and Published2.1.0, not review submission or new publication.
+  Proof: .artifacts/ordinary-chat-acceptance-20261108/store-r17-package-draft.png.
+- Experimental native38 run42477124953 reached the expected tampered-stager
+  rejection, then failed the fixture_cleanup_scope check. Its test-only alias
+  correction passed parent29/29 in31.40s, zero failures/skips, including a red/green
+  extended-UNC normalization regression found during independent review. Exact
+  CI38 short-name causality remains unconfirmed: the local volume returns long
+  names, while extended-path aliases deterministically reproduce the old guard
+  failure. Containment/naming/reparse checks and15s/20s budgets remain intact.
+  Formal delivery7 remains a separate successful build.
+- Actual Revoke ee5180ab1aa742b5a30eb02d584ef528 remains stopped and the test
+  installation revoked. Reauthorization request is unanswered. Preserve this
+  state; current-account hosted calls, whole-browser restoration and final Dot
+  write/owned-child acceptance are still pending, as are Release/review receipts.
+
 ## Actual r16 Revoke Completion And Verified Delivery Build (Checkpoint75)
 
 - Existing IAB installation updated from the r16 public extension ZIP:

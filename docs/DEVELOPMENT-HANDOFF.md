@@ -2,6 +2,39 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Final Source Regression And Store Draft Refresh (Checkpoint76)
+
+Main fbd8d58247e416da54a63042769e5961980fbc2f was pushed and read back.
+The final source passed the complete npm test command, including the last
+native-call deadline adjustment. Extension checks93, run42477125044, succeeded
+in4m45s. This supersedes checkpoint75's earlier full-regression qualification.
+The administrator-control regression remains401/401; local browser fixtures
+are not actual hosted whole-browser lifecycle acceptance.
+
+The Store draft now contains the r17 3.0.0 package, SHA256
+d5d62b994e2029e66f686195064d5025be1378251be4b192577ff3fa8fd5e95e.
+The public and Store packages passed their distribution-pair check. All247
+installed r17 members matched; r16 to r17 changed CHANGELOG.md only, not code.
+The actual Package page shows Draft3.0.0 and Published2.1.0. No review submission
+or3.0.0 GitHub Release is established. Proof:
+.artifacts/ordinary-chat-acceptance-20261108/store-r17-package-draft.png.
+
+Experimental native38, run42477124953, failed its negative tampered-stager case
+at fixture_cleanup_scope after reaching the expected payload rejection. This
+is separate from the successful formal delivery7 build. A test-only directory
+alias correction passed parent29/29 cases in31.40s, zero failures or skips.
+Two original-guard regressions failed before the correction; independent review
+also found an extended-UNC prefix bug, reproduced red and then fixed. Actual
+cleanup is checked only after canonical containment, strict naming and ancestry
+reparse rejection. No product guard or15s/20s timeout was relaxed. The precise
+CI38 short-name cause is still unconfirmed until hosted rerun; the local volume
+does not allocate8.3 aliases, so extended-path aliases reproduce the failure class.
+
+The r8 test installation remains revoked with its original Revoke stopped.
+Reauthorization has been requested but not received; do not reconnect or infer
+new authority from old grants. Current-account hosted operation, actual browser
+exit/reopen restoration and final Dot write/owned-process proof remain open.
+
 ### Verified Recorded Revoke Completion And Delivery Build (Checkpoint75)
 
 The installed IAB candidate was updated to r16, with247/247 package members
