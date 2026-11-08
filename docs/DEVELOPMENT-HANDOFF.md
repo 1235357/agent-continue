@@ -2,6 +2,140 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Live Ordinary-Chat Acceptance And Upgrade Pause Repair (Checkpoint70)
+
+Follow-up: both independent Pause findings below were repaired. Parent's five-suite
+run passed537 tests; a fresh follow-up review independently passed354 repository
+tests and57 additional in-memory fault/compatibility checks with no remaining
+actionable finding in that scope. Live Pause acceptance is still required.
+Popup setup/device navigation now stays in the toolbar popup after saving the
+draft; full-view/Expand behavior is retained. The12-case navigation matrix and
+34 UI checks passed with mocked extension APIs, not yet installed-IAB acceptance.
+The new scratch r13 was copied247/247; it has not been reloaded at this note.
+Store SHA256:7e2414f8e37245af555df327a0f46b387f6a48e79f57ed39cc4da95d6612eca9.
+Native CI34 showed macOS success, Ubuntu failure and a Windows step timeout.
+The Windows raw log shows every observed recovery child entered, then timed out
+before utility-imported at15seconds. This identifies the explicit module-import
+boundary, not a proven underlying cause. Do not increase timeouts blindly.
+
+This section supersedes the in-progress readiness statements below, not their
+historical receipts. Canonical main was pushed through1746f03; no3.0.0 Release
+or Store review submission has occurred. The full product regression exited0.
+
+After r10 reload, saved-running restoration created owner generation
+f32647664aea458eb0a1655034aa7bd9. Public owner status and an independent native
+status request both returned ready. Reload resets browser session storage;
+this was NOT a full browser exit/reopen test. Do not replay the failed97d46
+Connect or its exited a8a782 owner generation.
+
+The existing ordinary ChatGPT acceptance conversation actually called Read File
+and returned the exact disposable marker. It then ran admin-probe.ps1 through
+Start Process, returning administrator=true, roundtrip=true and an owned child
+started/stopped result. Parent independently matched the result-file SHA256
+f600ac27d2bda9d505e2a6a47e6b7a3af8c9cfd78953e32ea851c412f1243c22.
+The script waited for its child exit and the browser reported process50100
+finished. Proof: .artifacts/ordinary-chat-acceptance-20261108/read-file-result.png
+and administrator-result.png. These bounded results do not prove all lifecycle
+controls or universal reliability. Do not rerun admin-probe: its result exists
+and its explicit no-replay guard must remain intact.
+
+Actual GUI Pause did NOT send a new native request: the old ec7 unassociated
+LAST record00b11992c1a04b0f9fe4180f1861a90d blocked the new installation path.
+The r8 runtime therefore remained running; do not claim it paused. The extension
+repair and fault regressions are in progress. An independent review reproduced
+capability-error fallback and fresh-archive conflict defects despite291 related
+tests passing; those findings remain release blockers until repaired/reviewed.
+Scratch r12 was byte-matched247/247 and reloaded only in IAB; it is NOT a final
+release candidate. External Chrome, production VPN/MCP/IDE/research stayed intact.
+
+Manual Verify Windows delivery6 on1746f03 failed after three official archive
+HTTP504 responses (11.8/14.3/18.8seconds), before building any delivery artifacts.
+Do not classify the bounded downloader as successful acquisition. The Store
+still holds old r9 ZIP draft3.0.0; published remains2.1.0. Its saved remote-code
+answer now truthfully discloses the optional cross-origin loopback iframe's
+local JavaScript outside the extension ZIP. Store submission validation also
+reports both Homepage and Privacy policy GitHub links unreachable by timeout.
+Final package, screenshots, current lifecycle/Dot tests and external receipts
+are still required; do not silently waive them or weaken protection.
+
+### Final Candidate Installation And Store Draft (Checkpoint69 In Progress)
+
+Latest diagnosis: the one r8 Connect below did NOT reach Ready. Its exact owner
+generation a8a78288c4c14c79a976078530050e4d exited1, with a protected terminal
+receipt proving root exit and inner-lease cleanup. Read-only installed Node
+authorization verification returned true. The browser witness pipe was absent;
+after a scoped IAB preview reload it was present. Do not claim a proven hosted
+connection or replay97d46acf570947599473f21a577f46c4.
+
+Source regression reproduced a distinct startup defect: manual Connect and
+resume-saved did not prepare the browser observer after a pre-install missing
+host. The extension-only fix now waits for a correlated observe-only attachment
+before reserving an operation; Pause/Revoke/permission loss cancel the await.
+Revoke and receipt reads do not require the observer. Related188/188 tests and
+the new actual-two-module11/11 integration tests passed. An independent review
+found no actionable issue within that scope. This is not native/hosted acceptance.
+The exact247-file r10 preview was installed/reloaded in IAB; its Store ZIP hash
+is d41487c8da0cd13eea595289a2d233787b6a1579b3e20f68c63e33b0b8eeab7e.
+The Store still holds r9 until replacement; the runtime remains unchanged r8.
+
+Store data-usage draft now includes personally identifiable information,
+authentication information, personal communications, web history, user activity
+and website content. No new review submission or policy certification receipt
+is claimed. Actual current-account/admin lifecycle and final hosted calls remain
+required. In particular, broad FAQ at-rest encryption language needs reconciliation
+with explicitly documented plaintext browser storage/protected runtime files;
+do not conceal that boundary or assert legal/compliance approval.
+
+Canonical main now includes14f1c0d, actually committed/pushed after independent
+review and parent recovery37/37pass in43.2s. The test-only change replaces62 cold
+PowerShell launches with37, one per case, preserving15s child/20s case/3min step
+limits and cache path/length/timestamp/SHA256 readback. The three CI selectors
+cover12/13/12 distinct cases. This does not yet resolve the hosted first-child
+15s timeout; new milestone diagnostics must establish that separately.
+
+Final parent complete product regression and package107/107 passed. A separate
+artifact audit matched extension-r9 and closure-r8 to the be67563 product source:
+247 extension files,50 setup files,24328 administrator entries and matching
+sidecars/dependencies. Later14f1c0d changes tests only, not these product bytes.
+Store ZIP SHA256 is474dd9d2a62d5780df06cec3da2fb700215905c101abd4a20653fae86c9f109e.
+Administrator ZIP SHA256 is7e174a6571003b45ceca557fb01dc4a62f3d1324cb33f012cb273c37154c7fb2.
+
+Actual IAB extension hjnopijiekcbgiljjfiekeiepkebhido was mechanically updated
+to exactly247 r9 files and reloaded as3.0.0; original path/ID/permission/storage
+were retained. The previous candidate folder is preserved locally. External
+Chrome's original scheduler was not reloaded, rebound or resumed.
+
+Old dedicated ec7 administrator runtime was paused with exact stopped receipt
+00b11992c1a04b0f9fe4180f1861a90d, then revoked with exact stopped receipt
+af21ebc5e3fa45fd929574eb308a38d4. Unenroll exited0; independent readback found
+the old administrator_owner HKLM registration absent and no AgentContinue task.
+Old files/credentials/evidence were retained. Do not replay either operation.
+
+New r8 installation3f65db52f84b4a4997d4b6038e58ea3b completed with protected
+receipt: all24328 files/ACLs, state, clean launch plan, real administrator child,
+binding and browser enrollment verified. It finished ready-to-connect, not
+connected. Root is C:\Program Files\AgentContinueAdmin\7e174a6571003b45ceca557f.
+One subsequent GUI Connect was admitted as97d46acf570947599473f21a577f46c4;
+its saved intent and launch-requested receipts exist. Current phase is waiting
+for runtime, not yet verified Ready. Never reissue that Connect blindly.
+
+Authenticated Google Store actually accepted the exact r9 ZIP: draft3.0.0 with
+optional nativeMessaging; published version remains2.1.0. Canonical full English
+description, developer/support links and native/storage/single-purpose draft
+disclosures were saved. This is draft preparation, NOT review submission or
+publication. Final screenshots/data categories/certification remain to reconcile.
+Proof: .artifacts/windows-one-command-setup-20261108/checkpoint69-store-draft-3.0.0.png.
+
+CI for be67563 is not all green. Extension83(run42464684301) succeeded.
+Manual delivery5(run42464737554) failed twice while downloading the official
+pinned tunnel archive with HTTP504, before building. Native31(run42464684180)
+failed Windows's first15s recovery child and macOS's live client acquisition;
+Ubuntu passed. Preserve pins and timeouts; bounded CI-download repair is being
+reviewed separately. No new GitHub Release/tag or Store review was submitted.
+Goal remains active. Password file remains unread; production VPN/MCP/IDE and
+research work were not changed. The ordinary acceptance host is still the old
+protocol and must not be reconnected to the administrator-owned tunnel.
+
 ### Current Control Integration (Checkpoint68 In Progress)
 
 Canonical remote main is512bd875, actually verified in IAB. Windows delivery4

@@ -1,5 +1,94 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Actual Ordinary Hosted Tools And Remaining Controls (Checkpoint70)
+
+- Follow-up Pause repair: parent five-suite537/537 passed; independent review
+  passed354 repository tests plus57 separate fault checks and reported no remaining
+  actionable finding in that scope. This is not a live Pause/stopped receipt.
+- Popup setup/device entrypoints now navigate the same popup after draft save;
+  full-view/Expand unchanged. Mocked UI34/34 plus source4/4 passed. Scratch r13
+  copied247/247 but not yet reloaded. Store SHA256:
+  7e2414f8e37245af555df327a0f46b387f6a48e79f57ed39cc4da95d6612eca9.
+- Native CI34: macOS succeeded; Ubuntu failed; Windows recovery step timed out.
+  All observed Windows children logged entry then reached15s without the
+  utility-imported milestone. Underlying import delay is not yet explained.
+
+- r8 generation f32647664aea458eb0a1655034aa7bd9 reached ready after scoped
+  r10 extension reload with saved-running intent. Public and native readbacks
+  agreed. Extension reload is not an entire browser close/reopen acceptance.
+- Ordinary ChatGPT actually returned disposable read marker
+  AGENTCONTINUE_R8_R10_READ_ACCEPTANCE_20261108_8d5a73b1, then executed the
+  fixed administrator probe through the existing D940 plugin. Tool output:
+  administrator=true, roundtrip=true, ownedChildStarted=true, ownedChildStopped=true;
+  process50100 finished and child88632 was waited/reaped. Parent matched the
+  disposable output SHA256 independently; no unrelated task was stopped.
+  Screenshots: .artifacts/ordinary-chat-acceptance-20261108/read-file-result.png
+  and administrator-result.png. Existing result-file guard prohibits replay.
+- GUI Pause was blocked by an unassociated legacy ec7 LAST record before native
+  dispatch. No r8 stopped receipt is established. Extension-only upgrade repair
+  remains under review:291 tests passed, but an independent fault reproduction
+  exposed capability-error fallback and fresh legacy-archive conflict defects.
+  Do not ship scratch r12 or claim these controls passed until fixed and retested.
+- Full product regression exited0 before that review follow-up. Main1746f03 is
+  pushed. Manual delivery6 failed three official download attempts with HTTP504,
+  before delivery artifacts. No successful CI acquisition/build is claimed.
+- Authenticated Store draft3.0.0 still contains r9 ZIP; public2.1.0 unchanged.
+  Remote-code draft now discloses the optional local sandbox relay. Submission
+  validation reports Homepage and Privacy policy URLs unreachable by timeout.
+  No3.0.0 GitHub Release or Store submission receipt exists.
+
+## Installed Final Candidate And Draft Upload (Checkpoint69 In Progress)
+
+- The actual r8 owner generation a8a78288c4c14c79a976078530050e4d exited1.
+  Protected terminal evidence shows rootExitObserved=true/jobDrained=true/
+  innerLeasesClear=true/tunnelReady=unobserved. A separate read-only installed
+  Node authorization probe returned authorizationValid=true. The browser witness
+  named pipe was absent before preview reload and present afterward. This locates
+  an integration boundary; it does not alone prove the entire exit cause.
+- Manual startup observer preparation was missing in the source and reproduced
+  red before repair. Explicit Connect/resume-saved now await an exact attachment
+  before journal reservation; observer requests remain wake:false. Cancellation,
+  Revoke and receipt independence were tested. Parent related188/188 and actual
+  module integration11/11 passed; independent source review found no issue.
+- r10 IAB preview247/247 bytes verified and reloaded, ID/storage/permission
+  retained; native r8 unchanged. Its Store ZIP SHA256 is
+  d41487c8da0cd13eea595289a2d233787b6a1579b3e20f68c63e33b0b8eeab7e.
+  Old97d46acf570947599473f21a577f46c4 remains a historical launch-requested
+  operation, not Ready, and is not to be replayed.
+- IAB exact existing extension IDhjnopijiekcbgiljjfiekeiepkebhido reloaded3.0.0
+  from r9 with247/247 file readback, no replacement of browser storage or external
+  Chrome original task. Browser permission remains Granted.
+- Old ec7 GUI Pause00b11992c1a04b0f9fe4180f1861a90d and GUI Revoke
+  af21ebc5e3fa45fd929574eb308a38d4 each have exact protected stopped receipts.
+  Old Unenroll exit0 was independently checked against absent HKLM owner
+  registration and absent AgentContinue scheduled task. Files remain preserved.
+- Fresh r8 installer operation3f65db52f84b4a4997d4b6038e58ea3b returned
+  installed-ready-to-connect. Protected result verified24328 files, ACLs,
+  administrator state, clean launch plan, administrator child, binding and
+  enrollment; activated=false/tunnelStarted=false. Bundle root suffix uses the
+  FIRST24 hash characters:7e174a6571003b45ceca557f, not25 characters.
+- One GUI Connect97d46acf570947599473f21a577f46c4 passed full verification and
+  recorded intent-saved/launch-requested. Read its exact receipt/current owner;
+  waiting-owner does not establish readiness, hosted tool success or failure.
+- Final product exit0 and package107/107pass. Independent artifact audit found
+  no actionable mismatch in exact r9/r8 closure. Parent recovery37/37pass43.2s;
+  independent fixture review found no weakened checks. Commit14f1c0d changes
+  tests only. First hosted15s child remains unresolved pending new CI evidence.
+- Google Store draft is now3.0.0, nativeMessaging listed, published remains2.1.0.
+  Full English description and revised native/storage/single-purpose draft
+  justifications were saved. No review submitted and no new GitHub release.
+  Screenshot: .artifacts/windows-one-command-setup-20261108/
+  checkpoint69-store-draft-3.0.0.png.
+- be67563 CI: Extension83success; manual delivery5attempts1/2failed official
+  archive downloadHTTP504 before build; Native31Windows recovery childSIGTERM
+  and macOS client_acquisition_failed, Ubuntu corepass. Do not treat a transient
+  acquisition diagnosis as proven for both failures or waive release guards.
+
+Production VPN/MCP/IDE/research/external Chrome task unchanged. Ordinary local
+host remains old protocol, no reconnect into the administrator-owned tunnel.
+Final candidate hosted calls, saved-running reopen, Pause/Revoke and publication
+gates remain active. Never replay settled or uncertain operation IDs above.
+
 ## Browser Control Integration And Actual CI (Checkpoint68 In Progress)
 
 Actual main512bd875 verification was read in the authenticated IAB:

@@ -37,7 +37,7 @@ async function createPage({ full = false, enabled = false, uiLanguage, fixture =
       job: { ...structuredClone(original), id: 'test-job', enabled, phase: 'idle', tabId: 41,
         url: 'https://chatgpt.com/dots/home', title, sentCount: 2,
         nextAt: Date.now() + 20 * 60000, discardProtection: 'active', statusText, queueIndex: 0 },
-      exports: [], tabs: [], permissionRequests: [], grantPower: true,
+      exports: [], tabs: [], tabAttempts: [], configWrites: [], permissionRequests: [], grantPower: true,
       availableTargets: availableTargets || [{ id: 41, title, url: 'https://chatgpt.com/dots/home' }, { id: 42, title: '测试对话', url: 'https://chatgpt.com/c/test' }],
     };
     if (uiLanguage !== undefined) mock.uiLanguage = uiLanguage;
@@ -89,11 +89,16 @@ async function createPage({ full = false, enabled = false, uiLanguage, fixture =
         onChanged: { addListener(listener) { mock.listeners.push(listener); } },
         local: {
           async get(keys) { const result = {}; for (const key of typeof keys === 'string' ? [keys] : keys || []) result[key] = structuredClone(mock[key]); return result; },
-          async set(values) { for (const [key, value] of Object.entries(values)) { const old = mock[key]; mock[key] = structuredClone(value); notify(key, old, value); } },
+          async set(values) {
+            if (mock.deferConfigSave && Object.hasOwn(values, 'config')) await new Promise(resolve => { mock.finishConfigSave = resolve; });
+            for (const [key, value] of Object.entries(values)) { const old = mock[key]; mock[key] = structuredClone(value); notify(key, old, value); }
+            if (Object.hasOwn(values, 'config')) mock.configWrites.push(structuredClone(values.config));
+          },
         },
       },
       permissions: { async request(options) { mock.permissionRequests.push(structuredClone(options)); return mock.grantPower; } },
       tabs: { async query() { return [{ id: 41 }]; }, async create(options) {
+        mock.tabAttempts.push(structuredClone(options));
         if (mock.rejectTabs) throw new Error('SYNTHETIC_PRIVATE_NAVIGATION_ERROR');
         mock.tabs.push(options); return { id: 99 };
       } },
@@ -162,29 +167,50 @@ async function capture(page, name) {
 }
 
 try {
-  for (const enabled of [false, true]) {
-    const { page, context, errors } = await createPage({ enabled });
+  for (const full of [false, true]) for (const enabled of [false, true])
+  for (const rejectTabs of full ? [false, true] : [false])
+  for (const [id, destination] of [['setupWindows', 'setup.html'], ['manageDevices', 'devices.html?mode=browser-managed']]) {
+    const { page, context, errors } = await createPage({ full, enabled });
     await page.locator('#tab-settings').click();
     assert.equal(await page.locator('#setupWindows').count(), 1, 'guided Windows setup is directly available');
     assert.equal(await page.locator('#manageDevices').count(), 1, 'existing controls have a dedicated entry');
     const before = await page.evaluate(() => structuredClone(__uiMock.job));
-    for (const [id, destination] of [['setupWindows', 'setup.html'], ['manageDevices', 'devices.html?mode=browser-managed']]) {
-      const count = await page.evaluate(() => __uiMock.tabs.length);
-      await page.locator('#' + id).click();
-      await page.waitForFunction(count => __uiMock.tabs.length === count + 1, count);
-      assert.equal(await page.evaluate(() => __uiMock.tabs.at(-1).url), 'https://ui-fixture.invalid/' + destination);
+    const popupUrl = page.url();
+    const snapshotKeys = ['config', 'configWrites', 'job', 'requests', 'tabs', 'tabAttempts', 'permissionRequests'];
+    await page.evaluate(({ rejectTabs, snapshotKeys }) => {
+      __uiMock.rejectTabs = rejectTabs;
+      __uiMock.deferConfigSave = true;
+      addEventListener('pagehide', () => {
+        sessionStorage.setItem('navigationSnapshot', JSON.stringify(Object.fromEntries(snapshotKeys.map(key => [key, __uiMock[key]]))));
+      }, { once: true });
+    }, { rejectTabs, snapshotKeys });
+    if (!full && !enabled && id === 'setupWindows') await capture(page, 'windows-entry-en.png');
+    await page.locator('#' + id).click();
+    await page.waitForFunction(() => typeof __uiMock.finishConfigSave === 'function');
+    assert.equal(page.url(), popupUrl, 'navigation must wait for draft persistence');
+    assert.deepEqual(await page.evaluate(() => __uiMock.tabAttempts), [], 'no tab may open before draft persistence');
+    await page.evaluate(() => __uiMock.finishConfigSave());
+    const navigated = !full || rejectTabs;
+    if (navigated) {
+      await page.waitForURL('https://ui-fixture.invalid/' + destination, { timeout: 5000 });
+      assert.equal(await page.locator('#navigationFixture').textContent(), destination.split('?')[0]);
+    } else {
+      await page.waitForFunction(() => __uiMock.tabs.length === 1);
+      assert.equal(page.url(), popupUrl, 'full console remains open when tab creation succeeds');
     }
-    assert.deepEqual(await page.evaluate(() => __uiMock.job), before);
-    assert.deepEqual(await page.evaluate(() => __uiMock.requests.filter(r => r.type !== 'GET_STATE')), []);
-    assert.deepEqual(await page.evaluate(() => __uiMock.permissionRequests), []);
-    if (!enabled) await capture(page, 'windows-entry-en.png');
-    await page.evaluate(() => { __uiMock.rejectTabs = true; });
-    const fallbackResource = enabled ? 'devices.html?mode=browser-managed' : 'setup.html';
-    await page.locator(enabled ? '#manageDevices' : '#setupWindows').click();
-    await page.waitForURL('https://ui-fixture.invalid/' + fallbackResource);
-    assert.equal(await page.locator('#navigationFixture').textContent(), fallbackResource.split('?')[0]);
+    const state = await page.evaluate(({ navigated, snapshotKeys }) => navigated
+      ? JSON.parse(sessionStorage.getItem('navigationSnapshot'))
+      : Object.fromEntries(snapshotKeys.map(key => [key, __uiMock[key]])), { navigated, snapshotKeys });
+    const tab = { url: 'https://ui-fixture.invalid/' + destination };
+    assert.deepEqual(state.tabAttempts, full ? [tab] : [], 'toolbar popup never attempts an extension tab');
+    assert.deepEqual(state.tabs, full && !rejectTabs ? [tab] : []);
+    assert.deepEqual(state.configWrites, [original], 'draft is persisted exactly once before navigation');
+    assert.deepEqual(state.config, original);
+    assert.deepEqual(state.job, before, 'scheduler state is unchanged');
+    assert.deepEqual(state.requests.filter(r => r.type !== 'GET_STATE'), []);
+    assert.deepEqual(state.permissionRequests, []);
     assert.deepEqual(errors, []);
-    await context.close(); pass(`Windows setup and controls use extension tabs without changing scheduler or permissions (enabled=${enabled})`);
+    await context.close(); pass(`Windows ${id} preserves draft and scheduler (full=${full}, enabled=${enabled}, rejectTabs=${rejectTabs})`);
   }
   for (const enabled of [false, true]) {
     const { page, context } = await createPage({ enabled, availableTargets: [

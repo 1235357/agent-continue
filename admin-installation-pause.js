@@ -4,6 +4,8 @@ import { administratorControlSupport, ADMIN_CONTROL_SETUP_INSTALLATION } from '.
 export const INSTALLATION_PAUSE_ASSOCIATIONS='windowsAdministratorInstallationPauseV1';
 const archiveKey=id=>INSTALLATION_PAUSE_ASSOCIATIONS+':'+id;
 const legacyKey=id=>INSTALLATION_PAUSE_ASSOCIATIONS+':legacy:'+id;
+const samePauseRecord=(value,record)=>!!adminBrowserPauseRecord(value)&&
+  value.operationId===record.operationId&&value.outcome===record.outcome;
 const exact=(v,keys)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).length===keys.length&&keys.every(k=>Object.hasOwn(v,k));
 const hex=(v,n)=>typeof v==='string'&&v.length===n&&/^[a-f0-9]+$/.test(v);
 const receiptStates=['unconfirmed','pause-recorded','stopped','fenced','superseded'];
@@ -45,21 +47,46 @@ export function bindInstallationPause(api,{timers=globalThis}={}) {
       ]);
       if(!await permitted(at)||reply?.version!==1||reply.id!==id||reply.action!==action)return null;
       const {version,id:ignoredId,action:ignoredAction,...body}=reply;
-      if(action==='control-support')return administratorControlSupport(body,'revoke');
+      if(action==='control-support') {
+        if(body.state==='unsupported')return exact(body,['control','state','bundleSha256','target','ownerState','eligible'])&&
+          body.control==='revoke'&&body.bundleSha256===null&&body.target===null&&
+          body.ownerState==='unobserved'&&body.eligible===false?body:null;
+        return administratorControlSupport(body,'revoke');
+      }
       const support=action==='pause-installation-support';
       if(!exact(body,support?['bundleSha256','state']:['bundleSha256','operationId','state'])||
         body.bundleSha256!==fields.bundleSha256||!support&&body.operationId!==fields.operationId)return null;
-      const states=support?['supported','unconfirmed']:action==='pause-installation'?
+      const states=support?['supported','unconfirmed','unsupported']:action==='pause-installation'?
         [...receiptStates,'requested','cancelled']:receiptStates;
       return states.includes(body.state)?body:null;
     }catch{return null;}finally{timers.clearTimeout(timer);}
   }
+  async function stopSupport(digest,at) {
+    const saved=await read();
+    if(!saved||Object.keys(saved.map).length>=256||!hex(digest,64))return null;
+    return request('pause-installation-support',{bundleSha256:digest},at);
+  }
   async function available(digest,at=epoch) {
-    try {
-      const saved=await read();
-      return !!saved&&Object.keys(saved.map).length<256&&hex(digest,64)&&
-        (await request('pause-installation-support',{bundleSha256:digest},at))?.state==='supported';
-    }catch{return false;}
+    try{return (await stopSupport(digest,at))?.state==='supported';}catch{return false;}
+  }
+  async function legacyPreserved(record) {
+    if(!record)return true;
+    const key=legacyKey(record.operationId);
+    return samePauseRecord((await storage.local.get(key))[key],record);
+  }
+  async function preserveLegacy(record,at) {
+    if(!record)return true;
+    const key=legacyKey(record.operationId),old=(await storage.local.get(key))[key];
+    if((old!==undefined&&!samePauseRecord(old,record))||!await permitted(at))return false;
+    // An interrupted archive leaves LAST unchanged; neither branch may downgrade.
+    await storage.local.set({[key]:record});
+    return await legacyPreserved(record)&&await permitted(at);
+  }
+  async function legacyFallback(record,at) {
+    const saved=await read();
+    if(!saved||saved.installation||Object.keys(saved.map).length)return null;
+    if(record?!samePauseRecord(saved.record,record)||await archived(record.operationId)!==undefined:saved.record)return null;
+    return await permitted(at)?undefined:null;
   }
   async function archived(operationId) {
     const value=(await storage.local.get(archiveKey(operationId)))[archiveKey(operationId)];
@@ -99,11 +126,23 @@ export function bindInstallationPause(api,{timers=globalThis}={}) {
         const {record:previous,map,installation}=saved;
         const previousDigest=previous?(map[previous.operationId]??await archived(previous.operationId)):undefined;
         if(previousDigest===null)return null;
-        if(previous&&!previousDigest&&!installation)return undefined;
         // Setup atomically saved this installation with the Connect admission.
         // Manual denial must not depend on a fresh target or liveness sample.
+        // Upgrades can retain an unassociated legacy LAST record. Probe current
+        // stop capability before falling back; never rebind or replay that ID.
         const support=installation??await request('control-support',{control:'revoke'},at);
-        if(!installation&&(support?.state!=='supported'||!await available(support.bundleSha256,at)))return undefined;
+        if(!installation) {
+          // Unknown is not legacy-only: only an explicit closed unsupported reply
+          // permits fallback, and never for an installation-associated history.
+          const fallback=()=>previousDigest===undefined?legacyFallback(previous,at):null;
+          if(support?.state==='unsupported')return await fallback();
+          if(support?.state!=='supported')return null;
+          const stop=await stopSupport(support.bundleSha256,at);
+          if(stop?.state==='unsupported')return await fallback();
+          if(stop?.state!=='supported')return null;
+        }
+        const legacy=previous&&previousDigest===undefined?previous:null;
+        const priorLegacy=legacy?{[legacyKey(legacy.operationId)]:legacy}:{};
         let consumed=false;
         if(previous&&previousDigest===support.bundleSha256&&previous.outcome!=='cancelled') {
           const receipt=await observe(previous.operationId,at);
@@ -118,10 +157,12 @@ export function bindInstallationPause(api,{timers=globalThis}={}) {
           if(!receipt||receipt.state==='unconfirmed') {
             if(!await permitted(at))return null;
             const original={operationId:originalId,outcome:'unconfirmed'};
-            await storage.local.set({[ADMIN_BROWSER_PAUSE_LAST]:original});
+            if(!await preserveLegacy(legacy,at))return null;
+            await storage.local.set({[ADMIN_BROWSER_PAUSE_LAST]:original,...priorLegacy});
             const checked=await read();
             return checked?.record?.operationId===originalId&&checked.record.outcome==='unconfirmed'&&
-              checked.map[originalId]===originalBundle&&epoch===at?original:null;
+              checked.map[originalId]===originalBundle&&await legacyPreserved(legacy)&&
+              await permitted(at)?original:null;
           }
           if(!await retire(originalId,map))return null;
         }
@@ -131,14 +172,14 @@ export function bindInstallationPause(api,{timers=globalThis}={}) {
           if(!await retire(previous.operationId,map))return null;
         }
         if(!await permitted(at)||Object.keys(map).length>=256)return null;
+        if(!await preserveLegacy(legacy,at))return null;
         const operationId=crypto.randomUUID().replaceAll('-','');
         const pending={operationId,outcome:'unconfirmed'};
         const next={...map,[operationId]:support.bundleSha256};
-        const priorLegacy=previous&&previousDigest===undefined?{[legacyKey(previous.operationId)]:previous}:{};
         await storage.local.set({[ADMIN_BROWSER_PAUSE_LAST]:pending,[INSTALLATION_PAUSE_ASSOCIATIONS]:next,...priorLegacy});
         const checked=await read();
         if(!checked||checked.record?.operationId!==operationId||checked.record.outcome!=='unconfirmed'||
-          checked.map[operationId]!==support.bundleSha256||!await permitted(at))return null;
+          checked.map[operationId]!==support.bundleSha256||!await legacyPreserved(legacy)||!await permitted(at))return null;
         const reply=await request('pause-installation',{bundleSha256:support.bundleSha256,operationId},at);
         if(!reply||reply.state==='unconfirmed')return pending;
         const result={operationId,outcome:reply.state==='cancelled'?'cancelled':'requested'};

@@ -545,11 +545,13 @@ async function openExtensionPage(url) {
   try { await chrome.tabs.create({ url }); }
   catch { location.assign(url); }
 }
+// Embedded shells may silently discard new extension tabs from toolbar popups.
 for (const [id, resource] of [['setupWindows', 'setup.html'], ['manageDevices', 'devices.html?mode=browser-managed']]) {
   $(id).addEventListener('click', async () => {
     try {
       await persistDraftNow();
-      await openExtensionPage(chrome.runtime.getURL(resource));
+      if (fullView) await openExtensionPage(chrome.runtime.getURL(resource));
+      else location.assign(chrome.runtime.getURL(resource));
     } catch { tell(t('无法打开设备设置或控制页面。'), true); }
   });
 }

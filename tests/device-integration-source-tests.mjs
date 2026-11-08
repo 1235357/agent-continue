@@ -22,7 +22,7 @@ test('local device page is linked without changing the four scheduler panels', (
   const popup = read('popup.js');
   assert.match(popup, /\['setupWindows', 'setup\.html'\]/);
   assert.match(popup, /\['manageDevices', 'devices\.html\?mode=browser-managed'\]/);
-  assert.match(popup, /openExtensionPage\(chrome\.runtime\.getURL\(resource\)\)/);
+  assert.match(popup, /await persistDraftNow\(\);\s*if \(fullView\) await openExtensionPage\(chrome\.runtime\.getURL\(resource\)\);\s*else location\.assign\(chrome\.runtime\.getURL\(resource\)\);/);
   assert.equal((html.match(/role="tabpanel"/g) || []).length, 4);
   assert.match(read('i18n-html.js'), /'设备管理': 'Manage devices'/);
   assert.equal(read('devices.html').includes('https://chatgpt.com/'), false);
