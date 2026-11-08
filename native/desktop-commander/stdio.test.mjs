@@ -9,11 +9,12 @@ import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { observeDirectChild, hasExited } from './process-observation.mjs';
 import { prepareHostedShellProbe } from '../../scripts/hosted-read-acceptance.mjs';
+import { observeTestProcessOutput } from './test-process-output.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 test('real pinned core initializes, lists tools, writes/reads an owned file and executes a harmless process',
-  { timeout: 60000 }, async t => {
+  { timeout: 120000 }, async t => {
     let app = here, interpreter = process.execPath;
     const extracted = process.env.AC_WINDOWS_ADMIN_BUNDLE_SMOKE_ROOT;
     if (extracted !== undefined) {
@@ -179,7 +180,9 @@ test('real pinned core initializes, lists tools, writes/reads an owned file and 
       agent_continue_operation_id: 'abdfabcd-abcd-4abc-8abc-abcdabcdabcd' } };
     const executed = await send('tools/call', processCall);
     assert.notEqual(executed.isError, true);
-    assert.match(JSON.stringify(executed.content), /AGENT_CONTINUE_PROCESS_OK/);
+    const processOutput = (started, marker) => observeTestProcessOutput(started, marker,
+      request => send('tools/call', request));
+    assert.match(await processOutput(executed, 'AGENT_CONTINUE_PROCESS_OK'), /AGENT_CONTINUE_PROCESS_OK/);
     const exactCommand = process.platform === 'win32' ? "Write-Output ('AC_' + 'EXACT_OK')" : "printf '%s' 'AC_EXACT_OK'";
     const exactId = 'abc1abcd-abcd-4abc-8abc-abcdabcdabcd';
     const exactArgs = { command: exactCommand, shell, timeout_ms: 10000, agent_continue_operation_id: exactId,
@@ -254,7 +257,7 @@ test('real pinned core initializes, lists tools, writes/reads an owned file and 
     assert.deepEqual(await receipt(exactId), { status: 'not-recorded' });
     const exactResult = await exact(exactArgs);
     assert.notEqual(exactResult.isError, true);
-    assert.match(JSON.stringify(exactResult.content), /AC_EXACT_OK/);
+    assert.match(await processOutput(exactResult, 'AC_EXACT_OK'), /AC_EXACT_OK/);
     const exactReceipt = { status: 'provider-reported-result', requestKind: 'exact-process' };
     assert.deepEqual(await receipt(exactId), exactReceipt);
     const exactKey = createHash('sha256').update(exactId).digest('hex');
@@ -312,7 +315,7 @@ test('real pinned core initializes, lists tools, writes/reads an owned file and 
         agent_continue_process_sha256: createHash('sha256').update(JSON.stringify([probe, shell, 10000])).digest('hex') };
       const result = await exact(args);
       assert.notEqual(result.isError, true);
-      const output = result.content.filter(block => block.type === 'text').map(block => block.text).join('\n');
+      const output = await processOutput(result, observed);
       assert.deepEqual(output.match(/\bAC_OS_TOKEN_(?:ADMIN|STANDARD)\b/g), [observed]);
       windowsToken = observed === 'AC_OS_TOKEN_ADMIN' ? 'administrator' : 'standard';
       if (extracted !== undefined) assert.equal(windowsToken, 'standard');
@@ -321,8 +324,7 @@ test('real pinned core initializes, lists tools, writes/reads an owned file and 
         const openedAt = Date.now();
         const attested = await send('tools/call', { name: hostedProbe.tool, arguments: hostedProbe.request });
         assert.notEqual(attested.isError, true);
-        const marker = attested.content.filter(part => part.type === 'text')
-          .flatMap(part => part.text.match(/\bAC_WEB_SHELL_[a-f0-9]{32}\b/g) ?? []);
+        const marker = (await processOutput(attested, /\bAC_WEB_SHELL_[a-f0-9]{32}\b/)).match(/\bAC_WEB_SHELL_[a-f0-9]{32}\b/g) ?? [];
         assert.equal(marker.length, 1);
         assert.equal(hostedProbe.request.command.includes(marker[0].slice(-32)), false);
         const browserDigest = createHash('sha256').update(marker[0]).digest('hex');
@@ -366,7 +368,8 @@ test('real pinned core initializes, lists tools, writes/reads an owned file and 
         assert.equal(step.plan.name, exactProcess);
         const result = await exact(step.plan.arguments);
         assert.notEqual(result.isError, true);
-        const text = result.content.filter(item => item.type === 'text').map(item => item.text).join('\n');
+        const text = await processOutput(result, windowsToken === 'standard'
+          ? 'AC_ADMIN_PROBE_REQUIRES_ELEVATION' : /\bAC_ADMIN_[a-f0-9]{32}\b/);
         const proofPath = path.join(root, 'work', step.proof);
         if (windowsToken === 'standard') {
           assert.match(text, /\bAC_ADMIN_PROBE_REQUIRES_ELEVATION\b/);
@@ -397,7 +400,7 @@ test('real pinned core initializes, lists tools, writes/reads an owned file and 
     }
     const firstPrepared = await prepared(reference);
     assert.notEqual(firstPrepared.isError, true);
-    assert.match(JSON.stringify(firstPrepared.content), /AC_PREPARED_OK/);
+    assert.match(await processOutput(firstPrepared, 'AC_PREPARED_OK'), /AC_PREPARED_OK/);
     assert.equal(fs.readFileSync(effect, 'utf8').trim(), 'AC_PREPARED_OK');
     const preparedReceipt = { status: 'provider-reported-result', requestKind: 'prepared-process' };
     assert.deepEqual(await receipt(reference.agent_continue_operation_id), preparedReceipt);

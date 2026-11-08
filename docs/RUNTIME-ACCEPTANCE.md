@@ -2,6 +2,30 @@
 
 ## Current-Account Fresh Setup And Archive-Only Adoption (Checkpoint65)
 
+The310-file unreleased source checkpoint was committed and actually pushed to
+canonical main as d4515269cb6ac7a29b10701989d49894554c549b. Remote readback matched.
+The complete product regression exited0 before the subsequent independent
+browser-wake critique; packaging32/32, release-source7/7 and documentation/support
+33/33 also passed. These passes do not dismiss that critique's newly reproduced
+uncertainty/timeout cleanup defects; repairs remain required before final release.
+The built-in browser dispatched Verify Windows delivery run42459001181 on main.
+This is a real hosted verification attempt, not a passing build or publication.
+
+That attempt failed its stdio smoke assertion after successful isolated ordinary
+account creation/logon, protected source staging and package build. Its original
+log reports a valid started process/PID whose output had not arrived; the smoke
+incorrectly required the marker in start_process's initial output. Test-only
+observation now reads only that returned PID with bounded time/read count/output,
+never repeats Start, and requires the complete expected marker. Ten focused
+observer cases and the actual pinned-provider stdio roundtrip passed locally:
+standard token,67 RPC replies,0 protocol errors and clean stdin-close exit. The
+upcoming hosted rerun is still required; no guards were relaxed or checks skipped.
+
+Linux Extension checks run42458974844 separately found a320x600 layout overflow:
+the primary copy action's bottom was619px. The Windows fixture passed locally,
+so this is a real cross-platform presentation gap, not a reason to weaken that
+first-viewport assertion. A scoped responsive-spacing repair is in progress.
+
 Actual IAB verification after the scoped acceptance-extension reload returned
 Granted / Bridge reachable / Disconnected / Paused for Current account. This
 closes the first-install native-attachment gap, not cloud connection or chat
