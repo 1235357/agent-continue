@@ -11,6 +11,8 @@ before9.433s/after1.479s is a bounded observation, not a proved runner root
 cause.10 output helper tests passed; future failure reports fixed gate/phase
 observations only. No production runtime change, control replay, Release or
 Store submission. R11 stays revoked/not running.
+The exact-shell regression also disables module autoloading and requires the
+released witness plus the actual output marker; it passed1.781s locally.
 
 ## CI62 Startup Projection Test Corrected (Checkpoint99)
 

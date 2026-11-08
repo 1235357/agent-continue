@@ -88,7 +88,7 @@ for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle', 'replay
     if (exactShell) {
       const operation = 'abcdabcd-abcd-4abc-8abc-abcdabcdabcd';
       const command = process.platform === 'win32'
-        ? "$gate = '" + exactOutputRelease.replaceAll("'", "''") + "'; $phase = '" + exactOutputPhase.replaceAll("'", "''") + "'; " +
+        ? "$PSModuleAutoLoadingPreference = 'None'; $gate = '" + exactOutputRelease.replaceAll("'", "''") + "'; $phase = '" + exactOutputPhase.replaceAll("'", "''") + "'; " +
           "[IO.File]::WriteAllText($phase, 'started'); $clock = [Diagnostics.Stopwatch]::StartNew(); " +
           "while (-not [IO.File]::Exists($gate)) { if ($clock.ElapsedMilliseconds -ge 20000) { throw 'fixture_output_gate_timeout' }; [Threading.Thread]::Sleep(25) }; " +
           "[IO.File]::WriteAllText($phase, 'released'); [Console]::WriteLine(('AC_TUNNEL_' + 'EXACT'))"
@@ -607,7 +607,10 @@ for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle', 'replay
       assert.deepEqual(replies[6].resp_json.result.structuredContent, { status: 'not-recorded' });
       assert.notEqual(replies[7].resp_json.result.isError, true);
       assert.match(await exactShellOutput, /AC_TUNNEL_EXACT/);
-      if (process.platform === 'win32') assert.ok(outputReadTimings.length > 0, 'delayed Windows output requires a correlated read');
+      if (process.platform === 'win32') {
+        assert.ok(outputReadTimings.length > 0, 'delayed Windows output requires a correlated read');
+        assert.equal(fs.readFileSync(exactOutputPhase, 'utf8'), 'released', 'the owned command observed its release gate');
+      }
       assert.equal(replies[8].resp_json.error?.code, -32070);
       assert.deepEqual(replies[9].resp_json.result.structuredContent, { status: 'provider-reported-result', requestKind: 'exact-process' });
     }

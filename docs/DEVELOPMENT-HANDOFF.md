@@ -18,6 +18,10 @@ The revised exact-shell passed locally1.479s with11 correlated responses;
 all10 output-observer unit tests passed. This is test isolation, not a claim
 that the exact hosted-runner startup delay has been proved or production
 PowerShell changed. Full CI, Release and Store submission are still pending.
+Independent source review confirmed the three cmdlet module dependencies.
+The test command now explicitly disables module autoloading and requires the
+released witness in addition to actual correlated output, preventing a hidden
+cmdlet dependency from returning. That exact regression passed1.781s locally.
 
 ### CI62 Startup Projection Race (Checkpoint99)
 
