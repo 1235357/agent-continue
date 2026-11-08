@@ -2,6 +2,38 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### CI61 Protocol Observation Failure (Checkpoint98)
+
+Native61/run42520937816 Windows failed after23m40s. The ledger step passed in
+2m27s. The official loopback protocol group passed5/6 cases, including packaged
+manager/installer status and Pause; exact-shell failed at26.189s with
+test_process_output_unconfirmed from the observation deadline. Later guided/
+Chromium steps did not run. CI61's specific delayed RPC cause is not proved.
+The exact failing step was retained in the local acceptance artifacts.
+
+Local exact-shell with the original10-second initial wait passed3.030s with10
+responses. A deliberate11-second output delay also passed13.533s with13
+responses, so a poll-backoff hypothesis was not reproduced. The revised fixture
+uses a finite20-second output gate released only after the original Start/
+replay/receipt sequence and a100ms initial wait, then requires a correlated read
+without replaying Start; it passed2.523s with12 responses. This avoids a
+timing-only200ms sleep pretending to be a synchronization barrier.
+The15-second total observation limit and45-second case limit are unchanged.
+Failure diagnostics now retain only fixed codes, read ordinals, delivery/settle
+timings and bounded protocol metadata, not raw command/output or credentials.
+The complete protocol block was moved earlier in CI, without duplicate cases,
+coverage exclusions or larger limits. The still-unreached guided fixture also
+used an obsolete combined-builder default without an administrator bundle;
+it now explicitly requests its current-account source-only kit.21 focused
+workflow tests and46 setup-release tests passed. A fresh
+full hosted run remains required; this is not a product fix or a CI pass.
+
+Main1811e7d contains the matching English/Chinese source-version notes and
+Checkpoint97 readback. Store reviewer instructions were saved onNov8 with499
+characters, covering scheduler and optional Windows setup without credentials.
+No3.0.0 tag/Release, npm publication or Store review submission yet. R11 remains
+revoked/not running; do not replay settled control operations.
+
 ### r11 Actual Full-App Reopen And Both Web Surfaces (Checkpoint97)
 
 This supersedes the pending cutover/reopen statements below. Official r11

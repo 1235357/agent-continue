@@ -1,5 +1,21 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## CI61 Failure And Pending Protocol Diagnostics (Checkpoint98)
+
+Native61 Windows passed the ledger in2m27s but failed exact-shell output
+observation at26.189s; the protocol group passed5/6, including packaged manager.
+Later guided/Chromium steps were skipped. The error is the helper's15-second
+read deadline, not proof of a production tunnel failure. Local original and
+deliberately delayed-output cases passed; the specific CI61 cause is unproven.
+The revised test uses a finite output-release gate to force follow-up reading,
+adds bounded timing-only failure diagnostics, and moves the unchanged full
+protocol group earlier in CI. The guided fixture explicitly requests the
+source-only kit it actually uses instead of the now-combined builder default.
+Individual limits and assertions are retained;21 focused workflow tests and46
+setup-release tests passed. Full hosted verification, Release and Store
+submission remain pending.
+The r11 test installation stays revoked and not running.
+
 ## r11 Actual Full-App Reopen And Hosted Commands (Checkpoint97)
 
 The owner explicitly reconfirmed the shared-app exit even with another workflow

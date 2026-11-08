@@ -75,6 +75,32 @@ class WindowsReleaseWorkflowTests(unittest.TestCase):
         self.assertLess(core.index("- name: " + name), core.index("- name: Verify pinned download retries"))
         self.assertLess(core.index("- name: " + name), core.index("- name: Verify read-only control projections"))
 
+    def test_complete_protocol_fixture_runs_early_without_duplicate_or_weakened_bounds(self):
+        source = (ROOT / ".github/workflows/native-runtime-tests.yml").read_text(encoding="utf-8")
+        core = job(source, "core")
+        acquire = "Acquire pinned official runtime for isolated protocol fixtures"
+        windows = "Windows packaged manager IPC and official tunnel loopback exchange"
+        linux = "Generated-profile exchange in the disposable CI runner"
+        for name in (acquire, windows, linux):
+            self.assertEqual(core.count("- name: " + name), 1)
+        self.assertLess(core.index("- name: " + acquire), core.index("- name: " + windows))
+        self.assertLess(core.index("- name: " + windows), core.index("- name: Verify pinned download retries"))
+        block = step(core, windows)
+        self.assertIn("timeout-minutes: 7", block)
+        self.assertIn("$env:TUNNEL_CLIENT_TEST_PACKAGED = '1'", block)
+        self.assertIn("node --test --test-concurrency=1 tunnel.test.mjs", block)
+        self.assertNotIn("--test-skip", block)
+        self.assertNotIn("--test-name-pattern", block)
+        self.assertIn("if ($LASTEXITCODE -ne 0)", block)
+
+    def test_current_account_protocol_fixtures_explicitly_request_source_only_bundles(self):
+        source = (ROOT / "native/desktop-commander/tunnel.test.mjs").read_text(encoding="utf-8")
+        calls = re.findall(r"await run\(python, \[([^\n]*'[^'\n]*build-setup-release\.py'[^\n]*)\]", source)
+        self.assertEqual(len(calls), 2)
+        for call in calls:
+            self.assertIn("'--source-only'", call)
+            self.assertIn("'--output', release", call)
+
     def test_native_bootstrap_phases_cover_each_original_file_once_with_bounded_children(self):
         ordinary = (ROOT / ".github/workflows/native-runtime-tests.yml").read_text(encoding="utf-8")
         core = job(ordinary, "core")

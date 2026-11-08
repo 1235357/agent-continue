@@ -195,6 +195,25 @@ jobs:
       - name: Verify standalone installer ZIP after extraction
         working-directory: .
         run: python tests/setup-release-tests.py
+      - name: Acquire pinned official runtime for isolated protocol fixtures
+        # Keep the complete protocol fixture early for bounded failure feedback.
+        shell: pwsh
+        timeout-minutes: 3
+        run: ./test-fixtures/fetch-ci-tunnel.ps1
+      - name: Generated-profile exchange in the disposable CI runner
+        if: runner.os == 'Linux'
+        shell: bash
+        run: timeout --kill-after=5s 50s node --test tunnel.test.mjs
+      - name: Windows packaged manager IPC and official tunnel loopback exchange
+        if: runner.os == 'Windows'
+        shell: pwsh
+        timeout-minutes: 7
+        run: |
+          $env:TUNNEL_CLIENT_TEST_NPM_CACHE = (npm config get cache).Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'CI cache discovery failed' }
+          $env:TUNNEL_CLIENT_TEST_PACKAGED = '1'
+          node --test --test-concurrency=1 tunnel.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Windows packaged tunnel acceptance failed' }
       - name: Verify pinned download retries and finite process watchdogs offline
         working-directory: .
         shell: pwsh
@@ -326,24 +345,6 @@ jobs:
           $env:AGENT_CONTINUE_OFFICIAL_CLIENT = '1'
           node --test --test-concurrency=1 official-assets.test.mjs packed.test.mjs ../../tests/setup-model-tests.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Official assets and installed tarball acceptance failed' }
-      - name: Acquire pinned official runtime for isolated protocol fixtures
-        shell: pwsh
-        timeout-minutes: 3
-        run: ./test-fixtures/fetch-ci-tunnel.ps1
-      - name: Generated-profile exchange in the disposable CI runner
-        if: runner.os == 'Linux'
-        shell: bash
-        run: timeout --kill-after=5s 50s node --test tunnel.test.mjs
-      - name: Windows packaged manager IPC and official tunnel loopback exchange
-        if: runner.os == 'Windows'
-        shell: pwsh
-        timeout-minutes: 7
-        run: |
-          $env:TUNNEL_CLIENT_TEST_NPM_CACHE = (npm config get cache).Trim()
-          if ($LASTEXITCODE -ne 0) { throw 'CI cache discovery failed' }
-          $env:TUNNEL_CLIENT_TEST_PACKAGED = '1'
-          node --test --test-concurrency=1 tunnel.test.mjs
-          if ($LASTEXITCODE -ne 0) { throw 'Windows packaged tunnel acceptance failed' }
       - uses: actions/setup-python@v6
         if: runner.os == 'Windows'
         with:

@@ -64,6 +64,7 @@ for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle', 'replay
     const installDir = guidedCmd ? path.join(home, 'Local', 'AgentContinue') : path.join(scratch, "installed, with spaces's $literal");
     const root = sealed ? bundle + '.state' : installed ? path.join(installDir, 'state') : path.join(scratch, "state, with spaces's $literal");
     const ownedFile = path.join(root, 'work', 'through-tunnel.txt');
+    const exactOutputRelease = path.join(root, 'work', 'exact-output-release');
     const guardLog = path.join(scratch, 'guard.log');
     const system = process.env.SystemRoot;
     const requests = [
@@ -85,11 +86,16 @@ for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle', 'replay
     const exactShell = mode === 'exact-shell' || browserRoundtrip || sealed;
     if (exactShell) {
       const operation = 'abcdabcd-abcd-4abc-8abc-abcdabcdabcd';
-      const command = process.platform === 'win32' ? "Write-Output ('AC_TUNNEL_' + 'EXACT')" : "printf '%s' 'AC_TUNNEL_EXACT'";
+      const command = process.platform === 'win32'
+        ? "$gate = '" + exactOutputRelease.replaceAll("'", "''") + "'; $clock = [Diagnostics.Stopwatch]::StartNew(); " +
+          "while (-not (Test-Path -LiteralPath $gate)) { if ($clock.ElapsedMilliseconds -ge 20000) { throw 'fixture_output_gate_timeout' }; Start-Sleep -Milliseconds 25 }; " +
+          "Write-Output ('AC_TUNNEL_' + 'EXACT')"
+        : "printf '%s' 'AC_TUNNEL_EXACT'";
       const shell = process.platform === 'win32'
         ? path.join(system, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe').replaceAll('\\', '/')
         : '/bin/sh';
-      const timeout_ms = 10000;
+      // The fixture releases Windows output only after the original start/replay sequence.
+      const timeout_ms = process.platform === 'win32' ? 100 : 10000;
       const args = { command, shell, timeout_ms, agent_continue_operation_id: operation,
         agent_continue_process_sha256: crypto.createHash('sha256').update(JSON.stringify([command, shell, timeout_ms])).digest('hex') };
       const start = (id, arguments_) => ({ jsonrpc: '2.0', id, method: 'tools/call',
@@ -107,7 +113,7 @@ for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle', 'replay
     } });
     const requestIdAt = index => 'fixture-' + index;
     const requestIds = new Set(requests.map((_, index) => requestIdAt(index)));
-    const replies = [], errors = [], outputReads = new Map();
+    const replies = [], errors = [], outputReads = new Map(), outputReadTimings = [];
     let exactShellOutput;
     let lastResponse, firstBrowserTunnel, guidedEnvironment, sealedRestart = false, firstSealedResponses = 0;
     let queued = 0, child, childExited, controller, owner, packageBin, installerOperation, browser;
@@ -141,6 +147,8 @@ for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle', 'replay
             'Bearer sk-agentcontinue-synthetic-never-valid' : 'Bearer not-a-real-key-from-file');
           if (queued === null) { res.writeHead(204); res.end(); return; }
           const index = queued; queued = null;
+          const reading = outputReadTimings.find(item => item.index === index);
+          if (reading) reading.deliveredMs = Math.round(performance.now() - reading.opened);
           res.setHeader('Content-Type', 'application/json');
           res.end(JSON.stringify({ commands: [{ request_id: requestIdAt(index), shard_token: 'fake-shard',
             command_type: 'jsonrpc', channel: 'main', created_at: new Date().toISOString(),
@@ -187,20 +195,35 @@ for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle', 'replay
           } else assert.equal(response.resp_type, 'notify_ack');
           replies.push(response);
           const outputRead = outputReads.get(index);
-          if (outputRead) { outputReads.delete(index); outputRead(response.resp_json.result); }
+          if (outputRead) {
+            const reading = outputReadTimings.find(item => item.index === index);
+            reading.settledMs = Math.round(performance.now() - reading.opened);
+            reading.providerError = response.resp_json.result.isError === true;
+            outputReads.delete(index); outputRead(response.resp_json.result);
+          }
           if (replies.length < requests.length) queued = replies.length;
           res.setHeader('Content-Type', 'application/json'); res.end('{"status":"ok"}');
           if (exactShell && !sealedRestart && index === 9) {
             // Keep the original start/replay/receipt sequence; append observation only.
+            if (process.platform === 'win32') fs.writeFileSync(exactOutputRelease, 'release\n', { flag: 'wx' });
             exactShellOutput = observeTestProcessOutput(replies[7].resp_json.result, 'AC_TUNNEL_EXACT', params => {
               const index = requests.length;
               requests.push({ jsonrpc: '2.0', id: 10 + index, method: 'tools/call', params });
               requestIds.add(requestIdAt(index));
+              outputReadTimings.push({ index, opened: performance.now(), timeoutMs: params.arguments.timeout_ms,
+                deliveredMs: null, settledMs: null, providerError: null });
               const observed = new Promise(resolve => outputReads.set(index, resolve));
               queued = index;
               return observed;
             });
-            exactShellOutput.catch(() => {});
+            exactShellOutput.catch(error => {
+              t.diagnostic(JSON.stringify({ phase: 'exact-output-observation',
+                code: /^test_process_[a-z_]+$/.test(error.message) ? error.message : 'test_output_failed',
+                received: replies.length, requested: requests.length, pendingReads: outputReads.size,
+                reads: outputReadTimings.map(({ opened, ...item }) => ({ ...item,
+                  elapsedMs: Math.round(performance.now() - opened) })),
+                lastResponse, exitCode: child?.exitCode, stderrBytes }));
+            });
           }
           if (browserRoundtrip && index === 9) {
             await exactShellOutput;
@@ -267,7 +290,7 @@ for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle', 'replay
         await run(python, ['-m', 'zipfile', '-e', testedKit, extracted], { timeout: 15000, windowsHide: true });
       } else {
         const release = path.join(scratch, 'release');
-        await run(python, [path.join(repo, 'scripts', 'build-setup-release.py'), '--output', release], { timeout: 30000, windowsHide: true });
+        await run(python, ['-B', path.join(repo, 'scripts', 'build-setup-release.py'), '--source-only', '--output', release], { timeout: 30000, windowsHide: true });
         await run(python, ['-m', 'zipfile', '-e', path.join(release, 'agent-continue-setup.zip'), payload], { timeout: 12000, windowsHide: true });
       }
       assert.deepEqual(fs.readdirSync(payload).filter(name => name.startsWith('guided-')), []);
@@ -579,6 +602,7 @@ for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle', 'replay
       assert.deepEqual(replies[6].resp_json.result.structuredContent, { status: 'not-recorded' });
       assert.notEqual(replies[7].resp_json.result.isError, true);
       assert.match(await exactShellOutput, /AC_TUNNEL_EXACT/);
+      if (process.platform === 'win32') assert.ok(outputReadTimings.length > 0, 'delayed Windows output requires a correlated read');
       assert.equal(replies[8].resp_json.error?.code, -32070);
       assert.deepEqual(replies[9].resp_json.result.structuredContent, { status: 'provider-reported-result', requestKind: 'exact-process' });
     }
