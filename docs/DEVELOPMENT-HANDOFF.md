@@ -2,6 +2,21 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### CI62 Startup Projection Race (Checkpoint99)
+
+Native62/run42523896180 Windows stopped in the initial native npm suite at
+tunnel-supervision.test.mjs302: internal ready had been observed, but the next
+external status frame was unknown223ms after startup. Source permits a
+concurrent status probe to set ready while connect is still publishing phase;
+device operations correctly require the complete state. The fixture now waits
+for and retains the complete ready/unpaused status frame under its existing
+six-second wait bound, rather than treating an earlier internal bit as an
+atomic external observation. It still requires exactly one child, no explicit
+Reconnect and unchanged readiness assertions.19 supervision tests passed locally;
+the complete native npm suite then passed278 tests with4 platform skips in43.925s.
+No production lifecycle semantics changed. CI62 did not reach the new protocol
+diagnostics; CI61's separate delayed-read cause remains unproven.
+
 ### CI61 Protocol Observation Failure (Checkpoint98)
 
 Native61/run42520937816 Windows failed after23m40s. The ledger step passed in

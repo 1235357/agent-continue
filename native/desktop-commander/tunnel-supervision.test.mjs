@@ -295,10 +295,14 @@ check('stop terminates the owned child and leaves no process or restart behind',
 
 check('reopening an owner with persisted resume intent starts the tunnel without a user action', async t => {
   const f = await fixture(t, { paused: false }), c = f.open();
-  assert.ok(await waitFor(async () => (await c.status()).ready, 6000));
-  assert.equal(f.children.length, 1);
   const ops = await f.operationsFor(c);
-  const frame = await ops.handle({ version: 1, id: 'autostart', action: 'status' });
+  let frame;
+  // A concurrent probe can set ready while connect is still publishing its phase.
+  assert.ok(await waitFor(async () => {
+    frame = await ops.handle({ version: 1, id: 'autostart', action: 'status' });
+    return frame.ok && frame.state.connection === 'ready' && frame.state.paused === false;
+  }, 6000));
+  assert.equal(f.children.length, 1);
   assert.equal(frame.state.connection, 'ready'); assert.equal(frame.state.paused, false);
 });
 

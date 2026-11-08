@@ -1,5 +1,16 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## CI62 Startup Projection Test Corrected (Checkpoint99)
+
+Native62 failed the initial supervision fixture's second observation: internal
+ready can precede connect's final phase, so an external status may still be
+unknown. The fixture now waits for the complete ready/unpaused status frame
+within the same six-second bound, keeps that observed frame and still requires
+one automatically started child.19 supervision tests passed locally, followed by
+the complete native suite:278 passed,4 platform skips,0 failures in43.925s. No product
+readiness rule changed, no control operation was repeated, and CI62 did not
+reach protocol diagnostics. Full CI, Release and Store submission are pending.
+
 ## CI61 Failure And Pending Protocol Diagnostics (Checkpoint98)
 
 Native61 Windows passed the ledger in2m27s but failed exact-shell output
