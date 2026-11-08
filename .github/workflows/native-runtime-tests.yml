@@ -374,7 +374,7 @@ jobs:
       - name: Verify guarded hosted fixture routing without opening a tunnel
         if: runner.os == 'Windows'
         run: node --test ../../tests/hosted-managed-process-tests.mjs ../../tests/hosted-catalog-fixture-tests.mjs ../../tests/hosted-administrator-token-probe-tests.mjs
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: runner.os == 'Windows' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         with:
           name: agent-continue-windows-preview-kit
