@@ -1,5 +1,29 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Hosted Release Failures And Narrow Regression Fixes (Checkpoint87)
+
+- Pushed main62bd21d4cb780105074dd5cd40f7fe0e68662b98. Actual Native49 Windows
+  job128790370850 passed native278/4-platform-skip, current-account13/13,
+  ledger38/38 and signing8/8, then failed10/46 native-release checks. Later
+  skipped steps are not accepted. Earlier ledger/signing failure statements
+  are historical; a complete all-green hosted run is still required.
+- Official raw log plus an actual disposable Git checkout reproduced LF->CRLF
+  conversion of the byte-pinned publisher JSON. Narrow .gitattributes eol=lf
+  preserves that one policy's original bytes; both native CI path triggers now
+  include the rule. No verifier pin changed. Real checkout regression was RED
+  before this correction; publisher source/checkout7/7 now passes locally.
+- Installer fixture had a stale generated payload manifest, correctly rejected
+  by production validation before the intended missing-Node branch. It now
+  uses the declared bootstrap closure with a freshly computed scratch manifest.
+  Valid/missing/tampered states assert exact refusal phases, unchanged scratch
+  bytes and no installation writes. Production integrity checks remain intact.
+- Parent full native-release49/49 passed66.270s, zero skips; workflow23/23 passed.
+  A follow-up hosted run is required. No release/tag or Store review submission
+  is established. Store English description/support was saved as a draft only.
+  Same r8 remains paused; no settled operation was replayed, no production or
+  original Chrome task was changed. Whole-browser reopen and fresh current-account
+  live installation/hosted operation remain unverified.
+
 ## Current-Account Source Integration And Recovery Correction (Checkpoint86)
 
 - Fresh installer publication now reaches actual background/current-account

@@ -70,6 +70,15 @@ class WindowsReleaseWorkflowTests(unittest.TestCase):
                 self.assertIsNotNone(trigger)
                 self.assertIn("      - 'tests/windows-offline-payload-tests.mjs'", trigger.group(1))
 
+    def test_pinned_publisher_checkout_rule_changes_trigger_native_checks(self):
+        attributes = (ROOT / ".gitattributes").read_text(encoding="ascii")
+        self.assertIn("native/bootstrap/native-publishers.json text eol=lf", attributes.splitlines())
+        ordinary = (ROOT / ".github/workflows/native-runtime-tests.yml").read_text(encoding="utf-8")
+        for event in ("push", "pull_request"):
+            trigger = re.search(r"^  " + event + r":\n(.*?)(?=^  [\w-]+:|\Z)", ordinary, re.M | re.S)
+            self.assertIsNotNone(trigger)
+            self.assertIn("      - '.gitattributes'", trigger.group(1))
+
     def test_public_npm_gate_receives_original_builder_receipt_and_keeps_the_real_tarball_case(self):
         windows = job(self.source, "windows-sidecar")
         upload = step(windows, "Upload the original Windows build receipt")

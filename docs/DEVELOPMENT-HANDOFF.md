@@ -2,6 +2,35 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Hosted Release Failures Reproduced And Corrected (Checkpoint87)
+
+Main62bd21d4cb780105074dd5cd40f7fe0e68662b98 was pushed. Native49 Windows
+job128790370850 actually passed the full native278/4-platform-skip suite,
+current-account13/13, ledger38/38 and signing8/8. Its native-release suite then
+failed10 of46 checks; downstream skipped checks are NOT accepted passes.
+This supersedes the older hosted ledger/signing uncertainty, not all CI gates.
+
+The official log and a local real Git checkout reproduced a byte-pin mismatch:
+core.autocrlf=true changed native-publishers.json from LF to CRLF. Independent
+production pins remain unchanged. A narrow .gitattributes rule keeps ONLY that
+policy at LF, and both push/PR native workflow path filters include the rule.
+The new checkout regression failed with the exact differing hash before the fix.
+
+The remaining independent failure was an installer fixture using a stale generated
+payload manifest beside a mutable checkout. The production installer correctly
+rejected it before Node resolution. The fixture now builds a declared scratch
+bootstrap closure and matching SHA256SUMS, then verifies valid, missing-manifest
+and tampered-manifest cases, unchanged scratch bytes and no installation writes.
+No installer bypass, new trusted signer or security exclusion was introduced.
+
+Parent complete native-release49/49 passed66.270s, zero failures or skips.
+Publisher source/checkout7/7 and workflow23/23 passed. These are local tests;
+the follow-up commit still needs a new hosted workflow result. The English Store
+description/support draft is saved, not submitted for review. r8 remains paused;
+whole-browser saved-running reopen, fresh current-account live acceptance and
+final Release/Store submission receipts remain open. No production connection
+or original external Chrome scheduler was changed.
+
 ### Fresh Current-Account Continuation Wired (Checkpoint86)
 
 The installer now publishes a create-only, exact setup/extension/binding proof

@@ -3,6 +3,7 @@ name: Experimental native runtime checks
 on:
   push:
     paths:
+      - '.gitattributes'
       - 'native/**'
       - 'cli.mjs'
       - 'package-lock.json'
@@ -80,6 +81,7 @@ on:
       - '.github/workflows/native-runtime-tests.yml'
   pull_request:
     paths:
+      - '.gitattributes'
       - 'native/**'
       - 'cli.mjs'
       - 'package-lock.json'

@@ -1,0 +1,2 @@
+# Trusted publisher policy is byte-pinned in independent verifier code.
+native/bootstrap/native-publishers.json text eol=lf

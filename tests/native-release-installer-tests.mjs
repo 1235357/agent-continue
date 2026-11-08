@@ -6,6 +6,8 @@ import os from 'node:os';
 import {fileURLToPath} from 'node:url';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
+import crypto from 'node:crypto';
+import {buildPackage} from '../native/bootstrap/build-package.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const run=promisify(execFile);
@@ -33,25 +35,50 @@ test('legacy native preparation validates a vendor release before resolving Node
   assert.match(local,/return main\(/);
 });
 
-test('command install respects an explicit Node path without native release or provisioning fallback',
+for(const [manifestState,failure] of [['valid','node_not_found'],
+  ['missing','payload_file_missing'],['tampered','payload_digest_mismatch']]) {
+test(manifestState==='valid'
+  ? 'command install respects an explicit Node path without native release or provisioning fallback'
+  : `command install rejects a ${manifestState} generated payload manifest before resolving Node`,
   {skip:process.platform!=='win32',timeout:15000},async()=>{
-    const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'ac-native-release-entry-'));
+    const temporary=fs.realpathSync.native(os.tmpdir());
+    const scratch=fs.mkdtempSync(path.join(temporary,'ac-native-release-entry-'));
     try {
+      // Build only the declared closure; never inherit generated checkout artifacts.
+      const bootstrap=path.join(scratch,'bootstrap');
+      buildPackage(bootstrap);
+      const files=fs.readdirSync(bootstrap,{recursive:true})
+        .filter(name=>fs.statSync(path.join(bootstrap,name)).isFile());
+      fs.writeFileSync(path.join(bootstrap,'SHA256SUMS.txt'),files.map(name=>
+        crypto.createHash('sha256').update(fs.readFileSync(path.join(bootstrap,name))).digest('hex')+
+        '  '+name.split(path.sep).join('/')).join('\n')+'\n');
+      const manifest=path.join(bootstrap,'payload-manifest.json');
+      if(manifestState==='missing') fs.unlinkSync(manifest);
+      if(manifestState==='tampered') fs.appendFileSync(manifest,' ');
       const localApp=path.join(scratch,'local');fs.mkdirSync(localApp);
       const destination=path.join(scratch,'must-not-install');
       const request=path.join(scratch,'request.json');
       fs.writeFileSync(request,JSON.stringify({format:'agent-continue-device-setup',version:1,
         target:'windows',extensionId:'a'.repeat(32),nativeHost:'com.agentcontinue.device_control'})+'\n');
+      const before=fs.readdirSync(scratch,{recursive:true}).sort().map(name=>[name,
+        fs.statSync(path.join(scratch,name)).isDirectory()?null:fs.readFileSync(path.join(scratch,name))]);
       const powershell=path.join(process.env.SystemRoot,'System32','WindowsPowerShell','v1.0','powershell.exe');
       await assert.rejects(run(powershell,['-NoLogo','-NoProfile','-NonInteractive','-File',
-        path.join(root,'native/bootstrap/install.ps1'),'-InstallLocal','-Consent','accept-install',
+        path.join(bootstrap,'install.ps1'),'-InstallLocal','-Consent','accept-install',
         '-SetupRequest',request,'-InstallDir',destination,'-NodePath',path.join(scratch,'missing-node.exe')],
       {windowsHide:true,timeout:10000,env:{...process.env,LOCALAPPDATA:localApp}}),error=>{
         assert.equal(error.code,1);assert.equal(error.stdout,'');
-        assert.equal(error.stderr.trim(),'agent_continue_install_failed: node_not_found');
+        assert.equal(error.stderr.trim(),'agent_continue_install_failed: '+failure);
         return true;
       });
       assert.equal(fs.existsSync(destination),false);
       assert.deepEqual(fs.readdirSync(localApp),[]);
-    } finally {fs.rmSync(scratch,{recursive:true,force:true});}
+      assert.deepEqual(fs.readdirSync(scratch,{recursive:true}).sort().map(name=>[name,
+        fs.statSync(path.join(scratch,name)).isDirectory()?null:fs.readFileSync(path.join(scratch,name))]),before);
+    } finally {
+      assert.equal(path.dirname(fs.realpathSync.native(scratch)),temporary);
+      assert.match(path.basename(scratch),/^ac-native-release-entry-[A-Za-z0-9]+$/);
+      fs.rmSync(scratch,{recursive:true,force:true});
+    }
   });
+}

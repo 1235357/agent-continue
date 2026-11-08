@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import * as packager from '../native/bootstrap/build-package.mjs';
 const hash=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
@@ -16,6 +17,23 @@ test('bundled publisher policy has a matching independent preparer code pin',()=
   assert.ok(packagerSource.includes("const publisherPolicySha256 = '"+hash(bytes)+"'"));
   assert.ok(source.includes("[IO.Path]::Combine($PSScriptRoot, 'native-publishers.json')"));
   assert.ok(source.includes('$signature.TimeStamperCertificate'));
+});
+
+test('Windows Git checkout preserves the independently pinned publisher policy bytes',t=>{
+  const root=fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()),'ac-publisher-checkout-'));
+  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  const policy='native/bootstrap/native-publishers.json';
+  const bytes=fs.readFileSync(new URL('../'+policy,import.meta.url));
+  const attributes=new URL('../.gitattributes',import.meta.url);
+  fs.mkdirSync(path.join(root,'native/bootstrap'),{recursive:true});
+  fs.writeFileSync(path.join(root,policy),bytes);
+  fs.writeFileSync(path.join(root,'.gitattributes'),fs.existsSync(attributes)?fs.readFileSync(attributes):'');
+  const git=(...args)=>execFileSync('git',args,{cwd:root,windowsHide:true,stdio:'pipe',timeout:10000});
+  git('init','--quiet');
+  git('-c','core.autocrlf=false','add','--','.gitattributes',policy);
+  fs.unlinkSync(path.join(root,policy));
+  git('-c','core.autocrlf=true','checkout-index','--all','--force');
+  assert.equal(hash(fs.readFileSync(path.join(root,policy))),hash(bytes));
 });
 
 function fixture(t) {
