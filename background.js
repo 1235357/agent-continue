@@ -14,7 +14,9 @@ import { bindInstallationPause } from './admin-installation-pause.js';
 import { bindSetupInstallation, SETUP_MESSAGES } from './setup-controller.js';
 
 const browserWake = bindBrowserWake(chrome);
-const administratorControls = bindAdministratorControls(chrome);
+const administratorControls = bindAdministratorControls(chrome, {
+  prepareObserver: admit => administratorBrowser?.prepareSetupObserver(admit) ?? false,
+});
 const installationPause = bindInstallationPause(chrome);
 let setupInstallation;
 const administratorBrowser = bindAdministratorBrowser(chrome, {

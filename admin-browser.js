@@ -263,7 +263,7 @@ export function bindAdministratorBrowser(api, { timers = globalThis, onPauseInte
           recoveryStopped = false;
           recoveryAttempts = 0;
           sealed = true;
-          // An explicit, verified fresh setup can attach after the original
+          // An explicit, verified setup or manual startup can attach after the original
           // pre-install host lookup failed. This never requests startup demand.
           openObserver(false, true);
         }

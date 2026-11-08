@@ -21,7 +21,7 @@ function event() {
   const listeners = [];
   return { addListener: fn => listeners.push(fn), emit: value => listeners.map(fn => fn(value)) };
 }
-function fixture(t, { local = {}, native, failure = false } = {}) {
+function fixture(t, { local = {}, native, failure = false, prepareObserver = async () => true } = {}) {
   let granted = true;
   const calls = [], writes = [], removed = event(), added = event(), startup = event(), alarm = event();
   const api = {
@@ -40,7 +40,7 @@ function fixture(t, { local = {}, native, failure = false } = {}) {
     alarms: { onAlarm: alarm, clear: async () => true, create: async () => undefined },
   };
   // Time is outside persisted fixture operation ranges; automatic observation is tested separately.
-  const controller = bindAdministratorControls(api, { now: () => 700000 });
+  const controller = bindAdministratorControls(api, { now: () => 700000, prepareObserver });
   t.after(() => controller?.dispose());
   return { api, local, calls, writes, controller,
     send: (message, ...from) => controller.handleMessage(message, from.length ? from[0] : sender),
@@ -55,6 +55,68 @@ const association = (r = record()) => ({ version: 1, ...setup, operationId: r.op
 const setupConnect = (f, value = setup, admit = f.controller.captureStartupPermit()) =>
   f.controller.connectFromSetup(value, admit);
 const turn = () => new Promise(resolve => setImmediate(resolve));
+
+for (const control of ['connect', 'resume-saved']) {
+  test(`manual ${control} waits for a correlated browser observer before reserving or dispatching`, async t => {
+    const gate = Promise.withResolvers();
+    let admitted;
+    const f = fixture(t, { prepareObserver: admit => { admitted = admit; return gate.promise; } });
+    const pending = f.send({ ...connect, control });
+    await turn();
+    assert.equal(typeof admitted, 'function');
+    assert.equal(admitted(), true);
+    assert.deepEqual(f.writes, []);
+    assert.deepEqual(f.calls.map(r => r.action), ['control-support']);
+    gate.resolve(true);
+    assert.ok(await pending);
+    assert.equal(f.calls.filter(r => r.action === 'control').length, 1);
+  });
+}
+
+test('manual startup fails closed on missing, failed or non-boolean observer preparation', async t => {
+  for (const prepareObserver of [null, async () => false, async () => undefined, async () => 'attached',
+    async () => { throw Error('observer unavailable'); }]) {
+    const f = fixture(t, { prepareObserver });
+    assert.equal(await f.send(connect), null);
+    assert.deepEqual(f.writes, []);
+    assert.equal(f.calls.some(r => r.action === 'control'), false);
+  }
+});
+
+for (const stop of ['pause', 'revoke', 'permission', 'dispose']) {
+  test(`${stop} cancels manual startup while observer preparation is pending`, async t => {
+    const gate = Promise.withResolvers();
+    let admitted;
+    const f = fixture(t, { prepareObserver: admit => { admitted = admit; return gate.promise; } });
+    const pending = f.send(connect);
+    await turn();
+    assert.equal(admitted(), true);
+    if (stop === 'pause') f.controller.cancelPendingStartup();
+    if (stop === 'permission') f.revoke();
+    if (stop === 'dispose') f.controller.dispose();
+    if (stop === 'revoke') {
+      const revoked = await f.send({ type: ADMIN_CONTROL, control: 'revoke', bundleSha256: digest });
+      assert.equal(revoked.control, 'revoke');
+    }
+    assert.equal(admitted(), false);
+    gate.resolve(true);
+    assert.equal(await pending, null);
+    assert.equal(f.calls.some(r => r.action === 'control' && r.control !== 'revoke'), false);
+    assert.equal(f.writes.some(w => w[ADMIN_CONTROL_JOURNAL]?.operations.some(r => r.control !== 'revoke')), false);
+  });
+}
+
+test('readback, Revoke and an ineligible startup never prepare a browser observer', async t => {
+  let preparations = 0;
+  const f = fixture(t, { prepareObserver: async () => { preparations++; throw Error('must not prepare'); },
+    native: r => r.action === 'control-support' ? support(r.control, { eligible: false, target: null }) :
+      r.action === 'control-status' ? status(r) : submission(r) });
+  assert.equal(await f.send(connect), null);
+  const revoked = await f.send({ type: ADMIN_CONTROL, control: 'revoke', bundleSha256: digest });
+  assert.equal(revoked.control, 'revoke');
+  await f.send(query(revoked));
+  assert.equal(preparations, 0);
+});
 
 test('setup admission prefix is exported, but setup methods are not message APIs', async t => {
   assert.equal(adminControl.ADMIN_CONTROL_SETUP, 'windowsAdministratorSetupAdmissionV1:');

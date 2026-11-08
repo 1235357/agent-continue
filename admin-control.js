@@ -91,7 +91,7 @@ export function administratorControlJournal(value) {
   return value;
 }
 
-export function bindAdministratorControls(api, { now = Date.now, timers = globalThis } = {}) {
+export function bindAdministratorControls(api, { now = Date.now, timers = globalThis, prepareObserver = null } = {}) {
   const { runtime, permissions, storage, alarms } = api;
   if (api.extension?.inIncognitoContext || !runtime?.sendNativeMessage || !runtime?.getPlatformInfo ||
       !permissions?.contains || !storage?.local?.get || !storage.local.set) return null;
@@ -244,8 +244,9 @@ export function bindAdministratorControls(api, { now = Date.now, timers = global
     // A validated Revoke intent cancels earlier startup preparation before any await.
     if (control === 'revoke') startupEpoch++;
     const startup = startupEpoch;
-    const startupCurrent = () => !disposed && (control === 'revoke' || startup === startupEpoch) && admit();
     const started = epoch;
+    const startupCurrent = () => !disposed && started === epoch &&
+      (control === 'revoke' || startup === startupEpoch) && admit();
     if (setup) {
       // Duplicate lookup shares the journal queue and precedes even read-only native support.
       const previous = await serial(() => setupAdmission(setup, startupCurrent));
@@ -259,6 +260,12 @@ export function bindAdministratorControls(api, { now = Date.now, timers = global
     const supported = support && (control === 'revoke' || support.state === 'supported' && support.eligible &&
       support.bundleSha256 === message.bundleSha256 && support.target === message.target);
     if (!startupCurrent() || started !== epoch || !setup && !supported) return null;
+    if (!setup && control !== 'revoke') {
+      // The host may have been absent when this browser worker first loaded.
+      // A manual startup needs a live observer, not another startup-wake request.
+      if (typeof prepareObserver !== 'function' || await prepareObserver(startupCurrent) !== true ||
+          !startupCurrent() || started !== epoch) return null;
+    }
     const reserved = await serial(async () => {
       if (!await permitted(startupCurrent) || started !== epoch || !startupCurrent()) return null;
       const admission = setup ? await setupAdmission(setup, startupCurrent) : { journal: await readJournal() };
