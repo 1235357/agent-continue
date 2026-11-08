@@ -1122,6 +1122,57 @@ Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Archive/Microsoft
                     self.assertEqual(probe["stderr"], "probe partial stderr")
                 self.assertEqual(len(calls), 2)
 
+    def assert_guided_probe_observation(self, report, marker):
+        probe = report["postTimeoutEngineProbe"]
+        expected = ["engine-entered", "installer-parsed:0", "tls-ready", "utility-imported",
+                    "archive-imported", "stdin-redirected:True"]
+        self.assertIn(probe["status"], ("completed", "timeout"), probe)
+        lines = probe["stdout"].splitlines()
+        if probe["status"] == "completed":
+            self.assertEqual(probe["returncode"], 0, probe)
+            self.assertEqual(lines, expected)
+        else:
+            # The diagnostic budget is not a system-module performance contract.
+            # A partial observation must still prove real parsing, not an empty timeout.
+            self.assertNotIn("returncode", probe)
+            self.assertGreaterEqual(len(lines), 2, probe)
+            self.assertLessEqual(len(lines), len(expected), probe)
+            self.assertEqual(lines, expected[:len(lines)])
+        self.assertFalse(marker.exists(), "the phase probe must only parse the fixture installer")
+        self.assertEqual(report["fixtureChanges"], [])
+
+    def test_guided_cmd_timeout_retains_parsed_partial_probe_without_claiming_completion(self):
+        with tempfile.TemporaryDirectory(prefix="ac-guided-probe-contract-") as temporary:
+            marker = Path(temporary) / "must-not-execute.txt"
+            observed_ci = {"status": "timeout", "stderr": "",
+                           "stdout": "engine-entered\ninstaller-parsed:0\ntls-ready\n"}
+            report = {"postTimeoutEngineProbe": observed_ci, "fixtureChanges": []}
+            self.assert_guided_probe_observation(report, marker)
+            self.assertEqual(observed_ci["status"], "timeout")
+            self.assertNotIn("returncode", observed_ci)
+
+    def test_guided_cmd_probe_contract_rejects_unobserved_parse_false_completion_and_writes(self):
+        with tempfile.TemporaryDirectory(prefix="ac-guided-probe-contract-") as temporary:
+            marker = Path(temporary) / "must-not-execute.txt"
+            for probe in (
+                    {"status": "timeout", "stdout": ""},
+                    {"status": "timeout", "stdout": "engine-entered\n"},
+                    {"status": "timeout", "stdout": "engine-entered\ninstaller-parsed:1\n"},
+                    {"status": "timeout", "stdout": "installer-parsed:0\nengine-entered\n"},
+                    {"status": "timeout", "stdout": "engine-entered\ninstaller-parsed:0\n", "returncode": 0},
+                    {"status": "completed", "stdout": "engine-entered\ninstaller-parsed:0\n", "returncode": 0},
+                    {"status": "completed", "stdout": "", "returncode": 1},
+                    {"status": "launch", "stdout": "engine-entered\ninstaller-parsed:0\n"}):
+                with self.subTest(probe=probe), self.assertRaises(AssertionError):
+                    self.assert_guided_probe_observation({"postTimeoutEngineProbe": probe, "fixtureChanges": []}, marker)
+            valid = {"status": "timeout", "stdout": "engine-entered\ninstaller-parsed:0\ntls-ready\n"}
+            with self.assertRaises(AssertionError):
+                self.assert_guided_probe_observation({"postTimeoutEngineProbe": valid,
+                                                     "fixtureChanges": ["installed.marker"]}, marker)
+            marker.write_text("synthetic forbidden execution")
+            with self.assertRaises(AssertionError):
+                self.assert_guided_probe_observation({"postTimeoutEngineProbe": valid, "fixtureChanges": []}, marker)
+
     @unittest.skipUnless(os.name == "nt", "Windows PowerShell read-only timeout phase probe")
     def test_guided_cmd_timeout_engine_probe_parses_but_never_executes_installer(self):
         with tempfile.TemporaryDirectory(prefix="ac-guided-timeout-") as temporary:
@@ -1149,13 +1200,7 @@ Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Archive/Microsoft
                     observed = error
             self.assertIsInstance(observed, AssertionError)
             report = json.loads(str(observed).split("guided_cmd_timeout: ", 1)[1])
-            probe = report["postTimeoutEngineProbe"]
-            self.assertEqual(probe["status"], "completed", probe)
-            self.assertEqual(probe["returncode"], 0, probe)
-            self.assertEqual(probe["stdout"].splitlines(), ["engine-entered", "installer-parsed:0", "tls-ready",
-                                                         "utility-imported", "archive-imported", "stdin-redirected:True"])
-            self.assertFalse(marker.exists(), "the phase probe must only parse the fixture installer")
-            self.assertEqual(report["fixtureChanges"], [])
+            self.assert_guided_probe_observation(report, marker)
             self.assertEqual(len(calls), 2)
 
     def test_release_workflow_carries_matching_setup_assets(self):

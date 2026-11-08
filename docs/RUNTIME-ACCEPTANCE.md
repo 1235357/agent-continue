@@ -1,5 +1,22 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## CI56 Probe Contract, Not A New Product Timeout Fix (Checkpoint93)
+
+Native56 Windows128818849476 on d057862 passed the original guided CMD cases,
+ledger and native-release53/53, then failed its new3s diagnostic self-test.
+Probe stdout proved engine entry, parse0 and TLS initialization before module
+import timeout. Original CI55 stall remains unresolved; later skipped steps are
+not accepted. The actual captured output reproduced the false completion
+assertion RED. Corrected test accepts only completed/all-stages/return0 or a
+truthful timeout with exact ordered observed-parse prefix. No parse, wrong order,
+parse errors, false completion and fixture writes remain rejected. The original
+20s command and3s diagnostic budgets remain unchanged; no installer replay.
+Parent expanded44/44 passed21.021s; independent focused3/3 passed1.235s.
+
+Parent full root npm test exited0; native278pass/4explicit-skips and native-release
+53/53 passed. r9 paired extension packages are built, not released/submitted.
+Same r8 remains paused. No production/credential change or settled-operation retry.
+
 ## Unicode Launch, Interpreter Identity And r9 Package (Checkpoint92)
 
 - Replaces the older unsupported-Unicode source conclusion. Bounded Unicode

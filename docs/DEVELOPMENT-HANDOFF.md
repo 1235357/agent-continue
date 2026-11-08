@@ -2,6 +2,34 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### CI56 Diagnostic Contract Correction (Checkpoint93)
+
+d057862bd5ea2d23753a922f9566ff340b958e1c is pushed and observed in IAB.
+Native56 Windows128818849476 passed the ledger step, Job and native-release53/53,
+then failed only the NEW parse-only diagnostic self-test. Original guided CMD
+cases did not time out on this run. The3s probe emitted engine-entered,
+installer-parsed:0 and tls-ready before timing out at the system-module boundary.
+This observes the probe, not CI55's original internal stall or its root cause.
+
+The incorrect test requirement that every system import finish within3s is
+replaced by the actual diagnostic contract: completed requires return0 and all
+six exact ordered markers; timeout stays timeout and must retain an exact stage
+prefix proving parsing. Empty/unobserved parsing, parse errors, reordered stages,
+false completion and any fixture write still fail. Captured CI56 output was RED
+against the old assertion, then the new three focused tests passed. Original
+installer20s and probe3s limits and all original39 refusal/write assertions stay.
+No installer/probe production logic or release payload changed in this correction.
+Parent expanded ZIP suite44/44 passed21.021s; independent focused review3/3
+passed1.235s with no actionable finding in that bounded diff.
+
+Parent complete root npm test exited0 after d057862, including actual MV3
+integration13/13 and ProseMirror5/5 fixture scenarios. Native runtime278pass/
+4explicit-platform-skips and native-release53/53 in67.702s also passed locally.
+Paired r9 extension ZIPs were built with d057862 source revision and verified
+combined setup receipt; Store SHA5ef6039e4d56762ce9db63570b1ee567b53d81f7c99d115f51012b9c294b6127.
+They remain unpublished candidate artifacts. r8 is still paused and no settled
+operation was replayed. Hosted downstream checks and final delivery remain open.
+
 ### Unicode Native Launch And Fresh Combined Candidate (Checkpoint92)
 
 Supersedes Checkpoint91's open Unicode source limitation. Current-account
