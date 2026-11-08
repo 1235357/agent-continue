@@ -24,7 +24,7 @@ The interface defaults to English and offers a Simplified Chinese language switc
 
 Each attempt uses one submission mechanism. A matching new user-message marker is required for confirmation; clearing the composer alone is not success. An unknown result does not trigger an immediate retry, but another attempt may occur after the full normal interval. Delivery is not guaranteed or exactly once. Pause and inspect the conversation if a result is uncertain. Send once now submits a real message, and pause cannot retract an action already dispatched.
 
-The computer and browser must remain running, with the target executable and signed in. Background throttling, sleeping pages, and website changes may delay or prevent sending. Optional idle-sleep prevention does not override manual sleep. The extension does not increase account quotas, extend model context, or guarantee completion of an agent task.
+The computer and browser must remain running, with the target tab open and signed in. Background throttling, sleeping pages, and website changes may delay or prevent sending. Optional idle-sleep prevention does not override manual sleep. The extension does not increase account quotas, extend model context, or guarantee completion of an agent task.
 
 Prompt scheduling and file import need no separate extension account or API key. ChatGPT sign-in is required on the target website. Submitted prompts go to ChatGPT under that service's policies. There is no developer-operated collection backend, cloud synchronization or online document converter. Local extension storage is not encrypted. The scheduler does not use the system clipboard; Setup can copy its command after your user gesture.
 

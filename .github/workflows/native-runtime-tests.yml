@@ -256,7 +256,8 @@ jobs:
       - name: Verify read-only control projections, durable IDs and native-to-PowerShell contract
         if: runner.os == 'Windows'
         working-directory: .
-        timeout-minutes: 4
+        # Aggregate: 17 x 60s fixtures + 10s assertion + observation headroom.
+        timeout-minutes: 20
         run: npm run test:admin-control-ledger
       - name: Verify packaged Codex browser identity policy without starting controls
         if: runner.os == 'Windows'

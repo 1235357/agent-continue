@@ -1,5 +1,41 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## r11 Actual Full-App Reopen And Hosted Commands (Checkpoint97)
+
+The owner explicitly reconfirmed the shared-app exit even with another workflow
+active. Actual File/Quit removed old browser47844/startTicks639296773930563132,
+broker112948 and root105280. After all three exact identities were absent,
+the same IAB candidate path was updated to all250 verified Store ZIPc87599d6
+members, with backup and no profile/storage/grant changes. Official app relaunch
+produced browser64260/startTicks639297658652734048. Without a new Connect click,
+public owner Ready generation2298db5f2ddb425786380b4a274848e3, broker41208/root101728,
+was observed. Old Ready generation was ea4818f66774410bb23b5eba534a4ce3.
+
+| Actual surface | Native tool result | Independent parent readback |
+| --- | --- | --- |
+| Ordinary ChatGPT after full reopen | start_process34512; administrator=true; roundtrip=true; marker AC_R11_AFTER-REOPEN_403dc866781048f89e6caf7ab15b07ed; child93104 stopped | Matching result and exact marker file; exact child PID/startTicks639297662083755735 absent |
+| Existing approved Dot | start_process26872; administrator=true; roundtrip=true; marker AC_R11_DOT_1536dacc88824218a9b411f06d73b338; child102752 stopped | Matching result and exact marker file; exact child PID/startTicks639297663237174395 absent |
+
+Both surfaces used the same r11 installation and existing dedicated acceptance
+tunnel. No second script execution, Connect replay, production VPN/MCP/research
+change or forced app termination occurred. Screenshots and one-use result files
+are retained under the original chat visualization directory and
+.artifacts/ordinary-chat-acceptance-20261108. This proves the observed recovery
+and bounded command/file/owned-process cases, not arbitrary future reliability.
+R11 actual Devices Pause71379a0082b44c6c983dd477f3409204 has a matching stopped
+receipt and both broker41208/root101728 exact identities are absent. Actual
+Devices Revoke815c66010d5044c7ac844039924bf483 has matching revocation-recorded
+and stopped terminal receipts. The UI reported shutdown verified for that
+request. The r11 acceptance installation is left revoked, not running. No
+replay or security bypass was used. This does not establish that OpenAI grants
+were removed or that the local installation was uninstalled.
+
+Native60 failed the earlier ledger step at its four-minute cap; later steps did
+not run. The aggregate step now allows20 minutes for17 serial60-second fixtures
+plus assertion/observation headroom, without changing individual limits or
+coverage. Focused workflow tests passed19 cases; the specific CI60 cause remains
+unproven and the new hosted run is pending. No Release or Store submission.
+
 ## r10 Draft Saved; CI58 Status Timeout Still Open (Checkpoint95)
 
 - Fresh r10 combined candidate on0d3b436: exact six-asset receipt verification,

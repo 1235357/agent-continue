@@ -47,6 +47,24 @@ class WindowsReleaseWorkflowTests(unittest.TestCase):
     def setUp(self):
         self.source = WORKFLOW.read_text(encoding="utf-8")
 
+    def test_control_ledger_step_budget_preserves_individual_fixture_limits(self):
+        source = (ROOT / ".github/workflows/native-runtime-tests.yml").read_text(encoding="utf-8")
+        core = job(source, "core")
+        block = step(core, "Verify read-only control projections, durable IDs and native-to-PowerShell contract")
+        timeout = int(re.search(r"^        timeout-minutes: (\d+)$", block, re.M).group(1))
+        self.assertEqual(timeout, 20)
+        self.assertGreater(timeout * 60, 17 * 60 + 10)
+        self.assertIn("if: runner.os == 'Windows'", block)
+        self.assertIn("working-directory: .", block)
+        self.assertIn("run: npm run test:admin-control-ledger", block)
+        job_timeout = re.search(r"^    timeout-minutes: (\d+)$", core, re.M)
+        if job_timeout:
+            self.assertGreaterEqual(int(job_timeout.group(1)), timeout)
+        fixture = (ROOT / "tests/windows-admin-control-ledger-tests.mjs").read_text(encoding="utf-8")
+        self.assertIn("const windows = { skip: process.platform !== 'win32', timeout: 65_000 };", fixture)
+        self.assertIn("    timeout: 60_000,", fixture)
+        self.assertIn("timeout: 10_000,", fixture)
+
     def test_standalone_zip_refusals_run_once_before_expensive_native_phases(self):
         source = (ROOT / ".github/workflows/native-runtime-tests.yml").read_text(encoding="utf-8")
         core = job(source, "core")

@@ -2,6 +2,58 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### r11 Actual Full-App Reopen And Both Web Surfaces (Checkpoint97)
+
+This supersedes the pending cutover/reopen statements below. Official r11
+installation27eb4f79f780450cb0b7d8810e42ee73 completed and verified24328 files.
+Browser Connect008842edc3b74e0e80da7463ba2417d0 was requested once; generation
+ea4818f66774410bb23b5eba534a4ce3 reached Ready. The user reconfirmed full shared
+app exit despite another active workflow. Native File/Quit closed the old main
+PID47844/startTicks639296773930563132, broker112948 and root105280. All three
+exact old identities were absent before updating the loaded extension and
+relaunching the official app. No force kill or production connection change.
+
+The same IAB extension path/ID now contains all250 members of Store ZIPc87599d6
+(full hash below), each member hash verified, no extras. Existing storage and
+browser grants were preserved. New main PID64260/startTicks639297658652734048
+opened; WITHOUT clicking Connect again, generation2298db5f2ddb425786380b4a274848e3
+became Ready, broker41208/root101728. This is an actual browser-lifetime recovery
+observation, not merely a fixture or new process count.
+
+Ordinary ChatGPT then actually executed Invoke-R11-Web-Acceptance.ps1 once with
+Surface after-reopen: parent34512, administrator=true, file roundtrip=true,
+marker AC_R11_AFTER-REOPEN_403dc866781048f89e6caf7ab15b07ed, owned child93104
+stopped. Dot executed Surface dot once: parent26872, administrator=true,
+roundtrip=true, marker AC_R11_DOT_1536dacc88824218a9b411f06d73b338, owned child
+102752 stopped. Parent independently matched each marker/result and checked
+the exact child PID/start identity absent. Both scripts report
+productionChanged=false. No repeated tool mutations or new tunnel was used.
+Evidence is under .artifacts/ordinary-chat-acceptance-20261108 and the original
+chat visualization directory (AgentContinue-r11-after-reopen-web-proof.png and
+AgentContinue-r11-dot-web-proof.png).
+
+R11 Devices Pause71379a0082b44c6c983dd477f3409204 was sent once and read back
+stopped, with both exact broker41208/root101728 identities absent. Devices then
+requested Revoke815c66010d5044c7ac844039924bf483 once for the whole r11 installation.
+Both revocation-recorded and stopped terminal receipts match the r11 bundle and
+original operation. The UI confirmed shutdown verification. The acceptance
+installation is now revoked and not running; do not reconnect or reauthorize it
+merely for polling. Screenshots AgentContinue-r11-pause-proof.png and
+AgentContinue-r11-revoke-proof.png are retained. Stale progress files are not
+current activity or readiness. Protected state was not read through an ACL bypass.
+
+Native60/run42518354993 FAILED at the earlier control-ledger step's unchanged
+four-minute cap. The observation-bridge file passed12 tests; ledger file was
+still pending at239492ms. The later exact-shell/packaged-manager fixes were not
+reached, so they are not CI passes. Exact failing step was read in IAB. A bounded
+review found17 serial fixtures with individual60-second limits, plus a10-second
+assertion: the four-minute aggregate budget did not cover those declared limits.
+The workflow aggregate limit is now20 minutes, with all child limits and assertions
+unchanged. The focused workflow tests passed19 cases; CI60's specific slow fixture
+remains unproven and a fresh hosted run is still required.
+Store remains saved Draft3.0.0, published2.1.0;
+no GitHub Release/tag/npm publish or Chrome review submission is established.
+
 ### r11 Real Cutover In Progress (Checkpoint96)
 
 Main3193d708524d117993b6a3d066a98ac344bdb8cf includes the bounded status
