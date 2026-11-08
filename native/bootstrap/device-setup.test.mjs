@@ -353,11 +353,15 @@ managerCheck('manager consent, closed data fields and pre-abort refuse before an
       await assert.rejects(api.setupManager(options), codeIs('setup_input_invalid'));
     }
     for (const trusted of [{ fetchImpl() {} }, { command: 'private' }, { acquisitionTimeoutMs: 19 },
-      { acquisitionTimeoutMs: 180001 }, { get packageRoot() { throw new Error('do-not-call'); } }]) {
+      { acquisitionTimeoutMs: Infinity }, { acquisitionTimeoutMs: Number.MAX_SAFE_INTEGER + 1 },
+      { get packageRoot() { throw new Error('do-not-call'); } }]) {
       await assert.rejects(api.setupManager(base, trusted), codeIs('setup_input_invalid'));
     }
     const controller = new AbortController(); controller.abort();
     await assert.rejects(api.setupManager({ ...base, signal: controller.signal }), codeIs('setup_cancelled'));
+    for (const acquisitionTimeoutMs of [180001, Number.MAX_SAFE_INTEGER]) {
+      await assert.rejects(api.setupManager({ ...base, signal: controller.signal }, { acquisitionTimeoutMs }), codeIs('setup_cancelled'));
+    }
     const nonEnumerableSignal = Object.defineProperty({ ...base }, 'signal', { value: controller.signal });
     await assert.rejects(api.setupManager(nonEnumerableSignal), codeIs('setup_cancelled'));
   }, { metadata: true });

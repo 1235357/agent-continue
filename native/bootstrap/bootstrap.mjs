@@ -216,7 +216,15 @@ function acquire(npm, args, cwd, env, timeout, signal, reportFile) {
         closeObserved = true; closeCode = Number.isInteger(code) ? code : null;
         finish(code === 0 && !failed && !cancelled ? null : 'dependency_acquisition_failed');
       });
-      deadline = setTimeout(stop, timeout);
+      if (timeout !== undefined) {
+        // Only trusted test composition opts into a deadline; normal installs have none.
+        const checkDeadline = () => {
+          const remaining = timeout - (performance.now() - started);
+          if (remaining <= 0) stop();
+          else deadline = setTimeout(checkDeadline, Math.min(Math.ceil(remaining), 2147483647));
+        };
+        deadline = setTimeout(checkDeadline, Math.min(timeout, 2147483647));
+      }
       signal?.addEventListener('abort', stop, { once: true });
       if (signal?.aborted) stop();
     } catch { finish('dependency_acquisition_failed'); }
@@ -239,8 +247,8 @@ export async function stageRuntime(options, trusted = {}) {
     catch { fail('invalid_install_path'); }
     verifyPayload(packageRoot);
     const manifest = checkedManifest(packageRoot), npm = findNpm(trusted.npmCli);
-    const timeout = trusted.acquisitionTimeoutMs ?? 180000;
-    if (!Number.isInteger(timeout) || timeout < 20 || timeout > 180000) fail('bootstrap_failed');
+    const timeout = trusted.acquisitionTimeoutMs;
+    if (timeout !== undefined && (!Number.isSafeInteger(timeout) || timeout < 20)) fail('bootstrap_failed');
     let cache;
     if (options.offlineCache !== undefined) {
       cache = localPath(options.offlineCache);

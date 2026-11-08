@@ -339,7 +339,40 @@ check('cancellation stops only the owned acquisition and never publishes a succe
   assert.equal(fs.existsSync(path.join(installDir, 'receipt.json')), false);
 });
 
-check('acquisition deadline does not retry or publish a success receipt', async t => {
+check('default acquisition has no automatic deadline and can complete normally', async t => {
+  const { root, packaged, installDir } = fixture(t);
+  const npmCli = inventoryNpm(root);
+  const schedule = globalThis.setTimeout, delays = [];
+  globalThis.setTimeout = (callback, milliseconds, ...args) => {
+    delays.push(milliseconds);
+    return schedule(callback, milliseconds === 180000 ? 0 : milliseconds, ...args);
+  };
+  try {
+    const receipt = await api.stageRuntime({ installDir, consent: 'acquire-provider' }, composition(packaged, npmCli));
+    assert.equal(receipt.status, 'staged');
+    assert.deepEqual(delays, [], 'Default acquisition must not schedule a total-time cutoff');
+    const report = JSON.parse(fs.readFileSync(path.join(installDir, 'acquisition', 'process.json')));
+    assert.equal(report.result, 'completed');
+    assert.equal(report.cancelReason, null);
+  } finally { globalThis.setTimeout = schedule; }
+});
+
+check('trusted fixture deadlines above the old cap avoid Node timer overflow', async t => {
+  const { root, packaged, installDir } = fixture(t), npmCli = inventoryNpm(root);
+  const schedule = globalThis.setTimeout, delays = [];
+  globalThis.setTimeout = (callback, milliseconds, ...args) => {
+    delays.push(milliseconds);
+    return schedule(callback, milliseconds, ...args);
+  };
+  try {
+    const receipt = await api.stageRuntime({ installDir, consent: 'acquire-provider' },
+      { ...composition(packaged, npmCli), acquisitionTimeoutMs: Number.MAX_SAFE_INTEGER });
+    assert.equal(receipt.status, 'staged');
+    assert.deepEqual(delays, [2147483647]);
+  } finally { globalThis.setTimeout = schedule; }
+});
+
+check('explicit trusted fixture deadline does not retry or publish a success receipt', async t => {
   const { root, packaged, installDir } = fixture(t), marker = path.join(root, 'attempts');
   const npmCli = fakeNpm(root, `require('fs').appendFileSync(${JSON.stringify(marker)},'1');process.on('SIGTERM',()=>{});setInterval(()=>{},100)`);
   await assert.rejects(api.stageRuntime({ installDir, consent: 'acquire-provider' },

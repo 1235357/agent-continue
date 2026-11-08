@@ -1,5 +1,38 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Provider Install Has No Default Total Deadline (Checkpoint109)
+
+Per the owner's explicit instruction, remove the fixed180-second npm acquisition
+cutoff rather than increasing it. Default setup waits for npm completion/error or
+explicit cancellation. The outer PowerShell Invoke-Bootstrap has no total-time kill;
+CLI signals still reach AbortSignal/owned-child cleanup. Optional trusted fixture
+deadlines retain cancellation testing, with no old180-second upper cap and safe
+long-timer chunking. No CLI/browser option injects them. Other protocol/download/
+CI-test watchdogs are not the provider's removed total-time cutoff.
+
+Observed tests: new regression failed on the old automatic timer; final bootstrap
+29/29, focused cancellation/default/long/fixture-deadline4/4, combined bootstrap and
+device setup86 pass/2 platform skips, packed/model15 pass/1 opt-in skip, installer
+recovery/support/docs72/72. Combined run loaded the bootstrap file before the last
+long-timer test was added; the standalone29-case run tested the final file.
+Independent static review found no blocker, with no new multi-chunk virtual-expiry
+or direct listener-cleanup test claimed.
+
+Actual new-source cold CMD/portable Node installation plus file/PowerShell roundtrip,
+Pause and path-drift restart passed92.120s (1/1), against a loopback-only fake control
+plane with synthetic credentials. Baseline old source paired/cold controls passed
+30.987s/94.421s; a pass does not explain the historical CI69 deadline. Evidence logs
+are .artifacts/ordinary-chat-acceptance-20261108/checkpoint109-*.log. Ad-hoc metadata
+from an older selected scratch directory is explicitly excluded, not current-run proof.
+
+Change is Unreleased main source, not a replacement ofv3.0.1 or a new hosted test.
+Independent audit verified first-party runtime code/Node/tunnel correspondence
+between accepted r11 and Release12, but not byte-identical bundles (24 added optional
+dependency files and bookkeeping/license differences). Exact released-artifact live
+acceptance, current-candidate due-alarm send/count/limit-Pause and paused/revoked
+full-reopen non-restoration have not been established by that audit. Keep the full
+goal active. No new Windows grant, production connection or research operation.
+
 ## Corrected Metadata Resubmission Receipt (Checkpoint108)
 
 At approximately23:07 UTC on November8,2026, the Store returned the actual

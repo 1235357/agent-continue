@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Remove the fixed 180-second total cutoff from provider dependency installation.
+  Normal setup waits for npm completion, an actual error or explicit user
+  cancellation. Retain one-attempt behavior, integrity checks and owned-child
+  cancellation/cleanup. Trusted test-only deadlines remain optional and handle
+  long durations without Node timer overflow; they are not browser/CLI settings.
+  This source change does not replace the immutable v3.0.1 Release or the package
+  already submitted to the Chrome Web Store.
+
 ## [3.0.1] - 2026-11-08
 
 Release successor to the unpublished 3.0.0 build. The 3.0.0 tag is retained;

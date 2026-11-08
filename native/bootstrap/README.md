@@ -101,8 +101,9 @@ are not notarized. Do not disable or bypass Gatekeeper to activate these files.
 Use `--tunnel-archive "<absolute-official-runtime-zip>"` for an already downloaded
 official ZIP. Its digest must match the same platform pin. No arbitrary download
 URL, mutable latest version, shell extraction or executable override is accepted.
-The client deadline is cooperative and bounded to 60 seconds; provider npm has
-its own 180-second budget. Neither step retries automatically. Partial client
+The client deadline is cooperative and bounded to 60 seconds. Provider npm has
+no automatic total-time cutoff: it waits for completion, an error or your explicit
+cancellation (Ctrl+C in the setup terminal). Neither step retries automatically. Partial client
 failure preserves the valid staged provider and owned partial files, without an
 acquired receipt. Existing destinations are never overwritten or auto-repaired.
 ZIP work runs in a short-lived Node worker thread whose termination is awaited

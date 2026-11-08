@@ -136,9 +136,13 @@ CLI commands are exactly `help`, `version`, and
 `stage --install-dir ABS --consent acquire-provider [--offline-cache ABS]`.
 Help/import/version have no staging, network or launch effects. Failures print a
 closed fixed-code JSON result, never raw exceptions, npm output, keys or paths.
-The npm deadline starts immediately before spawn (180 seconds; trusted test
-override is an integer 20..180000 ms). It is one attempt, no shell and no arbitrary
-script/command option. On deadline or AbortSignal/SIGINT/SIGTERM, signal only the
+Normal npm acquisition has no total elapsed-time deadline. It remains one
+attempt, with no shell or arbitrary script/command option, until npm finishes,
+reports an error or the caller cancels. Only explicit trusted in-process test
+composition can request a deadline (a safe integer of at least 20 ms, no 180-second
+ceiling); long deadlines use Node-safe timer chunks rather than overflowing into
+an immediate timeout. CLI/browser input cannot set that fixture-only override.
+On explicit fixture deadline or AbortSignal/SIGINT/SIGTERM, signal only the
 retained npm child with SIGTERM, wait two seconds, then SIGKILL if still live,
 wait two seconds for close. Never kill by process name or enumerate unrelated
 tasks. If close remains unconfirmed, return acquisition_exit_unconfirmed, retain

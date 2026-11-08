@@ -404,8 +404,8 @@ export async function setupManager(options, trusted = {}) {
         typeof options.installDir !== 'string' || typeof options.setupRequestFile !== 'string' ||
         (options.offlineCache !== undefined && typeof options.offlineCache !== 'string') ||
         (options.signal !== undefined && !(options.signal instanceof AbortSignal)) ||
-        (trusted.acquisitionTimeoutMs !== undefined && (!Number.isInteger(trusted.acquisitionTimeoutMs) ||
-          trusted.acquisitionTimeoutMs < 20 || trusted.acquisitionTimeoutMs > 180000))) fail('setup_input_invalid');
+        (trusted.acquisitionTimeoutMs !== undefined && (!Number.isSafeInteger(trusted.acquisitionTimeoutMs) ||
+          trusted.acquisitionTimeoutMs < 20))) fail('setup_input_invalid');
     const input = Object.fromEntries(Reflect.ownKeys(options).map(key => [key, options[key]]));
     const dependencies = Object.fromEntries(Reflect.ownKeys(trusted).map(key => [key, trusted[key]]));
     const cancelled = () => { if (input.signal?.aborted) fail('setup_cancelled'); };
@@ -520,7 +520,7 @@ async function configureDevice(options, trusted, serverOnly = false) {
           !/^[a-p]{32}$/.test(options.guidedExtensionId) || options.setupRequestFile !== undefined ||
           options.expectedExtensionId !== undefined || options.privateRuntime === true)) ||
         (trusted.fetchImpl !== undefined && typeof trusted.fetchImpl !== 'function') ||
-        (trusted.acquisitionTimeoutMs !== undefined && (!Number.isInteger(trusted.acquisitionTimeoutMs) || trusted.acquisitionTimeoutMs < 20 || trusted.acquisitionTimeoutMs > 180000)) ||
+        (trusted.acquisitionTimeoutMs !== undefined && (!Number.isSafeInteger(trusted.acquisitionTimeoutMs) || trusted.acquisitionTimeoutMs < 20)) ||
         typeof options.tunnelId !== 'string' || !/^tunnel_(?:[a-z0-9]{4}_)?[a-z0-9]{32}$/.test(options.tunnelId)) fail('setup_input_invalid');
     const cancelled = () => { if (options.signal?.aborted) fail('setup_cancelled'); };
     cancelled();

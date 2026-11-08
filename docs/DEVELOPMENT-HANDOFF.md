@@ -2,6 +2,43 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Owner Removes Provider Install Time Cap (Checkpoint109)
+
+The owner's latest explicit instruction supersedes earlier advice to retain the
+180-second provider-install deadline. Normal npm acquisition now has no automatic
+elapsed-time cutoff: wait for completion, a reported error or explicit cancellation.
+The PowerShell Invoke-Bootstrap entry waits for the Node child without an outer
+180-second kill. CLI SIGINT/SIGTERM and AbortSignal cancellation, one-attempt behavior,
+owned-child shutdown, integrity checks and no-success-before-verification are retained.
+Trusted test-only deadlines are optional, accept safe integers >=20ms without the
+old180-second maximum, and chunk long timers without Node overflow. Network/client
+acquisition, IPC and test-runner watchdogs are separate and have not been disabled.
+
+The new no-default-timer regression first failed against the old source, then passed.
+Final bootstrap file:29/29; focused default/cancel/long/explicit-deadline checks:4/4.
+Bootstrap+device setup run:86 passed,2 Linux-only skips; packed/setup model:15 passed,
+1 opt-in real-provider skip; installer recovery/support/public docs:72/72. Independent
+static review found no blocking defect. Its noted gaps remain: multi-chunk virtual
+expiry and direct listener-cleanup assertions were not newly tested; no broad
+reliability claim follows. The final standalone bootstrap run includes the additional
+long-deadline test added after the combined run had loaded that file.
+
+Unmodified local paired/cold CMD controls passed30.987s/94.421s. The changed source's
+actual cold CMD/portable-Node case passed92.120s: correlated file/shell results,
+Pause and path-drift recovery, using only a loopback fake control plane and synthetic
+credentials. It is not a fresh hosted ChatGPT/Dot result or proof of CI69's cause.
+Logs: .artifacts/ordinary-chat-acceptance-20261108/checkpoint109-*.log.
+An ad-hoc scratch metadata probe selected an older fixture directory; those npm
+counts/process timings are excluded from this run's evidence.
+
+This is Unreleased source on canonical main; immutablev3.0.1 assets and the existing
+Store review remain untouched. Do not silently retrofit accepted r11 receipts:
+independent audit matched first-party runtime sources/Node/tunnel binaries to
+Release12 but found24 added optional dependency files plus bookkeeping/license
+differences. Exact Release12 installation is not the r11 installed artifact.
+Live due-alarm send/count/limit-Pause and an additional full reopen while already
+paused/revoked remain stronger acceptance gaps. Do not mark the full goal complete.
+
 ### Yellow Argon Corrected And Resubmitted (Checkpoint108)
 
 Canonical main7d8e00b contains the metadata correction and regression tests.

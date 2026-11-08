@@ -1,11 +1,11 @@
-# Windows Workflow Listing: 3.0.1 Unreleased Candidate
+# Windows Workflow Listing Review Reference
 
-Upcoming identity: **3.0.1, UNRELEASED / candidate**. This is not the existing Store
-listing or evidence of a release, saved draft, submission, approval or installation.
+Version **3.0.1 review reference**. This supporting document is not the saved Store
+listing or evidence of a release, submission, approval or installation.
 The [canonical English listing source](STORE-LISTING.en.md) and
 [canonical privacy policy](../PRIVACY.md) now include the Windows disclosures;
-this companion retains the candidate summary and concrete submission gates.
-Do not upload until those gates are verified. Preserve the historical scheduler
+this companion retains technical review context and scope-specific evidence gates.
+Read the latest dated delivery checkpoint before any submission. Preserve the historical scheduler
 v2.2.1 release and its assets; a new identity does not publish or approve itself.
 
 ## Name

@@ -178,7 +178,7 @@ authoritative where the earlier proposal imported an implicit contract.
   destination_exists, unchanged. API acquireClient can explicitly consume a valid
   provider-only stage, but CLI does not silently repair/resume. Forward cache only
   to stageRuntime, archive only to acquireClient, one shared caller AbortSignal
-  to both; provider uses its existing 180s budget and client starts its own 60s
+  to both; provider has no automatic total-time cutoff and client starts its own 60s
   cooperative budget on API entry. No automatic second consent or retry.
 - Cancellation is cooperative, not a hard preemption of synchronous parsing.
   An abort before commit rejects client_acquisition_failed. Active fetch readers
