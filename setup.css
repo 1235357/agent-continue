@@ -45,18 +45,18 @@
 .setup-management summary { cursor: pointer; font-weight: 600; }
 .setup-management h2 { margin-top: 16px; }
 @media (max-width: 520px) {
-  header { padding-top: 8px; padding-bottom: 8px; gap: 4px; }
-  .setup-brand { gap: 8px; }
+  header { padding-top: 8px; padding-bottom: 8px; gap: 8px; }
+  .setup-brand { flex: 1 1 0; gap: 8px; }
   .setup-brand h1 { font-size: 18px; }
-  .language-field { width: 132px; margin-left: auto; }
+  .language-field { width: 120px; margin-left: auto; }
   .language-field label { font-size: 11px; }
-  #installSection { padding-top: 12px; }
-  .windows-access-field { margin-top: 8px; }
-  #installSection .release-state, #setupRisk { margin-top: 8px; }
+  #installSection { padding-top: 8px; }
+  .windows-access-field { margin-top: 6px; }
+  #installSection .release-state, #setupRisk { margin-top: 6px; }
   #installSection .notice { padding: 6px 10px; font-size: 13px; line-height: 1.5; }
-  #installConsentLabel { margin-top: 10px; margin-bottom: 4px; }
+  #setupGrantBoundary { margin-top: 8px; font-size: 12px; }
+  #installConsentLabel { margin-top: 8px; margin-bottom: 4px; }
   #installFeedback { line-height: 1.4; }
-  #setupGrantBoundary { font-size: 12px; }
 }
 @media (prefers-color-scheme: dark) {
   .target-field label { color: #bdc6cd; }

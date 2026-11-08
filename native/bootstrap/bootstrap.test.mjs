@@ -39,6 +39,25 @@ function fakeNpm(root, body) {
 
 const composition = (packaged, npmCli) => ({ packageRoot: packaged, ...(npmCli ? { npmCli } : {}) });
 
+function assertRuntimeImportClosure(payload) {
+  const names = fs.readdirSync(payload);
+  let protectedImports = 0;
+  for (const name of names.filter(name => name.endsWith('.mjs'))) {
+    const text = fs.readFileSync(path.join(payload, name), 'utf8');
+    for (const match of text.matchAll(/(?:from\s*|import\s*\()(['"])(\.\/[^'"\n]+\.mjs)\1/g)) {
+      if (name === 'host.mjs' && match[0].startsWith('import') && match[2] === './windows-admin-owner.mjs') {
+        assert.match(text, /const administratorOwner = process\.argv\.length === 5 && process\.argv\[4\] === '--administrator-owner';/);
+        assert.match(text, /const administratorAdmission = administratorOwner\s*\?\s*await \(await import\('\.\/windows-admin-owner\.mjs'\)\)\.openWindowsAdministratorAdmission\(root\)\s*:\s*null;/);
+        assert.equal(names.includes('windows-admin-owner.mjs'), false, 'protected sidecar belongs only in the administrator bundle');
+        protectedImports++;
+      } else {
+        assert.ok(names.includes(match[2].slice(2)), 'missing imported runtime source: ' + match[2]);
+      }
+    }
+  }
+  assert.equal(protectedImports, 1, 'only the single guarded administrator sidecar import is separate');
+}
+
 function replacePayloadJSON(packaged, name, value) {
   const bytes = Buffer.from(JSON.stringify(value) + '\n');
   fs.writeFileSync(path.join(packaged, 'payload', name), bytes);
@@ -90,14 +109,27 @@ check('built payload includes the native bridge dependency closure but never a d
     assert.ok(names.includes(name), 'missing native source: ' + name);
     assert.deepEqual(fs.readFileSync(path.join(payload, name)), fs.readFileSync(path.resolve(here, '../desktop-commander', name)));
   }
-  for (const name of names.filter(name => name.endsWith('.mjs'))) {
-    const text = fs.readFileSync(path.join(payload, name), 'utf8');
-    for (const match of text.matchAll(/(?:from\s*|import\s*\()(['"])(\.\/[^'"\n]+\.mjs)\1/g)) {
-      assert.ok(names.includes(match[2].slice(2)), 'missing imported runtime source: ' + match[2]);
-    }
-  }
+  assertRuntimeImportClosure(payload);
   for (const name of ['device-native-binding.json', 'device-channel.json', 'device-operations.jsonl']) {
     assert.equal(names.includes(name), false);
+  }
+});
+
+check('ordinary closure rejects missing imports outside the exact guarded protected sidecar edge', t => {
+  for (const change of ['missing-source', 'wrong-importer', 'static-sidecar', 'duplicate-sidecar', 'unguarded-sidecar', 'wrong-flag']) {
+    const { packaged } = fixture(t), payload = path.join(packaged, 'payload');
+    const name = change === 'wrong-importer' ? 'device-owner.mjs' : 'host.mjs';
+    const file = path.join(payload, name);
+    let text = fs.readFileSync(file, 'utf8');
+    if (change === 'missing-source') text += "\nawait import('./missing-runtime.mjs');\n";
+    if (change === 'wrong-importer') text += "\nawait import('./windows-admin-owner.mjs');\n";
+    if (change === 'static-sidecar') text += "\nimport { openWindowsAdministratorAdmission } from './windows-admin-owner.mjs';\n";
+    if (change === 'duplicate-sidecar') text += "\nawait import('./windows-admin-owner.mjs');\n";
+    if (change === 'unguarded-sidecar') text = text.replace('const administratorAdmission = administratorOwner ?', 'const administratorAdmission = true ?');
+    if (change === 'wrong-flag') text = text.replace("process.argv[4] === '--administrator-owner'", "process.argv[4] === '--ordinary'");
+    fs.writeFileSync(file, text);
+    assert.throws(() => assertRuntimeImportClosure(payload), { code: 'ERR_ASSERTION' }, change);
+    assert.throws(() => api.verifyPayload(packaged), /payload_invalid/, change);
   }
 });
 

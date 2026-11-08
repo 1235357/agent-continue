@@ -166,13 +166,14 @@ function fixture(t) {
 
   async function run(args, options = {}) {
     const handle = start(args, options);
+    const stderrHash = crypto.createHash('sha256');
     let stdout = '', stdoutBytes = 0, stderrBytes = 0, overflow = false;
     handle.child.stdout.on('data', data => {
       stdoutBytes += data.length;
       if (stdoutBytes > 4 * 1024 * 1024) overflow = true;
       else stdout += data.toString('utf8');
     });
-    handle.child.stderr.on('data', data => { stderrBytes += data.length; });
+    handle.child.stderr.on('data', data => { stderrBytes += data.length; stderrHash.update(data); });
     const result = await handle.wait(options.timeout || 60000);
     if (!result) {
       assert.ok(await handle.stop(), 'owned_child_exit_unconfirmed');
@@ -180,7 +181,7 @@ function fixture(t) {
     }
     assert.ok(!result.launchError, 'owned_node_launch_failed');
     assert.ok(!overflow, 'owned_child_output_limit');
-    return { ...result, stdout, stdoutBytes, stderrBytes };
+    return { ...result, stdout, stdoutBytes, stderrBytes, stderrSha256: stderrHash.digest('hex') };
   }
 
   async function npm(args, cwd = work) {
@@ -345,7 +346,7 @@ test('actual local npm tarball has exact closure and installed help/version/refu
     const destination = path.join(f.root, 'must not be created \u6d4b\u8bd5');
     const before = inventory(f.root);
     await command(f, ['help'], { ok: true, commands: ['help', 'version', 'stage', 'acquire', 'setup', 'setup-server', 'setup-manager', 'install-local',
-      'start-manager', 'manager-status', 'manager-control', 'manager-browser', 'enroll-ssh', 'install-plan', 'uninstall', 'register',
+      'start-manager', 'manager-status', 'browser-install-status', 'manager-control', 'manager-browser', 'enroll-ssh', 'install-plan', 'uninstall', 'register',
       'register-browser-wake', 'status', 'verify'] });
     await command(f, ['version'], { ok: true, version: '0.3.0' });
     const setupArgs = ['setup', '--install-dir', destination, '--consent', 'no',
@@ -622,6 +623,33 @@ syncBuiltinESMExports();
 record('guard-loaded');
 process.once('exit', () => record('guard-exit'));
 `;
+
+test('ordinary installed tarball refuses administrator-owner without protected sidecars or fallback',
+  { timeout: 300000 }, async t => {
+    const f = await packAndInstall(t), payload = path.join(f.installed, 'payload');
+    assert.equal(fs.readdirSync(payload).some(name => name.startsWith('windows-admin-')), false);
+    const host = path.join(payload, 'host.mjs'), state = path.join(f.root, 'must-not-create-admin-state');
+    const guard = path.join(f.root, 'admin-refusal-guard.mjs'), log = path.join(f.root, 'admin-refusal.log');
+    fs.writeFileSync(guard, hostGuard, { flag: 'wx', mode: 0o600 });
+    const env = { ...f.env, AGENT_CONTINUE_PACKED_GUARD_LOG: log };
+    const options = { env, timeout: 10000 };
+    const before = inventory(f.root);
+    const loaded = await f.run(['--import', pathToFileURL(guard).href, '--input-type=module', '-e',
+      `await import(${JSON.stringify(pathToFileURL(host).href)});`], options);
+    assert.ok(loaded.code === 0 && loaded.signal === null, 'ordinary_host_import_failed');
+    assert.equal(loaded.stdoutBytes, 0);
+    assert.equal(loaded.stderrBytes, 0);
+    const refused = await f.run(['--import', pathToFileURL(guard).href, host,
+      '--state-dir', state, '--administrator-owner'], options);
+    assert.ok(refused.code === 1 && refused.signal === null, 'ordinary_host_claimed_administrator_owner');
+    assert.equal(refused.stdoutBytes, 0, 'ordinary_host_exposed_an_administrator_protocol');
+    assert.equal(refused.stderrSha256, hash('agent_continue_native_start_failed\n'), 'host_refusal_not_sanitized');
+    assert.equal(fs.existsSync(state), false, 'administrator_refusal_created_state');
+    sameJSON(fs.readFileSync(log, 'utf8').trim().split('\n'),
+      ['guard-loaded', 'guard-exit', 'guard-loaded', 'guard-exit'], 'administrator_refusal_attempted_network_or_child');
+    sameJSON(inventory(f.root).filter(([name]) => name !== path.basename(log)), before,
+      'administrator_refusal_modified_owned_fixture');
+  });
 
 async function fileRoundtrip(t, f, runtime, app, preparedState) {
   const state = preparedState ?? path.join(f.root, 'private full-account fixture \u6d4b\u8bd5');

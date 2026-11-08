@@ -1,5 +1,64 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Main Synchronization And Hosted CI Repairs (Checkpoint66 In Progress)
+
+2026-11-08 UTC. Canonical main now includes41d79c4407c9b9b678bc2f8e1c77e3da131372f9,
+following the earlier310-file source checkpoint. This is source synchronization,
+not a Release or Store submission. The authenticated personal Store session is
+available; the owner-supplied password file remains unread.
+
+Actual hosted Verify Windows delivery run42459799286 failed after5m28s. The
+previous initial-process-output assertion was passed. A later prepared-process
+revocation race incorrectly compared the admitted start reply to an immediate
+file-existence check before the child finished. The test now observes only the
+same returned PID and requires AC_PREPARED_OK before checking the winning effect;
+it never repeats a start. Local pinned stdio again passed1/1:67 RPC replies,
+0 protocol errors, no network/browser attempts and clean stdin-close exit.
+The whole smoke has a180-second ceiling; individual observations stay bounded.
+This is not a successful hosted rerun or proof of a production runtime change.
+
+Actual Linux Extension checks exposed a320x600 fallback-font layout failure.
+A new Windows Chromium fixture reproduced the exact619.0625px Copy bottom before
+the CSS fix. Mobile-only flexible brand, narrower language selector and reduced
+gaps preserve complete risk/consent, full control targets and closed Advanced.
+The original assertion was not relaxed. Parent rerun passed56/56 rendered checks;
+the fallback-font Copy bottoms are549.28125px current-account and568.78125px
+administrator in a600px viewport. Actual hosted Linux rerun is still required.
+
+Experimental native CI separately exposed an incomplete Windows wake-test
+dependency closure; adding the actual prepared-process and receipt modules to
+that disposable test made its real CLI path pass30/30 locally. No production
+origin/frame/ACL/pause guard was changed. Native local npm test passed269/0fail
+with four existing platform-specific skips, not a no-skip release acceptance.
+macOS fixture sockets exceeded sockaddr_un's path budget in its long default
+temporary directory. That fixture now uses canonical /tmp on Darwin, retains
+inode/path cleanup guards, and asserts its socket path is shorter than104 bytes.
+Windows device-setup rerun passed58 with two existing Linux-only skips. This is
+not a new macOS support claim. Ordinary/protected package closure and exact CLI
+discovery regressions are being reconciled separately.
+
+The browser-wake repair now passes196 focused tests, including40 wake cases:
+operation-identity fences, exact terminal reconciliation, read-only timeout
+teardown, realistic local disconnect, cancelled OWNER write and concurrent
+handshake success. A no-reply mutation still deliberately retains its command
+slot and durable fence; if its reply never arrives, status/new generic GUI Pause
+remain unavailable. Restart/regrant do not authorize bypass. This availability
+gap is unresolved, not a verified manual-control success or a release waiver.
+The ordinary/protected closure regression now models its single exact guarded
+sidecar edge, rejects six changed-import/guard cases, and actually verifies the
+ordinary packed host refuses the administrator flag without state/network/child
+effects. Exact help discovery includes browser-install-status. The local broad
+bootstrap run exposed one additional obsolete test demanding legacy EXE sources
+and17 runtime files. Its assertion now requires their exclusion from the ordinary
+package and the actual21-file closure; no EXE is compiled or installed. Eleven
+pre-existing generated-launcher opt-ins remain skipped, not counted as coverage.
+The reviewer's scratch-cleanup ordering finding was also fixed before integration.
+
+Final artifact rebuild, exact lifecycle and Revoke acceptance, GitHub Release
+and Store submission remain open. Keep the
+goal active. Production VPN/MCP/IDE/research and external Chrome tasks were not
+changed. Do not promote a failed hosted run or a fixture pass to delivery proof.
+
 ## Current-Account Fresh Setup And Archive-Only Adoption (Checkpoint65)
 
 The310-file unreleased source checkpoint was committed and actually pushed to

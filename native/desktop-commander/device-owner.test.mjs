@@ -69,7 +69,9 @@ async function message(child, predicate = () => true) {
 test('the actual Windows wake CLI holds a paused owner until its native pipe closes',
   { skip: process.platform !== 'win32' || !exists, timeout: 20000 }, async t => {
     const f = await fixture(t, { start: false });
-    for (const name of ['lifecycle.mjs', 'profile.mjs', 'process-observation.mjs', 'tunnel-pins.json']) {
+    // The real wake CLI loads prepared controls and their receipts even while paused.
+    for (const name of ['lifecycle.mjs', 'profile.mjs', 'process-observation.mjs', 'tunnel-pins.json',
+      'prepared-process.mjs', 'operation-receipts.mjs']) {
       fs.copyFileSync(new URL('./' + name, import.meta.url), path.join(f.source, name));
     }
     const lifecycle = path.join(f.root, 'lifecycle.json');
@@ -84,8 +86,14 @@ test('the actual Windows wake CLI holds a paused owner until its native pipe clo
       assert.deepEqual(await reply, { ...wake, ok: true });
       const status = await sendDeviceRequest(readNativeBinding(f.bindingFile), request('fixture-status'));
       assert.deepEqual(status.state, { paused: true, connection: 'disconnected' });
+    } catch (error) {
+      child.stdin.end();
+      const result = await done;
+      t.diagnostic(JSON.stringify({ code: result.code, signal: result.signal, stderr: result.error }));
+      throw error;
     } finally { child.stdin.end(); }
-    assert.equal((await done).code, 0);
+    const result = await done;
+    assert.equal(result.code, 0, result.error);
     assert.equal(fs.readFileSync(lifecycle, 'utf8'), saved);
     assert.equal(fs.existsSync(f.channel), false);
     assert.equal(fs.existsSync(path.join(f.root, 'controller.lease')), false);

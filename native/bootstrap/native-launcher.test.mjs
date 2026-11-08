@@ -37,14 +37,14 @@ test('Windows native launcher compiler and transport sources exist', () => {
   for (const name of sources) assert.ok(fs.existsSync(path.join(here, name)), `missing ${name}`);
 });
 
-test('bootstrap package includes launcher sources and test outside the runtime payload', () => {
+test('command-only bootstrap excludes legacy EXE launcher sources from its package and runtime', () => {
   const meta = JSON.parse(fs.readFileSync(path.join(here, 'package.json')));
   for (const name of sources) {
-    assert.ok(PACKAGE_FILES.includes(name), `builder allowlist missing ${name}`);
-    assert.ok(meta.files.includes(name), `npm allowlist missing ${name}`);
+    assert.equal(PACKAGE_FILES.includes(name), false, `legacy launcher must not ship: ${name}`);
+    assert.equal(meta.files.includes(name), false, `legacy launcher must not ship through npm: ${name}`);
   }
   assert.ok(meta.scripts.test.includes('native-launcher.test.mjs'));
-  assert.equal(RUNTIME_FILES.length, 17);
+  assert.equal(RUNTIME_FILES.length, 21);
   assert.ok(RUNTIME_FILES.includes('device-server.mjs'));
   assert.ok(RUNTIME_FILES.includes('device-ssh.mjs'));
   assert.ok(sources.every(name => !RUNTIME_FILES.includes(name)));

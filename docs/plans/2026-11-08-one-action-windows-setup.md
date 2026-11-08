@@ -42,6 +42,17 @@ goal with a UI-only milestone.
 
 ## Work Log
 
+Checkpoint66: main synchronization through41d79c4 is real, but the second hosted
+Windows verification still failed a later test admission/effect race. Same-PID
+observation now handles that race without repeating Start. Mobile fallback-font
+layout was reproduced exactly and fixed without weakening the first-viewport
+assertion; parent56/56 render checks passed. Ordinary/protected package tests and
+incomplete wake-fixture imports were corrected; actual hosted reruns are pending.
+Five browser-wake issues now have regression repairs, but a no-reply mutation
+still fences generic status/Pause indefinitely. Preserve the unresolved evidence;
+do not present that behavior as a finished recovery experience or waive it for
+release. See current Runtime Acceptance for precise tests and remaining gates.
+
 Checkpoint65: fresh dedicated current-account installation actually passed;
 configuration/registration succeeded without starting a duplicate connection.
 The real archive-only repeat command exposed and then verified the adoption fix:

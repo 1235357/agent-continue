@@ -825,6 +825,33 @@ try {
     assert.deepEqual(await page.evaluate(() => __setupMock.permissionRequests), []);
     pass('legacy worker waiting without capability copies a manual CMD command without polling or Connect');
   });
+  await withFixture({ uiLanguage: 'en', viewport: { width: 320, height: 600 }, granted: true, nativeStatus: true }, async ({ page }) => {
+    // Reproduce the wider fallback-font wrapping seen in Linux Chromium on Windows too.
+    await page.addStyleTag({ content: ':root { font-family: monospace; }' });
+    for (const scope of ['current-account', 'administrator']) {
+      await page.locator('#windowsAccessScope').selectOption(scope);
+      await assertPrimarySetupFlow(page);
+      assert.equal(await page.locator('#setupAdvanced').evaluate(element => element.open), false);
+      const screen = await page.evaluate(() => ({
+        width: innerWidth, height: innerHeight, scrollY,
+        bounds: ['setupRisk', 'setupGrantBoundary', 'installConsentLabel', 'copyWindowsBrowserPowerShell'].map(id => {
+          const { top, bottom, left, right, height } = document.getElementById(id).getBoundingClientRect();
+          return { id, top, bottom, left, right, height };
+        }),
+      }));
+      assert.equal(screen.scrollY, 0, 'the compact flow fits without scrolling');
+      for (const [index, bounds] of screen.bounds.entries()) {
+        assert.ok(bounds.height > 0 && bounds.top >= 0 && bounds.bottom <= screen.height &&
+          bounds.left >= 0 && bounds.right <= screen.width,
+        `${scope}: complete risk, boundary, consent and Copy fit with fallback typography: ${JSON.stringify(screen)}`);
+        if (index > 0) assert.ok(screen.bounds[index - 1].bottom <= bounds.top, 'consent-first content never overlaps');
+      }
+      assert.ok(screen.bounds.at(-1).height >= 44, 'Copy keeps its full-size hit target');
+      await layout(page, 'light');
+      console.log('SETUP_COMPACT_VIEWPORT ' + JSON.stringify({ scope, ...screen }));
+    }
+    pass('320x600 fallback typography: both Windows scopes fit full risk, consent and Copy without scrolling or expanding Advanced');
+  });
   for (const uiLanguage of ['en', 'zh_CN']) {
     for (const colorScheme of ['light', 'dark']) {
       for (const viewport of [{ width: 1100, height: 820 }, { width: 320, height: 600 }]) {

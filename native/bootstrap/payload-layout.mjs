@@ -1,5 +1,8 @@
 export const BOOTSTRAP_VERSION = '0.3.0';
 export const PROVIDER = Object.freeze({ name: '@wonderwhy-er/desktop-commander', version: '0.3.1' });
+// Ordinary/current-account closure. host.mjs loads windows-admin-owner.mjs only
+// with --administrator-owner; build-windows-administrator-bundle.mjs supplies
+// that protected sidecar and its dependencies separately, never in this payload.
 export const RUNTIME_FILES = Object.freeze([
   'device-native-host.mjs', 'device-operations.mjs', 'device-owner.mjs', 'device-server.mjs', 'device-ssh.mjs',
   'host.mjs', 'lifecycle.mjs', 'operation-receipts.mjs', 'package-lock.json', 'package.json', 'prepared-process.mjs',

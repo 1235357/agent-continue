@@ -18,7 +18,9 @@ const api = fs.existsSync(library) ? await import(library) : null;
 const extensionId = 'jpioilmpbolfokedaefmbfbjeaahfdkl';
 const check = (name, run) => test(name, { skip: !api, concurrency: false, timeout: 60000 }, run);
 const runtimeRoot = fileURLToPath(new URL('../desktop-commander/', import.meta.url));
-const temporary = fs.realpathSync(os.tmpdir());
+// Darwin's per-user temp path can exhaust sockaddr_un before the fixture starts.
+// Retain canonical-path/inode cleanup checks within a short private scratch root.
+const temporary = fs.realpathSync(process.platform === 'darwin' ? '/tmp' : os.tmpdir());
 const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const encode = value => JSON.stringify(value) + '\n';
 const localTarget = { win32: 'windows', darwin: 'macos', linux: 'linux' }[process.platform];
@@ -76,6 +78,10 @@ function scratch(t) {
     }
     checkedRemove(root, identity);
   });
+  if (process.platform !== 'win32') {
+    assert.ok(Buffer.byteLength(path.join(root, 'install', 'state', 'device-' + 'a'.repeat(32) + '.sock')) < 104,
+      'fixture socket must fit the shortest supported sockaddr_un path');
+  }
   return root;
 }
 

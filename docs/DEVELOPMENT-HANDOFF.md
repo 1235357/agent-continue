@@ -2,6 +2,40 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Hosted Verification Follow-Up (Checkpoint66 In Progress)
+
+Canonical main was actually pushed through41d79c4; no version tag, GitHub Release,
+npm publication or Store submission exists for this candidate. The Store account
+is authenticated; do not read its password file or repeat sign-in unnecessarily.
+
+Hosted Windows run42459799286 passed the formerly incorrect initial-output check
+then found a later test race between provider start admission and the child's
+file effect. Same-PID bounded readback now precedes the race-effect assertion;
+no start is replayed. Local pinned stdio passed67 RPC replies/0 protocol errors.
+The next hosted run remains required. Other actual CI failures are documented in
+RUNTIME-ACCEPTANCE.md; do not assume main is green from local tests alone.
+
+The compact setup repair retains the original first-viewport assertion and adds
+a fallback-font repro of the exact619.0625px failure. Parent rendered rerun passed
+56/56. Complete disclosure, consent and Copy now fit320x600 for both Windows
+scopes, with Advanced closed. No viewport-scaled font size or hidden disclosure.
+The Windows wake fixture dependency repair passed30/30 and local native tests
+passed269 with four existing platform skips. Darwin short-socket test setup keeps
+canonical-path/inode cleanup; Windows device-setup passed58 with two Linux skips.
+
+The five scoped browser-wake findings now have regression repairs (196 focused
+checks, including40 wake cases). An unresolved no-reply mutation still retains
+its slot/fence indefinitely, blocking generic status/Pause. This is a known
+availability limitation, not evidence that manual control is fully accepted.
+Do not erase its journal, regrant permission or replay the mutation to bypass it.
+Ordinary/protected closure tests now prove the exact guarded sidecar split and
+packed-host administrator refusal. Legacy EXE sources must stay excluded from
+the command-only package; the old inclusion assertion was corrected accordingly.
+
+Do not publish until remaining browser-control, final artifact and
+lifecycle/revocation gates are resolved. All current changes are bounded source
+or disposable-fixture work; installed production connections were not changed.
+
 ### Real Current-Account Setup And Repeat-Command Repair (Checkpoint65)
 
 Independent browser-wake critique identified additional unresolved-operation and

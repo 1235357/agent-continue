@@ -14,7 +14,7 @@ import { observeTestProcessOutput } from './test-process-output.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 test('real pinned core initializes, lists tools, writes/reads an owned file and executes a harmless process',
-  { timeout: 120000 }, async t => {
+  { timeout: 180000 }, async t => {
     let app = here, interpreter = process.execPath;
     const extracted = process.env.AC_WINDOWS_ADMIN_BUNDLE_SMOKE_ROOT;
     if (extracted !== undefined) {
@@ -442,7 +442,13 @@ test('real pinned core initializes, lists tools, writes/reads an owned file and 
           if (error && error.code !== 2) reject(error);
           else resolve(JSON.parse(stdout));
         })),
-      prepared(raced).then(result => result.isError !== true, error => {
+      prepared(raced).then(async result => {
+        if (result.isError === true) return false;
+        // A provider start reply settles admission, not the child's file effect.
+        // Observe only this returned PID before checking the winning effect.
+        assert.match(await processOutput(result, 'AC_PREPARED_OK'), /AC_PREPARED_OK/);
+        return true;
+      }, error => {
         assert.ok([-32070, -32074].includes(error.code));
         return false;
       }),
