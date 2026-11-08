@@ -42,19 +42,32 @@ if ($Prepare) {
     $ast=[Management.Automation.Language.Parser]::ParseInput($text,[ref]$tokens,[ref]$errorsFound)
     if ($errorsFound.Count) { throw 'stager_parse' }
     [Console]::Error.WriteLine('OBSERVATION_FIXTURE source-parsed')
-    $definitions=@($ast.FindAll({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst]},$true))
+    # Keep recursive AST discovery without a PowerShell callback for every node.
+    $node=[Linq.Expressions.Expression]::Parameter([Management.Automation.Language.Ast],'node')
+    $predicate=[Linq.Expressions.Expression]::Lambda(
+        [Func[Management.Automation.Language.Ast,bool]],
+        [Linq.Expressions.Expression]::TypeIs($node,[Management.Automation.Language.FunctionDefinitionAst]),
+        [Linq.Expressions.ParameterExpression[]]@($node)).Compile()
+    $definitions=[Collections.Generic.Dictionary[string,Management.Automation.Language.FunctionDefinitionAst]]::new([StringComparer]::Ordinal)
+    foreach ($definition in $ast.FindAll($predicate,$true)) {
+        if ($names -ccontains $definition.Name) {
+            if ($definitions.ContainsKey($definition.Name)) { throw 'fixture_function' }
+            $definitions.Add($definition.Name,$definition)
+        }
+    }
     $parts=@(); $functions=@()
     foreach ($name in $names) {
-        $nodes=@($definitions | Where-Object { $_.Name -ceq $name })
-        if ($nodes.Count -ne 1) { throw 'fixture_function' }
-        $extent=$nodes[0].Extent
+        if (-not $definitions.ContainsKey($name)) { throw 'fixture_function' }
+        $extent=$definitions[$name].Extent
         $parts+=$extent.Text
         $functions+=@{name=$name;start=$extent.StartOffset;end=$extent.EndOffset;
             sha256=(Get-FixtureHash ([Text.Encoding]::UTF8.GetBytes($extent.Text)))}
     }
+    [Console]::Error.WriteLine('OBSERVATION_FIXTURE source-indexed')
     $payload=[Text.Encoding]::UTF8.GetBytes($parts -join [char]10)
     $stream=[IO.File]::Open($payloadFile,'CreateNew','Write','None')
     try { $stream.Write($payload,0,$payload.Length); $stream.Flush($true) } finally { $stream.Dispose() }
+    [Console]::Error.WriteLine('OBSERVATION_FIXTURE payload-written')
     $manifest=@{version=1;sourceSha256=(Get-FixtureHash $sourceBytes);payloadSha256=(Get-FixtureHash $payload);functions=$functions}
     [Console]::WriteLine((ConvertTo-Json -InputObject $manifest -Depth 5 -Compress))
     [Console]::Error.WriteLine('OBSERVATION_FIXTURE prepare-complete')

@@ -1,5 +1,34 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Same-Installation Reauthorization (Checkpoint82)
+
+- User explicitly approved the exact r8 reauthorization, same IAB extension and
+  tunnel. Read-only UAC inspection verified pins/SID/origin/tunnel and observed
+  revoked+paused, no owner/controller/device leases and zero task instances.
+- Actual high maintenance f616edca28d34cff9c053ecc0844a8cb completed once, exit0:
+  authorized=true, paused=true, commitReceiptVerified=true,
+  projectionVerified=true, registrationChanged=false, tunnelStarted=false.
+- Independent public readback: target=f616edca28d34cff9c053ecc0844a8cb:idle,
+  ownerState=paused. Old stopped Revoke ee5180ab1aa742b5a30eb02d584ef528 remains;
+  enrolled stager SHA256 remains
+  59b3524d9119199ee86b2f90fc291d7d22a0f7ea45acbc293a6b109e21591250.
+- Source helper is a separate reviewed maintenance entry; installed stager was
+  not replaced. Original deny marker is archived, not deleted. No key was read
+  or imported. Old/uncertain authorization IDs cannot restore a later Revoke.
+- Three focused Node tests include78 scratch PS5.1 assertions. A real-helper
+  regression reproduced optional projection failure masking and passed after
+  -Require. Independent focused source review closed that reported P1.
+- New browser Connect and actual hosted results are still pending. CUA detected
+  user input and stopped the extension click; no browser connection or restart
+  acceptance is claimed. Full browser close must not interrupt other chats.
+- Extension CI103 on dc3a38d passed4m56s. Native45 passed32/34 control tests,
+  with two failures at preparation10s after source-parsed; all ledger batches
+  passed. The new compiled-AST indexing and milestones remain test-only until
+  normal hosted CI verifies them. Budgets and cases are unchanged.
+- Local evidence: .artifacts/ordinary-chat-acceptance-20261108 contains narrowed
+  inspection/maintenance JSON and CI45 diagnostics. These artifacts are not
+  public runtime keys or a new production service. No Release/Store submission.
+
 ## Entry Projection And Fixture Preparation (Checkpoint81)
 
 - Implemented setupEntryMetadata plus a read-only JSON CLI after complete asset

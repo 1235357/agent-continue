@@ -2,6 +2,49 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Same-Installation Authorization Restored (Checkpoint82)
+
+The owner explicitly answered the exact r8 same-installation reauthorization
+request. Earlier unanswered-permission notes are superseded. Actual maintenance
+ID f616edca28d34cff9c053ecc0844a8cb completed once with child exit0,
+authorized=true, paused=true, commitReceiptVerified=true and
+projectionVerified=true. Independent public readback shows this revision:idle
+and ownerState=paused. Prior Revoke ee5180ab1aa742b5a30eb02d584ef528 still reads
+stopped. The enrolled stager hash is unchanged. No tunnel was started.
+
+Source adds ReauthorizeHostedOwner after full sealed-bundle verification and
+before fresh-state creation. It validates the unchanged origin/task/binding,
+holds the control gate and existing execution locks, excludes unsettled/live
+prior runners, writes a fresh journal ID, rotates the revision and archives the
+old deny marker as the commit. Commit/projection evidence is separate. Old IDs
+refuse before mutation, even after a later Revoke. No first Bind/Authorize,
+registration replacement, credential import or Connect replay is performed.
+
+Independent source review found optional projection failure could be masked.
+Parent reproduced it with the actual helper, then required readback using
+-Require. Focused review closed that finding. Three Node tests, including78
+PS5.1 scratch checks, pass. Scratch ACL/runner stubs are not installed OS proof;
+actual UAC inspection and the successful maintenance are separately recorded.
+
+Actual Extension checks103 on dc3a38d passed4m56s. Native45 Windows failed5m39s:
+ledger read passed57.205s and publication5.967s;32/34 control tests passed. Both
+remaining failures hit the10s preparation watchdog after source-parsed. Test-only
+extraction now uses a compiled AST type predicate and ordinal index, preserving
+all timeouts, integrity checks and semantic cases. Parent8 pure checks pass;
+this is not evidence that the entire hosted stall is explained or cleared.
+
+Full npm test completed successfully. Ordinary22, Dot48, Dot keyboard12,
+import16, UI34, MV313 and ProseMirror5 passed. The final focused reauthorization
+tests were rerun after its projection correction and added quiescence cases.
+Live browser connection was NOT completed: CUA detected current user input and
+stopped the attempted extension click. Do not steal focus, switch to CLI and
+call it browser acceptance, or replay settled maintenance. Keep r8 paused until
+one explicit fresh browser Connect and real ordinary-chat acceptance.
+
+One-action command consumption/current-account continuation, whole-browser
+reopen recovery, final GitHub Release and Store review submission remain open.
+No production VPN/MCP/IDE/research or external Chrome original task changed.
+
 ### Entry Projection And Bounded Fixture Preparation (Checkpoint81)
 
 The one-action setup plan now has an implemented six-field release-entry

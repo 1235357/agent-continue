@@ -112,7 +112,7 @@ async function prepareObservation(t, execute = runFile) {
         env: { SystemRoot: path.win32.dirname(system), WINDIR: path.win32.dirname(system), PATH: system } }, execute);
     execution = fixtureEvidence({ state: 'completed', started, stderr: result.stderr });
   } catch (error) { execution = fixtureEvidence({ state: 'failed', started, error, stderr: error.stderr }); }
-  assertObservationCompletion(execution, ['prepare-entry', 'source-parsed', 'prepare-complete']);
+  assertObservationCompletion(execution, ['prepare-entry', 'source-parsed', 'source-indexed', 'payload-written', 'prepare-complete']);
   try { prepared.manifest = JSON.parse(result.stdout); } catch { assert.fail('fixture_manifest_json'); }
   loadPrepared(prepared);
   return prepared;
@@ -124,16 +124,16 @@ function fixtureEvidence({ state, started, error, stderr = '' }) {
       ['ETIMEDOUT', 'ENOENT', 'EACCES', 'EPERM'].includes(error?.code) ? error.code : null,
     killed: error?.killed === true,
     signal: ['SIGTERM', 'SIGKILL', 'SIGINT'].includes(error?.signal) ? error.signal : null,
-    phases: [...stderr.matchAll(/^OBSERVATION_FIXTURE (entry|prepare-entry|source-parsed|prepare-complete|source-verified|prepared-source-loaded|receipt-read|complete)\r?$/gm)]
+    phases: [...stderr.matchAll(/^OBSERVATION_FIXTURE (entry|prepare-entry|source-parsed|source-indexed|payload-written|prepare-complete|source-verified|prepared-source-loaded|receipt-read|complete)\r?$/gm)]
       .map(match => match[1]).slice(-8) };
 }
 
 test('fixture diagnostics keep fixed completion evidence without raw errors or private paths', () => {
   const evidence = fixtureEvidence({ state: 'failed', started: performance.now(),
     error: { code: 'private-code', killed: true, signal: 'private-signal', message: 'private-path' },
-    stderr: 'OBSERVATION_FIXTURE entry\nprivate-path\nOBSERVATION_FIXTURE private-secret\nOBSERVATION_FIXTURE source-parsed\n' });
+    stderr: 'OBSERVATION_FIXTURE entry\nprivate-path\nOBSERVATION_FIXTURE private-secret\nOBSERVATION_FIXTURE source-parsed\nOBSERVATION_FIXTURE source-indexed\nOBSERVATION_FIXTURE payload-written\n' });
   assert.deepEqual({ ...evidence, durationMs: 0 }, { state: 'failed', durationMs: 0, code: null,
-    killed: true, signal: null, phases: ['entry', 'source-parsed'] });
+    killed: true, signal: null, phases: ['entry', 'source-parsed', 'source-indexed', 'payload-written'] });
   assert.equal(Number.isInteger(evidence.durationMs) && evidence.durationMs >= 0, true);
   assert.doesNotMatch(JSON.stringify(evidence), /private-/);
 });
@@ -185,7 +185,8 @@ test('source-only observation rejects enlarged overlapping definitions even with
 
 test('source-only observation preparation requires bounded child success and a verified manifest before semantic calls', async () => {
   const { manifest, source, payload } = manifestExample();
-  const phases = ['prepare-entry', 'source-parsed', 'prepare-complete'].map(phase => 'OBSERVATION_FIXTURE ' + phase).join('\n');
+  const phases = ['prepare-entry', 'source-parsed', 'source-indexed', 'payload-written', 'prepare-complete']
+    .map(phase => 'OBSERVATION_FIXTURE ' + phase).join('\n');
   const make = () => {
     const prepared = { root: 'C:\\fixture', parent: 'C:\\temp', active: new Set() };
     let verified = 0;
@@ -206,7 +207,11 @@ test('source-only observation preparation requires bounded child success and a v
   assert.equal(good.verified(), 1);
   for (const execute of [
     async () => { throw Object.assign(Error('private-path'), { code: 'ETIMEDOUT', killed: true, stderr: 'OBSERVATION_FIXTURE prepare-entry' }); },
+    async () => { throw Object.assign(Error('private-path'), { code: 'ETIMEDOUT', killed: true,
+      stdout: JSON.stringify(manifest), stderr: phases }); },
     async () => ({ stdout: JSON.stringify(manifest), stderr: 'OBSERVATION_FIXTURE prepare-entry' }),
+    ...['source-indexed', 'payload-written'].map(phase => async () => ({ stdout: JSON.stringify(manifest),
+      stderr: phases.replace('OBSERVATION_FIXTURE ' + phase, '') })),
     async () => ({ stdout: 'not-json', stderr: phases }),
     async () => ({ stdout: JSON.stringify({ ...manifest, sourceSha256: '0'.repeat(64) }), stderr: phases }),
   ]) {
@@ -240,6 +245,10 @@ test('source-only observation completion rejects failed and truncated children o
       return true;
     });
   }
+  await assert.rejects(() => request('connect', 'corrupt', prepared, async () => {
+    throw Object.assign(Error('private-path'), { code: 'ETIMEDOUT', killed: true, signal: 'SIGTERM',
+      stdout: JSON.stringify(unknown), stderr: phases });
+  }, () => manifest), /fixture must finish/);
   await assert.rejects(() => request('connect', 'absent', prepared,
     async () => ({ stdout: JSON.stringify(unknown), stderr: phases.replace('OBSERVATION_FIXTURE complete', '') }), () => manifest));
   await assert.rejects(() => request('connect', 'corrupt', prepared,
@@ -261,6 +270,26 @@ test('source-only observation separates bounded preparation from unchanged seman
   assert.ok(prepareEnd > 0);
   assertPreparedSemanticSource(semantic);
   assert.match(semantic, /OBSERVATION_FIXTURE prepared-source-loaded/);
+});
+
+test('source-only observation preparation indexes the exact recursive AST closure without per-node PowerShell callbacks', () => {
+  const source = readFileSync(fixture, 'utf8');
+  const names = source.match(/\$names=@\(([\s\S]*?)\)\r?\nif \(\$Prepare\)/);
+  assert.ok(names, 'fixture must retain the explicit function closure');
+  assert.deepEqual([...names[1].matchAll(/'([^']+)'/g)].map(match => match[1]), observationNames);
+  const prepare = source.slice(source.indexOf('if ($Prepare)'), source.indexOf("'OBSERVATION_FIXTURE prepare-complete'"));
+  assert.doesNotMatch(prepare, /\.FindAll\s*\(\s*\{|\bWhere-Object\b/,
+    'preparation must not enter PowerShell once per AST node or rescan definitions through a pipeline');
+  assert.match(prepare, /\[Linq\.Expressions\.Expression\]::TypeIs\(\$node,\[Management\.Automation\.Language\.FunctionDefinitionAst\]\)/);
+  assert.match(prepare, /\[Linq\.Expressions\.Expression\]::Lambda\([\s\S]*?\[Func\[Management\.Automation\.Language\.Ast,bool\]\][\s\S]*?\)\.Compile\(\)/);
+  assert.match(prepare, /Dictionary\[string,Management\.Automation\.Language\.FunctionDefinitionAst\]\]::new\(\[StringComparer\]::Ordinal\)/);
+  assert.match(prepare, /foreach \(\$definition in \$ast\.FindAll\(\$predicate,\$true\)\)/);
+  assert.match(prepare, /if \(\$names -ccontains \$definition\.Name\)/);
+  assert.match(prepare, /if \(\$definitions\.ContainsKey\(\$definition\.Name\)\) \{ throw 'fixture_function' \}/);
+  assert.match(prepare, /if \(-not \$definitions\.ContainsKey\(\$name\)\) \{ throw 'fixture_function' \}/);
+  assert.match(prepare, /\$extent=\$definitions\[\$name\]\.Extent/);
+  assert.match(prepare, /OBSERVATION_FIXTURE source-indexed/);
+  assert.match(prepare, /OBSERVATION_FIXTURE payload-written/);
 });
 
 test('source-only semantic source guard rejects both parser APIs and source discovery mutations', () => {

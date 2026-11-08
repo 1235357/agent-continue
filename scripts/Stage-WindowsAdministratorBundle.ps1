@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Plan','Stage','Verify','PrepareState','VerifyState','ProbeLocal','AcceptLocal','InstallBrowserOwner','BindHosted','VerifyHosted','RunHostedWindow','StopHostedWindow','AuthorizeHostedOwner','RevokeHostedOwner','StartHostedOwner','ObserveHostedOwner','EnrollBrowserOwner','UnenrollBrowserOwner','InspectFailedBrowserOwner','RetireFailedBrowserOwner','ConnectHostedOwner','PauseHostedOwner','ObserveHostedOwnerPause','CheckBrowserHostedOwnerPause','RequestBrowserHostedOwnerPause','RequestBrowserHostedOwnerPauseFence','PauseBrowserHostedOwner','FenceBrowserHostedOwnerPause','RepairBrowserHostedOwnerPauseTarget','ObserveHostedOwnerControl','RequestBrowserHostedOwnerControl','RequestBrowserHostedOwnerControlFence','RequestBrowserHostedOwnerControlReconcile','ConnectBrowserHostedOwner','ResumeBrowserHostedOwner','RevokeBrowserHostedOwner','FenceBrowserHostedOwnerControl','ReconcileBrowserHostedOwnerControl','CheckBrowserHostedOwnerControl','ObserveBrowserSetup','CheckBrowserHostedOwnerInstallationPause','RequestBrowserHostedOwnerInstallationPause','ObserveBrowserHostedOwnerInstallationPause','PauseBrowserHostedOwnerInstallation')][string]$Action = 'Plan',
+    [ValidateSet('Plan','Stage','Verify','PrepareState','VerifyState','ProbeLocal','AcceptLocal','InstallBrowserOwner','BindHosted','VerifyHosted','RunHostedWindow','StopHostedWindow','AuthorizeHostedOwner','ReauthorizeHostedOwner','RevokeHostedOwner','StartHostedOwner','ObserveHostedOwner','EnrollBrowserOwner','UnenrollBrowserOwner','InspectFailedBrowserOwner','RetireFailedBrowserOwner','ConnectHostedOwner','PauseHostedOwner','ObserveHostedOwnerPause','CheckBrowserHostedOwnerPause','RequestBrowserHostedOwnerPause','RequestBrowserHostedOwnerPauseFence','PauseBrowserHostedOwner','FenceBrowserHostedOwnerPause','RepairBrowserHostedOwnerPauseTarget','ObserveHostedOwnerControl','RequestBrowserHostedOwnerControl','RequestBrowserHostedOwnerControlFence','RequestBrowserHostedOwnerControlReconcile','ConnectBrowserHostedOwner','ResumeBrowserHostedOwner','RevokeBrowserHostedOwner','FenceBrowserHostedOwnerControl','ReconcileBrowserHostedOwnerControl','CheckBrowserHostedOwnerControl','ObserveBrowserSetup','CheckBrowserHostedOwnerInstallationPause','RequestBrowserHostedOwnerInstallationPause','ObserveBrowserHostedOwnerInstallationPause','PauseBrowserHostedOwnerInstallation')][string]$Action = 'Plan',
     [Parameter(Mandatory=$true)][string]$Archive,
     [Parameter(Mandatory=$true)][string]$ExpectedSha256,
     [string]$Consent = '',
@@ -19,6 +19,8 @@ param(
     [string]$BrowserExtensionId = '',
     [string]$BrowserSetupId = '',
     [string]$ExpectedStagerSha256 = '',
+    [string]$PreviousRevocationId = '',
+    [string]$ReauthorizationId = '',
     [string]$InstallerSourcePath = '',
     [string]$FailedOwnerGeneration = '',
     [string]$PauseOperationId = '',
@@ -3478,6 +3480,86 @@ function Request-AdministratorOwnerRevocation([string]$BundleRoot, [string]$Dige
     } finally { if ($gate) { $gate.Dispose() } }
 }
 
+function Assert-AdministratorReauthorizationQuiescence([string]$BundleRoot,[string]$Digest,[string]$Sid,
+    [string]$Origin,$Handles) {
+    $vault=$BundleRoot+'.secrets'; $status=$BundleRoot+'.status'
+    $files=@([IO.Directory]::GetFiles($vault,'control-*'))
+    if ($files.Count -gt 4096) { throw 'reauthorization_history_limit' }
+    foreach ($file in $files) {
+        $name=[IO.Path]::GetFileName($file)
+        if ($name -cmatch '\Acontrol-([a-f0-9]{32})\.execution\.lock\z') {
+            Assert-SealedAcl $file $false $true
+            $Handles.Add([IO.File]::Open($file,'Open','ReadWrite','None'))
+        }
+    }
+    foreach ($file in $files) {
+        $name=[IO.Path]::GetFileName($file)
+        if ($name -cmatch '\Acontrol-([a-f0-9]{32})\.reserved\.json\z') {
+            $operation=$Matches[1]
+            $row=ConvertFrom-Json -InputObject ([Text.UTF8Encoding]::new($false,$true).GetString(
+                (Read-AdministratorControlBytes $file $true $Sid)))
+            $record=Read-AdministratorControlRecord $vault $Digest $Sid $Origin $operation $row.control
+            $receipt=Read-AdministratorControlReceipt $status $Digest $Sid $operation $row.control
+            if (-not $record -or $receipt.state -cnotin @('launch-requested','stopped','superseded','rejected','fenced','abandoned','recovered-paused') -or
+                -not (Test-AdministratorControlRunnerExited $record.runnerIdentity)) { throw 'reauthorization_unsettled_operation' }
+        } elseif ($name -cmatch '\Acontrol-([a-f0-9]{32})\.peer\.json\z') {
+            $handoff=$Matches[1]
+            $row=ConvertFrom-Json -InputObject ([Text.UTF8Encoding]::new($false,$true).GetString(
+                (Read-AdministratorControlBytes $file $true $Sid)))
+            if (-not (Test-AdministratorControlFields $row @('version','kind','bundleSha256','userSid','origin','operationId','control','mode','handoffId','runnerIdentity','sessionEvidence')) -or
+                $row.version -ne 1 -or $row.kind -cne 'control-peer' -or $row.bundleSha256 -cne $Digest -or
+                $row.userSid -cne $Sid -or $row.origin -cne $Origin -or $row.handoffId -cne $handoff -or
+                -not (Test-AdministratorControlRunnerExited $row.runnerIdentity)) { throw 'reauthorization_live_peer' }
+            $null=Get-AdministratorControlHandoffAckBytes $Digest $row.operationId $row.control $row.mode $handoff
+        }
+    }
+}
+
+function Restore-AdministratorOwnerAuthorization([string]$BundleRoot,[string]$Digest,[string]$Sid,
+    [string]$Origin,[string]$PreviousId,[string]$Id,[scriptblock]$VerifyBinding) {
+    if ($Digest -cnotmatch '\A[a-f0-9]{64}\z' -or $PreviousId -cnotmatch '\A[a-f0-9]{32}\z' -or
+        $Id -cnotmatch '\A[a-f0-9]{32}\z' -or $Id -ceq $PreviousId -or
+        $Origin -cnotmatch '\Achrome-extension://[a-p]{32}/\z' -or -not $VerifyBinding) { throw 'reauthorization_input' }
+    Assert-AdministratorOwnerControlIdentity $BundleRoot $Digest $Sid
+    $root=$BundleRoot+'.state'; $vault=$BundleRoot+'.secrets'; $status=$BundleRoot+'.status'
+    $prefix=[IO.Path]::Combine($vault,('reauthorization-'+$Id))
+    $gate=Open-AdministratorOwnerControl $vault
+    $handles=[Collections.Generic.List[IO.FileStream]]::new()
+    try {
+        # A known or uncertain old attempt is never an instruction to mutate again.
+        foreach ($suffix in @('.started.json','.committed.json','.revoked')) {
+            if (-not (Test-AdministratorOwnerAbsent ($prefix+$suffix))) { throw 'reauthorization_id_exists' }
+        }
+        if ((Read-AdministratorOwnerControlRevision $gate) -cne $PreviousId -or
+            -not (Read-AdministratorControlRecord $vault $Digest $Sid $Origin $PreviousId 'revoke') -or
+            (Read-AdministratorControlReceipt $status $Digest $Sid $PreviousId 'revoke').state -cne 'stopped' -or
+            -not (Test-AdministratorOwnerIntent $root $true) -or
+            (Get-AdministratorPauseGeneration $root $vault $Digest $Sid) -cne 'idle') { throw 'reauthorization_not_stopped' }
+        $deny=[IO.Path]::Combine($vault,'owner-revoked')
+        Assert-SealedAcl $deny $false $true
+        if ([IO.FileInfo]::new($deny).Length -ne 0) { throw 'reauthorization_marker' }
+        Assert-AdministratorReauthorizationQuiescence $BundleRoot $Digest $Sid $Origin $handles
+        $null=& $VerifyBinding $gate
+        $record=[ordered]@{version=1;kind='administrator-reauthorization';bundleSha256=$Digest;userSid=$Sid;
+            origin=$Origin;previousRevocationId=$PreviousId;reauthorizationId=$Id;paused=$true}
+        $bytes=[Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject $record -Compress)+[char]10)
+        Write-AdministratorOwnerFile ($prefix+'.started.json') $bytes
+        Write-AdministratorOwnerControlRevision $gate $Id
+        # Commit once by archiving the old deny marker. Paused intent is unchanged.
+        [IO.File]::Move($deny,($prefix+'.revoked'))
+        Assert-SealedAcl ($prefix+'.revoked') $false $true
+        $recorded=$false
+        try { Write-AdministratorOwnerFile ($prefix+'.committed.json') $bytes; $recorded=$true } catch { }
+        $projected=$false
+        try { Update-AdministratorBrowserPauseTarget $root $vault $Digest $Sid $gate -Require; $projected=$true } catch { }
+        return [ordered]@{ok=($recorded -and $projected);authorized=$true;paused=$true;reauthorizationId=$Id;
+            commitReceiptVerified=$recorded;projectionVerified=$projected;registrationChanged=$false;tunnelStarted=$false}
+    } finally {
+        foreach ($handle in $handles) { $handle.Dispose() }
+        $gate.Dispose()
+    }
+}
+
 function New-AdministratorHostedLaunchPlan([string]$BundleRoot, [string]$StateRoot, [string]$Digest,
     [string]$Sid, [string]$TunnelId) {
     $vault = $BundleRoot + '.secrets'
@@ -4195,6 +4277,14 @@ try {
     $firstAcceptance = $Action -eq 'AcceptLocal' -or $installBrowserOwner
     $bindHosted = $Action -eq 'BindHosted' -or $installBrowserOwner
     $authorizeHostedOwner = $Action -eq 'AuthorizeHostedOwner' -or $installBrowserOwner
+    $reauthorizeHostedOwner = $Action -ceq 'ReauthorizeHostedOwner'
+    if ($reauthorizeHostedOwner) {
+        $allowed=@('Action','Archive','ExpectedSha256','ExpectedUserSid','HostedTunnelId','BrowserExtensionId',
+            'ExpectedStagerSha256','PreviousRevocationId','ReauthorizationId','Consent')
+        foreach ($parameter in $PSBoundParameters.Keys) { if ($parameter -cnotin $allowed) { throw 'reauthorization_input' } }
+        if ($PreviousRevocationId -cnotmatch '\A[a-f0-9]{32}\z' -or $ReauthorizationId -cnotmatch '\A[a-f0-9]{32}\z' -or
+            $PreviousRevocationId -ceq $ReauthorizationId) { throw 'reauthorization_input' }
+    } elseif ($PreviousRevocationId -or $ReauthorizationId) { throw 'reauthorization_input' }
     $revokeHostedOwner = $Action -eq 'RevokeHostedOwner'
     $connectHostedOwner = $Action -eq 'ConnectHostedOwner'
     $browserPause = $Action -ceq 'PauseBrowserHostedOwner'
@@ -4225,19 +4315,19 @@ try {
     $failedOwnerAction = $inspectFailedOwner -or $retireFailedOwner
     if (($failedOwnerAction -and $FailedOwnerGeneration -cnotmatch '\A[a-f0-9]{32}\z') -or
         (-not $failedOwnerAction -and $FailedOwnerGeneration)) { throw 'input' }
-    $usesBrowserOrigin = $enrollBrowserOwner -or $connectHostedOwner -or $unenrollBrowserOwner -or $failedOwnerAction
+    $usesBrowserOrigin = $enrollBrowserOwner -or $connectHostedOwner -or $unenrollBrowserOwner -or $failedOwnerAction -or $reauthorizeHostedOwner
     $browserEnrollmentAttempted = $false
     if (($BrowserWake -and $Action -ne 'StartHostedOwner') -or
         ($usesBrowserOrigin -and $BrowserExtensionId -cnotmatch '\A[a-p]{32}\z') -or
         (-not $usesBrowserOrigin -and $BrowserExtensionId) -or
-        ($enrollBrowserOwner -and $ExpectedStagerSha256 -cnotmatch '\A[a-f0-9]{64}\z') -or
-        (-not $enrollBrowserOwner -and $ExpectedStagerSha256)) { throw 'input' }
+        (($enrollBrowserOwner -or $reauthorizeHostedOwner) -and $ExpectedStagerSha256 -cnotmatch '\A[a-f0-9]{64}\z') -or
+        (-not ($enrollBrowserOwner -or $reauthorizeHostedOwner) -and $ExpectedStagerSha256)) { throw 'input' }
     $verifyHosted = $Action -eq 'VerifyHosted'
     $runHostedWindow = $Action -eq 'RunHostedWindow'
     $stopHostedWindow = $Action -eq 'StopHostedWindow'
     $guarded = [bool]($HostedAdmissionSource -or $HostedAcceptancePlan -or $HostedAcceptancePlanSha256)
     $hostedAction = $bindHosted -or $verifyHosted -or $runHostedWindow -or $authorizeHostedOwner
-    $usesTunnel = $hostedAction -or $startHostedOwner -or $enrollBrowserOwner -or $unenrollBrowserOwner -or $failedOwnerAction
+    $usesTunnel = $hostedAction -or $startHostedOwner -or $enrollBrowserOwner -or $unenrollBrowserOwner -or $failedOwnerAction -or $reauthorizeHostedOwner
     if (($usesTunnel -and $HostedTunnelId -cnotmatch '\Atunnel_(?:[a-z0-9]{4}_)?[a-z0-9]{32}\z') -or
         (-not $usesTunnel -and $HostedTunnelId)) { throw 'input' }
     if ($LocalAcceptanceWitness -ne 0 -and
@@ -4258,7 +4348,7 @@ try {
         $HostedWindowSeconds -lt 15 -or $HostedWindowSeconds -gt 900)) -or
         (-not $runHostedWindow -and ($HostedWindowSource -or $HostedWindowSeconds)) -or
         ($stopHostedWindow -and -not $OperationReceiptId)) { throw 'input' }
-    $stateAction = $firstAcceptance -or $hostedAction -or $stopHostedWindow -or $revokeHostedOwner -or $startHostedOwner -or $pauseHostedOwner -or $enrollBrowserOwner -or $unenrollBrowserOwner -or $failedOwnerAction -or $Action -in @('PrepareState','VerifyState','ProbeLocal')
+    $stateAction = $firstAcceptance -or $hostedAction -or $stopHostedWindow -or $revokeHostedOwner -or $startHostedOwner -or $pauseHostedOwner -or $enrollBrowserOwner -or $unenrollBrowserOwner -or $failedOwnerAction -or $reauthorizeHostedOwner -or $Action -in @('PrepareState','VerifyState','ProbeLocal')
     if ($stateAction) {
         if ($ExpectedUserSid -cnotmatch '\AS-1-(?:5-21|12-1)(?:-[0-9]{1,10}){4}\z' -or
             ($Action -eq 'PrepareState' -and $Consent -cne 'accept-administrator-state-preparation') -or
@@ -4266,6 +4356,7 @@ try {
             ($firstAcceptance -and -not $installBrowserOwner -and $Consent -cne 'accept-administrator-first-local-acceptance') -or
             ($bindHosted -and -not $installBrowserOwner -and $Consent -cne 'accept-administrator-hosted-binding') -or
             ($authorizeHostedOwner -and -not $installBrowserOwner -and $Consent -cne 'accept-persistent-administrator-full-account') -or
+            ($reauthorizeHostedOwner -and $Consent -cne 'reauthorize-revoked-administrator-full-account') -or
             ($revokeHostedOwner -and $Consent -cne 'revoke-persistent-administrator-full-account') -or
             ($Action -eq 'StartHostedOwner' -and $Consent -cne 'restore-authorized-administrator-owner') -or
             ($connectHostedOwner -and $Consent -cne 'connect-authorized-administrator-owner') -or
@@ -4502,6 +4593,40 @@ try {
         Assert-SealedAcl $base $true
         Verify-SealedBundle $root $layout
         $filesVerified = $true
+    }
+    if ($reauthorizeHostedOwner) {
+        $phase='owner_reauthorization_preflight'
+        $stateRoot=$root+'.state'; $vault=$root+'.secrets'
+        $system=[Environment]::GetFolderPath([Environment+SpecialFolder]::System)
+        Import-Module -Name ([IO.Path]::Combine($system,'WindowsPowerShell\v1.0\Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1')) -ErrorAction Stop
+        $plan=New-AdministratorBrowserEnrollmentPlan $root $ExpectedSha256 $ExpectedUserSid $HostedTunnelId $BrowserExtensionId $system
+        if ($Archive -cne $plan.Archive) { throw 'reauthorization_archive' }
+        Read-AdministratorBrowserCommit $plan.Bridge $ExpectedSha256 $ExpectedUserSid
+        $null=Read-AdministratorBrowserStager ([IO.Path]::Combine($plan.Bridge,'stager.ps1')) $ExpectedStagerSha256
+        foreach ($name in $plan.Files.Keys) {
+            Assert-AdministratorBrowserAsset ([IO.Path]::Combine($plan.Bridge,$name)) $plan.Files[$name] $ExpectedUserSid
+        }
+        Assert-AdministratorBrowserAsset $plan.DemandScript $plan.DemandBytes $ExpectedUserSid
+        Assert-AdministratorOwnerBytes $plan.DemandBinding $plan.DemandBindingBytes
+        Assert-AdministratorOwnerWake $root $stateRoot $ExpectedSha256 $ExpectedUserSid $HostedTunnelId
+        $scheduler=New-Object -ComObject Schedule.Service
+        $scheduler.Connect()
+        $folder=$scheduler.GetFolder('\'+$plan.Folder)
+        $task=$folder.GetTask($plan.Name)
+        $verifyBinding={
+            param($Gate)
+            Assert-AdministratorBrowserRegistry $plan $true
+            Assert-AdministratorBrowserTaskAcl ($folder.GetSecurityDescriptor(5)) $plan.Sddl
+            Assert-AdministratorBrowserTask $task $plan $true
+            if ($task.GetInstances(0).Count -ne 0) { throw 'reauthorization_task_busy' }
+        }
+        $phase='owner_reauthorization_commit'
+        $origin='chrome-extension://'+$BrowserExtensionId+'/'
+        $record=Restore-AdministratorOwnerAuthorization $root $ExpectedSha256 $ExpectedUserSid $origin `
+            $PreviousRevocationId $ReauthorizationId $verifyBinding
+        [Console]::WriteLine((ConvertTo-Json -InputObject $record -Compress))
+        if ($record.ok) { exit 0 }
+        exit 2
     }
     $completeBrowserEnrollment = {
         $phase = 'browser_enrollment_preflight'
