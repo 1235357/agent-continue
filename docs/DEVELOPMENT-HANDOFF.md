@@ -36,6 +36,27 @@ automatically rerun. Added the precise file to both filters; the new contract
 failed for both events before the fix, and the release-workflow suite passed
 21/21 afterward. Hosted native rerun remains a separate pending receipt.
 
+Follow-up readback: pushed main2f502b4322cefca02bd33da6e4334ffaedcad7ba
+triggered native39 run42478533593. Its Windows offline suite passed29/29 in
+14.006s, including real8.3 parent/leaf aliases and the formerly failing negative
+case. The next protected-bundle fixture failed with sealed_acl after the
+"stop is private, idempotent" assertion. The compound guard also checks owner
+and protection, so do not claim an ACE-count cause from that line alone. No
+product ACL was weakened or changed. Actual full log excerpt is preserved in
+.artifacts/ordinary-chat-acceptance-20261108/native39-bundle-failure.txt.
+The latest combined Python package/site/release regression passed71/71 in51.536s.
+Native39 as a whole is NOT a pass; the later steps were not reached.
+
+The protected-bundle test now includes failure-only bounded ACL diagnostics
+around that specific state-creation call. It reports at most16 scratch-relative
+directories and16 ACE roles/masks per descriptor, not raw SIDs, ACL strings,
+private paths or errors; it rejects reparse entries and rethrows the original
+assertion. Static review and PowerShell syntax checks passed. No behavioral
+result is established: the local disposable probe was rejected by the tool's
+process-launch policy before execution and was not retried through another
+route. No probe fixture/job remains. This diagnostic is not a product fix and
+does not authorize restoration of the separately revoked hosted test runtime.
+
 The r8 test installation remains revoked with its original Revoke stopped.
 Reauthorization has been requested but not received; do not reconnect or infer
 new authority from old grants. Current-account hosted operation, actual browser

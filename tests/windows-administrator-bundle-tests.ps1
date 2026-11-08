@@ -327,6 +327,61 @@ function Assert-PauseResult($Result, [string]$Id, [string]$State) {
     }
 }
 
+function Write-FixtureStateAclDiagnostic([string]$StateRoot) {
+    try {
+        if (([IO.File]::GetAttributes($scratch) -band [IO.FileAttributes]::ReparsePoint) -or
+            [IO.Path]::GetFileName($scratch) -cnotmatch '\Aac-admin-bundle-test-[a-f0-9]{32}\z') { return }
+        $resolvedScratch = (Resolve-Path -LiteralPath $scratch -ErrorAction Stop).ProviderPath.TrimEnd('\')
+        $root = [IO.Path]::GetFullPath($StateRoot)
+        if ([IO.Path]::GetDirectoryName($root) -ine $resolvedScratch) { return }
+        $baseline = New-SealedAcl $true $true
+        $expected = [Security.AccessControl.RawSecurityDescriptor]::new($baseline.GetSecurityDescriptorBinaryForm(),0)
+        $pending = [Collections.Generic.Stack[string]]::new()
+        $pending.Push($root)
+        $remaining = 16
+        while ($pending.Count -and $remaining-- -gt 0) {
+            $member = [IO.Path]::GetFullPath($pending.Pop())
+            if (-not $member.StartsWith($resolvedScratch + '\', [StringComparison]::OrdinalIgnoreCase)) { continue }
+            $attributes = [IO.File]::GetAttributes($member)
+            if (($attributes -band [IO.FileAttributes]::ReparsePoint) -or
+                -not ($attributes -band [IO.FileAttributes]::Directory)) { continue }
+            $acl = [IO.Directory]::GetAccessControl($member)
+            $actual = [Security.AccessControl.RawSecurityDescriptor]::new($acl.GetSecurityDescriptorBinaryForm(),0)
+            $descriptors = @{}
+            foreach ($entry in @(@('expected',$expected), @('actual',$actual))) {
+                $aces = @()
+                foreach ($ace in @($entry[1].DiscretionaryAcl | Select-Object -First 16)) {
+                    $sid = if ($ace -is [Security.AccessControl.KnownAce]) { $ace.SecurityIdentifier.Value } else { '' }
+                    $role = if ($sid -ceq $administratorsSid) { 'fixture-owner' }
+                        elseif ($sid -ceq 'S-1-5-32-544') { 'administrators' }
+                        elseif ($sid -ceq $systemSid) { 'system' }
+                        elseif ($sid -ceq 'S-1-3-4') { 'owner-rights' }
+                        elseif ($sid -ceq $usersSid) { 'users' } else { 'other' }
+                    $aces += @{role=$role; type=[string]$ace.AceType; flags=[int]$ace.AceFlags
+                        mask=$(if ($ace -is [Security.AccessControl.KnownAce]) { $ace.AccessMask } else { $null })}
+                }
+                $descriptors[$entry[0]] = $aces
+            }
+            [Console]::WriteLine(('DIAG fixture-state-acl ' + (@{
+                member=$member.Substring($resolvedScratch.Length + 1)
+                protected=$acl.AreAccessRulesProtected
+                ownerMatches=($null -ne $actual.Owner -and $expected.Owner.Equals($actual.Owner))
+                expectedOwnerIsFixtureOwner=($expected.Owner.Value -ceq $administratorsSid)
+                actualOwnerIsFixtureOwner=($null -ne $actual.Owner -and $actual.Owner.Value -ceq $administratorsSid)
+                actualOwnerIsAdministrators=($null -ne $actual.Owner -and $actual.Owner.Value -ceq 'S-1-5-32-544')
+                expectedAceCount=$expected.DiscretionaryAcl.Count
+                actualAceCount=$(if ($null -eq $actual.DiscretionaryAcl) { -1 } else { $actual.DiscretionaryAcl.Count })
+                expectedAces=$descriptors.expected; actualAces=$descriptors.actual
+            } | ConvertTo-Json -Depth 5 -Compress)))
+            foreach ($child in ([IO.Directory]::EnumerateDirectories($member) | Select-Object -First 16)) {
+                $pending.Push($child)
+            }
+        }
+    } catch {
+        # Diagnostics must not replace the original assertion or disclose raw errors.
+    }
+}
+
 try {
     if ($NodeArchive) {
         $nodeFolder = Join-Path $scratch 'official-node'
@@ -576,7 +631,8 @@ try {
     Write-Output 'PASS stop is private, idempotent, and bound to the same hosted window receipt'
     $stateAfterWindow = $bundle + '.state'
     $stateSpec = Get-AdministratorStateLayout $probeDigest $fixtureSid
-    Write-AdministratorState $stateAfterWindow $stateSpec
+    try { Write-AdministratorState $stateAfterWindow $stateSpec }
+    catch { Write-FixtureStateAclDiagnostic $stateAfterWindow; throw }
     $workStem = Join-Path $stateAfterWindow ('work\acceptance-' + $windowId)
     $stepId = 'f' * 32
     $planBody = '[{"id":"' + $stepId + '","name":"read_file","arguments":{}}]'

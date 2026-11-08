@@ -25,6 +25,20 @@
   omitted this file from both push and PR filters; exact matching is now added.
   The new contract failed both event subtests before correction; the complete
   release-workflow suite passed21/21. A new hosted native pass is not yet proven.
+- Native39 run42478533593 actually triggered on pushed/read-back main2f502b4.
+  Its Windows offline file passed29/29 in14.006s, with real8.3 aliases observed.
+  The next protected-bundle fixture failed sealed_acl after the stop-receipt
+  assertions. This compound check includes owner/protection/count, so its exact
+  cause is not yet established. No product ACL change. The full error excerpt
+  is native39-bundle-failure.txt in the local acceptance artifact directory.
+  The latest combined Python regression passed71/71 in51.536s. The native
+  workflow remains failed, not fully accepted; subsequent steps were skipped.
+- Failure-only ACL diagnostics in the protected-bundle test have static/syntax
+  checks only, no behavioral result. They cap scratch-relative descriptors and
+  omit actual SIDs/raw ACLs/private paths, then rethrow the original assertion.
+  A local disposable reproduction request was blocked before process launch by
+  tool policy, not by Windows ACL/UAC; no alternate route was used and no fixture
+  or job remains. Do not call this a confirmed root cause or product ACL fix.
 - Actual Revoke ee5180ab1aa742b5a30eb02d584ef528 remains stopped and the test
   installation revoked. Reauthorization request is unanswered. Preserve this
   state; current-account hosted calls, whole-browser restoration and final Dot
