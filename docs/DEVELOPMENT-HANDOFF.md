@@ -2,6 +2,22 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Startup Terminal Protocol Candidate (Checkpoint104)
+
+Native68/run42529195934 passed packaged setup but both guided cases failed
+about20.8s with terminal_timeout_1_empty and no acquisition report: no visible
+prompt was observed. Empty here meant VT-stripped output, not proven zero raw
+bytes. The fixture previously discarded cursor-position queries. Microsoft's
+ConPTY documentation requires servicing the cursor-inheritance query; the
+fixture now answers only bounded startup queries before any position-changing
+output, at the known fresh surface position1;1. This is a supported protocol
+correction, not a proved explanation for CI68. Timeouts now distinguish no raw
+bytes from control-only output. Eight terminal unit tests and30 workflow
+contracts pass. A repeat real local paired/cold-CMD run passed34.848s/93.456s;
+both observed zero cursor queries, so they do not establish the cloud cause.
+Full bootstrap tests passed279, skipped16 legacy/platform/opt-in cases in257.264s.
+No product code, deadlines or security checks changed. Publication still pending.
+
 ### Cold Runner Failure Diagnostics (Checkpoint103)
 
 The complete root npm test command passed locally, including13 MV3 integration,

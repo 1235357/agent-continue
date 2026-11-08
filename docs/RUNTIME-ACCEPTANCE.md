@@ -1,5 +1,17 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Terminal Startup Protocol Candidate (Checkpoint104)
+
+Native68 passed packaged setup but both guided cases timed out at their first
+prompt with VT-stripped empty output. The fixture now handles at most8 startup
+cursor queries at a known fresh1;1 position, refusing moved/unknown positions.
+Microsoft documents that unserviced ConPTY cursor-inheritance queries can
+deadlock; this does not prove the cloud failure's cause. Eight unit cases and
+30 workflow contracts pass. Real local paired/cold-CMD cases passed again
+(34.848s/93.456s), with zero actual cursor queries. Full bootstrap tests:
+279 pass,16 legacy/platform/opt-in skips,257.264s. No product/security/deadline
+change. Release and Store submission remain unobserved.
+
 ## Cold Runner Diagnostics Without Relaxing Checks (Checkpoint103)
 
 Full root npm test passed locally. Native67 packaged setup passed about186s;

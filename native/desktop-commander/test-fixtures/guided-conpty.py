@@ -122,6 +122,7 @@ def require_fixture(config):
 
 def read_stage(terminal, deadline, stage, *, prompt=None, line_count=None, echo=None):
     raw = bytearray()
+    cursor_queries = 0
     # PyWinPTY's socket reader supports a deadline even if the console goes quiet.
     while (remaining := deadline - time.monotonic()) > 0:
         terminal.fileobj.settimeout(remaining)
@@ -145,6 +146,21 @@ def read_stage(terminal, deadline, stage, *, prompt=None, line_count=None, echo=
         raw.extend(chunk)
         if len(raw) > MAX_STAGE_BYTES:
             raise FixtureError("terminal_output_limit")
+        if stage == 1:
+            queries = list(re.finditer(rb"\x1b\[(\?)?6n", raw))
+            if len(queries) > 8:
+                raise FixtureError("terminal_cursor_query_limit")
+            for query in queries[cursor_queries:]:
+                # A fresh ConPTY surface starts at 1;1. Answer its startup
+                # inheritance query before waiting for application text.
+                prefix = re.sub(rb"\x1b\[(?:\??6n|\?25[hl])", b"", raw[:query.start()])
+                if prefix:
+                    raise FixtureError("terminal_late_cursor_query")
+                reply = "\x1b[" + ("?" if query[1] else "") + "1;1R"
+                if terminal.write(reply) != len(reply):
+                    raise FixtureError("terminal_cursor_reply_failed")
+            cursor_queries = len(queries)
+            terminal.initial_cursor_replies = cursor_queries
         if prompt is not None or line_count is not None:
             output = VT_SEQUENCE.sub(b"", raw)
             complete, _, tail = output.rpartition(b"\n")
@@ -157,7 +173,7 @@ def read_stage(terminal, deadline, stage, *, prompt=None, line_count=None, echo=
             elif len(output_lines(complete.decode("utf-8"), echo)) >= line_count:
                 return output.decode("utf-8")
     observed = VT_SEQUENCE.sub(b"", raw)
-    state = "empty" if not observed.strip() else "prompt_present" if prompt and prompt in observed else "other_output"
+    state = "no_bytes" if not raw else "control_only" if not observed.strip() else "prompt_present" if prompt and prompt in observed else "other_output"
     raise FixtureError(f"terminal_timeout_{stage}_{state}")
 
 
@@ -375,6 +391,10 @@ def drive(config):
             output = read_stage(terminal, min(deadline, time.monotonic() + PROMPT_SECONDS), stage, prompt=prompt)
             if stage == 1 and f'Chrome extension ID: {config["extensionId"]}' not in output_lines(output):
                 raise FixtureError("installer_extension_identity_missing")
+            if stage == 1:
+                (root / "guided-terminal-protocol.json").write_text(
+                    json.dumps({"initialPromptObserved": True,
+                                "cursorReplies": terminal.initial_cursor_replies}), encoding="utf-8")
             write_answer(terminal, answer, stage)
         if config["browserManaged"]:
             lines = output_lines(read_stage(terminal, deadline, "register"), "REGISTER")

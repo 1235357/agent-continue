@@ -43,6 +43,7 @@ on:
       - 'tests/browser-wake-tests.mjs'
       - 'tests/test_windows_preview_kit.py'
       - 'tests/guided-extension-control.mjs'
+      - 'tests/test_guided_conpty.py'
       - 'tests/windows-browser-native-startup-tests.mjs'
       - 'scripts/Invoke-WindowsHostedAcceptance.ps1'
       - 'tests/hosted-windows-launcher-tests.mjs'
@@ -122,6 +123,7 @@ on:
       - 'tests/browser-wake-tests.mjs'
       - 'tests/test_windows_preview_kit.py'
       - 'tests/guided-extension-control.mjs'
+      - 'tests/test_guided_conpty.py'
       - 'tests/windows-browser-native-startup-tests.mjs'
       - 'scripts/Invoke-WindowsHostedAcceptance.ps1'
       - 'tests/hosted-windows-launcher-tests.mjs'
@@ -192,6 +194,9 @@ jobs:
       - name: Verify bounded bootstrap suite coverage
         working-directory: .
         run: python -B -m unittest discover -s tests -p test_windows_release_workflow.py
+      - name: Verify guided terminal protocol fixture
+        working-directory: .
+        run: python -B -m unittest discover -s tests -p test_guided_conpty.py
       - name: Verify standalone installer ZIP after extraction
         working-directory: .
         run: python tests/setup-release-tests.py

@@ -389,6 +389,11 @@ for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle', 'replay
         throw error;
       }
       const { stdout, stderr } = guidedResult;
+      const terminalProtocol = JSON.parse(fs.readFileSync(path.join(scratch, 'guided-terminal-protocol.json'), 'utf8'));
+      assert.deepEqual(Object.keys(terminalProtocol).sort(), ['cursorReplies', 'initialPromptObserved']);
+      assert.equal(terminalProtocol.initialPromptObserved, true);
+      assert.ok(Number.isInteger(terminalProtocol.cursorReplies) && terminalProtocol.cursorReplies >= 0 && terminalProtocol.cursorReplies <= 8);
+      t.diagnostic(JSON.stringify({ phase: 'guided-terminal-protocol', ...terminalProtocol }));
       assert.equal(stderr, '');
       const result = JSON.parse(stdout);
       if (browserManaged) {
