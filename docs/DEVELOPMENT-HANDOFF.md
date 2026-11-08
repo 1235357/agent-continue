@@ -2,6 +2,46 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### r11 Real Cutover In Progress (Checkpoint96)
+
+Main3193d708524d117993b6a3d066a98ac344bdb8cf includes the bounded status
+subprocess deadline. Root test:package passed115/115 in80.859s. Windows Delivery9
+run42516414716 succeeded. Native59/run42515313994 failed after24m: packed status
+and verify now passed, but exact-shell assumed its marker would arrive in the
+initial output, and packaged-manager installer-status refused an unverified
+test payload. The test-only repair keeps the same start and uses bounded
+exact-PID output observation; packaged-manager now uses the source-only release
+ZIP and its checksum manifest, not an unstamped development payload. Parent
+output-helper tests passed10/10; actual local exact-shell loopback passed1/1
+in2.771s. Full Native rerun is pending, not passed. Preserved failure tail:
+.artifacts/ordinary-chat-acceptance-20261108/checkpoint96-ci59-windows-tail.txt.
+
+r11 authoritative assets are under
+.artifacts/windows-public-3.0.0-closure-r11/public-verified and extension/.
+Admin ZIP26f186ee15d3d04143d512799e94b4c9147aa454b598f732f5c007c1a16a4d34;
+Store ZIPc87599d6a643cd92e7da266469155fd1e072d4fc1c9ddb23a16635b079bb27ce.
+The Store saved draft is3.0.0; Published remains2.1.0. No review submission,
+GitHub Release, new tag or npm publish is established at this checkpoint.
+
+Ordinary ChatGPT actually executed one r8 browser Connect4c7567a5 acceptance:
+administrator=true, random file roundtrip=true, owned child4784 stopped after
+exact start-tick verification, productionChanged=false. Parent independently
+read the result/marker and verified that child identity was absent. This is r8
+evidence, not an r11 installed or browser-reopen claim.
+
+One-shot approved r8-to-r11 cutover is currently running. Old r8 revocation,
+owned process exit and exact unenrollment completed. Final official installer
+operation27eb4f79f780450cb0b7d8810e42ee73 was invoked once. Read its durable
+receipt / upgrade-r8-r11-result.json; NEVER repeat Apply if its outcome is
+unknown. New root is C:\Program Files\AgentContinueAdmin\26f186ee15d3d04143d51279.
+The final public install receipt now verifies24328 protected files, administrator
+state/child, clean and hosted launch plans, committed enrollment and authorized
+owner. It is readyToConnect=true, activated=false, tunnelStarted=false. Browser
+Connect and full lifetime recovery remain unconfirmed for r11.
+The owner confirmed all other workflows ended and authorized full shared-app
+exit/reopen after this transaction finishes. The old file-picker blocker is
+obsolete. Full browser lifetime recovery is not yet established.
+
 ### r10 Draft And A Different CI58 Failure (Checkpoint95)
 
 Current tested source is0d3b43670b31767a91a4892e427acfc479184740. Local r10

@@ -12,6 +12,7 @@ import { prepareState, buildHostLaunch } from './runtime.mjs';
 import { buildTunnelLaunch, createSealedWindowsProfileDocument, profileEnvironment } from './profile.mjs';
 import { openController } from './lifecycle.mjs';
 import { observeCore, hasExited } from './process-observation.mjs';
+import { observeTestProcessOutput } from './test-process-output.mjs';
 
 const executable = process.env.TUNNEL_CLIENT_TEST_EXE;
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -106,7 +107,8 @@ for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle', 'replay
     } });
     const requestIdAt = index => 'fixture-' + index;
     const requestIds = new Set(requests.map((_, index) => requestIdAt(index)));
-    const replies = [], errors = [];
+    const replies = [], errors = [], outputReads = new Map();
+    let exactShellOutput;
     let lastResponse, firstBrowserTunnel, guidedEnvironment, sealedRestart = false, firstSealedResponses = 0;
     let queued = 0, child, childExited, controller, owner, packageBin, installerOperation, browser;
     let forwardedNotifications = 0, mockRequests = 0, mockConnections = 0;
@@ -184,8 +186,24 @@ for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle', 'replay
             }
           } else assert.equal(response.resp_type, 'notify_ack');
           replies.push(response);
+          const outputRead = outputReads.get(index);
+          if (outputRead) { outputReads.delete(index); outputRead(response.resp_json.result); }
           if (replies.length < requests.length) queued = replies.length;
-          else if (browserRoundtrip) {
+          res.setHeader('Content-Type', 'application/json'); res.end('{"status":"ok"}');
+          if (exactShell && !sealedRestart && index === 9) {
+            // Keep the original start/replay/receipt sequence; append observation only.
+            exactShellOutput = observeTestProcessOutput(replies[7].resp_json.result, 'AC_TUNNEL_EXACT', params => {
+              const index = requests.length;
+              requests.push({ jsonrpc: '2.0', id: 10 + index, method: 'tools/call', params });
+              requestIds.add(requestIdAt(index));
+              const observed = new Promise(resolve => outputReads.set(index, resolve));
+              queued = index;
+              return observed;
+            });
+            exactShellOutput.catch(() => {});
+          }
+          if (browserRoundtrip && index === 9) {
+            await exactShellOutput;
             const launches = guidedProcesses();
             const first = launches.find(item => item.kind === 'tunnel');
             const manager = launches.find(item => item.kind === 'owner');
@@ -196,10 +214,13 @@ for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle', 'replay
             cores.push(core);
             fs.writeFileSync(guidedReady, 'ready\n', { flag: 'wx' });
           }
-          res.setHeader('Content-Type', 'application/json'); res.end('{"status":"ok"}'); return;
+          return;
         }
         res.writeHead(404); res.end();
-      } catch (error) { errors.push({ code: 'fixture_response_invalid', assertion: error.message.slice(0, 180), at: lastResponse }); res.writeHead(400); res.end(); }
+      } catch (error) {
+        errors.push({ code: 'fixture_response_invalid', assertion: error.message.slice(0, 180), at: lastResponse });
+        if (!res.headersSent) { res.writeHead(400); res.end(); }
+      }
     });
     mock.on('connection', socket => { mockConnections++; sockets.add(socket); socket.once('close', () => sockets.delete(socket)); });
     await new Promise(resolve => mock.listen(0, '127.0.0.1', resolve));
@@ -358,10 +379,16 @@ for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle', 'replay
       controllerReady = true;
     } else if (installed) {
       const payload = path.join(scratch, 'package');
+      const release = path.join(scratch, 'release');
+      const python = process.env.TUNNEL_CLIENT_TEST_PYTHON || 'python';
       const request = path.join(scratch, 'browser-request.json');
       const { buildSetupRequest, serializeSetupRequest } = await import('../../setup-model.js');
       fs.writeFileSync(request, serializeSetupRequest(buildSetupRequest('windows', 'a'.repeat(32))));
-      await run(process.execPath, [path.join(here, '../bootstrap/build-package.mjs'), '--output', payload], { timeout: 15000, windowsHide: true });
+      // The PowerShell status wrapper requires the stamped per-file checksum list.
+      await run(python, ['-B', path.join(here, '../../scripts/build-setup-release.py'), '--source-only', '--output', release],
+        { timeout: 30000, windowsHide: true });
+      await run(python, ['-B', '-m', 'zipfile', '-e', path.join(release, 'agent-continue-setup.zip'), payload],
+        { timeout: 12000, windowsHide: true });
       packageBin = path.join(payload, 'bin.mjs');
       const cache = process.env.TUNNEL_CLIENT_TEST_NPM_CACHE;
       const archive = process.env.TUNNEL_CLIENT_TEST_ARCHIVE;
@@ -449,16 +476,27 @@ for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle', 'replay
       return result.state;
     }
     const installerStartArgs = ['start-manager', '--install-dir', installDir, '--consent', 'accept-install', '--connect', 'true'];
-    async function installerStatus() {
+    async function installerStatus(phase) {
       const wrapper = path.join(path.dirname(packageBin), 'install.ps1');
       const ps = path.join(system, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-      const { stdout } = await run(ps, ['-NoProfile', '-NonInteractive', '-File', wrapper,
-        '-DeviceAction', 'installer-status', '-InstallDir', installDir, '-NodePath', runtimeNode],
-      { timeout: 30000, windowsHide: true });
-      return JSON.parse(stdout);
+      const opened = performance.now();
+      try {
+        const { stdout } = await run(ps, ['-NoProfile', '-NonInteractive', '-File', wrapper,
+          '-DeviceAction', 'installer-status', '-InstallDir', installDir, '-NodePath', runtimeNode],
+        { timeout: 30000, windowsHide: true });
+        const result = JSON.parse(stdout);
+        t.diagnostic(JSON.stringify({ phase, action: 'installer-status', elapsedMs: Math.round(performance.now() - opened), exitCode: 0 }));
+        return result;
+      } catch (error) {
+        t.diagnostic(JSON.stringify({ phase, action: 'installer-status', elapsedMs: Math.round(performance.now() - opened),
+          exitCode: Number.isInteger(error.code) ? error.code : null, killed: error.killed === true,
+          error: /^agent_continue_install_failed: payload_integrity_unverified\r?\n?$/.test(error.stderr ?? '')
+            ? 'payload_integrity_unverified' : 'installer_status_failed' }));
+        throw error;
+      }
     }
     if (guidedInstall) {
-      assert.deepEqual(await installerStatus(), { ok: true, operationId: installerOperation,
+      assert.deepEqual(await installerStatus('guided-ready'), { ok: true, operationId: installerOperation,
         operationStatus: 'settled', managerRunning: true, connection: 'ready', paused: false });
     } else if (mode === 'owned-lifecycle' || installed || sealed) {
       const profilePath = sealed ? args[2] : path.join(root, 'tunnel.yaml');
@@ -493,7 +531,7 @@ for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle', 'replay
         assert.equal(result.operationStatus, 'settled');
         installerOperation = result.operationId;
         assert.match(installerOperation, /^[0-9a-f-]{36}$/);
-        assert.deepEqual(await installerStatus(), { ok: true, operationId: installerOperation,
+        assert.deepEqual(await installerStatus('packaged-ready'), { ok: true, operationId: installerOperation,
           operationStatus: 'settled', managerRunning: true, connection: 'ready', paused: false });
       } else {
         if (sealed) {
@@ -540,7 +578,7 @@ for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle', 'replay
       assert.equal(replies[5].resp_json.error?.code, -32072);
       assert.deepEqual(replies[6].resp_json.result.structuredContent, { status: 'not-recorded' });
       assert.notEqual(replies[7].resp_json.result.isError, true);
-      assert.match(JSON.stringify(replies[7].resp_json.result.content), /AC_TUNNEL_EXACT/);
+      assert.match(await exactShellOutput, /AC_TUNNEL_EXACT/);
       assert.equal(replies[8].resp_json.error?.code, -32070);
       assert.deepEqual(replies[9].resp_json.result.structuredContent, { status: 'provider-reported-result', requestKind: 'exact-process' });
     }
@@ -560,7 +598,7 @@ for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle', 'replay
       assert.equal(await hasExited(cores.at(-1)), true);
       const count = mockRequests;
       await delay(500);
-      assert.deepEqual(await installerStatus(), { ok: true, operationId: installerOperation,
+      assert.deepEqual(await installerStatus('guided-paused'), { ok: true, operationId: installerOperation,
         operationStatus: 'settled', managerRunning: true, connection: 'disconnected', paused: true });
       await assert.rejects(run(runtimeNode, [packageBin, ...installerStartArgs], { timeout: 35000, windowsHide: true }), error => {
         assert.equal(error.code, 1);
@@ -621,7 +659,7 @@ for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle', 'replay
       const observed = installed ? await control('status') : await controller.status();
       assert.equal(observed.paused, true);
       if (installed) {
-        assert.deepEqual(await installerStatus(), { ok: true, operationId: installerOperation,
+        assert.deepEqual(await installerStatus('packaged-paused'), { ok: true, operationId: installerOperation,
           operationStatus: 'settled', managerRunning: true, connection: 'disconnected', paused: true });
         await assert.rejects(run(process.execPath, [packageBin, ...installerStartArgs], { timeout: 35000, windowsHide: true }), error => {
           assert.equal(error.code, 1);
