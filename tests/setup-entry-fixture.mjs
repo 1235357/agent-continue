@@ -6,16 +6,17 @@ import path from 'node:path';
 
 export const extensionId = 'abcdefghijklmnopabcdefghijklmnop';
 export const setupId = 'a'.repeat(32);
-export const releaseVersion = '3.0.0';
+export const releaseVersion = JSON.parse(fs.readFileSync(new URL('../manifest.json', import.meta.url))).version;
+const releaseTag = 'v' + releaseVersion;
 export const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 export const assetNames = ['agent-continue-setup.zip', 'install.ps1', 'install-administrator.ps1',
   'Stage-WindowsAdministratorBundle.ps1', 'agent-continue-windows-administrator-x64.zip', 'SHA256SUMS.txt'];
 // Inert test identity only. No URL in these fixtures is fetched or evidence of publication.
-export const entryUrl = 'https://github.com/1235357/agent-continue/releases/download/v3.0.0/install.ps1';
-export const entryBytes = Buffer.from("$script:acReleaseTag = 'v3.0.0'\n# Inert fixture; never execute an installer.\n");
+export const entryUrl = 'https://github.com/1235357/agent-continue/releases/download/' + releaseTag + '/install.ps1';
+export const entryBytes = Buffer.from(`$script:acReleaseTag = '${releaseTag}'\n# Inert fixture; never execute an installer.\n`);
 export const sumsBytes = Buffer.from(`${hash(entryBytes)}  install.ps1\n`);
 export const descriptor = (extra = {}) => ({ format: 'agent-continue-windows-setup-entry', version: 1,
-  releaseTag: 'v3.0.0', entryUrl, entrySha256: hash(entryBytes), sumsSha256: hash(sumsBytes), ...extra });
+  releaseTag, entryUrl, entrySha256: hash(entryBytes), sumsSha256: hash(sumsBytes), ...extra });
 
 export function snapshotFiles(files) {
   return Object.fromEntries(files.map(file => {
@@ -50,13 +51,13 @@ export function combinedFixture(t) {
     'agent-continue-windows-administrator-x64.zip': Buffer.from('opaque inert administrator archive; no execution'),
     'Stage-WindowsAdministratorBundle.ps1': Buffer.from('# inert stager\n'),
   };
-  bytes['install-administrator.ps1'] = Buffer.from(assignment('acReleaseTag', 'v3.0.0') +
+  bytes['install-administrator.ps1'] = Buffer.from(assignment('acReleaseTag', releaseTag) +
     assignment('acAdministratorBundleSha256', hash(bytes[assetNames[4]])) +
     assignment('acAdministratorStagerSha256', hash(bytes[assetNames[3]])));
-  bytes['install.ps1'] = Buffer.from(assignment('acReleaseTag', 'v3.0.0') +
+  bytes['install.ps1'] = Buffer.from(assignment('acReleaseTag', releaseTag) +
     assignment('acAdministratorInstallerSha256', hash(bytes['install-administrator.ps1'])));
   const sources = { 'bin.mjs': Buffer.from('// inert source\n'), 'payload-manifest.json': Buffer.from('{"inert":true}\n') };
-  const receipt = { built: true, combinedBuilt: true, deliveryContract: 'combined-public', releaseTag: 'v3.0.0',
+  const receipt = { built: true, combinedBuilt: true, deliveryContract: 'combined-public', releaseTag,
     installed: false, published: false, administratorBundleVerified: true, administratorStagerPlan: true };
   function write() {
     bytes['SHA256SUMS.txt'] = Buffer.from(Object.entries({ ...sources, ...Object.fromEntries(

@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.0.1] - 2026-11-08
+
+Release successor to the unpublished3.0.0 build. The3.0.0 tag is retained;
+its Windows CI fixture used inconsistent short/long temporary paths and failed
+before any Release was created. Canonicalize the two disposable test roots
+without relaxing the actual ordinary-token CI adapter's path checks. Product
+Windows control and scheduler behavior are unchanged from the accepted3.0.0
+source. Publication and Chrome Store submission still require actual receipts.
+
 ## [3.0.0] - 2026-11-08
 
 The combined Windows source version is 3.0.0. GitHub/npm publication, Chrome Web Store submission/approval and installed-version receipts are recorded separately. The scheduler v2.2.1 release and its assets remain unchanged.

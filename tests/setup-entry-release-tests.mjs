@@ -27,7 +27,7 @@ test('entry projection pins final combined entry and checksum-list bytes in exac
 
 for (const change of [{ combinedBuilt: false }, { deliveryContract: 'current-account-source-only' },
   { administratorBundleVerified: false }, { administratorStagerPlan: false }, { installed: true },
-  { published: true }, { releaseTag: 'v3.0.1' }]) {
+  { published: true }, { releaseTag: 'v0.0.0' }]) {
   test(`entry projection rejects incomplete, source-only or mismatched closure ${JSON.stringify(change)}`, t => {
     const f = combinedFixture(t), before = snapshot(f.root);
     assert.equal(typeof windowsRelease.setupEntryMetadata, 'function');
@@ -47,8 +47,8 @@ for (const name of assetNames) {
   });
 }
 
-for (const stamp of ["$script:acReleaseTag = ''\n", "$script:acReleaseTag = 'v3.0.1'\n",
-  "$script:acReleaseTag = 'v3.0.0'\n$script:acReleaseTag = 'v3.0.0'\n"]) {
+for (const stamp of ["$script:acReleaseTag = ''\n", "$script:acReleaseTag = 'v0.0.0'\n",
+  `$script:acReleaseTag = 'v${releaseVersion}'\n$script:acReleaseTag = 'v${releaseVersion}'\n`]) {
   test('entry projection rejects an unsupported stamp even when all outer hashes are recomputed', t => {
     const f = combinedFixture(t);
     f.bytes['install.ps1'] = Buffer.from(stamp + `$script:acAdministratorInstallerSha256 = '${hash(f.bytes['install-administrator.ps1'])}'\n`);

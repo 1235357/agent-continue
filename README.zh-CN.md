@@ -4,15 +4,15 @@
 
 向一个已有的 ChatGPT 或 Your dot 会话定时发送自定义提示词。Windows 版本还提供需单独安装、明确授权的文件、Shell 与进程工具。
 
-**3.0.0 Windows 版本源码 · Manifest V3 · 免费 · MIT 开源**
+**3.0.1 Windows 版本源码 · Manifest V3 · 免费 · MIT 开源**
 
 [Chrome 应用商店](https://chromewebstore.google.com/detail/jpioilmpbolfokedaefmbfbjeaahfdkl) · [GitHub Releases](https://github.com/1235357/agent-continue/releases) · [源码](https://github.com/1235357/agent-continue) · [更新记录](CHANGELOG.md) · [隐私说明（英文）](PRIVACY.md)
 
 已单独发布的 v2.2.1 仍仅含调度、发送确认修复、开发者支持及 schema 3 诊断，不含 Windows 控制，其公开资产保持不变。源码版本、GitHub 发布、npm 发布、商店审核与浏览器已安装版本是不同状态；请分别核对对应页面和扩展详情，不能把本说明当成发布或安装回执。
 
-## Windows 设备设置（3.0.0）
+## Windows 设备设置（3.0.1）
 
-选择当前账户或管理员范围，明确同意访问后，从已核验、解压的源码安装包复制并运行 PowerShell 或 CMD 命令；复制不等于执行。没有兼容 Node.js 时，引导命令可在同意后下载、校验并解压官方便携 Node。当前交付采用命令式安装，不使用已退役的自制 Agent Continue 启动器或 EXE/MSI 安装路线；Node.js、OpenAI 官方隧道客户端及上游依赖仍在浏览器外执行。详见公开仓库中的[安装命令与范围选择](https://github.com/1235357/agent-continue/blob/main/native/bootstrap/README.md#windows-command-installation)。本文不证明公开 3.0.0 安装器或 npm 路径已经可用。
+选择当前账户或管理员范围，明确同意访问后，从已核验、解压的源码安装包复制并运行 PowerShell 或 CMD 命令；复制不等于执行。没有兼容 Node.js 时，引导命令可在同意后下载、校验并解压官方便携 Node。当前交付采用命令式安装，不使用已退役的自制 Agent Continue 启动器或 EXE/MSI 安装路线；Node.js、OpenAI 官方隧道客户端及上游依赖仍在浏览器外执行。详见公开仓库中的[安装命令与范围选择](https://github.com/1235357/agent-continue/blob/main/native/bootstrap/README.md#windows-command-installation)。本文不证明公开 3.0.1 安装器或 npm 路径已经可用。
 
 **连接并授权后，会话可按所选 Windows 账户权限读写文件、执行 Shell 命令、查看及管理进程，范围不限于扩展或安装目录；这不是沙箱。** 当前账户模式使用既有权限；管理员模式单独请求 Windows 提权（UAC），将受保护运行时放在 Program Files，并注册浏览器主机及管理员所有者计划任务。独立运行的当前账户模式不注册浏览器主机；浏览器管理的当前账户模式使用 HKCU，管理员注册使用受保护的 HKLM。可选 `nativeMessaging`、Windows 批准与 OpenAI 会话授权相互独立。安装不等于会话授权。浏览器管理的安装器本身以暂停状态完成；用户本次明确同意安装及连接后，保持有效的原设置页可在核对匹配安装回执后另请求一次连接。当前账户使用独立的一次性证明，不借用管理员通道或旧的仅安装同意；已有安装不会被自动接管或解除暂停，结果不明时保留原操作 ID 查询，不盲目重发。独立当前账户安装可在提供隧道参数且同意连接时请求一次连接，引导提示要求输入 `CONNECT`；浏览器管理的当前账户引导则确认 `REGISTER`，该安装步骤不启动隧道。安装和连接可能分别需要 UAC，不承诺一次批准完成全部步骤。本候选流程仍待最终安装制品的实际验收。
 
@@ -93,7 +93,7 @@ Checkpoint97 已记录 r11 的真实完整应用退出、重开及运行意图�
 
 `https://chatgpt.com/*` 用于目标识别、检查、填写、发送及恢复；`activeTab` 用于用户操作时访问所选标签；`scripting` 执行页面逻辑；`storage` 本地保存配置、正文、队列、模板、语言、主题、日志及恢复状态；`alarms` 唤醒调度；可选 `power` 在明确开启时防止空闲休眠。
 
-历史稳定版 v2.2.1 不请求 `nativeMessaging` 或包含 Windows 控制；3.0.0 候选增加可选 `nativeMessaging`，用于与单独安装、绑定扩展的本机桥接交换有限状态、连接、Pause/Revoke、恢复及预备进程引用检查。它不安装软件、不授予 Windows 提权或会话访问，也不通过桥接发送任意 Shell 正文。未增加全站点、Cookie、剪贴板或 debugger 权限；设置页可在用户操作后用剪贴板 API 复制命令，调度发送不使用剪贴板。这些浏览器权限边界不限制已单独授权的 Windows 账户级工具。
+历史稳定版 v2.2.1 不请求 `nativeMessaging` 或包含 Windows 控制；3.0.1 候选增加可选 `nativeMessaging`，用于与单独安装、绑定扩展的本机桥接交换有限状态、连接、Pause/Revoke、恢复及预备进程引用检查。它不安装软件、不授予 Windows 提权或会话访问，也不通过桥接发送任意 Shell 正文。未增加全站点、Cookie、剪贴板或 debugger 权限；设置页可在用户操作后用剪贴板 API 复制命令，调度发送不使用剪贴板。这些浏览器权限边界不限制已单独授权的 Windows 账户级工具。
 
 本地存储不加密，隐藏正文不等于安全隔离。默认配置导出不包含提示词及队列正文，需明确选择才包含。“清空数据”保留语言及持久设备／控制证据，移除管理员浏览器恢复偏好，但不请求 Windows Pause/Revoke，也不删除原生状态、原始文件、导出文件或已发送数据。完整数据流和删除范围见 [隐私说明（英文）](PRIVACY.md)。
 

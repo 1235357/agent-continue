@@ -1,6 +1,6 @@
-# Windows Workflow Listing: 3.0.0 Unreleased Candidate
+# Windows Workflow Listing: 3.0.1 Unreleased Candidate
 
-Upcoming identity: **3.0.0, UNRELEASED / candidate**. This is not the existing Store
+Upcoming identity: **3.0.1, UNRELEASED / candidate**. This is not the existing Store
 listing or evidence of a release, saved draft, submission, approval or installation.
 The [canonical English listing source](STORE-LISTING.en.md) and
 [canonical privacy policy](../PRIVACY.md) now include the Windows disclosures;
@@ -158,7 +158,7 @@ bounded results do not establish permanent readiness or full lifecycle delivery.
 See [Runtime Acceptance](RUNTIME-ACCEPTANCE.md) for the dated evidence. This source
 update does not reconnect the runtime or replay a settled operation.
 
-- Finalize the upcoming 3.0.0 assets without replacing scheduler v2.2.1 assets.
+- Finalize the upcoming 3.0.1 assets without replacing scheduler v2.2.1 assets.
 - Verify one source revision and matching GitHub/store extension payloads.
 - Verify the matching administrator runtime/helper/stager/setup checksum closure
   and the independently versioned npm installation contract from actual artifacts.

@@ -1,5 +1,15 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Release Build Stopped Before Publication (Checkpoint105)
+
+Release11/run42530336455 on tagv3.0.0 failed two CI-adapter test path checks
+before building/uploading assets; no GitHub Release was created. Preserve the
+tag. Two disposable Python roots now use resolve() consistently with PowerShell
+readback, leaving actual path guards unchanged.20 helper tests,104 related Node
+checks and34 packaging tests pass locally.3.0.1 is the next source candidate;
+manifest-coupled CLI test metadata follows that version. Full Windows delivery
+verification and publication remain pending. r11 control stays revoked.
+
 ## Terminal Startup Protocol Candidate (Checkpoint104)
 
 Native68 passed packaged setup but both guided cases timed out at their first

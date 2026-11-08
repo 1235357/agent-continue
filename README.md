@@ -4,15 +4,15 @@ English | [简体中文](https://github.com/1235357/agent-continue/blob/main/REA
 
 Schedule your own prompts in one existing ChatGPT or Your dot conversation. The Windows-enabled version also offers separately installed, explicitly authorized file, shell and process tools.
 
-**3.0.0 Windows-enabled release source. Manifest V3. Free and MIT-licensed.**
+**3.0.1 Windows-enabled release source. Manifest V3. Free and MIT-licensed.**
 
 [Chrome Web Store](https://chromewebstore.google.com/detail/jpioilmpbolfokedaefmbfbjeaahfdkl) · [GitHub Releases](https://github.com/1235357/agent-continue/releases) · [Source](https://github.com/1235357/agent-continue) · [Changelog](https://github.com/1235357/agent-continue/blob/main/CHANGELOG.md) · [Privacy](https://github.com/1235357/agent-continue/blob/main/PRIVACY.md)
 
 The separately released v2.2.1 remains scheduler-only, including its acknowledgement fixes, developer support and schema 3 diagnostics; its published assets are preserved. Source version, GitHub release availability, npm publication, Chrome Web Store review and your installed version are separate states. Consult the respective listing and your browser's extension details rather than treating this README as a publication or installation receipt.
 
-## Windows Device Setup (3.0.0)
+## Windows Device Setup (3.0.1)
 
-Choose current-account or administrator scope, consent to the stated access, then copy and run the reviewed PowerShell or CMD setup command from the verified, extracted source bundle. Copying does not run it. The guided commands can download, verify and extract official portable Node.js after consent if a compatible version is missing. Current delivery is command-only, not the retired custom Agent Continue launcher/EXE/MSI route; Node.js, the official OpenAI tunnel client and upstream dependencies still run outside the browser. See the repository's [setup commands and scope choices](https://github.com/1235357/agent-continue/blob/main/native/bootstrap/README.md#windows-command-installation). A public 3.0.0 installer/npm route is not established by this source documentation.
+Choose current-account or administrator scope, consent to the stated access, then copy and run the reviewed PowerShell or CMD setup command from the verified, extracted source bundle. Copying does not run it. The guided commands can download, verify and extract official portable Node.js after consent if a compatible version is missing. Current delivery is command-only, not the retired custom Agent Continue launcher/EXE/MSI route; Node.js, the official OpenAI tunnel client and upstream dependencies still run outside the browser. See the repository's [setup commands and scope choices](https://github.com/1235357/agent-continue/blob/main/native/bootstrap/README.md#windows-command-installation). A public 3.0.1 installer/npm route is not established by this source documentation.
 
 **Once connected and authorized, a conversation can read/write files, execute shell commands and manage processes across the selected Windows account, not just the installation folder. This is not a sandbox.** Current-account setup uses existing privileges. Administrator setup separately requests Windows elevation (UAC), stages a protected Program Files runtime, and registers its browser host and administrator-owner task. Standalone current-account setup does not register a browser host; browser-managed current-account setup uses HKCU, and administrator enrollment uses protected HKLM registration. Optional browser `nativeMessaging`, Windows approval and OpenAI conversation authorization are separate grants. Installation is not chat authorization. Browser-managed installers finish paused. With fresh installation-and-connection consent, the unchanged initiating Setup page can separately request one connection after matching installation readback. Current-account continuation uses its own one-time proof, not administrator transport or a previous install-only consent. Existing installations are not automatically adopted or unpaused, and uncertain operations are checked under their original IDs rather than replayed. Standalone current-account setup can request one connection with tunnel inputs and connection consent (`CONNECT` in the guided prompt); browser-managed guided setup confirms `REGISTER` without starting the tunnel in that installer step. Installation and connection may require separate UAC approvals. Final installed-artifact acceptance of this candidate flow remains open.
 
@@ -40,7 +40,7 @@ Logs are timestamped locally, but diagnostic exports use relative millisecond ti
 
 ![English control console with synthetic demonstration data](https://raw.githubusercontent.com/1235357/agent-continue/main/docs/store-2.1.0-en-console.png)
 
-The screenshot shows the v2.1.0 console with synthetic content, not a private conversation or evidence of a v2.2.1 or 3.0.0 installation.
+The screenshot shows the v2.1.0 console with synthetic content, not a private conversation or evidence of a v2.2.1 or 3.0.1 installation.
 
 ## Scheduler Installation
 
@@ -111,9 +111,9 @@ Prompt scheduling/file import require no separate extension account or API key a
 | `storage` | Store configuration, prompts, queues, templates, language, theme, logs, and recovery state locally |
 | `alarms` | Wake the scheduler for due checks |
 | Optional `power` | Prevent system idle sleep when explicitly enabled |
-| Optional `nativeMessaging` (3.0.0) | Reach the separately installed Windows bridge for bounded status/lifecycle controls and prepared-process reference checks; not installation, elevation or a chat grant |
+| Optional `nativeMessaging` (3.0.1) | Reach the separately installed Windows bridge for bounded status/lifecycle controls and prepared-process reference checks; not installation, elevation or a chat grant |
 
-Historical stable v2.2.1 does not request `nativeMessaging` or include Windows control. The 3.0.0 manifest adds that optional permission without all-site, Cookie, clipboard or debugger permissions. This browser permission boundary is not a sandbox for separately authorized Windows tools. Setup can copy its command through the clipboard API after a user gesture; scheduler sending does not use the clipboard.
+Historical stable v2.2.1 does not request `nativeMessaging` or include Windows control. The 3.0.1 manifest adds that optional permission without all-site, Cookie, clipboard or debugger permissions. This browser permission boundary is not a sandbox for separately authorized Windows tools. Setup can copy its command through the clipboard API after a user gesture; scheduler sending does not use the clipboard.
 
 Local storage is not encrypted. Hiding prompt text reduces accidental on-screen exposure but is not a security boundary. Configuration exports omit prompt and queue bodies unless explicitly included. Clear Data retains the language preference and durable device/control evidence, removes the administrator browser-restore preference, and does not issue Windows Pause/Revoke. It does not remove native state, original files, exported files or data already sent to ChatGPT. See [PRIVACY.md](https://github.com/1235357/agent-continue/blob/main/PRIVACY.md) for storage, deletion and disclosure details.
 

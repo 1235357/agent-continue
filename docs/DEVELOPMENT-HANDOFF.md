@@ -2,6 +2,19 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Unpublished Tag Retained; Patch Release Prepared (Checkpoint105)
+
+Tagv3.0.0 names main1bc39f6 and is retained unchanged. Release workflow11,
+run42530336455, failed before acquisition/publication: two ordinary-token
+adapter tests used Python TEMP's8.3 spelling while PowerShell returned the long
+path. The fixture roots now resolve before constructing both source origins
+and receipt inputs; the adapter's actual path checks are unchanged. All20
+CI-adapter helper tests pass locally. Source version/public current docs now
+prepare3.0.1; a setup-entry CLI fixture now follows manifest.version rather than
+hard-coding an old version.104 related Node checks and34 packaging tests pass.
+No3.0.1 tag, Release or Store submission yet. First verify the complete Windows
+delivery on canonical main without publishing, then proceed with exact assets.
+
 ### Startup Terminal Protocol Candidate (Checkpoint104)
 
 Native68/run42529195934 passed packaged setup but both guided cases failed

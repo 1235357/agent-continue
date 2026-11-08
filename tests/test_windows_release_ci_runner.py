@@ -213,7 +213,7 @@ foreach ($writable in @($false,$true)) {{
 
     def test_staging_failure_runs_mocked_account_cleanup_and_removes_only_owned_scratch(self):
         with tempfile.TemporaryDirectory(prefix="ac-ci-cleanup-fixture-") as temp:
-            root = Path(temp)
+            root = Path(temp).resolve()
             for relative in ("repo/scripts", "repo/native/bootstrap", "repo/native/desktop-commander", "temp"):
                 (root / relative).mkdir(parents=True)
             sentinel = root / "temp/do-not-delete.txt"
@@ -259,11 +259,12 @@ foreach ($bad in @('C:\\ci-other\\out', 'C:\\ci\\..\\escape', 'C:\\ci')) {
 
     def test_receipt_requires_exact_inventory_digest_account_and_success_flags(self):
         with tempfile.TemporaryDirectory(prefix="ac-ci-receipt-fixture-") as temp:
-            output = Path(temp) / "work/output"
+            root = Path(temp).resolve()
+            output = root / "work/output"
             output.mkdir(parents=True)
             (output / "agent-continue-windows-administrator-x64.zip").write_bytes(b"non-executable fixture")
             body = f"""
-$root = {ps_quote(temp)}; $sid = '{SID}'
+$root = {ps_quote(root)}; $sid = '{SID}'
 $output = Join-Path $root 'work\\output'
 $receiptPath = Join-Path $output 'ordinary-token.json'
 $hash = (Get-FileHash -LiteralPath (Join-Path $output 'agent-continue-windows-administrator-x64.zip') -Algorithm SHA256).Hash.ToLowerInvariant()
