@@ -2,6 +2,33 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Hosted53 Passed; CMD Fixture Engine Cache Corrected (Checkpoint89)
+
+Main e86ecb5852b453625366876cfc1ef75a37fbcb24 is pushed and verified in IAB;
+the working tree was clean after that commit. Native51 Windows128799399869
+actually passed the entire native-release53/53, including the canonical scratch
+and unchanged trust checks. This closes CI50's five preparation-fixture failures.
+It then reached setup-release-tests.py and failed three guided CMD subcases of
+that38-test suite: Windows PowerShell's own ModuleAnalysisCache changed the
+disposable profile after a refused invocation. Later steps remain unaccepted.
+Official raw evidence is local checkpoint89-ci51-windows-log.txt.
+
+Microsoft's about_Environment_Variables documents the asynchronous cache and
+PSModuleAnalysisCachePath=NUL on Windows. Only the fixture's child environment
+now sets that value. User/system environment and production installers are
+unchanged; the snapshot does NOT exclude ModuleAnalysisCache or other directories.
+A controlled regression reproduced the exact changed-path assertion RED, then
+passed after the environment correction. Its reverse control still rejects a
+synthetic actual installer marker. Parent full ZIP suite39/39 passed21.341s,
+zero skips. The new hosted run remains required.
+
+Additional local release checks passed: Windows CI-token contracts20/20,
+installer pin13/13 and Setup Plan15 passes/2 platform skips. These do not prove
+actual CI account creation, public acquisition, final installation or publication.
+r8 stays paused. Existing ordinary/Dot administrator proof is retained; whole-
+browser saved-running recovery and final-artifact gates are still open. Store
+English/support is saved draft only, with no new Release or review submission.
+
 ### Remaining Fixture Drift And Broader Local Installation Proof (Checkpoint88)
 
 Main28f40ac73a93c803c62aef17b4e0162acba4cac6 was pushed. Native50 Windows

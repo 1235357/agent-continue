@@ -1,5 +1,23 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Hosted53 Clearance And Guided CMD Cache Fixture (Checkpoint89)
+
+- Pushed/observed e86ecb5852b453625366876cfc1ef75a37fbcb24. Native51 Windows
+  128799399869 actually passed native-release53/53. CI50's five short-path
+  preparation failures are now hosted-cleared, not merely local passes.
+- Next setup ZIP step failed three guided CMD subcases within its38-test suite:
+  PowerShell's asynchronous ModuleAnalysisCache appeared after refusal. Local
+  raw evidence checkpoint89-ci51-windows-log.txt retains this exact assertion.
+  Microsoft about_Environment_Variables documents cache control. Test child env
+  now sets PSModuleAnalysisCachePath=NUL, without excluding cache paths from the
+  file snapshot or changing production/user environment. Controlled regression
+  was RED; final full ZIP39/39 passed21.341s, with a reverse test proving real
+  installation writes remain rejected. Later hosted skipped steps are not passes.
+- Local CI-token20/20, installer-pin13/13 and Setup Plan15pass/2platform-skip
+  checks passed. No actual account creation or installer activation is implied.
+  Same r8 stays paused; no settled request or probe was replayed. Whole-browser
+  recovery, final-artifact delivery and actual Release/Store submission are open.
+
 ## Remaining Hosted Fixture Failures And Local Install Chain (Checkpoint88)
 
 - Main28f40ac73a93c803c62aef17b4e0162acba4cac6 pushed; Native50 Windows

@@ -772,6 +772,8 @@ class SetupReleaseTests(unittest.TestCase):
             "PATH": os.pathsep.join((str(system32), str(ps.parent))), "PATHEXT": ".COM;.EXE;.BAT;.CMD",
             "USERPROFILE": str(sandbox), "LOCALAPPDATA": str(local), "APPDATA": str(roaming),
             "TEMP": str(scratch), "TMP": str(scratch),
+            # Suppress the engine's asynchronous cache, not installer writes under test.
+            "PSModuleAnalysisCachePath": "NUL",
         }
         self.assertIsNone(shutil.which("node", path=env["PATH"]), "guided fixture must not have Node on PATH")
 
@@ -945,6 +947,40 @@ class SetupReleaseTests(unittest.TestCase):
                     self.assertNotIn("exported Agent Continue setup JSON", out)
                     self.assertFalse(destination.exists())
                     self.assertFalse(local.exists())
+
+    def test_guided_refusal_disables_engine_cache_but_still_detects_installer_writes(self):
+        for write_kind in ("engine-cache", "installer-marker"):
+            with self.subTest(write_kind=write_kind), tempfile.TemporaryDirectory(prefix="ac-guided-cache-") as temporary:
+                root = Path(temporary).resolve()
+                extracted = root / "extracted"
+                extracted.mkdir()
+                calls = []
+
+                def refused(command, **kwargs):
+                    env = kwargs["env"]
+                    calls.append(command)
+                    local = Path(env["LOCALAPPDATA"])
+                    if write_kind == "installer-marker" or env.get("PSModuleAnalysisCachePath") != "NUL":
+                        relative = "AgentContinue/installed.marker" if write_kind == "installer-marker" else \
+                            "Microsoft/Windows/PowerShell/ModuleAnalysisCache"
+                        target = local / relative
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        target.write_bytes(b"synthetic write")
+                    error = "agent_continue_install_failed: interactive_terminal_required" if command[-1] == "a" * 32 else "invalid_arguments"
+                    return subprocess.CompletedProcess(command, 1, "", error)
+
+                probe = unittest.TestCase()
+                with mock.patch.dict(os.environ, {"SystemRoot": str(root / "system"), "AGENT_CONTINUE_TEST_GUIDED_PTY": "0"}), \
+                        mock.patch.object(shutil, "which", return_value=None), \
+                        mock.patch.object(subprocess, "run", side_effect=refused):
+                    run = lambda: SetupReleaseTests.check_guided_cmd(probe, root / "powershell/powershell.exe", extracted, root)
+                    if write_kind == "installer-marker":
+                        with self.assertRaisesRegex(AssertionError, "guided command changed the fixture tree"):
+                            run()
+                    else:
+                        run()
+                        self.assertEqual(len(calls), 3)
+                        self.assertFalse((root / "guided-cmd/AppData/Local/Microsoft/Windows/PowerShell/ModuleAnalysisCache").exists())
 
     def test_release_workflow_carries_matching_setup_assets(self):
         workflow = (REPO / ".github/workflows/release.yml").read_text(encoding="utf-8")
