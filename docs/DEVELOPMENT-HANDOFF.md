@@ -2,6 +2,23 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### CI63 Output Gate Investigation (Checkpoint100)
+
+Native63/run42524370728 passed the corrected initial native suite but stopped
+at the early protocol group: exact-shell unconfirmed after15.840s,5/6 cases
+passed, packaged-manager passed181.185s. The new diagnostics prove every
+completed output read was delivered immediately and returned without provider
+error in roughly1000ms. A production transport stall is not demonstrated.
+Local Node24.22.2 exact-shell passed9.433s. The fixture now uses direct .NET
+file/sleep/console calls instead of module-loaded PowerShell cmdlets, while
+keeping its100ms initial wait, original20s gate,15s observation and45s case
+bounds. Fixed started/released witness values make a future cold-start versus
+gate/output failure distinguishable without recording command/output content.
+The revised exact-shell passed locally1.479s with11 correlated responses;
+all10 output-observer unit tests passed. This is test isolation, not a claim
+that the exact hosted-runner startup delay has been proved or production
+PowerShell changed. Full CI, Release and Store submission are still pending.
+
 ### CI62 Startup Projection Race (Checkpoint99)
 
 Native62/run42523896180 Windows stopped in the initial native npm suite at

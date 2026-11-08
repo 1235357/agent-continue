@@ -65,6 +65,7 @@ for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle', 'replay
     const root = sealed ? bundle + '.state' : installed ? path.join(installDir, 'state') : path.join(scratch, "state, with spaces's $literal");
     const ownedFile = path.join(root, 'work', 'through-tunnel.txt');
     const exactOutputRelease = path.join(root, 'work', 'exact-output-release');
+    const exactOutputPhase = path.join(root, 'work', 'exact-output-phase');
     const guardLog = path.join(scratch, 'guard.log');
     const system = process.env.SystemRoot;
     const requests = [
@@ -87,9 +88,10 @@ for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle', 'replay
     if (exactShell) {
       const operation = 'abcdabcd-abcd-4abc-8abc-abcdabcdabcd';
       const command = process.platform === 'win32'
-        ? "$gate = '" + exactOutputRelease.replaceAll("'", "''") + "'; $clock = [Diagnostics.Stopwatch]::StartNew(); " +
-          "while (-not (Test-Path -LiteralPath $gate)) { if ($clock.ElapsedMilliseconds -ge 20000) { throw 'fixture_output_gate_timeout' }; Start-Sleep -Milliseconds 25 }; " +
-          "Write-Output ('AC_TUNNEL_' + 'EXACT')"
+        ? "$gate = '" + exactOutputRelease.replaceAll("'", "''") + "'; $phase = '" + exactOutputPhase.replaceAll("'", "''") + "'; " +
+          "[IO.File]::WriteAllText($phase, 'started'); $clock = [Diagnostics.Stopwatch]::StartNew(); " +
+          "while (-not [IO.File]::Exists($gate)) { if ($clock.ElapsedMilliseconds -ge 20000) { throw 'fixture_output_gate_timeout' }; [Threading.Thread]::Sleep(25) }; " +
+          "[IO.File]::WriteAllText($phase, 'released'); [Console]::WriteLine(('AC_TUNNEL_' + 'EXACT'))"
         : "printf '%s' 'AC_TUNNEL_EXACT'";
       const shell = process.platform === 'win32'
         ? path.join(system, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe').replaceAll('\\', '/')
@@ -220,6 +222,9 @@ for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle', 'replay
               t.diagnostic(JSON.stringify({ phase: 'exact-output-observation',
                 code: /^test_process_[a-z_]+$/.test(error.message) ? error.message : 'test_output_failed',
                 received: replies.length, requested: requests.length, pendingReads: outputReads.size,
+                outputGateExists: fs.existsSync(exactOutputRelease),
+                outputPhase: fs.existsSync(exactOutputPhase) && ['started', 'released'].includes(fs.readFileSync(exactOutputPhase, 'utf8'))
+                  ? fs.readFileSync(exactOutputPhase, 'utf8') : 'not-observed',
                 reads: outputReadTimings.map(({ opened, ...item }) => ({ ...item,
                   elapsedMs: Math.round(performance.now() - opened) })),
                 lastResponse, exitCode: child?.exitCode, stderrBytes }));

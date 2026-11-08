@@ -1,5 +1,17 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## CI63 Output Observation Investigation (Checkpoint100)
+
+Native63 passed initial native tests; protocol5/6, exact-shell timed out15.840s.
+All completed read-only polls settled around1000ms without provider error;
+packaged manager/installer/Pause passed181.185s. The fixture replaces cmdlet
+module dependencies with .NET-only gate/witness/output calls, retaining all
+original deadlines and exact-process/replay assertions. Node24.22.2 local
+before9.433s/after1.479s is a bounded observation, not a proved runner root
+cause.10 output helper tests passed; future failure reports fixed gate/phase
+observations only. No production runtime change, control replay, Release or
+Store submission. R11 stays revoked/not running.
+
 ## CI62 Startup Projection Test Corrected (Checkpoint99)
 
 Native62 failed the initial supervision fixture's second observation: internal
