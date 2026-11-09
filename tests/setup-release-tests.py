@@ -792,6 +792,14 @@ if ($hash.Hash -cne $env:AC_MODULE_EXPECTED -or -not $json.ok -or
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertEqual(result.stdout.strip(), "exact-os-modules-ready")
             self.assertEqual(result.stderr, "")
+            reported = subprocess.run([ps, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
+                code.replace("\nInitialize-InstallerModules\n",
+                    "\nInitialize-InstallerModules -ReportGuidedStartup\nInitialize-InstallerModules -ReportGuidedStartup\n")],
+                cwd=root, env=env, capture_output=True, text=True, timeout=20)
+            self.assertEqual(reported.returncode, 0, reported.stdout + reported.stderr)
+            self.assertEqual(reported.stdout.splitlines(), ["Preparing Windows utility module.",
+                "Preparing Windows archive module.", "Windows setup modules ready.", "exact-os-modules-ready"])
+            self.assertEqual(reported.stderr, "")
 
     @unittest.skipUnless(os.name == "nt", "Windows PowerShell refusal before module loading")
     def test_refused_guided_input_does_not_load_installer_modules(self):

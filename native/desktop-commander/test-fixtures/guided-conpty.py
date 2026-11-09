@@ -193,6 +193,12 @@ def read_stage(terminal, deadline, stage, *, prompt=None, line_count=None, echo=
         terminal.initial_protocol_observation = {
             "state": state, "receivedBytes": len(raw), "cursorReplies": cursor_queries,
             "controls": [name for name, pattern in controls if re.search(pattern, raw)],
+            "startupPhase": max((
+                (observed.rfind(marker), phase) for marker, phase in (
+                    (b"Preparing Windows utility module.", "utility"),
+                    (b"Preparing Windows archive module.", "archive"),
+                    (b"Windows setup modules ready.", "ready")) if marker in observed
+            ), default=(-1, "not-observed"))[1],
         }
     raise FixtureError(f"terminal_timeout_{stage}_{state}")
 

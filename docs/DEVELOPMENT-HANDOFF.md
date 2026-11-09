@@ -1,5 +1,34 @@
 # Agent Continue Development Handoff
 
+## Guided Startup Phase Diagnosis (2026-11-09)
+
+Fresh native run42710495562, Windows job129478424083, failed in6m6s.
+Authenticated IAB log readback shows packaged IPC passed3m24s and the pinned
+runtime download passed3s. Both paired PowerShell and cold-CMD guided cases
+then stopped at the first prompt, before acquisition was observed:115/85
+control-only bytes, zero cursor replies, about20.7s each. The close-only reader
+was not reached in these cases; this is not evidence that its correction failed.
+The first-prompt root cause remains unresolved, not a proven module-import issue.
+
+The guided-only installer now emits three fixed module-preparation markers.
+The fixture retains only the last fixed phase enum, byte count and closed
+terminal-control facts. No input, key, path, terminal transcript or raw error is
+recorded. Quiet non-guided JSON output and refusal-before-import are preserved;
+test timeouts are unchanged. The phase marker is diagnostic, not a claimed fix.
+
+Local checks passed:15 protocol tests,2 closed-schema tests,166 PowerShell
+integrity checks, and module-initialization/refusal tests. Actual updated-source
+PowerShell-paired and CMD-unpaired loopback tests passed2/2, including file
+roundtrip, connection reconciliation and pause. Log:
+.artifacts/release-306-guided-phase-local.log. They used compatible existing
+Node, not cold provisioning or real hosted ChatGPT/Dot access.
+
+Earlier paired3.0.6 packages and npm closure below are preserved tested
+checkpoints. This installer-source change means their setup-entry closure must
+be rebuilt and reverified before final publication; do not reuse their old
+hashes as current-source evidence. Scheduler runtime remains4be2739. No release,
+Store mutation, production connection change or live-task replacement occurred.
+
 ## 3.0.6 Paired Package And Guided-Close Evidence (2026-11-09)
 
 Core-send source remains main4be2739. The completed combined setup builder

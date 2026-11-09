@@ -52,8 +52,9 @@ function terminalDiagnostic(root) {
     if (!info.isFile() || info.isSymbolicLink() || info.size > 2048) return { observed: false };
     const report = JSON.parse(fs.readFileSync(file, 'utf8'));
     if (!report || typeof report !== 'object' || Array.isArray(report)
-      || Object.keys(report).sort().join(',') !== 'controls,cursorReplies,receivedBytes,state'
+      || Object.keys(report).sort().join(',') !== 'controls,cursorReplies,receivedBytes,startupPhase,state'
       || !['no_bytes', 'control_only', 'prompt_present', 'other_output'].includes(report.state)
+      || !['not-observed', 'utility', 'archive', 'ready'].includes(report.startupPhase)
       || !Number.isInteger(report.receivedBytes) || report.receivedBytes < 0 || report.receivedBytes > 65536
       || !Number.isInteger(report.cursorReplies) || report.cursorReplies < 0 || report.cursorReplies > 8
       || !Array.isArray(report.controls) || report.controls.length > 6
@@ -61,7 +62,7 @@ function terminalDiagnostic(root) {
       || report.controls.some(value => !['cursor-hide', 'cursor-query', 'cursor-show',
         'erase-display', 'sgr', 'sync-output'].includes(value))) return { observed: false };
     return { observed: true, state: report.state, receivedBytes: report.receivedBytes,
-      cursorReplies: report.cursorReplies, controls: report.controls };
+      cursorReplies: report.cursorReplies, controls: report.controls, startupPhase: report.startupPhase };
   } catch { return { observed: false }; }
 }
 
@@ -88,7 +89,7 @@ test('terminal failure diagnostics disclose closed protocol facts only', t => {
   const file = path.join(root, 'guided-terminal-failure.json');
   assert.deepEqual(terminalDiagnostic(root), { observed: false });
   const valid = { state: 'control_only', receivedBytes: 18, cursorReplies: 1,
-    controls: ['cursor-hide', 'cursor-query', 'sgr'] };
+    controls: ['cursor-hide', 'cursor-query', 'sgr'], startupPhase: 'not-observed' };
   fs.writeFileSync(file, JSON.stringify(valid));
   assert.deepEqual(terminalDiagnostic(root), { observed: true, ...valid });
   for (const value of [
@@ -96,6 +97,7 @@ test('terminal failure diagnostics disclose closed protocol facts only', t => {
     { ...valid, controls: ['sgr', 'sgr'] }, { ...valid, cursorReplies: 9 },
     { ...valid, receivedBytes: 65537 }, { ...valid, receivedBytes: 1.5 },
     { ...valid, state: 'PRIVATE_MESSAGE' },
+    { ...valid, startupPhase: 'PRIVATE_PATH' },
   ]) {
     fs.writeFileSync(file, JSON.stringify(value));
     assert.deepEqual(terminalDiagnostic(root), { observed: false });

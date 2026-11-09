@@ -145,7 +145,7 @@ class GuidedTerminalTests(unittest.TestCase):
         observation = terminal.initial_protocol_observation
         self.assertEqual(observation, {
             "state": "other_output", "receivedBytes": len(b"\x1b[?25l\x1b[0m" + private),
-            "cursorReplies": 0, "controls": ["cursor-hide", "sgr"],
+            "cursorReplies": 0, "controls": ["cursor-hide", "sgr"], "startupPhase": "not-observed",
         })
         self.assertNotIn("PRIVATE", repr(observation))
 
@@ -160,8 +160,21 @@ class GuidedTerminalTests(unittest.TestCase):
             FIXTURE.read_stage(terminal, time.monotonic() + 1, 1, prompt=FIXTURE.PROMPT_BYTES[0])
         self.assertEqual(terminal.initial_protocol_observation, {
             "state": "control_only", "receivedBytes": 8, "cursorReplies": 1,
-            "controls": ["cursor-query", "sgr"],
+            "controls": ["cursor-query", "sgr"], "startupPhase": "not-observed",
         })
+
+    def test_startup_failure_retains_only_the_last_fixed_preparation_phase(self):
+        for markers, expected in (
+                ([b"Preparing Windows utility module."], "utility"),
+                ([b"Preparing Windows utility module.", b"Preparing Windows archive module."], "archive"),
+                ([b"Windows setup modules ready."], "ready")):
+            with self.subTest(phase=expected):
+                terminal = Terminal(b"\r\n".join(markers) + b"\r\nPRIVATE_PATH_AND_INPUT", "unused")
+                with self.assertRaises(FIXTURE.FixtureError):
+                    FIXTURE.read_stage(terminal, time.monotonic() + 1, 1,
+                                       prompt=FIXTURE.PROMPT_BYTES[0])
+                self.assertEqual(terminal.initial_protocol_observation["startupPhase"], expected)
+                self.assertNotIn("PRIVATE", repr(terminal.initial_protocol_observation))
 
 
 if __name__ == "__main__":

@@ -1,5 +1,25 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Guided Startup Observation Boundary (2026-11-09)
+
+Native42710495562 Windows129478424083 failed first-prompt observation in both
+paired PowerShell and cold CMD (115/85control-only bytes,0cursor replies,
+acquisition not observed). Packaged IPC and official-client download passed.
+This fresh result does not reach the corrected terminal-close stage and does
+not prove a module-import cause.
+
+Guided-only fixed startup markers now distinguish utility/archive/ready from
+not-observed without retaining terminal text or user input. The closed-schema
+fixture rejects arbitrary phase data.15 protocol tests,2 diagnostic tests,
+166 integrity checks, module/refusal checks and actual local guided2/2 pass.
+Local log:.artifacts/release-306-guided-phase-local.log. No test timeout was
+extended; no production credentials, browser grants or live tasks were used.
+
+The prior paired3.0.6 package hashes below remain historical test artifacts;
+their setup closure predates this installer change and needs a new verified
+build before publication. Installed real-page send and protected lifecycle
+gates remain open. Goal stays active; no Release or Store submission occurred.
+
 ## 3.0.6 Final Store ZIP And Installer Fixture (2026-11-09)
 
 The paired public-format candidates are now built, not published. All251

@@ -71,15 +71,21 @@ $script:acReleaseTag = ''
 $script:acAdministratorInstallerSha256 = ''
 
 function Initialize-InstallerModules {
+    param([switch]$ReportGuidedStartup)
     if ($script:acModulesInitialized) { return }
     # PS7 parents can pass their PSModulePath to PS5.1. Load OS modules only
     # after cheap refusal checks, before the first hashing/archive/JSON use.
     if ($PSVersionTable.PSEdition -eq 'Desktop') {
         foreach ($module in @('Microsoft.PowerShell.Utility', 'Microsoft.PowerShell.Archive')) {
+            if ($ReportGuidedStartup) {
+                if ($module -eq 'Microsoft.PowerShell.Utility') { [Console]::WriteLine('Preparing Windows utility module.') }
+                else { [Console]::WriteLine('Preparing Windows archive module.') }
+            }
             Import-Module (Join-Path $PSHOME ("Modules\$module\$module.psd1")) -ErrorAction Stop
         }
     }
     $script:acModulesInitialized = $true
+    if ($ReportGuidedStartup) { [Console]::WriteLine('Windows setup modules ready.') }
 }
 
 function Assert-BrowserSetupContinuationInput {
@@ -537,7 +543,7 @@ try {
             if ($ExtensionId -cnotmatch '\A[a-p]{32}\z') { throw 'invalid_extension_id' }
             if (-not $script:acExistingBrowserInstall) {
             if ($Host.Name -cne 'ConsoleHost' -or [Console]::IsInputRedirected) { throw 'interactive_terminal_required' }
-            Initialize-InstallerModules
+            Initialize-InstallerModules -ReportGuidedStartup
             if (-not (Get-AdjacentSetupArchive) -and
                 -not (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'bin.mjs') -PathType Leaf) -and
                 -not ($script:acReleaseTag -and $ExpectedSumsSha256)) { throw 'payload_incomplete' }
