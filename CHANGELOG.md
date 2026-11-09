@@ -1,6 +1,6 @@
 # Changelog
 
-## [3.0.5] - Unreleased
+## [3.0.5] - 2026-11-09
 
 - Wait in the extension worker for delayed Send readiness after preparing a
   controlled editor. A present but disabled or temporarily unmounted Send no
