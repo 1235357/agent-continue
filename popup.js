@@ -26,6 +26,7 @@ const fallbackConfig = {
   quietHours: { enabled: false, start: '23:00', end: '07:00' },
 };
 const normalized = value => ({ ...clone(fallbackConfig), ...clone(value || {}),
+  extensionPriority: true,
   queue: Array.isArray(value?.queue) ? clone(value.queue) : [],
   quietHours: { ...fallbackConfig.quietHours, ...(value?.quietHours || {}) },
 });
@@ -53,7 +54,7 @@ let targetSignature = '';
 let queueSignature = '';
 let currentSourceIdentity = null;
 const configFields = ['interval', 'maxSends', 'stopMarkers', 'preventDiscard', 'mode',
-  'scheduleMode', 'startImmediately', 'waitForIdle', 'extensionPriority', 'sendMethod', 'quietEnabled', 'quietStart', 'quietEnd'];
+  'scheduleMode', 'startImmediately', 'waitForIdle', 'sendMethod', 'quietEnabled', 'quietStart', 'quietEnd'];
 const editableButtons = ['importPrompt', 'importQueue', 'addToQueue', 'loadTemplate', 'deleteTemplate',
   'saveTemplate', 'importConfig', 'saveQueueItem'];
 const eventLabels = () => ({
@@ -135,7 +136,6 @@ function gatherConfig() {
     scheduleMode: $('scheduleMode').value,
     startImmediately: $('startImmediately').checked,
     waitForIdle: $('waitForIdle').checked,
-    extensionPriority: $('extensionPriority').checked,
     sendMethod: $('sendMethod').value,
     keepAwake: $('keepAwake').checked,
     quietHours: { enabled: $('quietEnabled').checked, start: $('quietStart').value, end: $('quietEnd').value },
@@ -304,7 +304,7 @@ function paint(job) {
     stopMarkers: (config.stopMarkers || []).join('\n'), mode: config.mode, scheduleMode: config.scheduleMode, sendMethod: config.sendMethod,
     quietStart: config.quietHours.start, quietEnd: config.quietHours.end })) setField(id, value);
   for (const [id, value] of Object.entries({ preventDiscard: config.preventDiscard, keepAwake: config.keepAwake,
-    startImmediately: config.startImmediately, waitForIdle: config.waitForIdle, extensionPriority: config.extensionPriority, quietEnabled: config.quietHours.enabled })) $(id).checked = !!value;
+    startImmediately: config.startImmediately, waitForIdle: config.waitForIdle, quietEnabled: config.quietHours.enabled })) $(id).checked = !!value;
   $('start').hidden = enabled || activating; $('start').disabled = !loaded || busy;
   $('pause').hidden = !enabled && !activating; $('pause').disabled = false;
   $('resume').hidden = enabled || activating || !job; $('resume').disabled = !loaded || busy;
@@ -437,7 +437,7 @@ function checkedImport(value) {
   if (!source || typeof source !== 'object' || Array.isArray(source)) throw new Error(t('配置文件格式不正确。'));
   const next = clone(draftConfig);
   for (const key of ['intervalMinutes', 'maxSends', 'stopMarkers', 'preventDiscard', 'mode', 'scheduleMode',
-    'keepAwake', 'startImmediately', 'waitForIdle', 'sendMethod', 'quietHours', 'prompt', 'queue']) {
+    'keepAwake', 'startImmediately', 'waitForIdle', 'extensionPriority', 'sendMethod', 'quietHours', 'prompt', 'queue']) {
     if (Object.hasOwn(source, key)) next[key] = source[key];
   }
   if ('prompt' in source && typeof source.prompt !== 'string') throw new Error(t('提示词必须是文本。'));

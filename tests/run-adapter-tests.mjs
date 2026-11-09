@@ -84,12 +84,12 @@ try {
     assert.equal(await page.evaluate(()=>fixture.inputEvents),0);
   });
 
-  await scenario('Existing user draft is preserved', async ({page,args}) => {
+  await scenario('Scheduled send replaces existing text with the configured prompt', async ({page,args}) => {
     await page.locator('#prompt-textarea').fill('My unsent personal draft');
     const outcome=await page.evaluate(pageAction,args);
-    assert.equal(outcome.status,'draft',JSON.stringify(outcome));
-    assert.equal(await page.locator('#prompt-textarea').innerText(),'My unsent personal draft');
-    assert.equal(await page.evaluate(()=>fixture.sendClicks),0);
+    assert.equal(outcome.status,'sent',JSON.stringify(outcome));
+    assert.deepEqual(await page.evaluate(()=>fixture.sentTexts),[prompt]);
+    assert.equal(await page.evaluate(()=>fixture.sendClicks),1);
   });
 
   await scenario('A paused job cannot fill or send', async ({page,args}) => {

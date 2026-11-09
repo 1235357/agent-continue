@@ -5,6 +5,10 @@ import test from 'node:test';
 
 const source = pageAction.toString();
 
+test('send implementation has no content-change veto or refill-count abort', () => {
+  assert.doesNotMatch(source, /changedDraft|composer-changed|填写后检测到内容变化|重新填写后检测到内容变化|refills === 2/);
+});
+
 // Deliberately small DOM contract: selectors are routed, not browser-parsed.
 // Coverage excludes real layout, trusted events, ProseMirror/React integration,
 // contenteditable serialization, stop controls, and cross-run retries.
@@ -124,7 +128,7 @@ function fixture(options = {}) {
       if (message.type === 'WAIT_RUN') {
         assert.ok([50, 60, 150, 180].includes(message.delayMs));
         extensionWaits++;
-        if (options.denyWait) return { ok: true, allowed: false };
+        if (options.denyWait || options.authorizeWait?.(state, message) === false) return { ok: true, allowed: false };
         advanceClock(message.delayMs);
         return { ok: true, allowed: true };
       }
@@ -158,6 +162,42 @@ test('extension clock cancellation before dispatch does not submit', async () =>
   assert.equal((await h.run()).status, 'error');
   assert.equal(h.state.clicks, 0);
   assert.equal(h.clocks().pageTimerCalls, 0);
+});
+
+test('repeated text changes during final settling reassert the prompt without replaying submission', async () => {
+  let changes = 0;
+  const h = fixture({
+    args: { extensionClock: true, extensionPriority: false },
+    authorize: state => {
+      if (state.checks === 3) state.editor.value = 'first intervening text';
+      return { ok: true, allowed: true };
+    },
+    authorizeWait: (state, message) => {
+      if (state.checks === 3 && message.delayMs === 180 && changes < 5) {
+        state.editor.value = 'intervening text ' + ++changes;
+      }
+      return true;
+    },
+  });
+  assert.equal((await h.run()).status, 'sent');
+  assert.equal(changes, 5);
+  assert.deepEqual(h.state.sentTexts, ['continue fixture']);
+  assert.equal(h.state.clicks, 1);
+});
+
+test('a pause observed during replacement settling prevents the one dispatch', async () => {
+  const h = fixture({
+    args: { extensionClock: true, extensionPriority: false },
+    authorize: state => {
+      if (state.checks === 3) state.editor.value = 'intervening text';
+      return { ok: true, allowed: true };
+    },
+    authorizeWait: state => state.checks !== 3,
+  });
+  assert.equal((await h.run()).status, 'error');
+  assert.equal(h.state.clicks, 0);
+  assert.equal(h.state.keys, 0);
+  assert.equal(h.state.editor.value, '');
 });
 
 for (const [name, options] of [
@@ -203,7 +243,7 @@ test('Dot identity disappearing during authorization fails closed', async () => 
   } });
   assert.equal((await f.run()).status, 'cancelled');
   assert.equal(f.state.clicks, 0);
-  assert.equal(f.state.editor.value, '');
+  assert.equal(f.state.editor.value, 'continue fixture', 'Lost target identity forbids cleanup edits too');
 });
 
 test('delayed acceptance is confirmed with exactly one click', async () => {
@@ -261,21 +301,41 @@ test('a recycled known message node remains uncertain even with new submitted te
   assert.equal(f.state.keys, 0);
 });
 
-test('preexisting human draft is preserved before authorization', async () => {
+test('scheduled send replaces preexisting text with the configured prompt', async () => {
   const draft = '  human draft\n\n';
   const f = fixture({ draft });
-  assert.equal((await f.run()).status, 'draft');
-  assert.equal(f.state.editor.value, draft);
-  assert.equal(f.state.checks, 0);
-  assert.equal(f.state.clicks, 0);
+  assert.equal((await f.run()).status, 'sent');
+  assert.deepEqual(f.state.sentTexts, ['continue fixture']);
+  assert.equal(f.state.clicks, 1);
 });
 
-test('human edit during post-fill settling is preserved', async () => {
+for (const legacyPriority of [undefined, false]) {
+  test(`mandatory priority replaces changes after fill with legacy priority=${legacyPriority}`, async () => {
+    const f = fixture({ args: { extensionPriority: legacyPriority } });
+    f.state.schedule(60, () => { f.state.editor.value = 'changed during settling'; });
+    assert.equal((await f.run()).status, 'sent');
+    assert.deepEqual(f.state.sentTexts, ['continue fixture']);
+    assert.equal(f.state.clicks, 1);
+  });
+}
+
+test('mandatory priority does not abort for repeated edits during authorization', async () => {
+  const f = fixture({ args: { extensionPriority: false }, authorize: state => {
+    if (state.checks >= 3) state.editor.value = `revision ${state.checks}`;
+    return { ok: true, allowed: true };
+  } });
+  assert.equal((await f.run()).status, 'sent');
+  assert.deepEqual(f.state.sentTexts, ['continue fixture']);
+  assert.equal(f.state.clicks, 1);
+  assert.equal(f.state.keys, 0);
+});
+
+test('text changes during post-fill settling do not veto scheduled sending', async () => {
   const f = fixture();
   f.state.schedule(60, () => { f.state.editor.value = 'human revision  '; });
-  assert.equal((await f.run()).status, 'draft');
-  assert.equal(f.state.editor.value, 'human revision  ');
-  assert.equal(f.state.clicks, 0);
+  assert.equal((await f.run()).status, 'sent');
+  assert.deepEqual(f.state.sentTexts, ['continue fixture']);
+  assert.equal(f.state.clicks, 1);
 });
 
 test('human edit concurrent with revocation is not cleared', async () => {
@@ -288,16 +348,14 @@ test('human edit concurrent with revocation is not cleared', async () => {
   assert.equal(f.state.clicks, 0);
 });
 
-test('human edit during final authorization prevents submission', async () => {
-  // Safety regression assertion, not an expectation of the current defect:
-  // textarea childNodes do not track value, so plainDraft can mask value edits.
+test('text changes during final authorization are replaced before submission', async () => {
   const f = fixture({ authorize: state => {
     if (state.checks === 3) state.editor.value += ' ';
     return { ok: true, allowed: true };
   } });
-  assert.equal((await f.run()).status, 'blocked');
-  assert.equal(f.state.editor.value, 'continue fixture ');
-  assert.equal(f.state.clicks, 0);
+  assert.equal((await f.run()).status, 'sent');
+  assert.deepEqual(f.state.sentTexts, ['continue fixture']);
+  assert.equal(f.state.clicks, 1);
 });
 
 test('priority mode reasserts the configured text in an ordinary ChatGPT composer', async () => {
@@ -314,12 +372,12 @@ test('priority mode reasserts the configured text in an ordinary ChatGPT compose
 test('pause during priority reassertion still wins before dispatch', async () => {
   const f = fixture({ args: { extensionPriority: true }, authorize: state => {
     if (state.checks === 3) state.editor.value = 'another message';
-    return { ok: true, allowed: state.checks < 4 };
+    return { ok: true, allowed: state.checks < 3 };
   } });
   assert.equal((await f.run()).status, 'cancelled');
   assert.equal(f.state.clicks, 0);
   assert.equal(f.state.keys, 0);
-  assert.equal(f.state.editor.value, '');
+  assert.equal(f.state.editor.value, 'another message');
 });
 
 for (const [status, acceptDelay] of [['sent', 0], ['unknown', 10000]]) {
@@ -332,29 +390,29 @@ for (const [status, acceptDelay] of [['sent', 0], ['unknown', 10000]]) {
     const outcome = await f.run();
     assert.deepEqual({ status: outcome.status, sentTexts: f.state.sentTexts },
       { status, sentTexts: ['continue fixture'] });
-    assert.equal(f.state.checks, 5);
+    assert.equal(f.state.checks, 3);
     assert.equal(f.state.clicks, 1);
     assert.equal(f.state.keys, 0);
   });
 }
 
-test('priority does not keep refilling while the draft keeps changing', async () => {
+test('priority replaces repeated text changes once without an authorization refill loop', async () => {
   const f = fixture({ args: { extensionPriority: true }, authorize: state => {
     if (state.checks >= 3) state.editor.value = `revision ${state.checks}`;
     return { ok: true, allowed: true };
   } });
-  assert.equal((await f.run()).status, 'blocked');
-  assert.equal(f.state.checks, 5);
-  assert.equal(f.state.editor.value, 'revision 5');
-  assert.equal(f.state.clicks, 0);
+  assert.equal((await f.run()).status, 'sent');
+  assert.equal(f.state.checks, 3);
+  assert.deepEqual(f.state.sentTexts, ['continue fixture']);
+  assert.equal(f.state.clicks, 1);
   assert.equal(f.state.keys, 0);
 });
 
 for (const [guard, status] of [['pause', 'cancelled'], ['attachment', 'draft'], ['identity loss', 'cancelled']]) {
-  for (const check of [4, 5]) {
+  for (const check of [2, 3]) {
     test(`priority respects ${guard} at authorization check ${check}`, async () => {
       const f = fixture({ dot: true, args: { extensionPriority: true }, authorize: state => {
-        if (state.checks >= 3) state.editor.value = `revision ${state.checks}`;
+        if (state.checks >= 2) state.editor.value = `revision ${state.checks}`;
         if (state.checks === check) {
           if (guard === 'pause') return { ok: true, allowed: false };
           if (guard === 'attachment') state.addAttachment();
@@ -374,12 +432,12 @@ for (const [guard, status] of [['pause', 'cancelled'], ['attachment', 'draft'], 
 test('priority cleanup does not edit a composer whose bound identity was lost', async () => {
   const f = fixture({ dot: true, args: { extensionPriority: true }, authorize: state => {
     if (state.checks === 3) state.editor.value = 'first change';
-    if (state.checks === 4) state.loseIdentity();
+    if (state.checks === 3) state.loseIdentity();
     return { ok: true, allowed: true };
   } });
   assert.equal((await f.run()).status, 'cancelled');
-  assert.equal(f.state.checks, 4);
-  assert.equal(f.state.editor.value, 'continue fixture');
+  assert.equal(f.state.checks, 3);
+  assert.equal(f.state.editor.value, 'first change');
   assert.equal(f.state.clicks, 0);
   assert.equal(f.state.keys, 0);
 });

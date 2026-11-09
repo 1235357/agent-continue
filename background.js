@@ -428,7 +428,7 @@ async function finishRound(snapshot, result) {
       job.needsAttention = ['blocked', 'error'].includes(result.status);
       job.statusText = (result.message || t('页面暂不可用。')) + t(' 一分钟后再检查，任务仍保持启用。');
       if (current.lastResult !== result.status || (current.lastDiagnosticCode ?? null) !== (result.diagnosticCode ?? null)) {
-        await logEvent(result.status, result.status === 'draft' ? t('保留现有草稿或附件，等待输入框空闲。') : result.status === 'busy' ? t('目标暂忙或未就绪，延后检查。') : t('页面暂不可用，保持启用并等待恢复。'),
+        await logEvent(result.status, result.status === 'draft' ? t('保留附件，等待附件移除后再检查。') : result.status === 'busy' ? t('目标暂忙或未就绪，延后检查。') : t('页面暂不可用，保持启用并等待恢复。'),
           result.diagnosticCode ? { code: result.diagnosticCode, durationMs: now - snapshot.lastRunAt } : null);
       }
     } else if (result.status === 'done') {
@@ -487,7 +487,7 @@ async function runRound(force = false, expectedJobId = null) {
       const changed = result.assistantToken ? result.assistantToken !== snapshot.assistantToken : result.assistantCount > snapshot.assistantCount;
       if (result.status === 'ready') result = changed ? { status: 'reply-complete' } : { status: 'busy', message: t('等待新的 Agent 回复完成。') };
     } else {
-      result = await executePage({ mode: 'send', expectedUrl: snapshot.url, prompt: currentPrompt(snapshot), runId: snapshot.runId, runDeadline: snapshot.runDeadline, stopMarkers: snapshot.stopMarkers ?? [], waitForIdle: snapshot.waitForIdle ?? false, extensionPriority: snapshot.extensionPriority === true, extensionClock: true, sendMethod: snapshot.sendMethod ?? 'auto', targetIdentity: snapshot.targetIdentity }, snapshot.tabId, snapshot.runDeadline);
+      result = await executePage({ mode: 'send', expectedUrl: snapshot.url, prompt: currentPrompt(snapshot), runId: snapshot.runId, runDeadline: snapshot.runDeadline, stopMarkers: snapshot.stopMarkers ?? [], waitForIdle: snapshot.waitForIdle ?? false, extensionPriority: true, extensionClock: true, sendMethod: snapshot.sendMethod ?? 'auto', targetIdentity: snapshot.targetIdentity }, snapshot.tabId, snapshot.runDeadline);
     }
   } catch { result = snapshot.runKind === 'reply-check' ? { status: 'error', message: t('回复检查暂不可用，继续等待新回复。') } : { status: 'unknown', message: t('后台页面操作未确认。'), diagnosticCode: 'execution-exception' }; }
   return finishRound(snapshot, result);

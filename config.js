@@ -18,7 +18,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   preventDiscard: true,
   keepAwake: false,
   waitForIdle: false,
-  extensionPriority: false,
+  extensionPriority: true,
   sendMethod: 'auto',
   startImmediately: false,
   mode: 'repeat',
@@ -74,7 +74,8 @@ export function readConfig(value = {}, { allowEmpty = false } = {}) {
   for (const key of ['preventDiscard', 'keepAwake', 'waitForIdle', 'startImmediately', 'extensionPriority']) {
     const item = value[key] ?? DEFAULT_CONFIG[key];
     if (typeof item !== 'boolean') throw new Error(t('开关设置必须为布尔值。'));
-    booleans[key] = item;
+    // Keep validating the legacy key, but it can no longer disable delivery.
+    booleans[key] = key === 'extensionPriority' ? true : item;
   }
   const quiet = value.quietHours ?? DEFAULT_CONFIG.quietHours;
   if (!quiet || typeof quiet.enabled !== 'boolean' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(quiet.start) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(quiet.end)) throw new Error(t('静默时段须为有效的本地时间。'));

@@ -1,6 +1,6 @@
 # Chrome Web Store Listing - English
 
-Canonical English listing source for Agent Continue **3.0.2** (prepared source, not yet released or submitted). This edit does not change a saved Store listing, submit a package, publish a release or establish approval/installation. Actual availability and submission state require separate platform receipts. The 3.0.1 submission corrected after Yellow Argon remains pending review; this source update does not withdraw or replace it. Historical v2.2.1 is a separate scheduler-only release; do not replace its assets or describe it as Windows-enabled. The repository's [Windows review notes](https://github.com/1235357/agent-continue/blob/main/docs/STORE-LISTING.windows-candidate.en.md) retain the disclosure and submission checks.
+Canonical English listing source for Agent Continue **3.0.2**. This file does not change a saved Store listing, submit a package, publish a release or establish approval or installation. Actual availability and submission state require separate platform receipts. Historical v2.2.1 is a separate scheduler-only release; do not replace its assets or describe it as Windows-enabled. The repository's [Windows review notes](https://github.com/1235357/agent-continue/blob/main/docs/STORE-LISTING.windows-candidate.en.md) retain the disclosure and submission checks.
 
 After final release and disclosure gates are closed, use the entire **Description** section, including the developer/support block, for the new listing draft. The copy uses plain-text URLs rather than relying on Markdown rendering. Do not withdraw an existing review merely to apply this source copy.
 
@@ -14,7 +14,7 @@ Schedule ChatGPT prompts and optionally connect Windows file, shell and process 
 
 ## Description
 
-Schedule your own prompts in a chosen ChatGPT or Your dot conversation. Repeat a prompt, work through a queue, set an interval and pause whenever needed. You can type a prompt or import text from a local document. The interface defaults to English, with Simplified Chinese available in Settings; your own content is not translated.
+Schedule your own prompts in a chosen ChatGPT or Your dot conversation. Repeat a prompt, work through a queue, set an interval and pause whenever needed. You can type a prompt or import text from a local document. Sends replace unsent text in the bound conversation with your configured prompt. They do not submit attachments. The interface defaults to English, with Simplified Chinese available in Settings; your own content is not translated.
 
 The computer and browser must stay running, with the target conversation open and signed in. Website changes, sleep and background throttling can delay or prevent a send. Delivery is not guaranteed. The extension does not increase account quotas or guarantee that an AI task finishes. If a submission is uncertain, inspect the conversation before continuing.
 
@@ -58,7 +58,7 @@ Type your prompt or import text from a local document. Document parsing takes pl
 
 The interface defaults to English and offers a Simplified Chinese language switch. Your language preference is stored locally; your prompts and custom content are not translated. The Developer & support page shows the developer contacts and installed extension version and offers the same language choices.
 
-Each attempt uses one submission mechanism. A matching new user-message marker is required for confirmation; clearing the composer alone is not success. An unknown result does not trigger an immediate retry, but another attempt may occur after the full normal interval. Delivery is not guaranteed or exactly once. Pause and inspect the conversation if a result is uncertain. Send once now submits a real message, and pause cannot retract an action already dispatched.
+Scheduled sends and Send once now replace unsent text with the configured prompt, including text changed while preparing the send. An attachment, manual Pause, or a different conversation still prevents dispatch. Each attempt uses one submission mechanism. A matching new user-message marker is required for confirmation; clearing the composer alone is not success. An unknown result does not trigger an immediate retry, but another attempt may occur after the full normal interval. Delivery is not guaranteed or exactly once. Pause and inspect the conversation if a result is uncertain. Send once now submits a real message, and pause cannot retract an action already dispatched.
 
 The computer and browser must remain running, with the target tab open and signed in. Background throttling, sleeping pages, and website changes may delay or prevent sending. Optional idle-sleep prevention does not override manual sleep. The extension does not increase account quotas, extend model context, or guarantee completion of an agent task.
 
@@ -131,7 +131,7 @@ Before submission, reconcile actual privacy-form categories with the finalized p
 - Release downloads: https://github.com/1235357/agent-continue/releases
 - Privacy policy source: https://github.com/1235357/agent-continue/blob/main/PRIVACY.md
 
-These are listing-copy links, not evidence of a 3.0.1 upload, approval, publication or installation.
+These are listing-copy links, not evidence of a 3.0.2 upload, approval, publication or installation.
 
 ## Reviewer Test Instructions (500-Character Form)
 
@@ -139,7 +139,7 @@ Use your own ChatGPT test account; no developer credentials. Select a test chat,
 
 ## Release Scope and Remaining Gates (Not Store Copy)
 
-Version 3.0.1 combines the scheduler and optional Windows source. Historical v2.2.0 support/schema 3 changes and v2.2.1 scheduler fixes remain scheduler-only; they did not request nativeMessaging. The permission table above describes the combined version, not those older releases.
+Version 3.0.2 combines the scheduler and optional Windows device control. Historical v2.2.0 support/schema 3 changes and v2.2.1 scheduler fixes remain scheduler-only; they did not request nativeMessaging. The permission table above describes the combined version, not those older releases.
 
 Checkpoint97 records actual r11 full-app saved-running recovery, ordinary ChatGPT and Dot administrator command/file/owned-process results, and matching Pause/Revoke stopped receipts with independent host readback. The test runtime is revoked and not running. These bounded observations do not establish current-account hosted operation, automatic adoption of an existing installation or indefinite recovery reliability. Complete matching extension/setup/npm artifact verification, actual public downloads and the real new Store submission receipt separately. See the repository's [Runtime Acceptance](https://github.com/1235357/agent-continue/blob/main/docs/RUNTIME-ACCEPTANCE.md); do not replay settled operations or turn historical Ready into a current state.
 

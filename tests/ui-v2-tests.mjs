@@ -5,7 +5,22 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(process.env.EXTENSION_ROOT || path.dirname(here));
-const { DEFAULT_CONFIG } = await import(pathToFileURL(path.join(root, 'config.js')).href);
+const { DEFAULT_CONFIG, readConfig } = await import(pathToFileURL(path.join(root, 'config.js')).href);
+assert.equal(DEFAULT_CONFIG.extensionPriority, true, 'composer priority is mandatory by default');
+for (const legacy of [{}, { extensionPriority: false }, { extensionPriority: true }]) {
+  const input = { ...legacy, prompt: '  SYNTHETIC-CONFIG-PROMPT\n', waitForIdle: true, preventDiscard: false, startImmediately: false };
+  const savedInput = structuredClone(input);
+  const config = readConfig(input);
+  assert.equal(config.extensionPriority, true, 'legacy false cannot restore draft protection');
+  assert.equal(config.prompt, input.prompt);
+  assert.equal(config.waitForIdle, true);
+  assert.equal(config.preventDiscard, false);
+  assert.equal(config.startImmediately, false);
+  assert.deepEqual(input, savedInput, 'normalization does not mutate saved input');
+}
+for (const invalid of ['false', 0, 1, {}, []]) {
+  assert.throws(() => readConfig({ prompt: 'SYNTHETIC-CONFIG-PROMPT', extensionPriority: invalid }), 'legacy key still requires a boolean');
+}
 const playwright = process.env.PLAYWRIGHT_MODULE_PATH
   ? await import(pathToFileURL(path.resolve(process.env.PLAYWRIGHT_MODULE_PATH)).href)
   : await import('playwright');
@@ -14,6 +29,11 @@ const screenshotFont = process.env.POPUP_FONT_PATH ? path.resolve(process.env.PO
 const browser = await playwright.chromium.launch({ headless: true, executablePath: process.env.TEST_CHROMIUM_PATH || undefined, args: ['--no-sandbox'] });
 const checks = [];
 const pass = name => { checks.push(name); console.log('PASS ' + name); };
+pass('Config: mandatory priority defaults to true, normalizes legacy false without mutating input, preserves other settings, and rejects non-booleans.');
+const priorityNotices = {
+  en: 'Scheduled sends replace unsent text in the bound conversation. Attachments are not submitted.',
+  zh_CN: '定时发送会替换绑定会话中的未发送文字，不会提交附件。',
+};
 const original = { ...structuredClone(DEFAULT_CONFIG), prompt: 'SYNTHETIC-PRIVATE-PROMPT\n  Preserve these spaces.\n', intervalMinutes: 20,
   queue: [{ name: '合成队列 A', text: 'SYNTHETIC-QUEUE-A' }, { name: '合成队列 B', text: 'SYNTHETIC-QUEUE-B' }] };
 const resources = new Set(['popup.html', 'popup.css', 'popup.js', 'config.js', 'file-import.js',
@@ -130,7 +150,12 @@ async function assertSealed(page, samples) {
 async function assertLayout(page, full = false) {
   const layout = await page.evaluate(() => {
     const controls = document.querySelector('.controls').getBoundingClientRect();
+    const notice = document.querySelector('#composerPriorityNotice');
+    const noticeBounds = notice.getBoundingClientRect();
+    const buttons = document.querySelector('.main-controls').getBoundingClientRect();
     return { width: innerWidth, pageWidth: document.documentElement.scrollWidth, controls: { top: controls.top, bottom: controls.bottom, height: innerHeight },
+      noticeFits: notice.scrollWidth <= notice.clientWidth + 1 && noticeBounds.top >= buttons.bottom - 1
+        && noticeBounds.left >= controls.left && noticeBounds.right <= controls.right + 1 && noticeBounds.bottom <= controls.bottom + 1,
       overflow: [...document.querySelectorAll('button,input,select,textarea')].filter(element => {
         if (!element.getClientRects().length) return false;
         const r = element.getBoundingClientRect(); return r.left < -1 || r.right > innerWidth + 1;
@@ -138,6 +163,7 @@ async function assertLayout(page, full = false) {
   });
   assert.ok(layout.pageWidth <= layout.width + 1, JSON.stringify(layout));
   assert.deepEqual(layout.overflow, [], JSON.stringify(layout));
+  assert.equal(layout.noticeFits, true, 'mandatory notice fits beside task controls without overlap: ' + JSON.stringify(layout));
   if (!full) assert.ok(layout.controls.top >= 0 && layout.controls.bottom <= layout.controls.height + 1, JSON.stringify(layout));
 }
 async function capture(page, name) {
@@ -167,6 +193,54 @@ async function capture(page, name) {
 }
 
 try {
+  for (const full of [false, true]) for (const uiLanguage of ['en', 'zh_CN']) {
+    const fixture = { ...structuredClone(original), extensionPriority: false };
+    const { page, context, errors } = await createPage({ full, uiLanguage, fixture });
+    assert.equal(await page.locator('#extensionPriority').count(), 0, 'no optional priority control remains');
+    const notice = page.locator('.controls #composerPriorityNotice');
+    assert.equal(await notice.isVisible(), true);
+    assert.equal(await notice.textContent(), priorityNotices[uiLanguage]);
+    for (const id of ['start', 'resume', 'sendNow']) {
+      assert.equal(await page.locator('#' + id).getAttribute('aria-describedby'), 'composerPriorityNotice');
+    }
+    await assertLayout(page, full);
+    assert.deepEqual(await page.evaluate(() => __uiMock.configWrites), [], 'opening old config does not migrate storage or start a task');
+    const savedJob = await page.evaluate(() => structuredClone(__uiMock.job));
+    await page.locator('#resume').click();
+    await page.waitForFunction(() => __uiMock.job.enabled);
+    assert.deepEqual(await page.evaluate(() => __uiMock.requests.find(r => r.type === 'RESUME')), { type: 'RESUME' }, 'Resume does not replay the legacy policy from the popup');
+    assert.equal(await page.locator('#pause').isEnabled(), true);
+    assert.equal(await notice.textContent(), priorityNotices[uiLanguage]);
+    await page.locator('#pause').click();
+    await page.waitForFunction(() => !__uiMock.job.enabled);
+    await page.locator('#interval').fill('29');
+    await page.waitForFunction(() => __uiMock.config.intervalMinutes === 29);
+    assert.equal(await page.evaluate(() => __uiMock.config.extensionPriority), true);
+    assert.equal(await page.evaluate(() => __uiMock.config.prompt), fixture.prompt);
+    await page.locator('#tab-settings').click();
+    await page.locator('#configFile').setInputFiles({ name: 'legacy-settings.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ config: { extensionPriority: false, intervalMinutes: 31 } })) });
+    await page.waitForFunction(() => __uiMock.config.intervalMinutes === 31);
+    assert.equal(await page.evaluate(() => __uiMock.config.extensionPriority), true, 'JSON import cannot restore false');
+    assert.equal(await page.evaluate(() => __uiMock.config.prompt), fixture.prompt);
+    await page.locator('#tab-task').click();
+    assert.deepEqual(await page.evaluate(() => {
+      const { enabled, nextAt, statusText, ...config } = __uiMock.job;
+      return config;
+    }), Object.fromEntries(Object.entries(savedJob).filter(([key]) => !['enabled', 'nextAt', 'statusText'].includes(key))), 'Pause and draft editing leave the saved task configuration unchanged');
+    await page.locator('#targetSelect').selectOption('41');
+    await page.locator('#start').click();
+    await page.waitForFunction(() => __uiMock.requests.some(r => r.type === 'START'));
+    const start = await page.evaluate(() => __uiMock.requests.find(r => r.type === 'START'));
+    assert.equal(start.config.extensionPriority, true);
+    assert.equal(start.config.intervalMinutes, 31);
+    assert.equal(start.config.prompt, fixture.prompt);
+    assert.equal(start.tabId, 41);
+    assert.equal(await page.evaluate(() => __uiMock.configWrites.every(config => config.extensionPriority === true)), true);
+    assert.deepEqual(await page.evaluate(() => __uiMock.permissionRequests), [], 'mandatory policy adds no permission prompt');
+    assert.deepEqual(errors, []);
+    await context.close();
+    pass(`Mandatory notice and legacy false normalization preserve Resume, Pause, draft editing and explicit Start (full=${full}, language=${uiLanguage})`);
+  }
   for (const full of [false, true]) for (const enabled of [false, true])
   for (const rejectTabs of full ? [false, true] : [false])
   for (const [id, destination] of [['setupWindows', 'setup.html'], ['manageDevices', 'devices.html?mode=browser-managed']]) {
@@ -283,6 +357,8 @@ try {
         assert.equal(await page.evaluate(() => __uiMock.uiLanguage), language);
       }
       assert.equal((await page.locator('#tab-settings').textContent()).trim(), language === 'en' ? '⌘Settings' : '⌘设置');
+      assert.equal(await page.locator('#composerPriorityNotice').textContent(), priorityNotices[language]);
+      assert.equal(await page.locator('#composerPriorityNotice').isVisible(), true);
       assert.equal(await page.locator('#prompt').getAttribute('placeholder'), language === 'en' ? 'Enter the complete prompt to repeat...' : '输入需要重复发送的完整提示词…');
       assert.equal(await page.locator('#expand').getAttribute('aria-label'), language === 'en' ? 'Open full console' : '打开完整控制台');
       for (const panel of ['task', 'prompt', 'settings', 'logs']) {
@@ -386,13 +462,11 @@ try {
   await page.waitForFunction(() => __uiMock.config.waitForIdle === true);
   await page.locator('#waitForIdle').uncheck();
   await page.waitForFunction(() => __uiMock.config.waitForIdle === false);
-  assert.equal(await page.locator('#extensionPriority').isChecked(), false);
-  await page.locator('#extensionPriority').check();
-  await page.waitForFunction(() => __uiMock.config.extensionPriority === true);
-  await page.locator('#extensionPriority').uncheck();
-  await page.waitForFunction(() => __uiMock.config.extensionPriority === false);
+  assert.equal(await page.locator('#extensionPriority').count(), 0);
+  assert.equal(await page.locator('#composerPriorityNotice').textContent(), priorityNotices.zh_CN);
+  assert.equal(await page.evaluate(() => __uiMock.config.extensionPriority), true);
   await page.locator('#tab-task').click();
-  pass('Interrupt is the visible default; optional waiting can be selected and persisted.');
+  pass('Interrupt is the visible default; optional waiting persists without disabling mandatory composer priority.');
   await page.locator('#tab-settings').click();
   assert.equal(await page.locator('#sendMethod').inputValue(), 'auto');
   assert.equal(await page.locator('#sendMethod option').count(), 3);
@@ -469,11 +543,16 @@ try {
   const explicitExport = await page.evaluate(async () => JSON.parse(await __uiMock.exports.at(-1).text()));
   assert.equal(explicitExport.config.prompt, importedText);
   assert.equal(await page.locator('#includeSecrets').isChecked(), false);
-  await page.locator('#configFile').setInputFiles({ name: 'settings.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ config: { intervalMinutes: 37, mode: 'repeat', sendMethod: 'button' } })) });
+  await page.locator('#configFile').setInputFiles({ name: 'settings.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ config: { intervalMinutes: 37, mode: 'repeat', sendMethod: 'button', extensionPriority: false } })) });
   await page.waitForFunction(() => __uiMock.config.intervalMinutes === 37);
   assert.equal(await page.evaluate(() => __uiMock.config.prompt), importedText);
   assert.equal(await page.locator('#sendMethod').inputValue(), 'button');
-  pass('Backup: default JSON omits prompts/queue; explicit content export is one-shot; settings-only import preserves existing prompt.');
+  assert.equal(await page.evaluate(() => __uiMock.config.extensionPriority), true);
+  const beforeInvalidImport = await page.evaluate(() => structuredClone(__uiMock.config));
+  await page.locator('#configFile').setInputFiles({ name: 'invalid-settings.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ config: { intervalMinutes: 99, extensionPriority: 'false' } })) });
+  await page.waitForFunction(() => document.querySelector('#feedback').classList.contains('error'));
+  assert.deepEqual(await page.evaluate(() => __uiMock.config), beforeInvalidImport, 'invalid legacy flag cannot overwrite the draft');
+  pass('Backup: default JSON omits prompts/queue; explicit content export is one-shot; legacy false normalizes to true and invalid priority leaves the draft intact.');
 
   await page.evaluate(() => { __uiMock.grantPower = false; });
   await page.locator('#keepAwake').click();

@@ -4,13 +4,13 @@ English | [简体中文](https://github.com/1235357/agent-continue/blob/main/REA
 
 Schedule your own prompts in one existing ChatGPT or Your dot conversation. The Windows-enabled version also offers separately installed, explicitly authorized file, shell and process tools.
 
-**Prepared 3.0.2 Windows-enabled release source. Manifest V3. Free and MIT-licensed.**
+**3.0.2 Windows-enabled extension. Manifest V3. Free and MIT-licensed.**
 
 [Chrome Web Store](https://chromewebstore.google.com/detail/jpioilmpbolfokedaefmbfbjeaahfdkl) · [GitHub Releases](https://github.com/1235357/agent-continue/releases) · [Source](https://github.com/1235357/agent-continue) · [Changelog](https://github.com/1235357/agent-continue/blob/main/CHANGELOG.md) · [Privacy](https://github.com/1235357/agent-continue/blob/main/PRIVACY.md)
 
 The separately released v2.2.1 remains scheduler-only, including its acknowledgement fixes, developer support and schema 3 diagnostics; its published assets are preserved. Source version, GitHub release availability, npm publication, Chrome Web Store review and your installed version are separate states. Consult the respective listing and your browser's extension details rather than treating this README as a publication or installation receipt.
 
-3.0.2 is prepared source only; GitHub release, Chrome Web Store submission/approval and installed-version receipts remain pending. The root npm CLI version remains independently 0.3.0.
+The root npm CLI version remains independently 0.3.0. Check the GitHub Release, Chrome Web Store listing, and installed extension details for their respective versions.
 
 ## Windows Device Setup (3.0.2)
 
@@ -72,7 +72,7 @@ Resume retains the original task's prompt, target, interval, and counters. To ap
 | Prompts | Repeat one prompt, loop a queue, or run a queue once; local templates |
 | Timing | 1–10080 minutes; interval or reply-aware timing; optional local-time quiet hours |
 | Controls | Start, pause, resume, send once, read-only checks, optional confirmed-send limit and stop markers |
-| Page handling | Target identity checks, draft and detected-attachment checks, optional wait-for-idle behavior |
+| Page handling | Exact target identity checks, mandatory replacement of unsent text, detected-attachment guards, optional wait-for-idle behavior |
 | Background operation | Does not activate the target tab or use the system clipboard |
 | Local interface | English and Simplified Chinese; system, light, and dark themes; prompt text hidden until explicitly shown |
 | Records | Up to 200 locally timestamped activity entries; diagnostic JSON exports default to relative timings and omit stored free-text messages |
@@ -81,9 +81,9 @@ Resume retains the original task's prompt, target, interval, and counters. To ap
 
 ### One Submission Mechanism per Attempt
 
-Each attempt requires a current background permit and uses one submission mechanism. In automatic mode, Your dot uses Ctrl+Enter; ordinary ChatGPT uses a send button when found, otherwise Enter. With opt-in Extension Priority, automatic mode first uses an available Send button in the target composer. Explicit button-only and Ctrl+Enter-only modes are also available. There is no subsequent switch to another mechanism within that attempt.
+Each attempt requires a current background permit and uses one submission mechanism. Automatic mode first uses an available Send button in the bound target composer; otherwise it uses Ctrl+Enter in Your dot or Enter in ordinary ChatGPT. Explicit button-only and Ctrl+Enter-only modes are also available. There is no subsequent switch to another mechanism within that attempt.
 
-By default, an existing draft is preserved. To let the configured prompt replace unsent text, pause the task, enable **Extension priority: allow replacing unsent text** in Settings, and start a new task. Resuming keeps the original settings. This mode never submits existing attachments or bypasses pause and target checks. See [Extension Priority](https://github.com/1235357/agent-continue/blob/main/docs/COMPOSER-PRIORITY.md).
+**Scheduled sends replace unsent text in the bound conversation. Attachments are not submitted.** Every SEND, including **Send once now**, uses the configured prompt instead of existing composer text. Text changed after filling, including while authorization is pending, must not abort the send; the configured prompt is reasserted before submission. This policy is mandatory, not a Settings toggle. The legacy boolean `extensionPriority` remains accepted but normalizes to `true`, even when an old saved or imported configuration says `false`. **Resume** keeps the original prompt, target, interval and counts, not the retired draft-protection policy. Start/Resume add no modal, permission or runtime access grant. Detected attachments still block sending; Pause, current authorization and exact-target guards remain. See [Mandatory Composer Priority](https://github.com/1235357/agent-continue/blob/main/docs/COMPOSER-PRIORITY.md).
 
 A matching new user-message marker is required for confirmation. An empty composer or a busy indicator alone is not success. If confirmation is unavailable, the result remains **unknown**, the confirmed-send count does not increase, and no immediate retry occurs. A later attempt may occur after the full normal interval. This is not exactly-once delivery: an unconfirmed message may already have reached ChatGPT. Pause and inspect the conversation when the result is uncertain. Pausing cannot retract a submission already dispatched.
 

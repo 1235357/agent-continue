@@ -2,6 +2,25 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Mandatory Prompt Replacement (Checkpoint111)
+
+The owner reported that the published 3.0.1 still stopped after a composer
+text change. Direct inspection of both downloaded 3.0.1 ZIPs confirmed the
+old default-false opt-in and text-change aborts in their shipped adapter. This
+was a released behavior defect, not evidence of an incorrectly installed copy.
+
+Every send in 3.0.2 now replaces unsent text in the bound composer with the
+configured prompt. No draft-change veto or fixed refill-count stop remains.
+Legacy false is accepted and normalized to true. The task UI discloses
+replacement before Start/Resume, retains the original task settings on Resume,
+and still protects attachments, Pause and target identity. One cycle attempts
+one submission and counts only a new matching receipt.
+
+Use the [acceptance record](RUNTIME-ACCEPTANCE.md#mandatory-prompt-replacement-checkpoint111)
+for the reproduced editor cases and package verification. The older 3.0.1
+release assets remain immutable. A tested preview is not a Store package,
+a new live-site run, or a native Windows installation receipt.
+
 ### Prepared 3.0.2 And Windows CI Startup Failure (Checkpoint110)
 
 The owner-requested removal of the default npm install elapsed-time cap is pushed

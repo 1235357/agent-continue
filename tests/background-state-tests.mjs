@@ -381,9 +381,9 @@ for (const [name, pageResult, code] of [
     await h.message({type:'PAUSE'});
   });
 }
-await scenario('Explicit priority reaches the adapter and logs only bounded composer diagnostics', async()=>{
+await scenario('Mandatory priority reaches the adapter even for a legacy false flag and logs only bounded diagnostics', async()=>{
   const h=await harness();
-  await h.start({extensionPriority:true});
+  await h.start({extensionPriority:false});
   h.pageResult=async()=>({status:'draft',diagnosticCode:'composer-changed',message:'Synthetic protection.'});
   await h.message({type:'SEND_NOW'});
   assert.equal(h.state.injections.findLast(item=>item.args[0].mode==='send').args[0].extensionPriority,true);

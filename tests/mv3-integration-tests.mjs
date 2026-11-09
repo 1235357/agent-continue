@@ -299,10 +299,15 @@ try {
   await control.locator('#check').click();
   await control.waitForFunction(() => document.querySelector('#feedback').textContent.includes('Composer detected'));
   assert.deepEqual(await dot.evaluate(() => [fixture.sendClicks, fixture.keyboardSends]), [0, 0]);
+  await control.locator('#tab-settings').click();
+  await control.locator('#sendMethod').selectOption('ctrl-enter');
+  await control.waitForFunction(async () => (await chrome.storage.local.get('config')).config?.sendMethod === 'ctrl-enter');
+  await control.locator('#tab-task').click();
   await control.locator('#start').click();
   await control.waitForFunction(() => document.querySelector('#badge').textContent === 'Running');
   const started = await state(control);
   assert.equal(started.job.tabId, dotTab.id); assert.equal(started.job.prompt, sentinel); assert.equal(started.job.intervalMinutes, 20);
+  assert.equal(started.job.sendMethod, 'ctrl-enter');
   assert.equal(started.job.maxSends, 0); assert.deepEqual(started.job.stopMarkers, []);
   assert.equal((await workerTab(worker, dot.url())).autoDiscardable, false);
   assert.ok((await worker.evaluate(() => chrome.alarms.getAll())).length > 0);
@@ -321,7 +326,7 @@ try {
   assert.equal(await dot.evaluate(() => document.visibilityState), 'hidden', 'The target must actually be hidden without any visibility override');
   const sent = await call(control, { type: 'SEND_NOW' });
   assert.equal(sent.ok, true, sent.error); assert.equal(sent.job.sentCount, 1, sent.job.statusText);
-  assert.deepEqual(await dot.evaluate(() => [fixture.sendClicks, fixture.keyboardSends, fixture.submits]), [0, 1, 1], 'Default Dot submission must use Ctrl+Enter exactly once and never click Send');
+  assert.deepEqual(await dot.evaluate(() => [fixture.sendClicks, fixture.keyboardSends, fixture.submits]), [0, 1, 1], 'Selected Ctrl+Enter strategy must submit once and never click Send');
   const keys = await dot.evaluate(() => fixture.keyEvents.filter(event => event.key === 'Enter'));
   assert.deepEqual(keys.map(event => [event.type, event.code, event.keyCode, event.ctrlKey, event.trusted]), [['keydown', 'Enter', 13, true, false], ['keyup', 'Enter', 13, true, false]]);
   assert.equal(renderedText(await dot.evaluate(() => fixture.sentTexts[0])), renderedText(sentinel));
@@ -351,7 +356,7 @@ try {
       fixture.composerMutated = true;
     }), { once: true });
   });
-  const priorityStart = await call(control, { type: 'START', tabId: priorityTab.id, config: { prompt: priorityPrompt, extensionPriority: true } });
+  const priorityStart = await call(control, { type: 'START', tabId: priorityTab.id, config: { prompt: priorityPrompt, extensionPriority: false, sendMethod: 'auto' } });
   assert.equal(priorityStart.ok, true, priorityStart.error);
   assert.equal(priorityStart.job.extensionPriority, true);
   assert.equal(await priorityPage.evaluate(() => document.querySelector('[contenteditable]').textContent), 'Synthetic unsent text');

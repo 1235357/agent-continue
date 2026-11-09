@@ -1,5 +1,37 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Mandatory Prompt Replacement (Checkpoint111)
+
+Direct inspection of the downloaded 3.0.1 Release and Store ZIPs found identical
+shipped scheduler logic: an opt-in defaulted to false, and text changes could
+abort a round. The old opt-in path also stopped after a fixed number of refills.
+The user requested unconditional ownership of unsent composer text on send,
+not submission of an unrelated draft or changes to native device access.
+
+The replacement path now respects a handled beforeinput, reselects the whole
+composer before fallback insertion, and allows controlled-editor updates to
+settle through the extension clock. Repeated ordinary edits request another
+replacement while the existing run permit remains valid. Rendering-only
+paragraph/inline formatting and native NBSP do not veto a matching prompt.
+The fixtures separately reproduced double insertion, a stale deferred editor
+model, and repeated NBSP refills before the fixes. Their final synthetic checks
+do not establish arbitrary private-framework behavior on live web pages.
+
+Focused verification: 44/44 VM adapter checks, 34/34 package tests and 34/34
+support/disclosure checks. Built a 3.0.2 Windows preview ZIP with SHA-256
+`761e1236506420ad6c3215f1de357925a387bc80f3b35f97b7d583c6e3655c3f`.
+Five scheduler/UI members matched source after line-ending normalization;
+the retired content-change error was absent. The extracted ZIP passed 13/13
+real MV3 browser scenarios on synthetic pages, including a legacy false value,
+post-fill mutation, one submission, Pause, and both explicit keyboard and
+automatic button routes. No live conversation or production extension changed.
+Logs: .artifacts/ordinary-chat-acceptance-20261108/checkpoint111-*.log.
+
+The in-app Store dashboard still showed Pending review for the corrected 3.0.1
+submission at this checkpoint. No review withdrawal or replacement occurred.
+Public 3.0.2 artifact publication, exact live-site acceptance, and a new
+Store submission require their own receipts.
+
 ## Prepared 3.0.2 Regression And CI Startup Evidence (Checkpoint110)
 
 Full local `npm test` exited0 on the prepared3.0.2 source, including34UI-v2,

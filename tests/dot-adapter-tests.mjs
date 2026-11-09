@@ -185,12 +185,14 @@ try {
     for (const url of ['https://chatgpt.com/', 'https://chatgpt.com/share/abc', 'https://example.invalid/dots/home', 'http://chatgpt.com/dots/home', 'https://chatgpt.com:8443/dots/home']) assert.equal(validateTarget(url), false, url);
   });
   await scenario('Dot self-check binds structural identity without filling or sending', async ({ page, args }) => {
+    await page.evaluate(() => { document.querySelector('[data-composer-markdown]').textContent = 'Unsent text stays during self-check'; });
     const outcome = await page.evaluate(pageAction, { ...args, mode: 'check', runId: null, targetIdentity: null });
     assert.equal(outcome.status, 'ready', JSON.stringify(outcome));
     assert.equal(outcome.identity, 'acct~dot');
     assert.equal(outcome.assistantToken, 'acct~dot~Msg~assistant-old');
     assert.equal(outcome.assistantCount, 1);
     assert.deepEqual(await page.evaluate(() => [fixture.inputs, fixture.sends, fixture.checks]), [0, 0, 0]);
+    assert.equal(await page.getByRole('textbox', { name: 'Message' }).innerText(), 'Unsent text stays during self-check');
   });
   await scenario('Dot sends through its Message editor and Send button and returns pre-send assistant state', async ({ page, args }) => {
     const outcome = await page.evaluate(pageAction, args);
@@ -271,7 +273,62 @@ try {
     assert.deepEqual(await page.evaluate(() => [fixture.beforeInputs, fixture.frameworkReplacements, fixture.inputs, fixture.sends]), [1, 1, 1, 1]);
     assert.equal(await page.evaluate(() => fixture.sentTexts[0]), prompt);
   });
-  await scenario('A rejected beforeinput that restores a different draft is never treated as our insertion', async ({ page, args }) => {
+  await scenario('Final replacement respects a handled beforeinput without inserting twice', async ({ page, args }) => {
+    const configured = 'Exactly one configured continuation';
+    await page.evaluate(() => {
+      const input = document.querySelector('[data-composer-markdown]');
+      input.addEventListener('beforeinput', event => {
+        if (event.inputType !== 'insertText') return;
+        event.preventDefault();
+        input.textContent = event.data;
+        const range = document.createRange();
+        range.selectNodeContents(input); range.collapse(false);
+        const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
+        input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: event.data }));
+      });
+      const authorize = chrome.runtime.sendMessage;
+      chrome.runtime.sendMessage = async message => {
+        const reply = await authorize(message);
+        if (fixture.checks === 3) input.textContent = 'Intervening unsent text';
+        return reply;
+      };
+    });
+    const outcome = await page.evaluate(pageAction, { ...args, prompt: configured, extensionPriority: false });
+    assert.deepEqual(await page.evaluate(() => fixture.sentTexts), [configured]);
+    assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
+  });
+
+  await scenario('Final replacement commits deferred controlled-input state before submitting', async ({ page, args }) => {
+    const configured = 'Configured controlled-model continuation';
+    await page.evaluate(() => {
+      const input = document.querySelector('[data-composer-markdown]');
+      fixture.controlledText = '';
+      input.addEventListener('input', () => {
+        const value = input.innerText;
+        setTimeout(() => { fixture.controlledText = value; }, 100);
+      });
+      const authorize = chrome.runtime.sendMessage;
+      chrome.runtime.sendMessage = async message => {
+        const reply = await authorize(message);
+        if (fixture.checks === 3) {
+          input.textContent = 'Intervening unsent controlled text';
+          fixture.controlledText = input.innerText;
+        }
+        return reply;
+      };
+      document.querySelector('button[aria-label="Send"]').addEventListener('click', event => {
+        event.stopImmediatePropagation();
+        fixture.sends++; fixture.sentTexts.push(fixture.controlledText);
+        appendMessage(fixture.controlledText, 'acct~dot~Msg~controlled-new');
+        input.textContent = '';
+      }, { capture: true });
+    });
+    const outcome = await page.evaluate(pageAction, { ...args, prompt: configured, extensionPriority: false });
+    assert.deepEqual(await page.evaluate(() => fixture.sentTexts), [configured]);
+    assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
+  });
+
+  await scenario('Priority overwrites a framework-restored different draft before the one send', async ({ page, args }) => {
     const restoredDraft = 'Restored synthetic human draft';
     await page.evaluate(restoredDraft => {
       const input = document.querySelector('[data-composer-markdown]');
@@ -283,9 +340,27 @@ try {
       });
     }, restoredDraft);
     const outcome = await page.evaluate(pageAction, args);
-    assert.equal(outcome.status, 'blocked', JSON.stringify(outcome));
-    assert.equal(await page.getByRole('textbox', { name: 'Message' }).innerText(), restoredDraft);
-    assert.equal(await page.evaluate(() => fixture.sends), 0);
+    assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
+    assert.equal(await page.evaluate(() => fixture.sentTexts[0].replace(/\n+/g, '\n').trim()), prompt.trim());
+    assert.equal(await page.evaluate(() => fixture.sends), 1);
+  });
+
+  await scenario('Native NBSP and inline formatting do not cause a replacement loop', async ({ page, args }) => {
+    await page.evaluate(() => {
+      const input = document.querySelector('[data-composer-markdown]');
+      input.style.whiteSpace = 'normal';
+      input.addEventListener('input', () => {
+        const mark = document.createElement('strong');
+        mark.textContent = input.textContent;
+        input.replaceChildren(mark);
+      });
+    });
+    const configured = 'Keep the trailing space ';
+    const outcome = await page.evaluate(pageAction, { ...args, prompt: configured, extensionPriority: false });
+    assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
+    const state = await page.evaluate(() => ({ inputs: fixture.inputs, texts: fixture.sentTexts }));
+    assert.equal(state.inputs, 1);
+    assert.deepEqual(state.texts.map(value => value.replace(/\u00a0/g, ' ')), [configured]);
   });
   await scenario('A cancelled beforeinput may commit asynchronously before the one allowed send', async ({ page, args }) => {
     await page.evaluate(() => {
@@ -395,7 +470,7 @@ try {
       assert.equal(await page.getByRole('textbox', { name: 'Message' }).innerText(), '');
     });
   }
-  await scenario('Legacy recovery preserves an actual extra human blank line instead of collapsing it', async ({ page, args }) => {
+  await scenario('Legacy extra blank lines are replaced with the configured prompt', async ({ page, args }) => {
     const configured = 'First synthetic line\n\nSecond synthetic line';
     const humanDraft = 'First synthetic line\n\n\nSecond synthetic line';
     const before = await page.evaluate(value => {
@@ -404,11 +479,11 @@ try {
       return input.innerText;
     }, humanDraft);
     const outcome = await page.evaluate(pageAction, { ...args, prompt: configured });
-    assert.equal(outcome.status, 'draft', JSON.stringify(outcome));
-    assert.equal(await page.getByRole('textbox', { name: 'Message' }).innerText(), before);
-    assert.equal(await page.evaluate(() => fixture.sends), 0);
+    assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
+    assert.equal(await page.evaluate(() => fixture.sentTexts[0].replace(/\n+/g, '\n')), configured.replace(/\n+/g, '\n'));
+    assert.equal(await page.evaluate(() => fixture.sends), 1);
   });
-  await scenario('Legacy recovery preserves a missing human blank line even when innerText accidentally matches', async ({ page, args }) => {
+  await scenario('Legacy missing blank lines do not veto configured-prompt submission', async ({ page, args }) => {
     const configured = 'First synthetic line\n\n\nSecond synthetic line';
     const humanDraft = 'First synthetic line\n\nSecond synthetic line';
     const before = await page.evaluate(value => {
@@ -418,19 +493,19 @@ try {
     }, humanDraft);
     assert.equal(before, configured, 'The fixture must reproduce the innerText false positive');
     const outcome = await page.evaluate(pageAction, { ...args, prompt: configured });
-    assert.equal(outcome.status, 'draft', JSON.stringify(outcome));
-    assert.equal(await page.getByRole('textbox', { name: 'Message' }).innerText(), before);
-    assert.equal(await page.evaluate(() => fixture.sends), 0);
+    assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
+    assert.equal(await page.evaluate(() => fixture.sentTexts[0].replace(/\n+/g, '\n')), configured.replace(/\n+/g, '\n'));
+    assert.equal(await page.evaluate(() => fixture.sends), 1);
   });
-  await scenario('A matching prompt remains a protected draft in explicit wait mode', async ({ page, args }) => {
+  await scenario('Wait-for-idle controls Agent activity, not ownership of composer text', async ({ page, args }) => {
     const stuckPrompt = 'Synthetic configured prompt';
     await page.getByRole('textbox', { name: 'Message' }).fill(stuckPrompt);
     const outcome = await page.evaluate(pageAction, { ...args, prompt: stuckPrompt, waitForIdle: true });
-    assert.equal(outcome.status, 'draft', JSON.stringify(outcome));
-    assert.equal(await page.getByRole('textbox', { name: 'Message' }).innerText(), stuckPrompt);
-    assert.equal(await page.evaluate(() => fixture.sends), 0);
+    assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
+    assert.equal(await page.evaluate(() => fixture.sentTexts[0]), stuckPrompt);
+    assert.equal(await page.evaluate(() => fixture.sends), 1);
   });
-  await scenario('Force recovery never adopts whitespace-changed prompts or prompts with attachments', async ({ page, args }) => {
+  await scenario('Priority replaces whitespace-changed text but still refuses attachments', async ({ page, args }) => {
     const stuckPrompt = 'Synthetic configured prompt';
     const input = page.getByRole('textbox', { name: 'Message' });
     for (const changed of [' ' + stuckPrompt, stuckPrompt + ' ', stuckPrompt + '\n']) {
@@ -438,8 +513,8 @@ try {
       const before = await input.innerText();
       assert.notEqual(before, stuckPrompt, 'The fixture must retain the human whitespace edit');
       const outcome = await page.evaluate(pageAction, { ...args, prompt: stuckPrompt, waitForIdle: false });
-      assert.equal(outcome.status, 'draft', JSON.stringify(outcome));
-      assert.equal(await input.innerText(), before);
+      assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
+      assert.equal(await page.evaluate(() => fixture.sentTexts.at(-1)), stuckPrompt);
     }
     await input.fill(stuckPrompt);
     await page.evaluate(() => {
@@ -448,29 +523,28 @@ try {
     });
     const attached = await page.evaluate(pageAction, { ...args, prompt: stuckPrompt, waitForIdle: false });
     assert.equal(attached.status, 'draft', JSON.stringify(attached));
-    assert.deepEqual(await page.evaluate(() => [fixture.stops, fixture.sends]), [0, 0]);
+    assert.deepEqual(await page.evaluate(() => [fixture.stops, fixture.sends]), [0, 3]);
     assert.equal(await input.innerText(), stuckPrompt);
   });
-  await scenario('A pre-send failure preserves a human edit made while waiting for Send', async ({ page, args }) => {
+  await scenario('An unavailable Send is a control failure, not a text-change veto', async ({ page, args }) => {
     await page.evaluate(() => {
       document.querySelector('button[aria-label="Send"]').remove();
       fixture.whitespaceAtCheck = 2;
     });
     const outcome = await page.evaluate(pageAction, args);
     assert.equal(outcome.status, 'blocked', JSON.stringify(outcome));
-    assert.equal(await page.getByRole('textbox', { name: 'Message' }).innerText(), await page.evaluate(() => fixture.modifiedDraft));
-    assert.ok((await page.getByRole('textbox', { name: 'Message' }).innerText()).trim().length > 0);
+    assert.equal((await page.getByRole('textbox', { name: 'Message' }).innerText()).trim(), '');
     assert.equal(await page.evaluate(() => fixture.sends), 0);
   });
-  await scenario('Dot preserves text drafts and attachment-only drafts', async ({ page, args }) => {
+  await scenario('Dot replaces text-only drafts and preserves attachment-only drafts', async ({ page, args }) => {
     const editor = page.getByRole('textbox', { name: 'Message' });
     await editor.fill('My unsent synthetic draft');
-    assert.equal((await page.evaluate(pageAction, args)).status, 'draft');
-    assert.equal(await editor.innerText(), 'My unsent synthetic draft');
+    assert.equal((await page.evaluate(pageAction, args)).status, 'sent');
+    assert.equal(await page.evaluate(() => fixture.sentTexts[0].replace(/\n+/g, '\n').trim()), prompt.trim());
     await editor.fill('');
     await page.evaluate(() => { const chip = document.createElement('button'); chip.setAttribute('aria-label', 'Remove file local-test.txt'); chip.textContent = 'Remove'; document.querySelector('#attachment-slot').append(chip); });
     assert.equal((await page.evaluate(pageAction, args)).status, 'draft');
-    assert.equal(await page.evaluate(() => fixture.sends), 0);
+    assert.equal(await page.evaluate(() => fixture.sends), 1);
   });
   await scenario('Dot requires a unique editor and a loaded target identity', async ({ page, args }) => {
     await page.evaluate(() => { const duplicate = document.querySelector('[data-composer-markdown]').cloneNode(); document.querySelector('[data-composer-input]').append(duplicate); });
@@ -516,7 +590,7 @@ try {
     const outcome = await page.evaluate(pageAction, args);
     assert.equal(outcome.status, 'cancelled', JSON.stringify(outcome));
     assert.equal(await page.evaluate(() => fixture.sends), 0);
-    assert.equal((await page.getByRole('textbox', { name: 'Message' }).innerText()).trim(), '');
+    assert.equal((await page.getByRole('textbox', { name: 'Message' }).innerText()).trim(), prompt.trim());
   });
   await scenario('Human pause after insertion cancels the Dot click and removes only its own draft', async ({ page, args }) => {
     await page.evaluate(() => { fixture.cancelOnInput = true; });
@@ -524,11 +598,11 @@ try {
     assert.equal(await page.evaluate(() => fixture.sends), 0);
     assert.equal((await page.getByRole('textbox', { name: 'Message' }).innerText()).trim(), '');
   });
-  await scenario('A whitespace-only human edit before final submission is preserved and not sent', async ({ page, args }) => {
+  await scenario('A whitespace-only edit before final submission is overwritten and sent once', async ({ page, args }) => {
     await page.evaluate(() => { fixture.whitespaceAtCheck = 3; });
-    assert.equal((await page.evaluate(pageAction, args)).status, 'blocked');
-    assert.equal(await page.evaluate(() => fixture.sends), 0);
-    assert.equal(await page.getByRole('textbox', { name: 'Message' }).innerText(), await page.evaluate(() => fixture.modifiedDraft));
+    assert.equal((await page.evaluate(pageAction, args)).status, 'sent');
+    assert.equal(await page.evaluate(() => fixture.sends), 1);
+    assert.equal(await page.evaluate(() => fixture.sentTexts[0].replace(/\n+/g, '\n').trim()), prompt.trim());
   });
   await scenario('Pause cannot clear a draft that a human changed only by whitespace', async ({ page, args }) => {
     await page.evaluate(() => { fixture.whitespaceAtCheck = 2; fixture.cancelWithWhitespace = true; });

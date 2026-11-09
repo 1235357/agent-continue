@@ -161,8 +161,8 @@ try {
   control = await newPage(`chrome-extension://${id}/popup.html?view=full`);
   await control.waitForFunction(() => !document.querySelector('#check').disabled);
 
-  await scenario('Official ProseMirror default Dot keymap receives one isolated-world Ctrl+Enter, with no Send click', async page => {
-    await start(page);
+  await scenario('Official ProseMirror explicit keyboard strategy sends one isolated-world Ctrl+Enter, with no Send click', async page => {
+    await start(page, { sendMethod: 'ctrl-enter' });
     const sent = await call({ type: 'SEND_NOW' });
     assert.equal(sent.ok, true, sent.error);
     assert.equal(sent.job.sentCount, 1, sent.job.statusText);
@@ -189,7 +189,7 @@ try {
     assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [1, 0, 1]);
   });
   await scenario('A trusted-event-only keymap remains unconfirmed without replaying through Send', async page => {
-    await start(page);
+    await start(page, { sendMethod: 'ctrl-enter' });
     const sent = await call({ type: 'SEND_NOW' });
     assert.equal(sent.ok, true, sent.error);
     assert.equal(sent.job.sentCount, 0);
@@ -199,7 +199,7 @@ try {
     assert.equal(observed.editorEmpty, false);
   });
   await scenario('An actually hidden ProseMirror tab receives Ctrl+Enter while foreground text, selection and active tab stay unchanged', async page => {
-      await start(page);
+      await start(page, { sendMethod: 'ctrl-enter' });
       const foreground = await newPage('https://pm-foreground.invalid/work');
       try {
         await foreground.bringToFront();

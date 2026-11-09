@@ -1,18 +1,26 @@
 # Changelog
 
-## [3.0.2] - 2026-11-08 (prepared)
+## [3.0.2] - 2026-11-08
 
-Prepared source only. GitHub release, Chrome Web Store submission/approval and
-installed-version receipts for 3.0.2 remain pending. The root npm CLI version
-remains independently 0.3.0.
+The root npm CLI version remains independently 0.3.0.
+
+- Scheduled sends and Send once now always use the configured prompt. Replace
+  unsent text in the bound composer, including changes made after filling or
+  during authorization. Old settings cannot restore the retired text-change
+  veto; the task controls disclose replacement before starting or resuming.
+- Let controlled rich-text editors finish applying a replacement before
+  submission. Do not insert again when the editor already handled the input.
+  Attachments, Pause, target identity and confirmation checks remain in force.
+  A cycle attempts submission once and does not immediately replay an
+  unconfirmed result.
+- Auto uses the available Send button before choosing a keyboard shortcut.
+  The explicit button-only and Ctrl+Enter-only choices remain available.
 
 - Remove the fixed 180-second total cutoff from provider dependency installation.
   Normal setup waits for npm completion, an actual error or explicit user
   cancellation. Retain one-attempt behavior, integrity checks and owned-child
   cancellation/cleanup. Trusted test-only deadlines remain optional and handle
   long durations without Node timer overflow; they are not browser/CLI settings.
-  This source change does not replace the immutable v3.0.1 Release or the package
-  already submitted to the Chrome Web Store.
 
 ## [3.0.1] - 2026-11-08
 

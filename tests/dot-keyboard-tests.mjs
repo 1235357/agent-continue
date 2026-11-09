@@ -98,12 +98,12 @@ try {
     assert.equal(result.status,'cancelled',result.message);
     assert.deepEqual(await page.evaluate(()=>[fixture.keys.length,fixture.clicks]),[0,0]);
   });
-  await scenario('A human draft change immediately before submission is preserved', async(page,args)=>{
+  await scenario('A text change immediately before keyboard submission is replaced and sent once', async(page,args)=>{
     await page.evaluate(()=>fixture.editAt=3);
     const result=await page.evaluate(pageAction,args);
-    assert.equal(result.status,'blocked',result.message);
-    assert.equal(await page.evaluate(()=>document.querySelector('[contenteditable]').innerText.endsWith(' human edit')),true);
-    assert.deepEqual(await page.evaluate(()=>[fixture.keys.length,fixture.clicks]),[0,0]);
+    assert.equal(result.status,'sent',result.message);
+    assert.equal(await page.evaluate(()=>document.querySelector('[contenteditable]').innerText),'');
+    assert.deepEqual(await page.evaluate(()=>[fixture.keys.length,fixture.clicks,fixture.submissions]),[2,0,1]);
   });
   await scenario('Ignored synthetic keys are unconfirmed and never fall back to a click', async(page,args)=>{
     await page.evaluate(()=>fixture.ignoreKeys=true);
