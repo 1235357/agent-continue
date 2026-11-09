@@ -26,6 +26,274 @@ const record = (values = {}) => ({ bundleSha256: digest, operationId, control: '
 const plain = value => JSON.parse(JSON.stringify(value));
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 
+for (const control of ['connect', 'resume-saved']) {
+  test(`new ${control} follows its own journal to actual readiness without a second user click`, async () => {
+    const f = await fixture();
+    const pending = record({ control, outcome: 'requested' });
+    f.handle(async message => {
+      if (message.type === contracts.ADMIN_CONTROL_SUPPORT) return f.support[message.control];
+      if (message.type === contracts.ADMIN_CONTROL) {
+        await f.save({ version: 1, operations: [pending] });
+        return pending;
+      }
+      if (message.type === 'administrator-status') return { state: 'ready', generation: 'f'.repeat(32) };
+      return null;
+    });
+    await f.click('administrator-control-support-check');
+    await f.click(control === 'connect' ? 'administrator-connect' : 'administrator-reconnect');
+    await f.click('administrator-control-confirm');
+    assert.equal(f.messages.filter(m => m.type === 'administrator-status').length, 0);
+    await f.save({ version: 1, operations: [{ ...pending, state: 'launch-requested',
+      progress: { phase: 'waiting-owner', verifiedFiles: null, totalFiles: null } }] });
+    await tick(); await tick();
+    assert.equal(f.messages.filter(m => m.type === 'administrator-status').length, 1);
+    assert.match(f.get('administrator-status').textContent, /local runtime reported ready/i);
+    assert.equal(f.messages.filter(m => m.type === contracts.ADMIN_CONTROL).length, 1);
+    assert.deepEqual(f.writes, []);
+  });
+}
+
+async function startedFixture(statusReply = () => ({ state: 'unobserved', generation: null })) {
+  const f = await fixture(), pending = record({ outcome: 'requested' });
+  f.handle(async message => {
+    if (message.type === contracts.ADMIN_CONTROL_SUPPORT) return f.support[message.control];
+    if (message.type === contracts.ADMIN_CONTROL) {
+      await f.save({ version: 1, operations: [pending] });
+      return pending;
+    }
+    return message.type === 'administrator-status' ? statusReply() : null;
+  });
+  await f.click('administrator-control-support-check');
+  await f.click('administrator-connect');
+  await f.click('administrator-control-confirm');
+  return { ...f, pending, async launched(values = {}) {
+    await f.save({ version: 1, operations: [{ ...pending, state: 'launch-requested', ...values }] });
+    await tick(); await tick();
+  } };
+}
+
+test('historic startup receipt, page load and journal reload never arm readiness follow-up', async () => {
+  const historic = record({ state: 'launch-requested', outcome: 'requested' });
+  const f = await fixture({ journal: { version: 1, operations: [historic] } });
+  f.handle(() => ({ state: 'ready', generation: 'f'.repeat(32) }));
+  await f.save({ version: 1, operations: [historic] });
+  await f.click('administrator-control-journal-check');
+  await f.expire(3000);
+  assert.deepEqual(f.messages, []);
+  assert.doesNotMatch(f.get('administrator-status').textContent, /reported ready/i);
+  assert.deepEqual(f.writes, []);
+});
+
+test('startup readiness follow-up only reads five times, never replays startup or blocks manual controls', async () => {
+  const f = await startedFixture();
+  await f.launched();
+  assert.equal(f.get('administrator-check').disabled, false);
+  assert.equal(f.get('administrator-pause').disabled, false);
+  assert.equal(f.get('administrator-revoke').disabled, false);
+  for (let i = 0; i < 8; i++) { await f.expire(3000); await tick(); }
+  assert.equal(f.messages.filter(m => m.type === 'administrator-status').length, 5);
+  assert.equal(f.messages.filter(m => m.type === contracts.ADMIN_CONTROL).length, 1);
+  assert.equal(f.messages.some(m => [contracts.ADMIN_CONTROL_RECONCILE, contracts.ADMIN_CONTROL_FENCE].includes(m.type)), false);
+  assert.equal(f.timers.size, 0);
+  await f.click('administrator-check');
+  assert.equal(f.messages.filter(m => m.type === 'administrator-status').length, 6);
+  assert.deepEqual(f.writes, []);
+});
+
+for (const change of ['Pause review', 'Revoke review', 'journal reload', 'support check', 'permission removal', 'permission recheck',
+  'new Pause', 'new control', 'corrupt journal', 'changed target', 'changed timestamp', 'selection',
+  'account', 'pagehide', 'route']) {
+  test(`startup readiness discards a late reply after ${change}`, async () => {
+    const reply = deferred(), f = await startedFixture(() => reply.promise);
+    await f.launched();
+    assert.equal(f.messages.filter(m => m.type === 'administrator-status').length, 1);
+    if (change === 'Pause review') await f.click('administrator-pause');
+    if (change === 'Revoke review') await f.click('administrator-revoke');
+    if (change === 'journal reload') await f.click('administrator-control-journal-check');
+    if (change === 'support check') await f.click('administrator-control-support-check');
+    if (change === 'permission removal') await f.removePermission();
+    if (change === 'permission recheck') await f.click('permission-check');
+    if (change === 'new Pause') await f.publishPause({ operationId: 'e'.repeat(32), outcome: 'requested' });
+    if (change === 'new control') await f.save({ version: 1, operations: [{ ...f.pending, state: 'launch-requested' },
+      record({ operationId: 'e'.repeat(32), control: 'revoke', target: null })] });
+    if (change === 'corrupt journal') await f.save({ version: 1, operations: [{ ...f.pending, extra: true }] });
+    if (change === 'changed target') await f.launched({ target: 'e'.repeat(32) + ':idle' });
+    if (change === 'changed timestamp') await f.launched({ createdAt: f.pending.createdAt + 1 });
+    if (change === 'selection') await f.select('manual');
+    if (change === 'account') { f.get('account-current').checked = true; await f.get('account-current').fire('change'); }
+    if (change === 'pagehide') await f.pagehide();
+    if (change === 'route') f.location.search = '?target=' + otherDigest;
+    reply.resolve({ state: 'ready', generation: 'f'.repeat(32) });
+    await tick(); await tick();
+    await f.expire(3000);
+    assert.doesNotMatch(f.get('administrator-status').textContent, /reported ready/i);
+    assert.equal(f.messages.filter(m => m.type === 'administrator-status').length, 1);
+    assert.equal(f.messages.filter(m => m.type === contracts.ADMIN_CONTROL).length, 1);
+    assert.deepEqual(f.writes, []);
+  });
+}
+
+test('manual status supersedes a stalled automatic read without losing the newer ready result', async () => {
+  const old = deferred(); let calls = 0;
+  const f = await startedFixture(() => ++calls === 1 ? old.promise : { state: 'ready', generation: 'f'.repeat(32) });
+  await f.launched();
+  await f.click('administrator-check');
+  assert.match(f.get('administrator-status').textContent, /reported ready/i);
+  old.resolve({ state: 'unobserved', generation: null });
+  await tick(); await tick(); await f.expire(3000);
+  assert.match(f.get('administrator-status').textContent, /reported ready/i);
+  assert.equal(calls, 2);
+  assert.equal(f.timers.size, 0);
+});
+
+test('confirmed Revoke invalidates a pending earlier manual readiness reply', async () => {
+  const f = await fixture(), old = deferred();
+  f.handle(async message => {
+    if (message.type === contracts.ADMIN_CONTROL_SUPPORT) return f.support[message.control];
+    if (message.type === 'administrator-status') return old.promise;
+    if (message.type === contracts.ADMIN_CONTROL && message.control === 'revoke') {
+      const denied = record({ control: 'revoke', target: null, state: 'revocation-recorded', outcome: 'requested' });
+      await f.save({ version: 1, operations: [denied] });
+      return denied;
+    }
+    return null;
+  });
+  await f.click('administrator-control-support-check');
+  const checking = f.click('administrator-check');
+  await tick();
+  await f.click('administrator-revoke');
+  await f.click('administrator-control-confirm');
+  old.resolve({ state: 'ready', generation: 'f'.repeat(32) });
+  await checking;
+  assert.doesNotMatch(f.get('administrator-status').textContent, /reported ready/i);
+  assert.equal(f.messages.filter(m => m.type === contracts.ADMIN_CONTROL && m.control === 'revoke').length, 1);
+  assert.deepEqual(f.writes, []);
+});
+
+for (const boundary of ['external Pause', 'external Revoke', 'Revoke refinement']) {
+  test(`${boundary} invalidates an older manual readiness reply without another dispatch`, async () => {
+    const revoked = record({ control: 'revoke', target: null, state: 'reserved', outcome: 'requested' });
+    const journal = { version: 1, operations: boundary === 'Revoke refinement' ? [revoked] : [] };
+    const f = await fixture({ journal }), old = deferred();
+    f.handle(message => message.type === 'administrator-status' ? old.promise : null);
+    const checking = f.click('administrator-check');
+    await tick();
+    if (boundary === 'external Pause') await f.publishPause({ operationId: 'e'.repeat(32), outcome: 'requested' });
+    else await f.save({ version: 1, operations: [{ ...revoked, state: 'revocation-recorded' }] });
+    old.resolve({ state: 'ready', generation: 'f'.repeat(32) });
+    await checking;
+    assert.doesNotMatch(f.get('administrator-status').textContent, /reported ready/i);
+    assert.equal(f.messages.filter(m => m.type === 'administrator-status').length, 1);
+    assert.equal(f.messages.some(m => m.type === contracts.ADMIN_CONTROL), false);
+    assert.deepEqual(f.writes, []);
+  });
+}
+
+test('ordinary startup progress does not invalidate a manual readiness query', async () => {
+  const startup = record({ outcome: 'requested' }), old = deferred();
+  const f = await fixture({ journal: { version: 1, operations: [startup] } });
+  f.handle(message => message.type === 'administrator-status' ? old.promise : null);
+  const checking = f.click('administrator-check');
+  await tick();
+  await f.save({ version: 1, operations: [{ ...startup, state: 'launch-requested' }] });
+  old.resolve({ state: 'ready', generation: 'f'.repeat(32) });
+  await checking;
+  assert.match(f.get('administrator-status').textContent, /reported ready/i);
+  assert.deepEqual(f.writes, []);
+});
+
+test('external Pause clears previously published readiness without inferring stopped', async () => {
+  const f = await startedFixture(() => ({ state: 'ready', generation: 'f'.repeat(32) }));
+  await f.launched();
+  assert.match(f.get('administrator-status').textContent, /reported ready/i);
+  await f.publishPause({ operationId: 'e'.repeat(32), outcome: 'requested' });
+  assert.doesNotMatch(f.get('administrator-status').textContent, /reported ready|verified.*stopped/i);
+  assert.equal(f.messages.filter(m => m.type === 'administrator-status').length, 1);
+  assert.equal(f.messages.filter(m => m.type === contracts.ADMIN_CONTROL).length, 1);
+  assert.deepEqual(f.writes, []);
+});
+
+test('a stalled startup readiness read expires without cancelling the underlying startup', async () => {
+  const reply = deferred(), f = await startedFixture(() => reply.promise);
+  await f.launched();
+  await f.expire(5000); await tick();
+  assert.equal(f.get('administrator-check').disabled, false);
+  assert.match(f.get('administrator-status').textContent, /no valid administrator status response/i);
+  await f.click('administrator-pause');
+  reply.resolve({ state: 'ready', generation: 'f'.repeat(32) });
+  await tick(); await f.expire(3000);
+  assert.doesNotMatch(f.get('administrator-status').textContent, /reported ready/i);
+  assert.equal(f.messages.filter(m => m.type === contracts.ADMIN_CONTROL).length, 1);
+  assert.equal(f.timers.size, 0);
+});
+
+for (const change of ['Pause review', 'account', 'manual status', 'pagehide', 'new Pause']) {
+  test(`late startup acknowledgement cannot arm follow-up after ${change}`, async () => {
+    const f = await fixture(), ack = deferred(), pending = record({ outcome: 'requested' });
+    f.handle(async message => {
+      if (message.type === contracts.ADMIN_CONTROL_SUPPORT) return f.support[message.control];
+      if (message.type === contracts.ADMIN_CONTROL) {
+        await f.save({ version: 1, operations: [pending] });
+        return ack.promise;
+      }
+      return { state: 'unobserved', generation: null };
+    });
+    await f.click('administrator-control-support-check');
+    await f.click('administrator-connect');
+    const confirming = f.click('administrator-control-confirm');
+    await tick(); await tick();
+    if (change === 'Pause review') await f.click('administrator-pause');
+    if (change === 'account') { f.get('account-current').checked = true; await f.get('account-current').fire('change'); }
+    if (change === 'manual status') await f.click('administrator-check');
+    if (change === 'pagehide') await f.pagehide();
+    if (change === 'new Pause') await f.publishPause({ operationId: 'e'.repeat(32), outcome: 'requested' });
+    const before = f.messages.filter(m => m.type === 'administrator-status').length;
+    await f.save({ version: 1, operations: [{ ...pending, state: 'launch-requested' }] });
+    ack.resolve(pending);
+    await confirming; await tick();
+    assert.equal(f.messages.filter(m => m.type === 'administrator-status').length, before);
+    assert.equal(f.messages.filter(m => m.type === contracts.ADMIN_CONTROL).length, 1);
+    assert.deepEqual(f.writes, []);
+  });
+}
+
+for (const observation of [null, { state: 'ready', generation: 'private-unknown' },
+  { state: 'ready', generation: 'f'.repeat(32), extra: true }]) {
+  test(`automatic startup read rejects malformed readiness: ${JSON.stringify(observation)}`, async () => {
+    const f = await startedFixture(() => observation);
+    await f.launched();
+    for (let i = 0; i < 5; i++) { await f.expire(3000); await tick(); }
+    assert.doesNotMatch(f.get('administrator-status').textContent, /reported ready/i);
+    assert.equal(f.messages.filter(m => m.type === 'administrator-status').length, 5);
+    assert.equal(f.messages.filter(m => m.type === contracts.ADMIN_CONTROL).length, 1);
+    assert.equal(f.timers.size, 0);
+  });
+}
+
+for (const response of ['immediate launch', 'lost acknowledgement', 'transport exception']) {
+  test(`startup can follow one new persisted identity after ${response}, never retrying the control`, async () => {
+    const f = await fixture(), saved = record({ state: 'launch-requested', outcome: 'requested' });
+    f.handle(async message => {
+      if (message.type === contracts.ADMIN_CONTROL_SUPPORT) return f.support[message.control];
+      if (message.type === contracts.ADMIN_CONTROL) {
+        await f.save({ version: 1, operations: [saved] });
+        if (response === 'transport exception') throw Error('private-path-must-not-render');
+        return response === 'lost acknowledgement' ? null : saved;
+      }
+      if (message.type === 'administrator-status') return { state: 'ready', generation: 'f'.repeat(32) };
+      return null;
+    });
+    await f.click('administrator-control-support-check');
+    await f.click('administrator-connect');
+    await f.click('administrator-control-confirm');
+    await tick(); await tick();
+    assert.match(f.get('administrator-status').textContent, /reported ready/i);
+    assert.equal(f.messages.filter(m => m.type === 'administrator-status').length, 1);
+    assert.equal(f.messages.filter(m => m.type === contracts.ADMIN_CONTROL).length, 1);
+    assert.deepEqual(f.writes, []);
+  });
+}
+
 test('guided administrator Connect prepares support and consent without issuing a mutation', async () => {
   const f = await fixture();
   assert.equal(f.get('administrator-guided-connect').disabled, false);
@@ -230,6 +498,7 @@ test('guided Connect discards a late support result after permission revocation'
 
 async function fixture({ query = '?mode=browser-managed', granted = true, journal, language = 'en', incognito = false, validPrepared = false, embedded = false } = {}) {
   const elements = new Map(), messages = [], writes = [], permissionListeners = [], storageListeners = [];
+  const pageListeners = new Map();
   const data = { [contracts.ADMIN_CONTROL_JOURNAL]: journal };
   const timers = new Map();
   const preparedCalls = [];
@@ -260,6 +529,7 @@ async function fixture({ query = '?mode=browser-managed', granted = true, journa
   const context = vm.createContext({
     URL, location, console, ...contracts, administratorControlRecord, administratorControlJournal,
     administratorControlSupport, administratorControlStatus,
+    addEventListener(name, handler) { pageListeners.set(name, [...(pageListeners.get(name) ?? []), handler]); },
     setTimeout(callback, delay) { const id = ++timerId; timers.set(id, { callback, delay }); return id; },
     clearTimeout(id) { timers.delete(id); },
     document: { getElementById: get, querySelectorAll: () => [], documentElement: { lang: 'en' },
@@ -295,6 +565,7 @@ async function fixture({ query = '?mode=browser-managed', granted = true, journa
     async click(id) { await get(id).fire('click'); }, async select(id, bundle = digest) { get('administrator-control-operation').value = id === 'manual' ? id : bundle + ':' + id;
       await get('administrator-control-operation').fire('change'); },
     async publishPause(value) { for (const listener of storageListeners) listener({ pause: { newValue: value } }, 'local'); await tick(); },
+    async pagehide() { for (const handler of pageListeners.get('pagehide') ?? []) handler(); await tick(); },
     async expire(delay) { for (const [id, timer] of timers) if (timer.delay === delay) { timers.delete(id); timer.callback(); } await tick(); },
     async removePermission() { granted = false; state.permission = 'absent'; for (const listener of permissionListeners) listener({ permissions: ['nativeMessaging'] }); await tick(); },
   };

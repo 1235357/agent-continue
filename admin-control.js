@@ -29,6 +29,10 @@ const validTarget = v => typeof v === 'string' && [37, 65].includes(v.length) &&
 const same = (a, b) => a.bundleSha256 === b.bundleSha256 && a.operationId === b.operationId && a.control === b.control;
 const recoverable = (record, action) => record && (!terminal.includes(record.state) ||
   action === 'control-reconcile' && record.control === 'revoke' && record.state === 'revocation-recorded');
+// Admission can settle before a recorded revocation has independently verified stop.
+const pendingReadback = (record, time) => (!terminal.includes(record.state) ||
+  record.control === 'revoke' && record.state === 'revocation-recorded') &&
+  time >= record.createdAt && time - record.createdAt < 600000;
 const validIdentity = v => hex(v.bundleSha256, 64) && hex(v.operationId, 32) && kinds.includes(v.control);
 const validState = (state, control) => states.includes(state) &&
   (control === 'revoke' ? !['intent-saved', 'launch-requested', 'launch-unconfirmed', 'recovered-paused'].includes(state) :
@@ -185,7 +189,8 @@ export function bindAdministratorControls(api, { now = Date.now, timers = global
   function schedule(records) {
     timers.clearTimeout(timer); timer = undefined;
     if (disposed) return;
-    const pending = records.filter(r => !terminal.includes(r.state) && now() >= r.createdAt && now() - r.createdAt < 600000);
+    const time = now();
+    const pending = records.filter(r => pendingReadback(r, time));
     if (!pending.length) { background(() => alarms?.clear?.(ADMIN_CONTROL_ALARM)); return; }
     const delay = pending.some(r => now() - r.createdAt < 30000) ? 2000 : 5000;
     // The alarm is a coarse worker-restart fallback, not a two-second scheduling guarantee.
@@ -200,6 +205,7 @@ export function bindAdministratorControls(api, { now = Date.now, timers = global
     await serial(async () => {
       if (disposed || started !== epoch) return;
       const journal = await readJournal();
+      if (disposed || started !== epoch) return;
       const existing = journal?.operations.find(r => same(r, record));
       const refinesRevocation = existing?.state === 'revocation-recorded' && result.state === 'stopped';
       if (!existing || terminal.includes(existing.state) && result.state !== existing.state && !refinesRevocation ||
@@ -209,8 +215,11 @@ export function bindAdministratorControls(api, { now = Date.now, timers = global
     });
     return result;
   }
-  function observe(record, started) {
+  function observe(record, started, afterCurrent = false) {
     const key = record.bundleSha256 + ':' + record.operationId + ':' + started;
+    if (afterCurrent && reads.has(key)) {
+      return reads.get(key).catch(() => null).then(() => observe(record, started));
+    }
     if (!reads.has(key)) {
       const work = observeOnce(record, started).finally(() => { reads.delete(key); });
       reads.set(key, work);
@@ -230,7 +239,7 @@ export function bindAdministratorControls(api, { now = Date.now, timers = global
       if (!journal) return;
       for (const record of journal.operations) {
         if (started !== epoch || disposed) return;
-        if (!terminal.includes(record.state) && now() >= record.createdAt && now() - record.createdAt < 600000) {
+        if (pendingReadback(record, now())) {
           await observe(record, started);
         }
       }
@@ -364,18 +373,27 @@ export function bindAdministratorControls(api, { now = Date.now, timers = global
     const key = record.operationId;
     if (submitted.has(key)) return null;
     const fields = { bundleSha256: record.bundleSha256, operationId: record.operationId, control: record.control };
+    let dispatched = false;
     const dispatchGuard = (send, current, timeout) => serial(async () => {
       if (!current()) return null;
       const latest = await Promise.race([readJournal(), timeout]);
       const active = latest?.operations.find(r => same(r, fields));
       if (!current() || !recoverable(active, action)) return null;
       // Keep check and dispatch ordered with journal commits, but never await native work in this queue.
+      dispatched = true;
       return { reply: send() };
     });
     const work = native(action, fields, started, () => true, dispatchGuard);
     submitted.set(key, work);
     try { return await work; }
-    finally { submitted.delete(key); void observePending(); }
+    finally {
+      submitted.delete(key);
+      // One read, not a renewed polling window; even an unknown reply may have had an effect.
+      if (dispatched && action === 'control-reconcile' && record.control === 'revoke' && !disposed && started === epoch) {
+        background(() => observe(record, started, true));
+      }
+      void observePending();
+    }
   }
   permissions.onRemoved?.addListener?.(change => {
     if (!change?.permissions?.includes('nativeMessaging')) return;

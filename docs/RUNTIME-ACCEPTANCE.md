@@ -53,6 +53,35 @@ Reconcile from falling through to a replacement host; 627 related tests pass.
 That follow-up is source-only, not installed or released evidence. Existing
 3.0.4 release assets and pending Store submission remain unchanged.
 
+## Source Follow-Up: Status Progress Is Not Another Native Command
+
+The current source fixes the confirmed-startup readiness refresh gap, stale
+manual ready replies after same-page or cross-page denial, and early termination
+of revocation-recorded readback. New UI observation is tied to the exact newly
+confirmed operation and invalidated by user/permission/identity boundaries. It
+uses at most five read-only readiness checks; that observation budget is not a
+native command/runtime deadline. Recent Revoke readback uses the existing
+ten-minute createdAt window, and explicit aged same-ID reconciliation gets one
+fresh query. Neither path creates native stopped evidence or repeats a control.
+
+Verification: UI/Pause/setup 417/417, worker 156/156, zero failures/cancelled/
+skipped. Both first-red cross-page denial regressions and their positive control
+are recorded in the source tests. A further first-red cached-observation case
+clears the old ready value when external Pause arrives, without asserting stop.
+Independent bounded review found the exact
+fixes closed. This is not a complete formal EGM gate, installation proof or
+actual current-browser Pause/Revoke/reopen acceptance. Those gates remain open.
+The patch does not change the 3.0.4 release or Store revision 00005.
+
+The full `npm test` command completed with exit 0, including 14/14 MV3,
+6/6 official ProseMirror MV3 and 9/9 local official ProseMirror scenarios.
+Its administrator UI stage loaded before the final one-line external-Pause
+cache clear; the subsequent 417-case group covers that final line. Logs remain
+local at `.artifacts/startup-followup-final-full-tests.log`,
+`.artifacts/startup-followup-targeted-tests.log` and
+`.artifacts/startup-followup-worker-tests.log`. These synthetic browser restarts
+do not substitute for the current protected installation's actual lifecycle.
+
 ## Current Dedicated Native Readback And Diagnostic
 
 Protected installation `72eaf030befa40a5a0e15a11f2d30433` was read again and

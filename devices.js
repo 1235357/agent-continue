@@ -325,6 +325,7 @@ const controller = createDeviceController({ runtime: validSelection ? globalThis
 const adminStorage = globalThis.chrome?.storage?.local;
 let adminStatus, adminReadBusy = false, adminRestore, adminSaveBusy = false, adminSaveFailed = false;
 let adminRevision = 0, adminPermissionRefreshing = false, adminPermissionUnverified = false;
+let adminStatusReadRevision = 0;
 let adminGuidedBusy = false, adminGuidedEpoch = 0, adminGuidedNote;
 let adminPauseRevision = 0, adminPauseBusy = false, adminPauseResult;
 let adminPauseRecord, adminPauseStorageReady, adminPauseStorageRevision = 0;
@@ -529,6 +530,7 @@ let adminControlSelected = '', adminControlReadBusy = false, adminControlReceipt
 let adminControlOptionsSignature;
 let adminControlReview, adminControlNote, adminControlStartupUnknown = false;
 let adminControlSummaryNote;
+let adminStartupFollowup, adminStartupFollowupRevision = 0;
 let adminRevokePreparing = false;
 const adminControlWrites = new Set();
 const adminControlKey = record => record ? record.bundleSha256 + ':' + record.operationId : '';
@@ -562,8 +564,15 @@ function closeAdministratorControlReview() {
 
 function observeAdministratorControlJournal(saved, prefer) {
   const journal = administratorControlJournal(saved);
+  const previousRevokes = new Set(adminControlRecords.filter(record => record.control === 'revoke')
+    .map(record => adminControlKey(record) + ':' + record.state));
   adminControlJournalReady = Boolean(journal);
   adminControlRecords = journal?.operations ?? [];
+  if (adminControlRecords.some(record => record.control === 'revoke' &&
+      !previousRevokes.has(adminControlKey(record) + ':' + record.state))) {
+    adminStatusReadRevision++;
+    adminStatus = undefined;
+  }
   if (adminControlSummaryNote?.snapshot !== administratorControlSummarySnapshot()) adminControlSummaryNote = undefined;
   const previous = adminControlSelected;
   if (prefer && adminControlRecords.some(record => adminControlKey(record) === prefer)) adminControlSelected = prefer;
@@ -727,6 +736,7 @@ function renderAdministratorControls(state) {
 
 async function checkAdministratorControlSupport() {
   if (adminControlSupportBusy || adminRevokePreparing || !adminPauseRoute() || !administratorPermitted(controller.getState())) return;
+  cancelAdministratorStartupFollowup();
   const revision = adminRevision;
   adminControlSupportBusy = true;
   adminControlSupports = { revoke: adminControlKnownRevoke ?? null };
@@ -859,6 +869,7 @@ function reviewAdministratorControl(kind) {
   const recovery = kind === 'fence' || kind === 'reconcile';
   const record = recovery ? selectedAdminControl() : undefined;
   if (recovery ? !canRecoverAdministratorControl(record, controller.getState(), kind) : !canRequestAdministratorControl(kind)) return;
+  cancelAdministratorStartupFollowup();
   if (kind === 'revoke' && adminGuidedBusy) {
     adminGuidedEpoch++;
     adminGuidedNote = '连接准备已取消，保留你的撤销选择。';
@@ -877,12 +888,61 @@ function administratorControlSubmission(value, expected) {
     sameAdminControl(value, expected) && Object.hasOwn(adminControlOutcomeKeys, value.outcome) ? value : null;
 }
 
+function cancelAdministratorStartupFollowup() {
+  adminStartupFollowupRevision++;
+  const followup = adminStartupFollowup;
+  adminStartupFollowup = undefined;
+  if (!followup) return;
+  clearTimeout(followup.timer);
+  followup.cancelRead?.();
+}
+
+function currentAdministratorStartupFollowup(followup) {
+  const record = adminControlRecords.find(record => adminControlKey(record) === followup.key);
+  return adminStartupFollowup === followup && followup.revision === adminRevision &&
+    followup.pauseRevision === adminPauseStorageRevision && followup.href === location.href &&
+    adminPauseRoute() && administratorPermitted(controller.getState()) &&
+    adminControlSelected === followup.key && record?.target === followup.target &&
+    record.createdAt === followup.createdAt && record.control === followup.control &&
+    !adminControlRecords.some(record => !followup.existing.has(adminControlKey(record))) &&
+    (!adminControlTerminal.has(record.state) || record.state === 'launch-requested');
+}
+
+function followAdministratorStartupReadiness() {
+  const followup = adminStartupFollowup;
+  if (!followup) return;
+  if (!currentAdministratorStartupFollowup(followup)) return cancelAdministratorStartupFollowup();
+  const record = adminControlRecords.find(record => adminControlKey(record) === followup.key);
+  if (record.state !== 'launch-requested' || followup.reading || followup.timer) return;
+  followup.reading = true;
+  followup.checks++;
+  void readAdministratorStatus(followup).then(observation => {
+    if (!currentAdministratorStartupFollowup(followup)) return;
+    if (observation?.state === 'ready' || followup.checks >= 5) return cancelAdministratorStartupFollowup();
+    followup.timer = setTimeout(() => {
+      followup.timer = undefined;
+      followAdministratorStartupReadiness();
+    }, 3000);
+  }).finally(() => { followup.reading = false; });
+}
+
+function beginAdministratorStartupFollowup(record) {
+  cancelAdministratorStartupFollowup();
+  adminStartupFollowup = { key: adminControlKey(record), target: record.target,
+    control: record.control, createdAt: record.createdAt, revision: adminRevision,
+    pauseRevision: adminPauseStorageRevision, href: location.href,
+    existing: new Set(adminControlRecords.map(adminControlKey)), checks: 0, reading: false };
+  followAdministratorStartupReadiness();
+}
+
 async function confirmAdministratorControl() {
   const review = adminControlReview;
   if (!$('administrator-control-dialog').open || !review) return;
   closeAdministratorControlReview();
   if (review.record ? !canRecoverAdministratorControl(review.record, controller.getState(), review.kind) : !canRequestAdministratorControl(review.kind)) return;
-  const revision = adminRevision;
+  cancelAdministratorStartupFollowup();
+  const revision = ++adminRevision;
+  const followupRevision = adminStartupFollowupRevision, followupPauseRevision = adminPauseStorageRevision;
   const busyKey = review.record ? 'recovery' : review.kind;
   const previous = new Set(adminControlRecords.map(adminControlKey));
   const summarySnapshot = administratorControlSummarySnapshot();
@@ -923,6 +983,13 @@ async function confirmAdministratorControl() {
       adminControlSelected = adminControlKey(persisted);
       adminControlReceipt = undefined;
       if (!review.record && review.kind !== 'revoke') adminControlStartupUnknown = false;
+      if (!review.record && review.kind !== 'revoke' && persisted.outcome !== 'cancelled' &&
+          (!matching || reply.outcome !== 'cancelled') && !previous.has(adminControlKey(persisted)) &&
+          persisted.target === support.target && (!matching || persisted.createdAt === reply.createdAt) &&
+          followupRevision === adminStartupFollowupRevision && followupPauseRevision === adminPauseStorageRevision &&
+          !adminControlRecords.some(record => !previous.has(adminControlKey(record)) && !sameAdminControl(record, persisted))) {
+        beginAdministratorStartupFollowup(persisted);
+      }
     }
     setAdministratorControlNote(adminControlOutcomeKeys[matching ? reply.outcome : 'unconfirmed'], summarySnapshot);
     // A new startup needs a fresh explicit support check, but Revoke stays available during verification.
@@ -931,6 +998,7 @@ async function confirmAdministratorControl() {
 }
 
 async function readAdministratorControlReceipt() {
+  cancelAdministratorStartupFollowup();
   const record = administratorControlReference();
   if (!adminPauseRoute() || !administratorPermitted(controller.getState()) || !record || adminControlReadBusy) return;
   const revision = adminRevision, selectionRevision = adminControlSelectionRevision;
@@ -960,16 +1028,21 @@ if (adminPauseRoute()) {
     if (!$('administrator-control-dialog').open) adminControlReview = undefined;
   });
   $('administrator-control-operation').addEventListener('change', event => {
+    cancelAdministratorStartupFollowup();
     adminControlSelected = event.target.value;
     adminControlSelectionRevision++;
     adminControlReceipt = undefined;
     closeAdministratorControlReview();
     render();
   });
-  $('administrator-control-journal-check').addEventListener('click', () => loadAdministratorControlJournal());
+  $('administrator-control-journal-check').addEventListener('click', () => {
+    cancelAdministratorStartupFollowup();
+    return loadAdministratorControlJournal();
+  });
   $('administrator-control-receipt-check').addEventListener('click', readAdministratorControlReceipt);
   for (const id of ['administrator-control-reference-bundle', 'administrator-control-reference-id', 'administrator-control-reference-action']) {
     $(id).addEventListener(id.endsWith('action') ? 'change' : 'input', () => {
+      cancelAdministratorStartupFollowup();
       adminControlSelectionRevision++;
       adminControlReceipt = undefined;
       render();
@@ -1093,9 +1166,47 @@ function render() {
   }
 }
 
+async function readAdministratorStatus(followup) {
+  if (adminReadBusy || !adminPauseRoute() || !administratorPermitted(controller.getState())) return;
+  if (!followup) cancelAdministratorStartupFollowup();
+  const readRevision = adminStatusReadRevision, pauseRevision = adminPauseStorageRevision;
+  const current = () => readRevision === adminStatusReadRevision && pauseRevision === adminPauseStorageRevision &&
+    (!followup || currentAdministratorStartupFollowup(followup));
+  if (!current()) return;
+  if (!followup) { adminReadBusy = true; adminStatus = undefined; render(); }
+  const revision = adminRevision;
+  let observed = null, timer, expired = false;
+  try {
+    // Cancel/expiry only ends this read; it never cancels or replays the native startup.
+    const deadline = new Promise(resolve => {
+      const stop = () => { expired = true; resolve(); };
+      if (followup) followup.cancelRead = stop;
+      timer = setTimeout(stop, 5000);
+    });
+    await Promise.race([deadline, (async () => {
+      if (!current() || !await adminPausePermitted(revision) || expired || !current()) return;
+      const value = await chrome.runtime.sendMessage({ type: ADMIN_BROWSER_MESSAGE });
+      if (expired || !current() || !await adminPausePermitted(revision) || expired || !current()) return;
+      observed = adminBrowserObservation(value);
+    })()]);
+  } catch { /* No raw transport error in Devices. */ }
+  finally {
+    expired = true;
+    clearTimeout(timer);
+    if (followup) followup.cancelRead = undefined;
+    if (revision === adminRevision && adminPauseRoute() && administratorPermitted(controller.getState()) && current()) {
+      adminStatus = observed;
+    }
+    if (!followup) adminReadBusy = false;
+    render();
+  }
+  return observed;
+}
+
 if (browserManaged) {
   $('administrator-pause').addEventListener('click', () => {
     if (!canRequestAdminPause(controller.getState()) || $('administrator-pause-dialog').open) return;
+    cancelAdministratorStartupFollowup();
     adminGuidedEpoch++;
     adminGuidedNote = '连接准备已取消，保留你的暂停选择。';
     closeAdministratorControlReview();
@@ -1256,32 +1367,7 @@ if (browserManaged) {
     event.preventDefault();
     return readAdministratorPauseReceipt();
   });
-  $('administrator-check').addEventListener('click', async () => {
-    if (adminReadBusy || !adminPauseRoute() || !administratorPermitted(controller.getState())) return;
-    adminReadBusy = true;
-    const revision = adminRevision;
-    adminStatus = undefined;
-    render();
-    let observed = null, timer, expired = false;
-    try {
-      // One deadline covers both permission reads and the query; expiry never retries native work.
-      const deadline = new Promise(resolve => { timer = setTimeout(() => { expired = true; resolve(); }, 5000); });
-      await Promise.race([deadline, (async () => {
-        if (!await adminPausePermitted(revision) || expired) return;
-        const value = await chrome.runtime.sendMessage({ type: ADMIN_BROWSER_MESSAGE });
-        if (expired || !await adminPausePermitted(revision) || expired) return;
-        observed = adminBrowserObservation(value);
-      })()]);
-    }
-    catch { /* No raw transport error in Devices. */ }
-    finally {
-      expired = true;
-      clearTimeout(timer);
-      if (revision === adminRevision && adminPauseRoute() && administratorPermitted(controller.getState())) adminStatus = observed;
-      adminReadBusy = false;
-      render();
-    }
-  });
+  $('administrator-check').addEventListener('click', () => readAdministratorStatus());
   $('administrator-restore').addEventListener('change', async event => {
     const enabled = event.target.checked;
     if (adminSaveBusy || enabled && (!adminStatus || controller.getState().permission !== 'granted')) return render();
@@ -1364,6 +1450,7 @@ $('language').addEventListener('change', async event => {
 });
 for (const account of ['current', 'administrator']) $('account-' + account).addEventListener('change', event => {
   if (!browserManaged || !event.target.checked) return;
+  cancelAdministratorStartupFollowup();
   selectedAccount = account;
   accountSelectionMade = true;
   renderAccountSurface();
@@ -1373,8 +1460,10 @@ globalThis.chrome?.storage?.onChanged?.addListener((changes, area) => {
     void loadAdministratorPreference();
   }
   if (adminPauseRoute() && area === 'local' && Object.hasOwn(changes, ADMIN_BROWSER_PAUSE_LAST)) {
+    cancelAdministratorStartupFollowup();
     cancelAdministratorPauseFollowup();
     adminPauseStorageRevision++;
+    adminStatus = undefined;
     observeAdministratorPauseRecord(changes[ADMIN_BROWSER_PAUSE_LAST].newValue, adminPauseSubmitting);
     render();
   }
@@ -1382,6 +1471,7 @@ globalThis.chrome?.storage?.onChanged?.addListener((changes, area) => {
     cancelAdministratorPauseFollowup();
     adminControlJournalRevision++;
     observeAdministratorControlJournal(changes[ADMIN_CONTROL_JOURNAL].newValue);
+    followAdministratorStartupReadiness();
     render();
   }
   if (area === 'local' && [PENDING_KEY, PRIORITY_PAUSE_KEY, REVISION_KEY].some(key => Object.hasOwn(changes, key + scope))) {
@@ -1390,6 +1480,7 @@ globalThis.chrome?.storage?.onChanged?.addListener((changes, area) => {
   }
 });
 async function refreshBrowserPermission(preserveRevoke = false) {
+  cancelAdministratorStartupFollowup();
   cancelAdministratorPauseFollowup();
   const retainedRevoke = preserveRevoke && administratorPermitted(controller.getState()) ? adminControlKnownRevoke : undefined;
   const revision = ++adminRevision;
@@ -1436,6 +1527,7 @@ if (browserManaged) {
   }
   for (const event of ['pagehide', 'beforeunload', 'popstate', 'hashchange']) {
     globalThis.addEventListener?.(event, interruptAdministratorPauseFollowup);
+    globalThis.addEventListener?.(event, cancelAdministratorStartupFollowup);
   }
 }
 await initializeLanguage();

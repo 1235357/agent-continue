@@ -57,6 +57,35 @@ extension/native runtime was replaced. Preserve fresh Pause, manual intent,
 pending-operation guards and durable receipt checks. Do not replace released
 3.0.4 assets or cancel its pending Store review to include this follow-up.
 
+### Follow-Up Source Fix: Readiness And Revoke Readback
+
+The source-level status path had three independently reproduced gaps. A new
+Devices Connect/resume could reach launch-requested in the worker journal
+without the top readiness field ever reading the ready observation. A delayed
+manual query could publish ready after same-page Revoke or a Pause/Revoke from
+another page. Finally, the worker classified revocation-recorded as terminal
+for both admission and observation, preventing later stopped refinement.
+
+Devices now follows only its own newly confirmed startup identity, using at
+most five existing read-only status queries after launch-requested. History,
+page load, permission grants and alarms cannot arm that page watcher. Manual
+actions, changed identity/target, Pause, Revoke, permission changes and page
+departure invalidate it. A separate read epoch rejects old manual responses
+after cross-page denial without discarding ordinary startup progress. The
+worker retains admission/archive terminal rules but observes recent recorded
+revocations within the original ten-minute window. An explicit same-ID Revoke
+reconciliation arranges one fresh read; it never replays startup or renews an
+expired monitor. Readback cannot manufacture a native stopped receipt.
+
+The targeted UI/Pause/setup suites pass 417/417 and the worker suite 156/156.
+The new cross-page cases first failed three times, with the ordinary-progress
+positive control passing; all now pass. A separately reproduced cached-ready
+display after external Pause is cleared without inferring stopped. Independent
+bounded review confirmed those fixes. These are source/fixture results, not installed browser lifecycle
+acceptance or a formal complete EGM gate. See
+`docs/plans/2026-11-08-startup-readiness-followup.md`. No runtime, extension,
+grant, production connection, version or released asset was replaced.
+
 ### Dedicated Native Connection Diagnostic
 
 The specific installed operation `72eaf030befa40a5a0e15a11f2d30433` was read
