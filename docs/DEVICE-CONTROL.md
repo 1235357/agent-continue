@@ -1,8 +1,21 @@
-# Device Control Candidate
+# Device Control Design And History
 
-This page describes uncommitted native-device development alongside v2.2.0. It is
-not part of the published v2.2.0 artifacts or evidence of an installed native bridge.
-The scheduler's released behavior remains documented in the root README.
+## Current Reading Order
+
+For the command-only Windows setup and current evidence, start with the root
+[README](../README.md), [Windows setup commands](../native/bootstrap/README.md#windows-command-installation),
+[Runtime Acceptance](RUNTIME-ACCEPTANCE.md) and
+[Development Handoff](DEVELOPMENT-HANDOFF.md). No custom Agent Continue EXE/MSI
+installer is required. Ordinary ChatGPT and Dot execution against the protected
+3.0.4-matching native runtime has been observed; current-installation browser
+Pause/Revoke and full-browser-reopen recovery remain separate unverified gates.
+The follow-up legacy-Pause fix on `main` is not an update to immutable 3.0.4 assets.
+
+The dated sections below preserve the earlier v2.2.0-era designs and experiments,
+including superseded installation alternatives. They are not current setup
+instructions, authorization to deploy, or proof that Linux/macOS or every listed
+proposal has been delivered. Historical acceptance belongs to its exact tested
+installation; follow the newer checkpoints before acting.
 
 ## Proposed Continuation Design — 2026-11-03
 
