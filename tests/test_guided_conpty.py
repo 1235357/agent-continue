@@ -46,6 +46,20 @@ class GuidedTerminalTests(unittest.TestCase):
                 self.assertEqual(result, "fixture ready\r")
                 self.assertEqual(terminal.writes, [response])
 
+    def test_sgr_before_startup_query_is_harmless(self):
+        for sgr in (b"\x1b[m", b"\x1b[0m", b"\x1b[1;31m"):
+            for query, reply in ((b"\x1b[6n", "\x1b[1;1R"),
+                                 (b"\x1b[?6n", "\x1b[?1;1R")):
+                raw = sgr + query
+                for split in range(1, len(raw)):
+                    with self.subTest(sgr=sgr, query=query, split=split):
+                        terminal = Terminal(raw, reply)
+                        terminal.chunks = [raw[:split], raw[split:]]
+                        result = FIXTURE.read_stage(terminal, time.monotonic() + 1, 1,
+                                                    prompt=FIXTURE.PROMPT_BYTES[0])
+                        self.assertEqual(result, "fixture ready\r")
+                        self.assertEqual(terminal.writes, [reply])
+
     def test_plain_prompt_requires_no_input(self):
         terminal = Terminal(b"", "unused")
         terminal.chunks = [b"fixture ready\r\n" + FIXTURE.PROMPT_BYTES[0]]
@@ -54,7 +68,8 @@ class GuidedTerminalTests(unittest.TestCase):
         self.assertEqual(terminal.writes, [])
 
     def test_queries_after_visible_text_are_not_answered_with_a_guessed_position(self):
-        for prefix in (b"visible text", b"\x1b[2;5H", b"\r\n", b" "):
+        for prefix in (b"visible text", b"\x1b[2;5H", b"\r\n", b" ",
+                       b"\x1b[0m\x1b[2;5H", b"\x1b[0m "):
             with self.subTest(prefix=prefix):
                 terminal = Terminal(prefix + b"\x1b[6n", "unused")
                 with self.assertRaisesRegex(FIXTURE.FixtureError, "^terminal_late_cursor_query$"):

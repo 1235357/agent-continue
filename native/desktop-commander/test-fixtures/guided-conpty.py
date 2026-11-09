@@ -153,7 +153,7 @@ def read_stage(terminal, deadline, stage, *, prompt=None, line_count=None, echo=
             for query in queries[cursor_queries:]:
                 # A fresh ConPTY surface starts at 1;1. Answer its startup
                 # inheritance query before waiting for application text.
-                prefix = re.sub(rb"\x1b\[(?:\??6n|\?25[hl])", b"", raw[:query.start()])
+                prefix = re.sub(rb"\x1b\[(?:\??6n|\?25[hl]|[0-9;]*m)", b"", raw[:query.start()])
                 if prefix:
                     raise FixtureError("terminal_late_cursor_query")
                 reply = "\x1b[" + ("?" if query[1] else "") + "1;1R"
