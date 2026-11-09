@@ -79,6 +79,8 @@ async function harness(seed={}) {
   };
   const h={state,chrome,pageResult:async args=>({status:args.mode==='check'?'ready':'sent',message:'mock'}),
     message(message,sender={id:'fixture-extension',url:'chrome-extension://fixture/popup.html'}){
+      if(message.type==='COMMIT_RUN' && !Object.hasOwn(message,'receiptBoundaryToken'))
+        message={receiptBoundaryToken:'00000000-0000-0000-0000-000000000001',...message};
       return new Promise(resolve=>chrome.runtime.onMessage.listeners[0](message,sender,resolve));
     },
     sender(){return {tab:copy(state.tab),frameId:0,documentId:'synthetic-bound-document',url:state.tab.url};},
@@ -476,6 +478,7 @@ await scenario('Model commit uses stored prompt, exact frame, and a durable one-
   assert.deepEqual(injection.target.documentIds, ['synthetic-bound-document']);
   assert.equal(injection.args[0].prompt, job.prompt);
   assert.equal(injection.args[0].runId, undefined);
+  assert.equal(injection.args[0].receiptBoundaryToken, '00000000-0000-0000-0000-000000000001');
   assert.equal(h.state.session.job.editorCommitRunId, job.runId);
   assert.equal((await h.message(request, h.sender())).code, 'unknown');
   assert.equal(h.state.injections.length, before + 3);
@@ -483,6 +486,19 @@ await scenario('Model commit uses stored prompt, exact frame, and a durable one-
   await h.message({ type: 'PAUSE' });
   assert.equal((await h.message(request, h.sender())).ok, false);
   assert.equal(h.state.injections.length, before + 3);
+});
+await scenario('Invalid receipt-boundary tokens never reserve or inject a model submission', async () => {
+  const h = await harness();
+  const job = await h.start();
+  h.state.session.job = { ...job, phase: 'sending', runKind: 'send', runDeadline: Date.now() + 10000 };
+  const before = h.state.injections.length;
+  for (const receiptBoundaryToken of [undefined, null, '', 'invalid', 'a'.repeat(1000), 42]) {
+    const reply = await h.message({ type: 'COMMIT_RUN', runId: job.runId, receiptBoundaryToken }, h.sender());
+    assert.equal(reply.dispatched, false);
+    assert.equal(reply.code, 'not-dispatched');
+    assert.equal(h.state.session.job.editorCommitRunId, undefined);
+  }
+  assert.equal(h.state.injections.length, before);
 });
 await scenario('Delayed Send is observed in the worker before exactly one submission, without activating the tab', async () => {
   const h = await harness();

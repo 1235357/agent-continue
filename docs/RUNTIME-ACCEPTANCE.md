@@ -7088,3 +7088,37 @@ run the file-creating ledger/store fixtures or inspect actual Dot artifacts. Par
 ran those fixtures. Actual simultaneous first-create race/crash durability and
 installed ACL/OS peer acceptance are not claimed. Five existing PS5.1 browser
 Pause fixture groups passed after the source edits. All review agents closed.
+
+## 3.0.5 Dispatch Boundary Follow-Up (2026-11-09)
+
+Actual disposable MV3/official ProseMirror regression10/10 passed with
+TEST_REAL_DUE_ALARM=1. This includes natural one-minute hidden-tab delivery,
+unchanged foreground input/focus, Pause silence, a prompt above100000characters,
+and the cross-world synchronous receipt boundary. A matching manual message
+during Send readiness with an ignored button remains unknown/count0; the positive
+case counts the actual later submission once. Source logs:
+.artifacts/scheduler-305-receipt-crossworld.log,
+.artifacts/scheduler-305-receipt-boundary-unit-final.log (88/88),
+.artifacts/scheduler-305-receipt-boundary-worker-final.log (51/51).
+The complete npm test also exited0; it includes expedited actual-alarm10/10 and
+official PM helper11/11. The two final cleanup/token unit additions were then
+rerun88/88 and51/51. This is not the owner's installed Chrome or live ChatGPT/Dot.
+
+Original ordinary-token administrator build/Plan completed,24328files, no install:
+.artifacts/release-305-native-build.log. Combined six-asset build completed:
+.artifacts/release-305-combined-build.log. Actual npm tarball/extraction/CLI and
+adjacent payload tests passed115/115 after preserving the old ignored generated
+v3.0.0 closure and staging the new v3.0.5 receipt. Log:
+.artifacts/release-305-package-contracts-final.log. Windows task/host registrations,
+credentials and running protected owners were not changed by these builds.
+
+GitHub main428c5f2 Extension checks42571949471 passed; Native42571949270
+FAILED at Windows guided ConPTY startup and Ubuntu installed-tarball acquisition.
+These are not all-green CI or live scheduler evidence. The completed review and
+9/9 fixture tests justify the preexisting SGR change only; the prior
+terminal_timeout_1_control_only remains unproved by that patch.
+
+No v3.0.5 Release, Store upload or installed-candidate change is established here.
+Last authenticated Store observation: revision00005/v3.0.4 Pending review,
+public2.1.0, new upload disabled. Current-installation browser-button Pause/Revoke
+and complete saved-intent browser lifetime recovery remain open gates.

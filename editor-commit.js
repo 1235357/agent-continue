@@ -20,6 +20,10 @@ export function editorCommit(args) {
     if (!['auto', 'button', 'ctrl-enter'].includes(sendMethod)) return result('invalid-method');
     const phase = args.phase ?? 'commit';
     if (!['prepare', 'observe', 'commit'].includes(phase)) return result('invalid-phase');
+    if (args.receiptBoundaryToken != null && (typeof args.receiptBoundaryToken !== 'string'
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(args.receiptBoundaryToken))) {
+      return result('invalid-arguments');
+    }
     const prompt = args.prompt.replace(/\r\n?/g, '\n');
     if (!prompt.trim()) return result('empty-payload');
     const expected = new URL(args.expectedUrl);
@@ -178,6 +182,15 @@ export function editorCommit(args) {
     // Exact known Send identifiers only, never a page-wide or generic control.
     const ready = readiness();
     if (ready !== 'ready') return result(ready);
+    if (args.receiptBoundaryToken) {
+      // The isolated adapter snapshots history synchronously, after all model
+      // corrections and without another worker/message round trip before send.
+      const boundary = new Event('agent-continue-receipt-' + args.receiptBoundaryToken,
+        { bubbles: true, cancelable: true });
+      if (editor.dispatchEvent(boundary)) return result('receipt-unavailable');
+      const currentReady = readiness();
+      if (currentReady !== 'ready') return result(currentReady);
+    }
     const sends = sendMethod === 'ctrl-enter' ? [] : sendControls().filter(enabledSend);
     failure = committedGuard();
     if (failure) return result(failure);

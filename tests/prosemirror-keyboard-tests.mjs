@@ -36,7 +36,8 @@ let worker;
 let control;
 let passed = 0;
 
-function fixture({ noSend = false, rejectSynthetic = false, recurringRestore = false, supported = false, sendActivationDelayMs = 0 } = {}) {
+function fixture({ noSend = false, rejectSynthetic = false, recurringRestore = false, supported = false, sendActivationDelayMs = 0,
+  manualReceiptDuringReadiness = false, ignoreButtonSubmit = false } = {}) {
   return `<!doctype html><meta charset="utf-8"><title>Official ProseMirror fixture</title>
   <style>${editorCss}body{font:16px sans-serif;padding:20px}.ProseMirror{min-height:90px;border:1px solid;padding:12px}.message-body{white-space:pre-wrap}</style>
   <main id="history"><article class="message-row" data-message-id="pm-account~pm-dot~old"><div class="message-body">Earlier synthetic response.</div></article></main>
@@ -50,6 +51,7 @@ function fixture({ noSend = false, rejectSynthetic = false, recurringRestore = f
   const button=document.querySelector('button[aria-label="Send"]');
   let sendActivationTimer;
   const submit=method=>{
+    if(method==='button' && ${JSON.stringify(ignoreButtonSubmit)})return;
     const text=window.pm.state.doc.textBetween(0,window.pm.state.doc.content.size,'\\n');
     if(!text.trim())return;
     fixture.submits++;fixture.sentTexts.push(text);
@@ -71,6 +73,11 @@ function fixture({ noSend = false, rejectSynthetic = false, recurringRestore = f
         const update={text:next.doc.textBetween(0,next.doc.content.size,'\\n'),docChanged:transaction.docChanged,at:performance.now(),hidden:document.hidden,focused:document.hasFocus()};
         fixture.modelUpdates.push(update);button.disabled=true;clearTimeout(sendActivationTimer);
         if(next.doc.textContent.trim())sendActivationTimer=setTimeout(()=>{
+          if(${JSON.stringify(manualReceiptDuringReadiness)} && !fixture.manualReceipt){
+            const row=document.createElement('article');row.className='message-row self';row.dataset.messageId='pm-account~pm-dot~manual-during-readiness';
+            const body=document.createElement('div');body.className='message-body';body.textContent=update.text;row.append(body);document.querySelector('#history').append(row);
+            fixture.manualReceipt={text:update.text,hidden:document.hidden};
+          }
           button.disabled=!window.pm.state.doc.textContent.trim();
           fixture.sendActivations.push({elapsedMs:performance.now()-update.at,hidden:document.hidden,focused:document.hasFocus()});
         },${JSON.stringify(sendActivationDelayMs)});
@@ -169,8 +176,9 @@ try {
     if (url.hostname === 'chatgpt.com' && url.pathname.startsWith('/dots/pm-')) {
       const index = Number(url.pathname.split('-').at(-1));
       return route.fulfill({ status: 200, contentType: 'text/html', body: fixture({
-        noSend: index === 3, rejectSynthetic: index === 4 || index === 6 || index === 8,
-        supported: index === 6 || index === 7 || index === 8, sendActivationDelayMs: index === 6 || index === 8 ? 100 : 0,
+        noSend: index === 3, rejectSynthetic: [4, 6, 8, 9, 10].includes(index),
+        supported: [6, 7, 8, 9, 10].includes(index), sendActivationDelayMs: [6, 8, 9, 10].includes(index) ? 100 : 0,
+        manualReceiptDuringReadiness: index === 9 || index === 10, ignoreButtonSubmit: index === 9,
         recurringRestore: index === 7,
       }) });
     }
@@ -413,6 +421,29 @@ try {
       assert.equal(await foreground.evaluate(() => document.hasFocus()), true);
     } finally { await foreground.close(); }
   });
+  for (const accepted of [false, true]) {
+    await scenario(accepted
+      ? 'The cross-world dispatch boundary counts only the actual submission after a matching readiness-time message'
+      : 'A matching readiness-time message cannot confirm an ignored button in a real MV3 isolated world', async page => {
+      const foreground = await newPage('https://pm-foreground.invalid/receipt-boundary');
+      try {
+        await foreground.bringToFront();
+        await foreground.locator('#work').focus();
+        await page.waitForFunction(() => document.hidden && !document.hasFocus());
+        await start(page, { sendMethod: 'auto' });
+        const sent = await call({ type: 'SEND_NOW' });
+        assert.equal(sent.ok, true, sent.error);
+        assert.equal(sent.job.sentCount, accepted ? 1 : 0, sent.job.statusText);
+        assert.equal(sent.job.lastResult, accepted ? 'sent' : 'unknown');
+        const observed = await inspect(page);
+        assert.deepEqual(observed.manualReceipt, { text: prompt, hidden: true });
+        assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, 1, accepted ? 1 : 0]);
+        assert.equal(observed.editorEmpty, accepted);
+        assert.equal(await page.locator('article.message-row.self').count(), accepted ? 2 : 1);
+        assert.equal(await foreground.evaluate(() => document.hasFocus()), true);
+      } finally { await foreground.close(); }
+    });
+  }
   console.log(`RESULT ${passed}/${passed} official ProseMirror MV3 scenarios passed`);
 } finally {
   await closeBrowser();

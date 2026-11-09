@@ -460,9 +460,30 @@ export async function pageAction(args) {
     if (args.modelCommit === true) {
       beforeAssistant = assistantState();
       rememberVisibleHistory();
-      const commit = await chrome.runtime.sendMessage({ type: 'COMMIT_RUN', runId: args.runId });
+      const receiptBoundaryToken = crypto.randomUUID();
+      const receiptEvent = 'agent-continue-receipt-' + receiptBoundaryToken;
+      let receiptBoundarySeen = false;
+      const captureReceiptBoundary = event => {
+        if (!samePage() || !withinDeadline() || !keepComposer() || event.target !== editor) return;
+        // Union with earlier history: virtualized rows must not become new receipts.
+        rememberVisibleHistory();
+        beforeAssistant = assistantState();
+        receiptBoundarySeen = true;
+        event.preventDefault();
+      };
+      document.addEventListener(receiptEvent, captureReceiptBoundary, true);
+      let commit;
+      try {
+        commit = await chrome.runtime.sendMessage({ type: 'COMMIT_RUN', runId: args.runId, receiptBoundaryToken });
+      } catch {
+        submitted = true;
+        return result('unknown', '页面未返回可确认的结果。');
+      } finally {
+        document.removeEventListener(receiptEvent, captureReceiptBoundary, true);
+      }
       if (commit?.ok === true && commit.supported === true && commit.dispatched === true) {
         submitted = true;
+        if (!receiptBoundarySeen) return result('unknown', '页面未返回可确认的结果。');
         return await confirmSubmission();
       }
       if (!(commit?.ok === true && commit.supported === false && commit.dispatched === false)) {

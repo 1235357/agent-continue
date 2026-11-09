@@ -396,6 +396,10 @@ async function waitRun(message, sender) {
   return checkRun(message.runId, sender);
 }
 async function commitRun(message, sender) {
+  if (typeof message.receiptBoundaryToken !== 'string'
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(message.receiptBoundaryToken)) {
+    return { ok: false, dispatched: false, code: 'not-dispatched', reason: 'commit-unavailable' };
+  }
   const permit = await transact(async () => {
     const job = await getJob();
     if (!job?.enabled || job.phase !== 'sending' || job.runKind === 'reply-check'
@@ -409,6 +413,7 @@ async function commitRun(message, sender) {
     return { tabId: job.tabId, documentId: sender.documentId, version, args: {
       expectedUrl: job.url, targetIdentity: job.targetIdentity,
       prompt: currentPrompt(job), sendMethod: job.sendMethod ?? 'auto', deadline: job.runDeadline,
+      receiptBoundaryToken: message.receiptBoundaryToken,
     } };
   });
   if (!permit) return { ok: false, code: 'cancelled' };

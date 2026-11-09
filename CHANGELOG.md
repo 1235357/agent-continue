@@ -16,6 +16,10 @@
 - Add hidden-tab, real Chromium-alarm regression coverage for delayed Send,
   rejected synthetic keys, exact single-message counting and post-Pause silence.
   These fixtures do not establish delivery on every live ChatGPT or Dot build.
+- Capture the receipt baseline synchronously immediately before final model
+  submission. An identical manual message that appeared during Send readiness
+  cannot be counted as this attempt's acknowledgement. Keep unknown delivery
+  distinct from successful dispatch and never replay an uncertain attempt.
 
 ## [3.0.4] - 2026-11-08
 

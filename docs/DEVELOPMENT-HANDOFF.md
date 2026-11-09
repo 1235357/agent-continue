@@ -1,5 +1,52 @@
 # Agent Continue Development Handoff
 
+## Dispatch Boundary And Complete 3.0.5 Build (2026-11-09)
+
+Canonical main428c5f2320fd80eea2ea168a52b48709d9f3b7b6 is pushed; its
+Extension checks42571949471 succeeded in5m14s. This follow-up adds an isolated-
+world, synchronous pre-dispatch history boundary after delayed model preparation.
+Matching messages that appeared while waiting cannot count as the final send.
+The random event token is per attempt, admitted by the worker and not persisted
+in diagnostics. Missing observer acknowledgement causes known no-dispatch;
+unknown worker replies do not permit another method or blind replay. DOM receipts
+still are not service receipts, and page-script interference is not prevented.
+
+Observed follow-up checks: helper88/88, worker51/51; actual isolated-world official
+ProseMirror MV3 scenarios10/10, including a natural one-minute hidden alarm and
+the long prompt, plus both pre-dispatch matching-message negative and actual
+post-dispatch positive cases. The complete npm regression subsequently exited0;
+its final worker/unit case additions also passed51/51 and88/88 separately. Log:
+.artifacts/scheduler-305-receipt-full-regression.log.
+
+The complete Windows candidate was built without installation or connection:
+administrator ZIP26f186ee15d3d04143d512799e94b4c9147aa454b598f732f5c007c1a16a4d34,
+24328files, original ordinary-token build/Plan result. Combined setup ZIP
+44250d3db8f57c7c9425e7c373e24ff11e6c405486bb7cd5db6c990a78ed689a binds
+v3.0.5 and the exact six sidecars. Original receipt:
+.artifacts/release-305-combined-build.log; assets:.artifacts/release-305-combined.
+The root npm tarball suite first correctly refused an old generated v3.0.0
+closure. That ignored, untracked generated directory was preserved at
+.artifacts/release-305-build-inputs/previous-generated-windows-release, not
+overwritten. Rebuilding from the new receipt passed115/115 actual package tests,
+including extracted CLI execution. No production or protected installation moved.
+
+Native CI42571949270 is terminal FAILED, not a verified wait: Windows job
+129011086414 passed packaged-manager loopback, then failed guided ConPTY startup
+with terminal_timeout_1_control_only and a later330000ms test timeout. Ubuntu
+job129011086476 failed installed-tarball acquisition with client_acquisition_failed;
+this is not the previous run's observed504. macOS bootstrap succeeded. Do not
+infer the underlying cause from the generic failure. Existing local SGR startup
+fixture edits were independently reviewed, then parent-tested9/9: they allow only
+non-moving SGR before a first-stage cursor query, retaining late-query refusal.
+They fix an actually reproduced terminal_late_cursor_query, NOT a demonstrated
+repair of the CI timeout. No deadline was enlarged or test excluded.
+
+Subagent Feynman left the five receipt-boundary source/test edits before a workspace
+credit error. Parent reviewed those bytes, completed cross-world regressions and
+cleanup/invalid-token cases. Hume's completed review covers only the two preexisting
+ConPTY fixture edits, not a cold review of the receipt implementation. Formal EGM
+completion/cold-review certification is not claimed. The full goal stays active.
+
 ## Scheduler Priority And 3.0.5 Candidate (2026-11-09)
 
 The owner's latest actual 3.0.4 screenshot shows configured text stranded in the

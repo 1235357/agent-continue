@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import vm from 'node:vm';
+import { randomUUID } from 'node:crypto';
 import { editorCommit } from '../editor-commit.js';
+import { pageAction } from '../adapter.js';
 
 // Synthetic public EditorView/model facade, not real layout, ProseMirror, or
 // trusted keyboard delivery. Selector routing deliberately covers only this
@@ -16,6 +18,8 @@ function fixture(options = {}) {
   const attachments = [];
   const files = [];
   const stops = [];
+  const users = [];
+  const documentListeners = new Map();
   let identity = 'account~dot~message';
   let buttons = [];
   let editors = [];
@@ -37,6 +41,12 @@ function fixture(options = {}) {
     }
     dispatchEvent(event) {
       metrics.events.push(event.type);
+      if (event.type.startsWith('agent-continue-receipt-')) {
+        event.target = this;
+        for (const listener of documentListeners.get(event.type) || []) listener(event);
+        options.onEvent?.(event.type, state);
+        return !event.defaultPrevented;
+      }
       if (event.type === 'keydown' || event.type === 'keyup') {
         metrics.keys.push(event);
         if (event.type === 'keydown') metrics.sent.push(logical(view.state.doc));
@@ -135,18 +145,33 @@ function fixture(options = {}) {
     },
   };
   editor.editor = { view };
-  const row = { getAttribute: name => name === 'data-message-id' ? identity : null };
+  const row = { getAttribute: name => name === 'data-message-id' ? identity : null, querySelector: () => null };
   const document = {
     body: {}, documentElement: {}, activeElement: null, visibilityState: 'visible',
+    addEventListener(type, listener) {
+      if (!documentListeners.has(type)) documentListeners.set(type, new Set());
+      documentListeners.get(type).add(listener);
+    },
+    removeEventListener(type, listener) { documentListeners.get(type)?.delete(listener); },
     querySelectorAll(selector) {
       if (selector === 'article.message-row, [data-message-author-role], article[data-testid^="conversation-turn-"]') return identity === null ? [] : [row];
       if (selector.startsWith('#prompt-textarea') || selector.includes('[data-composer-input]')) return editors;
+      if (selector.startsWith('[data-message-author-role="user"]')) return users;
+      if (selector.startsWith('[data-message-author-role="assistant"]') || selector.startsWith('.typing-indicator')) return [];
       throw new Error('Unexpected document-wide selector: ' + selector);
     },
   };
   const state = {
-    editor, composer, view, schema, metrics, buttons, attachments, stops, files, location, document,
+    editor, composer, view, schema, metrics, buttons, attachments, stops, files, location, document, users,
     setTime(value) { now = value; },
+    advanceTime(value) { now += value; },
+    addUserMessage(text, key) {
+      const node = new Element(); node.innerText = text;
+      if (key) node.attributes['data-message-id'] = key;
+      users.push(node);
+      return node;
+    },
+    listenerCount() { return [...documentListeners.values()].reduce((count, listeners) => count + listeners.size, 0); },
     setIdentity(value) { identity = value; },
     replaceButton() {
       for (const send of buttons) send.isConnected = false;
@@ -163,23 +188,30 @@ function fixture(options = {}) {
   };
   class SyntheticEvent {
     constructor(type, init = {}) { this.type = type; Object.assign(this, init); }
+    preventDefault() { if (this.cancelable) this.defaultPrevented = true; }
   }
   const globals = {
     document, location, URL, Date: { now: () => now },
     Event: SyntheticEvent, KeyboardEvent: SyntheticEvent,
+    HTMLInputElement: class {}, HTMLTextAreaElement: class {},
+    crypto: { randomUUID },
     getComputedStyle: element => element.style,
     window: {},
   };
-  for (const name of ['chrome', 'fetch', 'setTimeout', 'setInterval', 'queueMicrotask']) {
+  if (options.runtime) globals.chrome = { runtime: options.runtime };
+  for (const name of ['chrome', 'fetch', 'setTimeout', 'setInterval', 'queueMicrotask'].filter(name => name !== 'chrome' || !options.runtime)) {
     Object.defineProperty(globals, name, { get() { throw new Error('Forbidden API: ' + name); } });
   }
   const context = vm.createContext(globals);
   vm.runInContext('globalThis.commit = (' + editorCommit.toString() + ');', context);
+  vm.runInContext('globalThis.action = (' + pageAction.toString() + ');', context);
   const args = {
     expectedUrl, targetIdentity: options.dot ? 'account~dot' : null,
     prompt: 'configured first\n\nconfigured last\n', sendMethod: 'button', deadline: 1000,
   };
-  return { state, args, run: overrides => context.commit({ ...args, ...overrides }) };
+  return { state, args, run: overrides => context.commit({ ...args, ...overrides }),
+    action: overrides => context.action({ ...args, mode: 'send', runId: 'synthetic-receipt-run',
+      runDeadline: 10000, extensionClock: true, modelCommit: true, ...overrides }) };
 }
 
 function noDispatch(h) {
@@ -187,6 +219,53 @@ function noDispatch(h) {
   assert.equal(h.state.metrics.keys.length, 0);
   assert.equal(h.state.metrics.rawWrites, 0);
 }
+
+test('a matching manual user message during delayed readiness cannot confirm an ignored extension dispatch', async () => {
+  let h;
+  let commits = 0;
+  h = fixture({ dot: true, runtime: { async sendMessage(message) {
+    if (message.type === 'CHECK_RUN') return { ok: true, allowed: true };
+    if (message.type === 'WAIT_RUN') { h.state.advanceTime(message.delayMs); return { ok: true, allowed: true }; }
+    assert.equal(message.type, 'COMMIT_RUN');
+    commits++;
+    const args = { sendMethod: 'auto', deadline: 10000, receiptBoundaryToken: message.receiptBoundaryToken };
+    assert.equal(h.run({ ...args, phase: 'prepare' }).code, 'prepared');
+    h.state.buttons[0].disabled = true;
+    assert.equal(h.run({ ...args, phase: 'observe' }).code, 'waiting-send');
+    h.state.addUserMessage(h.args.prompt, 'account~dot~manual-during-readiness');
+    h.state.buttons[0].disabled = false;
+    assert.equal(h.run({ ...args, phase: 'observe' }).code, 'ready');
+    assert.equal(h.run({ ...args, phase: 'commit' }).dispatched, true);
+    return { ok: true, supported: true, dispatched: true };
+  } } });
+  const outcome = await h.action({ sendMethod: 'auto' });
+  assert.equal(outcome.status, 'unknown', 'A manual message from before final dispatch is not its receipt');
+  assert.equal(commits, 1);
+  assert.equal(h.state.metrics.clicks, 1);
+  assert.equal(h.state.metrics.keys.length, 0);
+  assert.equal(h.state.users.length, 1);
+  assert.equal(h.state.listenerCount(), 0);
+});
+
+test('a missing isolated receipt listener prevents the model submission without fallback', () => {
+  const h = fixture();
+  const outcome = h.run({ receiptBoundaryToken: randomUUID() });
+  assert.equal(outcome.code, 'receipt-unavailable');
+  assert.equal(outcome.dispatched, false);
+  assert.equal(h.state.metrics.clicks, 0);
+  assert.equal(h.state.metrics.keys.length, 0);
+});
+
+test('receipt listener cleanup also runs when the worker reply throws', async () => {
+  const h = fixture({ dot: true, runtime: { async sendMessage(message) {
+    if (message.type === 'CHECK_RUN') return { ok: true, allowed: true };
+    assert.equal(message.type, 'COMMIT_RUN');
+    throw new Error('synthetic worker reply lost');
+  } } });
+  assert.equal((await h.action()).status, 'unknown');
+  assert.equal(h.state.listenerCount(), 0);
+  assert.equal(h.state.metrics.clicks, 0);
+});
 
 test('serialized helper synchronously transacts the configured logical lines, then clicks once', async () => {
   const h = fixture({ renderedText: 'stale DOM rendering', onCommit(state) {
