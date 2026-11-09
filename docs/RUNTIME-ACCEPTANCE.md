@@ -1,5 +1,32 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Current Dedicated Native Readback And Diagnostic
+
+Protected installation `72eaf030befa40a5a0e15a11f2d30433` was read again and
+reports complete installation, verified administrator child, committed browser
+enrollment and ready-to-connect. Actual sealed stager SHA-256 remains
+`1da07714b44a3457abd95d64e7b4b60c0a490dde82db03b73c05285bf48de5d5`.
+Native registration still permits only `hjnopijiekcbgiljjfiekeiepkebhido`.
+`CheckBrowserHostedOwnerControl` returned supported/eligible/paused and target
+`67f647e4f14b4aadbd6ad467ad52721b:idle`.
+
+The separately authorized dedicated terminal probe dispatched Connect operation
+`b069caf550b94624b2ebea55541204a3` once. Request outcome and protected readback
+are unconfirmed, progress is null, owner observation is unobserved and the
+support target remains paused/unchanged. This is not proof of Start or failure
+of a hosted model call. Do not replay the operation. No receipt was fabricated
+or inferred from an exit-zero shell.
+
+Read-only preflight probes established medium-token/launch-plan construction,
+an actual elevated administrator token (child exit0), protected binding and
+scheduled-task definition (child exit0), without invoking runtime controls.
+The first-party kernel witness requires a browser-native-host ancestor chain;
+the terminal diagnostic does not meet that prerequisite. This identifies a
+scope error in using a terminal probe as a browser surrogate, not a reason to
+remove the witness. It does not independently establish the precise exception
+from the original child. Current browser UI, hosted tool execution and lifecycle
+acceptance remain outstanding. No production connection was modified.
+
 ## Published 3.0.4 And Actual Store Submission
 
 Checkpoint: 2026-11-08, America/Chicago. Release source tag `v3.0.4` is

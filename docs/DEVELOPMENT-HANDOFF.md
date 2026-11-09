@@ -2,6 +2,33 @@
 
 ## Current Delivery Checkpoint (2026-11-08 America/Chicago)
 
+### Dedicated Native Connection Diagnostic
+
+The specific installed operation `72eaf030befa40a5a0e15a11f2d30433` was read
+again: its protected result remains complete, administrator child verified,
+browser enrollment committed and ready-to-connect. The sealed stager hash
+still matches `1da07714...`. Live registration allows only the approved IAB
+extension `hjnopijiekcbgiljjfiekeiepkebhido`. A supported Connect observation
+reported paused with target `67f647e4f14b4aadbd6ad467ad52721b:idle`.
+
+One approved terminal-side connection diagnostic used operation
+`b069caf550b94624b2ebea55541204a3`. Its request and original-operation readback
+were unconfirmed, with no progress or Ready generation. Do not replay it.
+This was not a browser invocation. The kernel witness explicitly requires
+the medium caller to descend from the sealed native Node host, command shell
+and actual browser (`windows-browser-peer.cs`, ControlSession constructor).
+A normal tool terminal cannot establish that chain. Read-only probes verified
+medium-token/launch-plan construction, independent native elevation, protected
+binding and scheduled-task definition. They neither launched the runtime nor
+established hosted acceptance; other early child-failure causes were not
+excluded by those probes alone. No witness check or ACL was weakened.
+
+Continue from the real extension UI, not another terminal substitute. The
+IAB extension-page automation refusal remains in force. User UI interaction
+is required where the control tool refuses that page; do not bypass it with
+CDP, profile edits, a second UI transport, or fabricated browser ancestry.
+Ordinary ChatGPT/Dot, lifecycle and duplicate-cleanup gates remain open.
+
 ### Published 3.0.4 And Submitted Store Revision 00005
 
 Tag `v3.0.4` resolves to `d8ad315c862fa4a43a0deaa8271b31cddbf06a4c`,
@@ -82,7 +109,8 @@ the old revoked r11 HKLM64 registration. Its settled Revoke was read back and
 the exact inactive acceptance bridge was unenrolled; it was not reactivated.
 Native registration now points to the verified release digest's browser host.
 The owner subsequently approved connecting this same dedicated test installation
-and ordinary-chat lifecycle acceptance. That connection has not been started.
+and ordinary-chat lifecycle acceptance. The terminal-side diagnostic above did
+not establish a started connection; do not interpret approval as a Ready receipt.
 Automatic IAB navigation to extension URLs is blocked by browser policy and must
 not be worked around with CDP, profile writes or an alternate browser surface.
 The user requested old duplicate removal; the supplied screenshot shows IAB
