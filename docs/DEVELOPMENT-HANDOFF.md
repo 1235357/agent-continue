@@ -1,5 +1,30 @@
 # Agent Continue Development Handoff
 
+## Fresh Owner Failure Overrides Fixture Passes (2026-11-09 07:21 UTC)
+
+The owner exported agent-continue-activity (3).json from the currently failing
+extension. It reports extensionVersion3.0.5, first no-valid-result18748ms, then
+Pause/Start and execution-timeout20003ms. Do not explain this away as an old3.0.4
+package. Seven runtime files at the known unpacked AgentContinue directory match
+current source after line-ending normalization; this alone is not a loaded-worker
+readback. Actual IAB Dot has one editor and the scoped localized Send under
+data-composer-body; no message was sent or draft changed during that DOM check.
+Current installed scheduler remains FAILED from the owner's observation. The
+20-second outer watchdog matches the second observation but does not yet explain
+the first invalid result or prove the cause of the browser submission failure.
+
+Native CI42576016249 independently failed the same Windows first-prompt
+terminal_timeout_1_control_only; macOS succeeded. A current local temporary-
+directory, loopback-only paired-guided run passed in28.84s; the new diagnostic
+fixture then passed paired26.91s and CMD23.89s. These reused Node and do not prove
+cold provisioning or hosted CI. Test-only content-free initial terminal facts
+were added with red/green tests: Python11/11, Node diagnostic-reader2/2,
+workflow-contract30/30. No timeout enlarged, failed test skipped, transcript
+dumped, production credentials used, or real tunnel connected. The user redirected
+priority back to actual scheduler failure; do not keep the native branch as a
+substitute for that fix. Independent scheduler review findings require separate
+reconciliation, not automatic all-clear or blind implementation.
+
 ## Publication Hold And Final Capacity Recheck (2026-11-09)
 
 Main bb877e087dc2f9ed513e5de2127d57cfa894f1ad contains the integrated 3.0.5

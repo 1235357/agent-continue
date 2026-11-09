@@ -45,6 +45,26 @@ function acquisitionDiagnostic(installDir) {
   } catch { return { observed: false }; }
 }
 
+function terminalDiagnostic(root) {
+  try {
+    const file = path.join(root, 'guided-terminal-failure.json');
+    const info = fs.lstatSync(file);
+    if (!info.isFile() || info.isSymbolicLink() || info.size > 2048) return { observed: false };
+    const report = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (!report || typeof report !== 'object' || Array.isArray(report)
+      || Object.keys(report).sort().join(',') !== 'controls,cursorReplies,receivedBytes,state'
+      || !['no_bytes', 'control_only', 'prompt_present', 'other_output'].includes(report.state)
+      || !Number.isInteger(report.receivedBytes) || report.receivedBytes < 0 || report.receivedBytes > 65536
+      || !Number.isInteger(report.cursorReplies) || report.cursorReplies < 0 || report.cursorReplies > 8
+      || !Array.isArray(report.controls) || report.controls.length > 6
+      || new Set(report.controls).size !== report.controls.length
+      || report.controls.some(value => !['cursor-hide', 'cursor-query', 'cursor-show',
+        'erase-display', 'sgr', 'sync-output'].includes(value))) return { observed: false };
+    return { observed: true, state: report.state, receivedBytes: report.receivedBytes,
+      cursorReplies: report.cursorReplies, controls: report.controls };
+  } catch { return { observed: false }; }
+}
+
 test('acquisition failure diagnostics disclose bounded process facts only', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agentcontinue-acquisition-diagnostic-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -59,6 +79,30 @@ test('acquisition failure diagnostics disclose bounded process facts only', t =>
   for (const value of ['invalid json', JSON.stringify({ format: 'other', version: 1 }), ' '.repeat(4097)]) {
     fs.writeFileSync(file, value);
     assert.deepEqual(acquisitionDiagnostic(root), { observed: false });
+  }
+});
+
+test('terminal failure diagnostics disclose closed protocol facts only', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agentcontinue-terminal-diagnostic-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, 'guided-terminal-failure.json');
+  assert.deepEqual(terminalDiagnostic(root), { observed: false });
+  const valid = { state: 'control_only', receivedBytes: 18, cursorReplies: 1,
+    controls: ['cursor-hide', 'cursor-query', 'sgr'] };
+  fs.writeFileSync(file, JSON.stringify(valid));
+  assert.deepEqual(terminalDiagnostic(root), { observed: true, ...valid });
+  for (const value of [
+    { ...valid, command: 'PRIVATE_COMMAND' }, { ...valid, controls: ['PRIVATE_TEXT'] },
+    { ...valid, controls: ['sgr', 'sgr'] }, { ...valid, cursorReplies: 9 },
+    { ...valid, receivedBytes: 65537 }, { ...valid, receivedBytes: 1.5 },
+    { ...valid, state: 'PRIVATE_MESSAGE' },
+  ]) {
+    fs.writeFileSync(file, JSON.stringify(value));
+    assert.deepEqual(terminalDiagnostic(root), { observed: false });
+  }
+  for (const text of ['invalid json', ' '.repeat(2049)]) {
+    fs.writeFileSync(file, text);
+    assert.deepEqual(terminalDiagnostic(root), { observed: false });
   }
 });
 
@@ -397,7 +441,8 @@ for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle', 'replay
       } catch (error) {
         const code = /^guided_conpty: ([a-z0-9_]+)\r?\n?$/.exec(error.stderr ?? '')?.[1];
         t.diagnostic(JSON.stringify({ phase: 'guided-installer', mode,
-          code: code ?? 'unclassified_fixture_failure', acquisition: acquisitionDiagnostic(installDir) }));
+          code: code ?? 'unclassified_fixture_failure', acquisition: acquisitionDiagnostic(installDir),
+          terminal: terminalDiagnostic(scratch) }));
         throw error;
       }
       const { stdout, stderr } = guidedResult;

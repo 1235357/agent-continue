@@ -174,6 +174,19 @@ def read_stage(terminal, deadline, stage, *, prompt=None, line_count=None, echo=
                 return output.decode("utf-8")
     observed = VT_SEQUENCE.sub(b"", raw)
     state = "no_bytes" if not raw else "control_only" if not observed.strip() else "prompt_present" if prompt and prompt in observed else "other_output"
+    if stage == 1:
+        controls = (
+            ("cursor-hide", rb"\x1b\[\?25l"),
+            ("cursor-query", rb"\x1b\[\??6n"),
+            ("cursor-show", rb"\x1b\[\?25h"),
+            ("erase-display", rb"\x1b\[[0-3]?J"),
+            ("sgr", rb"\x1b\[[0-9;]*m"),
+            ("sync-output", rb"\x1b\[\?2026[hl]"),
+        )
+        terminal.initial_protocol_observation = {
+            "state": state, "receivedBytes": len(raw), "cursorReplies": cursor_queries,
+            "controls": [name for name, pattern in controls if re.search(pattern, raw)],
+        }
     raise FixtureError(f"terminal_timeout_{stage}_{state}")
 
 
@@ -429,6 +442,15 @@ def drive(config):
         if port is not None:
             require_listener_stopped(port, min(deadline, time.monotonic() + CLOSE_SECONDS))
         return result
+    except FixtureError:
+        observation = getattr(terminal, "initial_protocol_observation", None)
+        if observation is not None:
+            try:
+                with (root / "guided-terminal-failure.json").open("x", encoding="utf-8") as report:
+                    json.dump(observation, report)
+            except OSError:
+                pass  # Preserve the original failure; never emit terminal contents.
+        raise
     finally:
         # Do not signal the console group or touch detached manager/tunnel children.
         if terminal.pty.isalive():

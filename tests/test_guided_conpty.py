@@ -110,6 +110,32 @@ class GuidedTerminalTests(unittest.TestCase):
                 with self.assertRaisesRegex(FIXTURE.FixtureError, f"^terminal_timeout_1_{suffix}$"):
                     FIXTURE.read_stage(terminal, time.monotonic() + 1, 1, prompt=FIXTURE.PROMPT_BYTES[0])
 
+    def test_initial_timeout_retains_only_content_free_protocol_facts(self):
+        private = b"PRIVATE_KEY_PATH_AND_MESSAGE"
+        terminal = Terminal(b"\x1b[?25l\x1b[0m" + private, "unused")
+        with self.assertRaisesRegex(FIXTURE.FixtureError, "^terminal_timeout_1_other_output$"):
+            FIXTURE.read_stage(terminal, time.monotonic() + 1, 1, prompt=FIXTURE.PROMPT_BYTES[0])
+        observation = terminal.initial_protocol_observation
+        self.assertEqual(observation, {
+            "state": "other_output", "receivedBytes": len(b"\x1b[?25l\x1b[0m" + private),
+            "cursorReplies": 0, "controls": ["cursor-hide", "sgr"],
+        })
+        self.assertNotIn("PRIVATE", repr(observation))
+
+    def test_control_only_timeout_reports_answered_startup_query(self):
+        terminal = Terminal(b"\x1b[0m\x1b[6n", "\x1b[1;1R")
+        def timeout_after_chunks(size):
+            if terminal.chunks:
+                return terminal.chunks.pop(0)
+            raise TimeoutError()
+        terminal.recv = timeout_after_chunks
+        with self.assertRaisesRegex(FIXTURE.FixtureError, "^terminal_timeout_1_control_only$"):
+            FIXTURE.read_stage(terminal, time.monotonic() + 1, 1, prompt=FIXTURE.PROMPT_BYTES[0])
+        self.assertEqual(terminal.initial_protocol_observation, {
+            "state": "control_only", "receivedBytes": 8, "cursorReplies": 1,
+            "controls": ["cursor-query", "sgr"],
+        })
+
 
 if __name__ == "__main__":
     unittest.main()
