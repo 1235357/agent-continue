@@ -27,6 +27,18 @@ candidate in the background. Tool refusal of extension pages remains an operator
 channel boundary, not a reason to replay settled privileged actions or use an
 alternate channel to bypass that refusal. Full goal remains active.
 
+Rebuilt from main3a0a82731ece46eccad9098f677f842f2a1a6ab8 at
+dist/agent-continue-3.0.5-current-candidate. GitHub ZIP SHA256
+7737269177a419a89927bae5b0fe01cb772166449bb797144a2c619c31fac996;
+Store ZIP5effb3f62b403295ef2637c02ad8d49de10b3acbc77c62fcce8ec76e5cc24837.
+Extracted runtime passed10/10 official PM MV3 scenarios with a natural one-minute
+Chromium alarm, unchanged foreground input/focus, hidden delayed-Send, exact long
+prompt and both receipt-boundary cases. Extracted capacity12/12 also passed.
+Logs:.artifacts/scheduler-305-current-package-natural-alarm.log and
+.artifacts/scheduler-305-current-package-capacity.log. Both commands exited0.
+The package includes current README/CHANGELOG and the verified setup descriptor;
+these candidate pins supersede the earlier local pins, not published3.0.4 assets.
+
 ## Dispatch Boundary And Complete 3.0.5 Build (2026-11-09)
 
 Canonical main428c5f2320fd80eea2ea168a52b48709d9f3b7b6 is pushed; its

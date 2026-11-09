@@ -7136,3 +7136,12 @@ then confirmed the operator cancellation: total5m43s, successful windows-sidecar
 4m55s, release canceled43s. No publication success is claimed. The tag remains;
 no Store review cancellation, new upload, local extension replacement, native
 installation, production connection or research-task change accompanied the hold.
+
+The subsequently rebuilt current-source combined extension ZIP was extracted
+under .artifacts/release-305-current-extension-verified. Actual extracted-code
+MV3/official PM scenarios10/10 exited0 with TEST_REAL_DUE_ALARM=1; extracted
+capacity12/12 exited0. Foreground input/selection/tab/window remained unchanged
+during the natural hidden delayed-Send alarm; Pause prevented stale-alarm sends.
+Logs:.artifacts/scheduler-305-current-package-natural-alarm.log and
+.artifacts/scheduler-305-current-package-capacity.log. These are local fixtures,
+not proof of acceptance by the owner's installed real ChatGPT/Dot pages.
