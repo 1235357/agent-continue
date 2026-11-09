@@ -2,6 +2,61 @@
 
 ## Current Delivery Checkpoint (2026-11-08 America/Chicago)
 
+### Actual Browser Connect And Both Chat Entrances
+
+The owner's latest Devices screenshot supplies real browser Connect operation
+`65ef1e5cb0a44f6b9f3467b121c01764`, rather than the invalid terminal surrogate
+below. Read-only protected observations saw `reserved` / `verifying-full`, then
+`launch-requested` / `waiting-owner`, then `ready` with generation
+`eb4d3708c88a492aa732883bed7cc27b`. Saved intent is `running`. Full verification
+covered 24,352 files and took about 3 minutes 40 seconds before the owner launch;
+no hash, ACL, ancestry or approval check was removed to shorten that interval.
+
+In a new ordinary ChatGPT conversation
+`https://chatgpt.com/c/6af13f28-05ec-83ea-97d0-fa38705ccc57`, the existing dedicated
+AgentContinue Windows D940 Chat plugin actually read a unique fixture marker,
+then executed the checked `windows-hosted-probe-65ef.ps1` once. Its real tool
+result reports an administrator token, an ancestor at the current protected
+`ef4529bcb4d5c508f63433cd` Node runtime, a successful disposable-file write/read,
+and successful start/stop of its own uniquely identified child. An independent
+elevated read-only observer confirmed the protected result, exact file marker
+and absence of that same child identity. The hosted tool reported finished,
+but supplied no independent numeric exit code. Do not replay this script.
+
+The existing Dot main conversation then received one explicitly labeled
+temporary acceptance request, without stopping/restarting or changing its
+research goals. Dot reported one `start_process` for the separate checked
+`windows-dot-probe-65ef.ps1`, SHA-256
+`d23d1706a4d7833b3069bc0aeec8b12692a1ea05c61be65c0177c4d9ae354995`.
+Independent protected readback confirms administrator=true, the same sealed
+Node ancestor, the new Dot-specific file's exact marker, child PID 31628 with
+creation ticks `639297925676734326`, stopped=true and no same-identity child
+remaining. Dot's visible reply reports process 116616 finished, with no numeric
+exit code; its reply alone was not treated as sufficient proof. Do not replay.
+
+These observations supersede the old paused/ready-to-connect-only checkpoint.
+The old historical Pause warning is not the current runtime's readiness state.
+Browser-managed Pause/Revoke and saved-running full browser-reopen acceptance
+remain separate gates; neither chat result establishes them. Extension-page automation is still
+refused, so do not use a terminal or another UI transport as browser ancestry.
+
+### Follow-Up Source Fix: Unassociated Legacy Pause Provenance
+
+An independent audit found a conditional cross-installation fallback:
+`admin-installation-pause.js` allowed an unassociated legacy Reconcile request
+to fall through to the current native host. Such a record has no trustworthy
+original-bundle provenance. The installation adapter now returns a read-only
+result instead; explicit receipt queries and associated/archive original-bundle
+queries remain available. This is not proof that the owner's old screenshot
+record exercised the bug, nor is the historical warning proof of a disconnect.
+
+The minimal reproduction failed before the change. Nine new regression cases
+plus the related suites passed: installation Pause 169, admin browser 79, and
+setup/control/feedback integration 379, total 627. Source-only patch; no installed
+extension/native runtime was replaced. Preserve fresh Pause, manual intent,
+pending-operation guards and durable receipt checks. Do not replace released
+3.0.4 assets or cancel its pending Store review to include this follow-up.
+
 ### Dedicated Native Connection Diagnostic
 
 The specific installed operation `72eaf030befa40a5a0e15a11f2d30433` was read
@@ -27,7 +82,8 @@ Continue from the real extension UI, not another terminal substitute. The
 IAB extension-page automation refusal remains in force. User UI interaction
 is required where the control tool refuses that page; do not bypass it with
 CDP, profile edits, a second UI transport, or fabricated browser ancestry.
-Ordinary ChatGPT/Dot, lifecycle and duplicate-cleanup gates remain open.
+This diagnostic alone did not close hosted gates. The newer ordinary ChatGPT
+results above do; lifecycle and duplicate cleanup remain separate.
 
 ### Published 3.0.4 And Submitted Store Revision 00005
 
@@ -66,9 +122,10 @@ ignore security fixes or merge an untested upgrade.
 This closes the GitHub-publication and new Store-submission milestones, not
 the full Windows lifecycle goal. The release's Windows native archive and
 stager hashes equal the specifically installed 3.0.3 artifacts below, but that
-installation is still only ready-to-connect. No fresh hosted ChatGPT/Dot,
-administrator lifecycle or installed IAB scheduler claim follows from the
-synthetic package tests. Old duplicate extensions remain untouched; do not
+installation was then only ready-to-connect. The later real browser/ordinary
+ChatGPT result above supersedes that state, not the lifecycle/installed-IAB
+scheduler gates. No hosted claim follows from the synthetic package tests.
+Old duplicate extensions remain untouched; do not
 work around IAB's extension-page policy or alter the external Chrome task.
 
 ### Scheduler 3.0.4: Repeated Rewrite Starvation

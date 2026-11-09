@@ -1,5 +1,58 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Browser Operation 65ef And Both Chat Administrator Proofs
+
+Checkpoint: 2026-11-08 America/Chicago. Owner-provided Devices screenshot
+records real extension Connect `65ef1e5cb0a44f6b9f3467b121c01764` for the sealed
+`ef4529bcb4d5c508f63433cd` installation. Original-operation protected readbacks
+progressed through full verification of 24,352 files, waiting-owner and Ready
+generation `eb4d3708c88a492aa732883bed7cc27b`; saved intent became running.
+The approximately 3m40s full-verification phase is observed startup work, not
+evidence that the old legacy Pause receipt stopped this connection. It does
+not justify removing protected verification or replaying a pending request.
+
+Ordinary ChatGPT conversation:
+`https://chatgpt.com/c/6af13f28-05ec-83ea-97d0-fa38705ccc57`.
+The existing dedicated AgentContinue Windows D940 Chat plugin performed an
+actual `read_file` on a unique fixture, then one `start_process` invocation of
+the reviewed acceptance script, SHA-256
+`04d2f89ffccca8acf09102d733f14f8756810521198d64a16ed5ff0e48705910`.
+The controller had prepared and parsed the script but had not executed it.
+Actual hosted output:
+
+- `administrator=true`.
+- `runtimeAncestor=C:\Program Files\AgentContinueAdmin\ef4529bcb4d5c508f63433cd\runtime\node.exe`.
+- `fileRoundtrip=true` in a new acceptance-only directory under protected TEMP.
+- Owned child PID 31932, creation ticks `639297921633078489`, stopped=true.
+
+An elevated read-only observer independently verified the exact result JSON,
+roundtrip marker and absence of that same child identity. It did not issue any
+runtime control. Hosted process 109384 was reported finished; the tool supplied
+no independent numeric exit code. Screenshot evidence was saved locally as
+`ordinary-304-65ef-file-read.jpg` and
+`ordinary-304-65ef-administrator-proof.jpg`; no credentials or production logs
+were uploaded. Do not rerun the disposable script or reuse its directory.
+
+The existing Dot conversation subsequently received one clearly labeled
+temporary test, without pause/restart or research-goal edits. Its new acceptance
+script SHA-256 is
+`d23d1706a4d7833b3069bc0aeec8b12692a1ea05c61be65c0177c4d9ae354995`.
+Dot reported hosted process 116616 finished once. The controller independently
+read its fresh protected result and exact file marker: administrator=true,
+same current sealed Node ancestor, fileRoundtrip=true, owned child PID 31628
+with creation ticks `639297925676734326`, stopped=true and same-identity
+child no longer alive. The separate observer returned overall=true and
+mutationPerformed=false. This avoids relying on model prose alone; no tool
+numeric exit code was supplied. Screenshot: `dot-304-65ef-administrator-reply.jpg`.
+
+This supersedes old ready-to-connect-only observations and establishes bounded
+ordinary ChatGPT and Dot execution against this protected runtime. Browser-
+managed Pause/Revoke and full browser-reopen recovery are not thereby verified.
+A separate bounded frontend fix prevents unassociated legacy Pause
+Reconcile from falling through to a replacement host; 627 related tests pass.
+That follow-up is source-only, not installed or released evidence. Existing
+3.0.4 release assets and pending Store submission remain unchanged.
+
 ## Current Dedicated Native Readback And Diagnostic
 
 Protected installation `72eaf030befa40a5a0e15a11f2d30433` was read again and
@@ -25,7 +78,8 @@ the terminal diagnostic does not meet that prerequisite. This identifies a
 scope error in using a terminal probe as a browser surrogate, not a reason to
 remove the witness. It does not independently establish the precise exception
 from the original child. Current browser UI, hosted tool execution and lifecycle
-acceptance remain outstanding. No production connection was modified.
+acceptance were outstanding at that checkpoint; the newer actual ordinary-chat
+proof above supersedes that part only. No production connection was modified.
 
 ## Published 3.0.4 And Actual Store Submission
 

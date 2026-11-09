@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { bindInstallationPause, INSTALLATION_PAUSE_ASSOCIATIONS } from '../admin-installation-pause.js';
-import { ADMIN_BROWSER_PAUSE_LAST } from '../admin-browser.js';
+import { bindAdministratorBrowser, ADMIN_BROWSER_PAUSE_LAST, ADMIN_BROWSER_PAUSE_RECONCILE,
+  ADMIN_BROWSER_PAUSE_STATUS } from '../admin-browser.js';
 import { ADMIN_CONTROL_SETUP_INSTALLATION } from '../admin-control.js';
 
 const digest='a'.repeat(64), operationId='b'.repeat(32);
@@ -23,6 +24,60 @@ function fixture(initial={}) {
     grant(){grant=true;},
     failWrite(){failWrite=true;},corruptRead(){corruptRead=true;}};
 }
+function browserFixture(initial={}) {
+  const f=fixture(initial),extension='a'.repeat(32);
+  f.api.runtime.id=extension;
+  f.api.runtime.getURL=page=>`chrome-extension://${extension}/${page}`;
+  f.api.storage.session={get:async()=>({}),set:async()=>{}};
+  f.api.storage.local.remove=async key=>{delete f.data[key];};
+  const browser=bindAdministratorBrowser(f.api,{installationPause:f.bind()});
+  const sender={id:extension,frameId:0,tab:{id:1},
+    url:`chrome-extension://${extension}/devices.html?mode=browser-managed`};
+  return {...f,send:message=>browser.handleMessage(message,sender)};
+}
+test('unassociated legacy Reconcile cannot fence a replacement installation',async()=>{
+  const prior={operationId,outcome:'requested'};
+  const initial={[ADMIN_BROWSER_PAUSE_LAST]:prior,
+    [ADMIN_CONTROL_SETUP_INSTALLATION]:{version:1,setupId:'e'.repeat(32),bundleSha256:digest}};
+  const f=browserFixture(initial);
+  f.handle(m=>({...m,state:m.action==='pause-status'?'unconfirmed':'requested'}));
+  const result=await f.send({type:ADMIN_BROWSER_PAUSE_RECONCILE,operationId});
+  assert.deepEqual(f.calls,[],'unknown provenance must not dispatch to the current native host');
+  assert.equal(result,null);
+  assert.deepEqual(f.writes,[]);
+  assert.deepEqual(f.data,initial);
+});
+for(const known of [false,true])for(const outcome of ['requested','unconfirmed'])
+test(`unassociated legacy Pause stays read-only, known=${known}, outcome=${outcome}`,async()=>{
+  const initial={[ADMIN_BROWSER_PAUSE_LAST]:{operationId,outcome},
+    [INSTALLATION_PAUSE_ASSOCIATIONS+':legacy:'+operationId]:{operationId,outcome},
+    ...(known?{[ADMIN_CONTROL_SETUP_INSTALLATION]:{version:1,setupId:'e'.repeat(32),bundleSha256:digest}}:{})};
+  const f=browserFixture(initial);
+  f.handle(m=>({...m,state:m.action==='pause-status'?'unconfirmed':'requested'}));
+  assert.equal(await f.send({type:ADMIN_BROWSER_PAUSE_RECONCILE,operationId}),null);
+  assert.deepEqual(f.calls,[]);
+  assert.deepEqual(await f.send({type:ADMIN_BROWSER_PAUSE_STATUS,operationId}),{operationId,state:'unconfirmed'});
+  assert.deepEqual(f.calls.map(m=>[m.action,m.operationId]),[['pause-status',operationId]]);
+  assert.equal(await f.send({type:ADMIN_BROWSER_PAUSE_RECONCILE,operationId}),null);
+  assert.equal(f.calls.length,1);
+  assert.deepEqual(f.writes,[]);
+  assert.deepEqual(f.data,initial);
+});
+for(const archived of [false,true])for(const state of ['stopped','unconfirmed'])
+test(`original-bundle Pause readback survives replacement, archived=${archived}, state=${state}`,async()=>{
+  const original='f'.repeat(64),initial={[ADMIN_BROWSER_PAUSE_LAST]:{operationId,outcome:'requested'},
+    [ADMIN_CONTROL_SETUP_INSTALLATION]:{version:1,setupId:'e'.repeat(32),bundleSha256:digest},
+    ...(archived?{[INSTALLATION_PAUSE_ASSOCIATIONS+':'+operationId]:{version:1,operationId,bundleSha256:original}}:
+      {[INSTALLATION_PAUSE_ASSOCIATIONS]:{[operationId]:original}})};
+  const f=browserFixture(initial);
+  f.handle(m=>({...m,state}));
+  assert.deepEqual(await f.send({type:ADMIN_BROWSER_PAUSE_STATUS,operationId}),{operationId,state});
+  assert.equal(await f.send({type:ADMIN_BROWSER_PAUSE_RECONCILE,operationId}),null);
+  assert.deepEqual(f.calls.map(m=>[m.action,m.operationId,m.bundleSha256]),
+    [['pause-installation-status',operationId,original]]);
+  assert.deepEqual(f.writes,[]);
+  assert.deepEqual(f.data,initial);
+});
 test('supported installation Pause is recorded before exactly one untargeted dispatch',async()=>{
   const f=fixture(),control=f.bind();
   f.handle(async m=>{

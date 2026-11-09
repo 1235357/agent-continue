@@ -115,9 +115,10 @@ export function bindInstallationPause(api,{timers=globalThis}={}) {
   }
   return Object.freeze({available,
     observe:operationId=>observe(operationId).catch(()=>null),
-    async reconcile(operationId) {
-      // New installation Pause is never sent through legacy target fencing.
-      try{const saved=await read();return !saved||saved.map[operationId]||await archived(operationId)!==undefined?null:undefined;}catch{return null;}
+    async reconcile() {
+      // Associated IDs have no legacy fence contract; legacy IDs lack bundle provenance.
+      // Neither may authorize the browser's current-host reconciliation fallback.
+      return null;
     },
     pause:()=>serial(async()=>{
       const at=epoch;
