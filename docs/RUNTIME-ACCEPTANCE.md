@@ -1,5 +1,66 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Published 3.0.4 And Actual Store Submission
+
+Checkpoint: 2026-11-08, America/Chicago. Release source tag `v3.0.4` is
+`d8ad315c862fa4a43a0deaa8271b31cddbf06a4c` on canonical `main`.
+[Actions 42549266650](https://github.com/1235357/agent-continue/actions/runs/42549266650)
+completed both Windows sidecar and final release jobs successfully. The actual
+public Latest page resolved to
+[Release v3.0.4](https://github.com/1235357/agent-continue/releases/tag/v3.0.4),
+with that commit and 13 assets including the two source archive links.
+No existing tag or release asset was replaced.
+
+Actual public asset downloads in `.artifacts/release-304-final` matched both
+the release page digests and downloaded `SHA256SUMS`:
+
+- GitHub extension ZIP: `63149c28d9be926d85ba6db96f6c819a65652d521fb76bacf27f59f59a6b5d74`
+- Store extension ZIP: `1db05ef86ee3309c3d27a2084e4517ad3e2354746400e072b1472309e7fa3b9f`
+- Extension checksum file: `e9e488d36714a69c2fa9e3debaf6a8bd5f5d949d827a40e8e2f8026ad787d5c4`
+- Windows checksum file: `12375f0976751da3329a9552cb0759d3263bac273997a0e00123ac20ac66da61`
+
+`verify_distribution_pair` passed on the actual downloaded pair. The extracted
+final Store ZIP passed **16/16 MV3 integration scenarios**, including the real
+one-minute Chromium alarm without `SEND_NOW` or clock injection, exact target
+recovery after full browser reopen, and preserving manual scheduler Pause.
+Log: `.artifacts/release-304-final/store-mv3-acceptance.log`.
+It also passed **6/6 official ProseMirror MV3 scenarios**, log
+`.artifacts/release-304-final/store-pm-acceptance.log`, exit0. These are
+synthetic intercepted pages in disposable profiles, not authenticated
+ChatGPT/Dot or newly installed browser/runtime acceptance.
+
+The release page and downloaded Windows checksum file identify the native
+archive as `ef4529bcb4d5c508f63433cd328bd8e8c8e041c473d57658199a7dfbc693b68c`
+and stager as `1da07714b44a3457abd95d64e7b4b60c0a490dde82db03b73c05285bf48de5d5`.
+These match the specifically installed artifacts recorded below. The
+version-pinned outer installers differ; the existing installation is not
+reinstalled or automatically started on that basis.
+
+The owner explicitly confirmed canceling the pending **3.0.1** review and
+submitting **3.0.4** instead. IAB observed `Review canceled.`, uploaded the
+actual verified Store ZIP, and read back draft version **3.0.4**. The canonical
+English Description was saved, including configured-prompt replacement,
+no attachment submission and the requested developer email/GitHub/LinkedIn
+contacts. The previously saved privacy answers were inspected without
+reclassifying the runtime as local-only or declaring no sensitive handling.
+The old keyword-spam file-format enumeration was not reintroduced.
+
+Final submission returned **Your extension was submitted for review** and
+**Item submitted.**. Subsequent Package readback showed **Pending review**,
+draft **3.0.4**, CRX revision **00005**, published version **2.1.0**.
+Automatic publication after approval was checked. No new agreement or privacy
+certification checkbox was accepted in this replacement. There was no
+rollback or unpublish. The submission receipt does not establish approval.
+Screenshots are retained in the thread's visualizations directory as
+`github-release-304-published.png`, `store-304-submitted.png`, and
+`store-304-pending-package.png`.
+
+Remaining goal gates: live installed candidate control, ordinary ChatGPT and
+Dot administrator/lifecycle observations, and duplicate-extension cleanup.
+The specifically installed runtime remains ready-to-connect; no hosted Start
+or new current-candidate tool result is established by this publication.
+Production VPN/MCP/IDE/research and the external Chrome task were not changed.
+
 ## Scheduler 3.0.4 Repeated Rewrite Reproductions
 
 Three additional regressions were observed before their fixes:
@@ -79,7 +140,8 @@ was inferred from the install result. No production connection was changed.
 ## Published 3.0.3 Packages And Real Browser Alarm
 
 [Release v3.0.3](https://github.com/1235357/agent-continue/releases/tag/v3.0.3)
-is Latest at `9d370ebb861ab7b4f395358abc3801fd9fa0510b`.
+was observed as Latest at `9d370ebb861ab7b4f395358abc3801fd9fa0510b`
+at that earlier checkpoint; v3.0.4 now supersedes it.
 [Actions run 42541147924](https://github.com/1235357/agent-continue/actions/runs/42541147924)
 completed both Windows sidecar and release jobs. Both actual downloads matched
 the published digests and the 250 runtime members matched across ZIP layouts:

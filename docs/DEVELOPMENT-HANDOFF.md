@@ -2,6 +2,38 @@
 
 ## Current Delivery Checkpoint (2026-11-08 America/Chicago)
 
+### Published 3.0.4 And Submitted Store Revision 00005
+
+Tag `v3.0.4` resolves to `d8ad315c862fa4a43a0deaa8271b31cddbf06a4c`,
+on canonical `main`'s first-parent history.
+The [release workflow](https://github.com/1235357/agent-continue/actions/runs/42549266650)
+succeeded, and the public Latest page resolves to
+[v3.0.4](https://github.com/1235357/agent-continue/releases/tag/v3.0.4).
+Actual downloaded GitHub and Store ZIPs match their published SHA-256 values
+and have byte-identical runtime payloads. The extracted final Store ZIP passed
+16/16 MV3 scenarios with a real one-minute alarm and full browser reopen,
+plus 6/6 official ProseMirror integration scenarios. See the first section of
+`RUNTIME-ACCEPTANCE.md` for hashes, logs and exact evidence scope.
+
+After the owner's explicit confirmation to cancel the pending 3.0.1 review
+and replace it with 3.0.4, the IAB dashboard returned `Review canceled.`.
+The exact public Store ZIP was uploaded, the canonical English description
+was saved with configured-prompt replacement disclosure and the developer
+email/GitHub/LinkedIn links, and existing privacy answers were read back.
+The final submission returned `Your extension was submitted for review` and
+`Item submitted.`. Package readback shows **3.0.4**, **revision 00005**,
+**Pending review**, while the published version remains **2.1.0**.
+Publish automatically after approval was selected. Submission is not approval.
+No rollback, unpublish, review bypass or old release asset replacement occurred.
+
+This closes the GitHub-publication and new Store-submission milestones, not
+the full Windows lifecycle goal. The release's Windows native archive and
+stager hashes equal the specifically installed 3.0.3 artifacts below, but that
+installation is still only ready-to-connect. No fresh hosted ChatGPT/Dot,
+administrator lifecycle or installed IAB scheduler claim follows from the
+synthetic package tests. Old duplicate extensions remain untouched; do not
+work around IAB's extension-page policy or alter the external Chrome task.
+
 ### Scheduler 3.0.4: Repeated Rewrite Starvation
 
 The owner requires configured-prompt submission even when composer text changes.
@@ -19,8 +51,8 @@ editor remount during pre-Stop authorization, and a migration regression
 exposed additional retired draft warnings; both have scoped fixes.
 
 Current full regression and publication receipts must be read in the runtime
-record; a source version bump is not publication. The existing 3.0.1 Store
-review still locks uploads. Do not withdraw it silently. The owner answered
+record; a source version bump is not publication. The former 3.0.1 Store
+review was replaced only after explicit confirmation as recorded above. The owner answered
 the specific 3.0.3 test-only protected-install/native-registration request
 with consent; this is not a new hosted Start, a platform grant, a shared-app
 restart, or permission to revive the settled r11 installation. These
@@ -56,10 +88,9 @@ reopen tests, and the offline Windows plan. Reproduce the timed browser
 checks with `TEST_REAL_DUE_ALARM=1`, `EXTENSION_ROOT` set to the extracted
 verified Store ZIP, and `node tests/mv3-integration-tests.mjs`.
 
-The Store cannot accept the new package while 3.0.1 is in review. Recheck
-the uploader and submit the verified 3.0.3 ZIP with the reviewed listing
-and accurate disclosures when available. Do not claim submission until
-the dashboard shows the matching version and receipt. Exact-version
+That older Store blocker is superseded by the verified 3.0.4 submission
+above. Do not re-upload 3.0.3, cancel the new review, or replay its submission.
+Exact-version
 Windows install, authenticated ChatGPT and Dot administrator operations,
 and saved-running versus paused/revoked reopen still need their own
 observations. Use only the dedicated acceptance environment and fresh
