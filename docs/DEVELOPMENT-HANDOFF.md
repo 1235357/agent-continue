@@ -2,6 +2,23 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Published 3.0.3 And Remaining Live Gates
+
+Use the [published 3.0.3 evidence](RUNTIME-ACCEPTANCE.md#published-303-packages-and-real-browser-alarm)
+for exact ZIP digests, Actions receipts, real Chromium alarm and scheduler
+reopen tests, and the offline Windows plan. Reproduce the timed browser
+checks with `TEST_REAL_DUE_ALARM=1`, `EXTENSION_ROOT` set to the extracted
+verified Store ZIP, and `node tests/mv3-integration-tests.mjs`.
+
+The Store cannot accept the new package while 3.0.1 is in review. Recheck
+the uploader and submit the verified 3.0.3 ZIP with the reviewed listing
+and accurate disclosures when available. Do not claim submission until
+the dashboard shows the matching version and receipt. Exact-version
+Windows install, authenticated ChatGPT and Dot administrator operations,
+and saved-running versus paused/revoked reopen still need their own
+observations. Use only the dedicated acceptance environment and fresh
+required consent; the prior r11 Revoke remains settled.
+
 ### Scheduler 3.0.3 Follow-up
 
 The text-change veto is retired, including for saved tasks. Version 3.0.3

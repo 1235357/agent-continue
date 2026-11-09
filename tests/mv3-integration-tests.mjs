@@ -15,6 +15,7 @@ const playwright = process.env.PLAYWRIGHT_MODULE_PATH
 const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-continue-mv3-'));
 const chromePath = process.env.FULL_CHROMIUM_PATH || undefined;
 const headed = process.env.TEST_HEADED === '1';
+const testRealDueAlarm = process.env.TEST_REAL_DUE_ALARM === '1';
 const sentinel = 'MV3_SYNTHETIC_PROMPT\nContinue the local fixture only.';
 const checks = [];
 let context;
@@ -34,11 +35,20 @@ function chatFixture(dot) {
     : '<div id="prompt-textarea" contenteditable="true" role="textbox" aria-label="Message"><p><br></p></div>';
   return `<!doctype html><meta charset="utf-8"><title>${dot ? 'Your dot' : 'Synthetic ChatGPT'}</title><style>body{padding:20px;font:16px sans-serif}[contenteditable]{min-height:70px;border:1px solid;padding:10px}.message-body,[data-message-author-role]{white-space:pre-wrap}</style><main><div id="history">${history}</div><form data-composer-root>${editor}<button type="button" aria-label="Send" disabled>Send</button></form></main><script>
   const dot=${JSON.stringify(dot)};
-  const editor=document.querySelector('[contenteditable]');
+  let editor=document.querySelector('[contenteditable]');
   const send=document.querySelector('button[aria-label="Send"]');
   window.fixture={sendClicks:0,keyboardSends:0,submits:0,keyEvents:[],sentTexts:[],focusCalls:0};
   window.focus=()=>{fixture.focusCalls++};
-  editor.addEventListener('input',()=>{send.disabled=!editor.innerText.trim()});
+  function onEditorInput(){
+    send.disabled=!editor.innerText.trim();
+    if(!fixture.remountAfterFill||fixture.remounts)return;
+    const replacement=editor.cloneNode(false);
+    replacement.textContent='Synthetic replacement draft';
+    editor.replaceWith(replacement);editor=replacement;
+    editor.addEventListener('input',onEditorInput);
+    fixture.remounts=1;
+  }
+  editor.addEventListener('input',onEditorInput);
   const submit=method=>{
     const text=editor.innerText;
     if(method==='button')fixture.sendClicks++;else fixture.keyboardSends++;
@@ -456,6 +466,59 @@ try {
   assert.equal(await ordinary.evaluate(() => fixture.sentTexts[0]), 'MV3_STANDARD_SYNTHETIC');
   pass('Standard ChatGPT: exact target routing and actual isolated-world send also work with the ordinary composer fixture.');
 
+  if (testRealDueAlarm) {
+    assert.equal((await call(control, { type: 'PAUSE' })).ok, true);
+    const duePage = await newTestPage(context);
+    await duePage.goto('https://chatgpt.com/c/mv3-due-remount');
+    await duePage.evaluate(() => { fixture.remountAfterFill = true; });
+    const dueTab = await workerTab(worker, duePage.url());
+    const duePrompt = 'MV3_REAL_DUE_CONFIGURED_PROMPT';
+    const start = await call(control, { type: 'START', tabId: dueTab.id, config: {
+      prompt: duePrompt, intervalMinutes: 1, maxSends: 1, startImmediately: false, sendMethod: 'button',
+    } });
+    assert.equal(start.ok, true, start.error);
+    assert.equal(start.job.sentCount, 0);
+    const alarm = await worker.evaluate(() => chrome.alarms.get('agent-continue-heartbeat'));
+    assert.equal(alarm.periodInMinutes, 1);
+    assert.ok(alarm.scheduledTime >= start.job.nextAt);
+    console.log('WAIT Actual one-minute Chromium alarm (no SEND_NOW or clock injection).');
+    await control.evaluate(id => new Promise((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(timeout);
+        chrome.storage.onChanged.removeListener(onChange);
+      };
+      const inspect = job => {
+        if (job?.id !== id || job.enabled || job.sentCount !== 1) return;
+        cleanup();
+        resolve();
+      };
+      const onChange = (changes, area) => {
+        if (area === 'session') inspect(changes.job?.newValue);
+      };
+      const timeout = setTimeout(() => {
+        cleanup();
+        reject(new Error('No scheduled send reached the limit after two alarm periods'));
+      }, 145000);
+      chrome.storage.onChanged.addListener(onChange);
+      chrome.storage.session.get('job').then(({ job }) => inspect(job), error => {
+        cleanup();
+        reject(error);
+      });
+    }), start.job.id);
+    const finished = (await state(control)).job;
+    assert.ok(finished.lastRunAt >= start.job.nextAt);
+    assert.equal(finished.nextAt, null);
+    assert.equal(finished.unknownCount, 0);
+    assert.equal(finished.prompt, duePrompt);
+    assert.deepEqual(await duePage.evaluate(() => ({
+      remounts: fixture.remounts, clicks: fixture.sendClicks, texts: fixture.sentTexts,
+    })), { remounts: 1, clicks: 1, texts: [duePrompt] });
+    assert.equal((await worker.evaluate(() => chrome.alarms.getAll())).length, 0);
+    assert.equal((await call(control, { type: 'SEND_NOW' })).ok, false);
+    await duePage.close();
+    pass('Actual Chromium alarm refills an in-place remount, confirms one configured send, and pauses at the limit.');
+  }
+
   const restartStart = await call(control, { type: 'START', tabId: dotTab.id, config: { ...config, prompt: sentinel } });
   assert.equal(restartStart.ok, true);
   const oldJobId = restartStart.job.id;
@@ -506,6 +569,21 @@ try {
     try { console.error('Synthetic restart diagnostics: ' + JSON.stringify(await recoveryDiagnostics(worker, control))); }
     catch { console.error('Synthetic restart diagnostics were unavailable.'); }
     throw error;
+  }
+  if (testRealDueAlarm) {
+    const paused = (await state(control)).job;
+    assert.equal(paused.enabled, false);
+    await closeBrowser(); context = null;
+    session = await launch(); context = session.context; worker = session.worker; control = session.control;
+    const afterReopen = (await state(control)).job;
+    assert.equal(afterReopen.id, paused.id);
+    assert.equal(afterReopen.enabled, false);
+    assert.equal(afterReopen.nextAt, null);
+    assert.equal(afterReopen.sentCount, paused.sentCount);
+    assert.equal(afterReopen.prompt, paused.prompt);
+    assert.equal((await worker.evaluate(() => chrome.alarms.getAll())).length, 0);
+    assert.equal((await call(control, { type: 'SEND_NOW' })).ok, false);
+    pass('A full browser reopen preserves the manual scheduler pause, count and prompt without arming an alarm.');
   }
   console.log(`\n${checks.length}/${checks.length} MV3 integration scenarios passed.`);
 } finally {

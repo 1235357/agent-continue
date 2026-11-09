@@ -1,5 +1,41 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Published 3.0.3 Packages And Real Browser Alarm
+
+[Release v3.0.3](https://github.com/1235357/agent-continue/releases/tag/v3.0.3)
+is Latest at `9d370ebb861ab7b4f395358abc3801fd9fa0510b`.
+[Actions run 42541147924](https://github.com/1235357/agent-continue/actions/runs/42541147924)
+completed both Windows sidecar and release jobs. Both actual downloads matched
+the published digests and the 250 runtime members matched across ZIP layouts:
+
+- GitHub ZIP: `4df8b01afb5b95eb222c1c935d6c9cb00c6838503dcfc4ca2906f79d96cc8d44`
+- Store ZIP: `907faab9f28349a7b30474a2abfce3610621006bf4a2f16e773e2cb3ff562419`
+
+The exact published Store ZIP passed 15/15 isolated MV3 tests with
+`TEST_REAL_DUE_ALARM=1`. A real one-minute Chromium alarm (no Send Now or
+injected clock) drove one configured-prompt submission after an in-place
+remount, counted it, and removed the alarm at the configured limit. Whole
+browser reopen tests kept an enabled job bound to its exact target and kept a
+manually paused job paused without rearming, preserving its prompt and count.
+All chat pages were intercepted fixtures; there was no authenticated delivery
+or Windows tool call. Log: `.artifacts/release-303-run-42541147924/published-store-mv3.log`.
+
+The Windows CI sidecar and original receipt ZIPs matched their Actions
+digests. The public Windows asset digests match that build. The local
+stager was byte-identical to the tag and returned Plan complete with 24,352
+files and no activation, registration change or tunnel start. Native bundle
+`ef4529bcb4d5c508f63433cd328bd8e8c8e041c473d57658199a7dfbc693b68c`
+is not the previously live-tested r11 bundle. All 31 selected first-party,
+Node and tunnel member hashes agree, but the archive adds 24 dependency
+members and changes two bookkeeping/license members. This does not transfer
+the earlier live acceptance. The r11 protected read-only Revoke observer
+returned the original `stopped` receipt; owner observation was `unobserved`.
+No install, new grant, or lifecycle replay was performed.
+
+Store readback after GitHub publication: 2.1.0 Published, 3.0.1 Pending review,
+Upload new package disabled. The 3.0.3 package was not uploaded or submitted;
+no existing review was withdrawn.
+
 ## Scheduler 3.0.3 Follow-up
 
 The 3.0.2 GitHub ZIP did not contain the original text-change veto. Two
