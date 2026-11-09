@@ -7122,3 +7122,17 @@ No v3.0.5 Release, Store upload or installed-candidate change is established her
 Last authenticated Store observation: revision00005/v3.0.4 Pending review,
 public2.1.0, new upload disabled. Current-installation browser-button Pause/Revoke
 and complete saved-intent browser lifetime recovery remain open gates.
+
+## 3.0.5 Publication Hold And Fresh Recheck (2026-11-09)
+
+Source at main bb877e087dc2f9ed513e5de2127d57cfa894f1ad passed a fresh100/100
+helper/capacity check and51/51 worker-state check. These are local regression
+results, not installed-ChatGPT/Dot acceptance or proof of unlimited prompt size.
+The extension has no application-set prompt cap; OS/browser/service capacity and
+binary-document parser safeguards still apply without silent text truncation.
+
+Annotated tag v3.0.5 triggered Release42576016195 prematurely. Actual IAB readback
+then confirmed the operator cancellation: total5m43s, successful windows-sidecar
+4m55s, release canceled43s. No publication success is claimed. The tag remains;
+no Store review cancellation, new upload, local extension replacement, native
+installation, production connection or research-task change accompanied the hold.

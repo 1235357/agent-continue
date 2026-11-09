@@ -1,5 +1,32 @@
 # Agent Continue Development Handoff
 
+## Publication Hold And Final Capacity Recheck (2026-11-09)
+
+Main bb877e087dc2f9ed513e5de2127d57cfa894f1ad contains the integrated 3.0.5
+background-readiness and receipt-boundary fix. The owner's requirement is
+background automatic sending with readiness redundancy and no application-set
+prompt cap, not foreground keyboard automation or an unlimited service guarantee.
+Fresh source checks passed100/100 helper plus prompt-capacity cases and51/51
+worker-state cases. Logs:.artifacts/scheduler-305-final-redundancy-unit.log and
+.artifacts/scheduler-305-final-redundancy-worker.log.
+
+The annotated v3.0.5 tag triggered Release workflow42576016195 before live-site
+installed-candidate acceptance was complete. This was a premature publication
+attempt. The operator canceled that exact workflow; authenticated IAB readback
+shows Cancelled after5m43s, windows-sidecar succeeded4m55s, release canceled43s.
+This is an operator hold, not a test failure or a successful Release. Preserve
+the tag and original run/artifacts; do not delete, move, or blindly rerun them.
+The Store review was not canceled or replaced. Existing public assets and the
+owner's installed extension, tasks, prompts, native runtime and VPN are unchanged.
+
+The complete combined local candidate passed its extracted-runtime MV3 tests,
+but its ZIPs preceded the final README/CHANGELOG edits. Rebuild candidate packages
+from the current source and exact six-sidecar receipt before distribution.
+Local tests still do not establish that actual ChatGPT/Dot accepts this installed
+candidate in the background. Tool refusal of extension pages remains an operator
+channel boundary, not a reason to replay settled privileged actions or use an
+alternate channel to bypass that refusal. Full goal remains active.
+
 ## Dispatch Boundary And Complete 3.0.5 Build (2026-11-09)
 
 Canonical main428c5f2320fd80eea2ea168a52b48709d9f3b7b6 is pushed; its

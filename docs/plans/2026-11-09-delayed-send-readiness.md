@@ -80,3 +80,19 @@ Do not claim Pause can retract already-admitted Chromium IPC. A matching user ro
 arriving during the readiness wait is an outstanding attribution edge case,
 separate from this reproduced blocked-send fix. Live installed acceptance and
 current-installation device lifecycle remain open, not hidden by local passes.
+
+## Subsequent Receipt And Publication Reconciliation (2026-11-09)
+
+The matching-message attribution edge above was addressed by a synchronous
+isolated-world history snapshot at the final dispatch boundary, not by counting
+preparation or clearing as success. Both the ignored-submit negative case and
+actual-submit positive case passed in the disposable MV3 fixture. This does not
+prove server acknowledgement, arbitrary page-script isolation, or live-site
+acceptance. Source helper/capacity100/100 and worker51/51 rechecks passed.
+
+Tag v3.0.5 at bb877e087dc2f9ed513e5de2127d57cfa894f1ad prematurely triggered
+Release42576016195 before the live gate above was satisfied. That workflow was
+canceled before publication; authenticated GitHub readback is Cancelled5m43s.
+The successful windows-sidecar build remains evidence of a build only. No new
+Store submission or installed extension update followed. The original live-site
+and lifecycle gates are retained, not retroactively waived by local test passes.
