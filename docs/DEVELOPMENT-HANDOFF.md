@@ -26,6 +26,16 @@ The final submission returned `Your extension was submitted for review` and
 Publish automatically after approval was selected. Submission is not approval.
 No rollback, unpublish, review bypass or old release asset replacement occurred.
 
+The final remote inventory revealed four Dependabot branches, despite the
+single local development branch. Their unmerged PRs #1-#4 were closed without
+incorporating dependency changes into the tested release. GitHub removed two
+heads; the remaining two were removed after preserving all four PR tips in
+local `refs/agentcontinue-recovery/dependabot-1` through `-4`. Version-update
+PR limits are now zero in `.github/dependabot.yml`; dependency security alerts
+were not disabled. Remote `refs/heads` must read back as `main` only. Future
+dependency changes still require review and tests; this is not a reason to
+ignore security fixes or merge an untested upgrade.
+
 This closes the GitHub-publication and new Store-submission milestones, not
 the full Windows lifecycle goal. The release's Windows native archive and
 stager hashes equal the specifically installed 3.0.3 artifacts below, but that

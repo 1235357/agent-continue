@@ -4,9 +4,10 @@ updates:
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 3
+    # Version bumps are reviewed on main; do not maintain bot release branches.
+    open-pull-requests-limit: 0
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 0
