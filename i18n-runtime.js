@@ -1,5 +1,6 @@
 // Runtime copy only. Never use this catalog to translate user-owned content.
 export default {
+  '任务仍在运行；下次发送使用配置的提示词。': 'The task is running. The next send uses the configured prompt.',
   '停止标记最多 20 条，每条最多 100 个字符，且不能包含换行。': 'Use at most 20 stop markers, each up to 100 characters without line breaks.',
   '发送间隔必须为 1 至 10080 分钟。': 'The send interval must be between 1 and 10080 minutes.',
   '发送上限必须是 0 至 1000000 的整数；0 表示不限。': 'The send limit must be an integer from 0 to 1000000; 0 means unlimited.',

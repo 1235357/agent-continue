@@ -33,13 +33,14 @@ window.fixture = {
   checkDelays: [],
   checkReplies: []
 };
-const editor = document.querySelector('#prompt-textarea');
+let editor = document.querySelector('#prompt-textarea');
 let send = document.querySelector('[data-testid="send-button"]');
-editor.addEventListener('input', () => {
+const handleInput = () => {
   fixture.inputEvents++;
   send.disabled = !editor.innerText.trim();
   if (fixture.cancelOnInput) fixture.allowed = false;
-});
+};
+editor.addEventListener('input', handleInput);
 function submitFixtureMessage() {
   fixture.sendClicks++;
   const text = editor.innerText;
@@ -84,6 +85,19 @@ window.chrome.runtime = {
       next.addEventListener('click', submitFixtureMessage);
       send.replaceWith(next);
       send = next;
+    }
+    if (fixture.checks === fixture.replaceEditorAtCheck) {
+      const next = editor.cloneNode(false);
+      next.textContent = 'A different draft from the replacement editor';
+      next.addEventListener('input', handleInput);
+      editor.replaceWith(next);
+      editor = next;
+      if (fixture.attachOnReplacement) {
+        const attachment = document.createElement('span');
+        attachment.dataset.fileId = 'fixture-attachment';
+        attachment.textContent = 'Attachment';
+        editor.after(attachment);
+      }
     }
     if (fixture.checks === fixture.moveEditorAtCheck) {
       const newComposer = document.createElement('form');

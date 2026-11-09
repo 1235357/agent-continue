@@ -4,7 +4,7 @@
 
 向一个已有的 ChatGPT 或 Your dot 会话定时发送自定义提示词。Windows 版本还提供需单独安装、明确授权的文件、Shell 与进程工具。
 
-**3.0.2 Windows 版扩展 · Manifest V3 · 免费 · MIT 开源**
+**3.0.3 Windows 版扩展 · Manifest V3 · 免费 · MIT 开源**
 
 [Chrome 应用商店](https://chromewebstore.google.com/detail/jpioilmpbolfokedaefmbfbjeaahfdkl) · [GitHub Releases](https://github.com/1235357/agent-continue/releases) · [源码](https://github.com/1235357/agent-continue) · [更新记录](CHANGELOG.md) · [隐私说明（英文）](PRIVACY.md)
 
@@ -12,7 +12,7 @@
 
 根目录 npm CLI 的版本独立保持为 0.3.0。GitHub Release、Chrome 应用商店及本机已安装版本请分别核对。
 
-## Windows 设备设置（3.0.2）
+## Windows 设备设置
 
 选择当前账户或管理员范围，明确同意访问后，从已核验、解压的源码安装包复制并运行 PowerShell 或 CMD 命令；复制不等于执行。没有兼容 Node.js 时，引导命令可在同意后下载、校验并解压官方便携 Node。当前交付采用命令式安装，不使用已退役的自制 Agent Continue 启动器或 EXE/MSI 安装路线；Node.js、OpenAI 官方隧道客户端及上游依赖仍在浏览器外执行。详见公开仓库中的[安装命令与范围选择](https://github.com/1235357/agent-continue/blob/main/native/bootstrap/README.md#windows-command-installation)。本文不证明公开 3.0.2 安装器或 npm 路径已经可用。
 
@@ -95,7 +95,7 @@ Checkpoint97 已记录 r11 的真实完整应用退出、重开及运行意图�
 
 `https://chatgpt.com/*` 用于目标识别、检查、填写、发送及恢复；`activeTab` 用于用户操作时访问所选标签；`scripting` 执行页面逻辑；`storage` 本地保存配置、正文、队列、模板、语言、主题、日志及恢复状态；`alarms` 唤醒调度；可选 `power` 在明确开启时防止空闲休眠。
 
-历史稳定版 v2.2.1 不请求 `nativeMessaging` 或包含 Windows 控制；3.0.2 候选保留已有的可选 `nativeMessaging`，用于与单独安装、绑定扩展的本机桥接交换有限状态、连接、Pause/Revoke、恢复及预备进程引用检查。它不安装软件、不授予 Windows 提权或会话访问，也不通过桥接发送任意 Shell 正文。未增加全站点、Cookie、剪贴板或 debugger 权限；设置页可在用户操作后用剪贴板 API 复制命令，调度发送不使用剪贴板。这些浏览器权限边界不限制已单独授权的 Windows 账户级工具。
+历史稳定版 v2.2.1 不请求 `nativeMessaging` 或包含 Windows 控制；Windows 版保留已有的可选 `nativeMessaging`，用于与单独安装、绑定扩展的本机桥接交换有限状态、连接、Pause/Revoke、恢复及预备进程引用检查。它不安装软件、不授予 Windows 提权或会话访问，也不通过桥接发送任意 Shell 正文。未增加全站点、Cookie、剪贴板或 debugger 权限；设置页可在用户操作后用剪贴板 API 复制命令，调度发送不使用剪贴板。这些浏览器权限边界不限制已单独授权的 Windows 账户级工具。
 
 本地存储不加密，隐藏正文不等于安全隔离。默认配置导出不包含提示词及队列正文，需明确选择才包含。“清空数据”保留语言及持久设备／控制证据，移除管理员浏览器恢复偏好，但不请求 Windows Pause/Revoke，也不删除原生状态、原始文件、导出文件或已发送数据。完整数据流和删除范围见 [隐私说明（英文）](PRIVACY.md)。
 

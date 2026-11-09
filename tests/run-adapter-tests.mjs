@@ -128,6 +128,26 @@ try {
     assert.equal(await page.locator('#prompt-textarea').innerText(),prompt);
   });
 
+  for (const replaceEditorAtCheck of [2, 3]) {
+    await scenario(`Composer editor replaced in place at permission check ${replaceEditorAtCheck} still sends once`, async ({page,args}) => {
+      await page.evaluate(at => { fixture.replaceEditorAtCheck = at; }, replaceEditorAtCheck);
+      const outcome = await page.evaluate(pageAction, args);
+      assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
+      assert.deepEqual(await page.evaluate(() => fixture.sentTexts), [prompt]);
+    });
+  }
+
+  await scenario('An attachment on the replacement editor still prevents submission', async ({page,args}) => {
+    await page.evaluate(() => {
+      fixture.replaceEditorAtCheck = 3;
+      fixture.attachOnReplacement = true;
+    });
+    const outcome = await page.evaluate(pageAction, args);
+    assert.equal(outcome.status, 'draft', JSON.stringify(outcome));
+    assert.equal(await page.evaluate(() => fixture.sendClicks), 0);
+    assert.equal(await page.locator('#prompt-textarea').innerText(), 'A different draft from the replacement editor');
+  });
+
   await scenario('A final permission reply arriving after its deadline cannot submit', async ({page,args}) => {
     const runDeadline = await page.evaluate(() => {
       // The first two queries allow filling and finding the send button.

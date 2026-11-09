@@ -239,6 +239,20 @@ export async function pageAction(args) {
   let insertedDraftSnapshot = null;
   let submitted = false;
   let interrupted = false;
+  let needsRefill = false;
+
+  // React can remount the editor while preserving the same composer. Never
+  // follow an editor into another form or switch to a different composer.
+  const keepComposer = () => {
+    if (sameComposer()) return true;
+    const next = findComposer();
+    if (editor.isConnected || !next || next.composer !== composer) return false;
+    editor = next.editor;
+    inserted = false;
+    insertedDraftSnapshot = null;
+    needsRefill = true;
+    return true;
+  };
 
   // Helper to locate ProseMirror EditorView if running in MAIN world
   const getProseMirrorView = targetEl => {
@@ -408,11 +422,12 @@ export async function pageAction(args) {
     const interruptedResult = await interrupt();
     if (interruptedResult) return interruptedResult;
 
-    if (!samePage() || !withinDeadline() || !sameComposer() || !editable()) return result('blocked', '输入框当前不可用，稍后重试。');
+    if (!samePage() || !withinDeadline() || !keepComposer() || !editable()) return result('blocked', '输入框当前不可用，稍后重试。');
     if (hasAttachment()) return protectedDraft('输入框有附件，本次不提交。');
 
     const accepted = await fill(prompt);
     inserted = accepted;
+    if (accepted && sameComposer()) needsRefill = false;
     insertedDraftSnapshot = snapshotDraft();
     await wait(60);
 
@@ -494,7 +509,7 @@ export async function pageAction(args) {
       return result('cancelled', '本次发送许可已过期，未提交。');
     }
 
-    if (!samePage() || !sameComposer()) return result('blocked', '提交前页面已变化。');
+    if (!samePage() || !keepComposer()) return result('blocked', '提交前页面已变化。');
     if (busy()) { await clearOwnDraft(); return result('busy', 'Agent 仍在运行。'); }
     if (hasAttachment()) return protectedDraft('提交前检测到附件，已保留输入框内容。');
     const lateStop = () => forceInterrupt && visibleMatches(stopSelector, composer).length
@@ -512,16 +527,23 @@ export async function pageAction(args) {
       const current = plainDraft(editor, true);
       return current !== null && normalizeRenderedPayload(current) === normalizeRenderedPayload(prompt);
     };
-    while (!payloadMatches()) {
-      if (!samePage() || !sameComposer()) return result('blocked', '提交前页面已变化。');
+    for (;;) {
+      if (!samePage() || !keepComposer()) return result('blocked', '提交前页面已变化。');
       if (!withinDeadline()) return result('cancelled', '本次发送许可已过期，未提交。');
       if (!editable()) return result('blocked', '输入框当前不可用，稍后重试。');
       if (hasAttachment()) return protectedDraft('提交前检测到附件，已保留输入框内容。');
       if (busy()) return result('busy', 'Agent 仍在运行。');
       const stopDuringFill = lateStop();
       if (stopDuringFill) return stopDuringFill;
-      if (!await fill(prompt, true)) return result('blocked', '输入框当前不可用，稍后重试。');
-      inserted = payloadMatches();
+      if (!needsRefill && payloadMatches()) break;
+      const filledEditor = editor;
+      const filled = await fill(prompt, true);
+      if (!samePage() || !keepComposer()) return result('blocked', '提交前页面已变化。');
+      if (editor === filledEditor) {
+        if (!filled) return result('blocked', '输入框当前不可用，稍后重试。');
+        needsRefill = false;
+      }
+      inserted = !needsRefill && payloadMatches();
       insertedDraftSnapshot = inserted ? snapshotDraft() : null;
       await wait(180);
     }

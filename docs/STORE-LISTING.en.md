@@ -1,6 +1,6 @@
 # Chrome Web Store Listing - English
 
-Canonical English listing source for Agent Continue **3.0.2**. This file does not change a saved Store listing, submit a package, publish a release or establish approval or installation. Actual availability and submission state require separate platform receipts. Historical v2.2.1 is a separate scheduler-only release; do not replace its assets or describe it as Windows-enabled. The repository's [Windows review notes](https://github.com/1235357/agent-continue/blob/main/docs/STORE-LISTING.windows-candidate.en.md) retain the disclosure and submission checks.
+Canonical English listing source for Agent Continue **3.0.3**. This file does not change a saved Store listing, submit a package, publish a release or establish approval or installation. Actual availability and submission state require separate platform receipts. Historical v2.2.1 is a separate scheduler-only release; do not replace its assets or describe it as Windows-enabled. The repository's [Windows review notes](https://github.com/1235357/agent-continue/blob/main/docs/STORE-LISTING.windows-candidate.en.md) retain the disclosure and submission checks.
 
 After final release and disclosure gates are closed, use the entire **Description** section, including the developer/support block, for the new listing draft. The copy uses plain-text URLs rather than relying on Markdown rendering. Do not withdraw an existing review merely to apply this source copy.
 
@@ -131,7 +131,7 @@ Before submission, reconcile actual privacy-form categories with the finalized p
 - Release downloads: https://github.com/1235357/agent-continue/releases
 - Privacy policy source: https://github.com/1235357/agent-continue/blob/main/PRIVACY.md
 
-These are listing-copy links, not evidence of a 3.0.2 upload, approval, publication or installation.
+These are listing-copy links, not evidence of a 3.0.3 upload, approval, publication or installation.
 
 ## Reviewer Test Instructions (500-Character Form)
 
@@ -139,7 +139,7 @@ Use your own ChatGPT test account; no developer credentials. Select a test chat,
 
 ## Release Scope and Remaining Gates (Not Store Copy)
 
-Version 3.0.2 combines the scheduler and optional Windows device control. Historical v2.2.0 support/schema 3 changes and v2.2.1 scheduler fixes remain scheduler-only; they did not request nativeMessaging. The permission table above describes the combined version, not those older releases.
+Version 3.0.3 combines the scheduler and optional Windows device control. Historical v2.2.0 support/schema 3 changes and v2.2.1 scheduler fixes remain scheduler-only; they did not request nativeMessaging. The permission table above describes the combined version, not those older releases.
 
 Checkpoint97 records actual r11 full-app saved-running recovery, ordinary ChatGPT and Dot administrator command/file/owned-process results, and matching Pause/Revoke stopped receipts with independent host readback. The test runtime is revoked and not running. These bounded observations do not establish current-account hosted operation, automatic adoption of an existing installation or indefinite recovery reliability. Complete matching extension/setup/npm artifact verification, actual public downloads and the real new Store submission receipt separately. See the repository's [Runtime Acceptance](https://github.com/1235357/agent-continue/blob/main/docs/RUNTIME-ACCEPTANCE.md); do not replay settled operations or turn historical Ready into a current state.
 

@@ -1,5 +1,21 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Scheduler 3.0.3 Follow-up
+
+The 3.0.2 GitHub ZIP did not contain the original text-change veto. Two
+separate regressions were reproduced against the 3.0.2 source: an old
+warning persisted as the current task status after startup, and replacing
+the editor inside the same form during authorization blocked submission.
+Neither reproduction identifies the user's installed build.
+
+The fix migrates the retired current status without replaying a send and
+refills an in-place replacement editor with the configured prompt. The
+ordinary ChatGPT browser fixture went from 22/25 to 25/25, including one
+confirmed configured prompt at either authorization point, no attachment
+submission, and no follow when the editor moved to another form. The
+background regression preserves the original task, timing, manual pause,
+and history. These are synthetic tests, not a live delivery receipt.
+
 ## Mandatory Prompt Replacement (Checkpoint111)
 
 Direct inspection of the downloaded 3.0.1 Release and Store ZIPs found identical

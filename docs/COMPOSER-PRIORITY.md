@@ -6,6 +6,8 @@ Existing text is replaced, not preserved or appended. Text changed after
 filling, including while authorization is pending, must never abort the send:
 the configured prompt is reasserted and sending proceeds subject to the
 unchanged guards below. Composer text changes are not a reason to defer a cycle.
+If the page replaces the text editor inside the same composer, the extension
+refills it before dispatch. It does not follow an editor to another composer.
 
 The task controls display this notice in English or Simplified Chinese:
 
@@ -49,6 +51,8 @@ Historical activity entries and fixed diagnostic codes, including
 `existing-draft` and `composer-changed`, remain readable for compatibility;
 they do not define the current sending policy. Support exports omit draft
 and prompt bodies.
+An upgrade clears the retired warning from the current task status without
+replaying a send or deleting historical entries.
 The explicit no-send timing diagnostic requires a paused, bound task. It records
 only bounded timing values, fixed result codes and boolean observations in the
 existing local history. Export schema4 includes those fields; it does not include

@@ -63,6 +63,18 @@ const token = () => crypto.randomUUID();
 const errorMessage = error => error?.safeMessage || t('操作未完成，请检查目标页面和扩展权限后再试。');
 function fail(message) { const error = new Error(message); error.safeMessage = message; return error; }
 
+// Older builds stored rendered status text, sometimes without a diagnostic code.
+const retiredDraftNotice = message => typeof message === 'string' && [
+  'Content changed after filling; the draft was preserved',
+  'Content changed after refilling; the draft was preserved',
+  'The composer content changed and was preserved.',
+  'The composer changed before interruption; its content was preserved.',
+  '填写后检测到内容变化，已保留草稿',
+  '重新填写后检测到内容变化，已保留草稿',
+  '输入框内容发生变化，已保留当前内容。',
+  '打断前输入框发生变化，已保留当前内容。',
+].some(prefix => message.startsWith(prefix));
+
 async function getJob() { return (await chrome.storage.session.get('job')).job || null; }
 async function getConfig() {
   try { return readConfig((await chrome.storage.local.get('config')).config, { allowEmpty: true }); }
@@ -196,9 +208,12 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS) {
       }, Math.max(1, deadline - Date.now())); }),
     ]);
     const value = translatePageResult(result);
-    if (!value || !RESULT_STATUSES.has(value.status)) return { status: 'unknown', message: t('页面未返回可确认的结果。'), diagnosticCode: 'no-valid-result' };
+    if (!value || !RESULT_STATUSES.has(value.status)
+      || (['draft', 'blocked'].includes(value.status) && (value.diagnosticCode === 'composer-changed' || retiredDraftNotice(value.message)))) {
+      return { status: 'unknown', message: t('页面未返回可确认的结果。'), diagnosticCode: 'no-valid-result' };
+    }
     // Return only bounded adapter status fields.
-    const diagnosticCode = ['draft', 'blocked'].includes(value.status) && ['existing-draft', 'composer-changed'].includes(value.diagnosticCode) ? value.diagnosticCode : null;
+    const diagnosticCode = value.status === 'draft' && value.diagnosticCode === 'existing-draft' ? value.diagnosticCode : null;
     return { status: value.status, message: String(value.message || '').slice(0, 300), identity: typeof value.identity === 'string' ? value.identity.slice(0, 500) : null, assistantToken: typeof value.assistantToken === 'string' ? value.assistantToken.slice(0, 500) : null, assistantCount: Number(value.assistantCount) || 0, diagnosticCode };
   } catch (error) {
     if (watchdogExpired) return { status: 'unknown', message: t('页面操作超时，本周期结果未确认。'), diagnosticCode: 'execution-timeout' };
@@ -521,15 +536,17 @@ async function initialize() {
     // waiting preference explicitly selected in this or a later release.
     const migrateDelivery = value => value && value.deliveryBehaviorVersion !== DELIVERY_BEHAVIOR_VERSION
       ? { ...value, waitForIdle: false, deliveryBehaviorVersion: DELIVERY_BEHAVIOR_VERSION } : value;
+    const retireDraftNotice = job => retiredDraftNotice(job?.statusText)
+      ? { ...job, statusText: job.enabled ? t('任务仍在运行；下次发送使用配置的提示词。') : t('已手动暂停；后续定时发送已停止。') } : job;
     const storedConfig = (await chrome.storage.local.get('config')).config;
     const saved = (await chrome.storage.local.get('resumeJob')).resumeJob;
     const config = migrateDelivery(storedConfig);
-    const recovery = migrateDelivery(saved);
+    const recovery = retireDraftNotice(migrateDelivery(saved));
     const updates = {};
     if (config !== storedConfig) updates.config = config;
     if (recovery !== saved) updates.resumeJob = recovery;
     if (Object.keys(updates).length) await chrome.storage.local.set(updates);
-    let job = migrateDelivery(await getJob());
+    let job = retireDraftNotice(migrateDelivery(await getJob()));
     if (!job) {
       if (recovery) {
         // Rebind only to an exact URL; additionally require the dot conversation

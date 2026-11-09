@@ -2,6 +2,16 @@
 
 ## Current Delivery Checkpoint (2026-11-08 UTC)
 
+### Scheduler 3.0.3 Follow-up
+
+The text-change veto is retired, including for saved tasks. Version 3.0.3
+also clears its stale current-task warning on startup and recovers from an
+editor remount inside the same composer. It still sends only the configured
+prompt, once, to the bound conversation; Pause and attachment guards apply.
+See the [follow-up reproductions](RUNTIME-ACCEPTANCE.md#scheduler-303-follow-up).
+GitHub release, installed version, and Store submission are separate
+receipts. Do not withdraw an active Store review to refresh a package silently.
+
 ### Mandatory Prompt Replacement (Checkpoint111)
 
 The owner reported that the published 3.0.1 still stopped after a composer

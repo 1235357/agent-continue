@@ -248,6 +248,32 @@ await scenario('An idle worker restart restores the alarm and preserves the next
   await h.message({type:'PAUSE'});
 });
 
+await scenario('Retired content-change notices are cleared on upgrade without changing the task or its history', async () => {
+  const first = await harness();
+  const job = await first.start({ intervalMinutes: 37 });
+  for (const [persistedOnly, enabled, message] of [
+    [true, true, 'Content changed after filling; the draft was preserved and this cycle will not submit. Checking again in one minute; the task remains enabled.'],
+    [false, false, '重新填写后检测到内容变化，已保留草稿，本轮不提交。 一分钟后再检查，任务仍保持启用。'],
+    [false, true, 'The composer content changed and was preserved. Checking again in one minute; the task remains enabled.'],
+    [true, false, '打断前输入框发生变化，已保留当前内容。'],
+    [true, true, 'The composer changed before interruption; its content was preserved.'],
+    [false, true, '输入框内容发生变化，已保留当前内容。'],
+  ]) {
+    const legacy = { ...job, enabled, nextAt: enabled ? job.nextAt : null, statusText: message };
+    const logs = [{ at: 1, event: 'draft', message, diagnostic: { code: 'composer-changed' } }];
+    const h = await harness({ session: persistedOnly ? {} : { job: legacy }, local: { resumeJob: legacy, logs } });
+    const current = (await h.message({ type: 'GET_STATE' })).job;
+    assert.notEqual(current.statusText, message);
+    assert.equal(current.enabled, enabled);
+    assert.equal(current.nextAt, legacy.nextAt);
+    assert.equal(current.prompt, job.prompt);
+    assert.equal(current.url, job.url);
+    assert.equal(current.intervalMinutes, job.intervalMinutes);
+    assert.deepEqual(h.state.local.logs[0], logs[0]);
+    assert.equal(h.state.injections.length, 0);
+  }
+});
+
 await scenario('A frozen target is deferred without activating or injecting into it',async()=>{
   const h=await harness();await h.start();h.state.tab.frozen=true;
   const result=await h.message({type:'SEND_NOW'});
@@ -384,15 +410,32 @@ for (const [name, pageResult, code] of [
 await scenario('Mandatory priority reaches the adapter even for a legacy false flag and logs only bounded diagnostics', async()=>{
   const h=await harness();
   await h.start({extensionPriority:false});
-  h.pageResult=async()=>({status:'draft',diagnosticCode:'composer-changed',message:'Synthetic protection.'});
+  h.pageResult=async()=>({status:'draft',diagnosticCode:'existing-draft',message:'Synthetic attachment.'});
   await h.message({type:'SEND_NOW'});
   assert.equal(h.state.injections.findLast(item=>item.args[0].mode==='send').args[0].extensionPriority,true);
-  assert.equal(h.state.local.logs.findLast(item=>item.event==='draft').diagnostic.code,'composer-changed');
+  assert.equal(h.state.local.logs.findLast(item=>item.event==='draft').diagnostic.code,'existing-draft');
   h.pageResult=async()=>({status:'draft',diagnosticCode:'PRIVATE_SENTINEL',message:'Synthetic protection.'});
   await h.message({type:'SEND_NOW'});
   assert.equal(h.state.local.logs.findLast(item=>item.event==='draft').diagnostic,undefined);
   assert.doesNotMatch(JSON.stringify(h.state.local.logs),/PRIVATE_SENTINEL/);
   await h.message({type:'PAUSE'});
+});
+await scenario('An obsolete adapter result cannot restore the retired veto or replay a send', async () => {
+  for (const oldResult of [
+    { status: 'draft', diagnosticCode: 'composer-changed', message: 'Synthetic legacy notice.' },
+    { status: 'blocked', message: 'The composer content changed and was preserved.' },
+  ]) {
+    const h = await harness();
+    await h.start();
+    h.pageResult = async () => oldResult;
+    const { job } = await h.message({ type: 'SEND_NOW' });
+    assert.equal(job.sentCount, 0);
+    assert.equal(job.unknownCount, 1);
+    assert.equal(job.lastDiagnosticCode, 'no-valid-result');
+    assert.ok(job.nextAt >= Date.now() + 30 * 60_000 - 1000);
+    assert.ok(!job.statusText.includes(oldResult.message));
+    assert.equal(h.state.injections.filter(x => x.args[0].mode === 'send').length, 1);
+  }
 });
 await scenario('English runtime copy preserves private content and switches languages', async()=>{
   const h = await harness({ language: 'en' });

@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.0.3] - 2026-11-08
+
+- If the page rebuilds the text editor in the same bound composer before
+  submission, refill the replacement editor with the configured prompt and
+  submit once. Moving to a different composer still cannot redirect a send.
+- Clear the retired text-change warning from the current task status when
+  upgrading. Keep the task, schedule, pause state and historical log entries.
+
 ## [3.0.2] - 2026-11-08
 
 The root npm CLI version remains independently 0.3.0.
