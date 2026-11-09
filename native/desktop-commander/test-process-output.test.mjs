@@ -29,6 +29,20 @@ test('a delayed marker reads only the PID returned by this start and never start
   }
 });
 
+test('cold PowerShell running acknowledgement is followed by same-PID output, not assumed complete', async () => {
+  const started = result('Process started with PID 3872 (shell: C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe)\nInitial output:\n\nProcess is running. Use read_process_output to get more output.');
+  const requests = [], chunks = [result(''), result('AC_COLD_'), result('SHELL_OK')];
+  const output = await observeTestProcessOutput(started, 'AC_COLD_SHELL_OK', async request => {
+    requests.push(request);
+    return chunks.shift();
+  });
+  assert.match(output, /AC_COLD_SHELL_OK/);
+  assert.equal(requests.length, 3);
+  assert.ok(requests.every(request => request.name === 'read_process_output' && request.arguments.pid === 3872));
+  await assert.rejects(observeTestProcessOutput(started, 'AC_COLD_SHELL_OK', async () => result(''),
+    { maxReads: 2 }), /test_process_output_unconfirmed/);
+});
+
 test('missing or ambiguous start PID cannot authorize process observation', async () => {
   for (const text of ['no PID', 'Process started with PID 0',
     'Process started with PID 42\nProcess started with PID 43']) {

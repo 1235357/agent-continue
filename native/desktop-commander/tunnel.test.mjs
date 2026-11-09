@@ -99,6 +99,8 @@ for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle', 'replay
     const ownedFile = path.join(root, 'work', 'through-tunnel.txt');
     const exactOutputRelease = path.join(root, 'work', 'exact-output-release');
     const exactOutputPhase = path.join(root, 'work', 'exact-output-phase');
+    const coldOutputRelease = path.join(root, 'work', 'cold-output-release');
+    const coldOutputPhase = path.join(root, 'work', 'cold-output-phase');
     const guardLog = path.join(scratch, 'guard.log');
     const system = process.env.SystemRoot;
     const requests = [
@@ -141,15 +143,19 @@ for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle', 'replay
     }
     if (provisionNode) requests.push({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: {
       name: 'start_process', arguments: {
-        command: "Write-Output ('AC_COLD_' + 'SHELL_OK')",
+        command: "$PSModuleAutoLoadingPreference = 'None'; $gate = '" + coldOutputRelease.replaceAll("'", "''") +
+          "'; $phase = '" + coldOutputPhase.replaceAll("'", "''") + "'; " +
+          "[IO.File]::WriteAllText($phase, 'started'); $clock = [Diagnostics.Stopwatch]::StartNew(); " +
+          "while (-not [IO.File]::Exists($gate)) { if ($clock.ElapsedMilliseconds -ge 20000) { throw 'fixture_output_gate_timeout' }; [Threading.Thread]::Sleep(25) }; " +
+          "[IO.File]::WriteAllText($phase, 'released'); [Console]::WriteLine(('AC_COLD_' + 'SHELL_OK'))",
         shell: path.join(system, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
-        timeout_ms: 10000,
+        timeout_ms: 100,
       },
     } });
     const requestIdAt = index => 'fixture-' + index;
     const requestIds = new Set(requests.map((_, index) => requestIdAt(index)));
     const replies = [], errors = [], outputReads = new Map(), outputReadTimings = [];
-    let exactShellOutput;
+    let exactShellOutput, coldShellOutput;
     let lastResponse, firstBrowserTunnel, guidedEnvironment, sealedRestart = false, firstSealedResponses = 0;
     let queued = 0, child, childExited, controller, owner, packageBin, installerOperation, browser;
     let forwardedNotifications = 0, mockRequests = 0, mockConnections = 0;
@@ -238,10 +244,14 @@ for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle', 'replay
           }
           if (replies.length < requests.length) queued = replies.length;
           res.setHeader('Content-Type', 'application/json'); res.end('{"status":"ok"}');
-          if (exactShell && !sealedRestart && index === 9) {
+          const coldOutput = provisionNode && index === 5;
+          if (coldOutput || exactShell && !sealedRestart && index === 9) {
             // Keep the original start/replay/receipt sequence; append observation only.
-            if (process.platform === 'win32') fs.writeFileSync(exactOutputRelease, 'release\n', { flag: 'wx' });
-            exactShellOutput = observeTestProcessOutput(replies[7].resp_json.result, 'AC_TUNNEL_EXACT', params => {
+            const release = coldOutput ? coldOutputRelease : exactOutputRelease;
+            const phase = coldOutput ? coldOutputPhase : exactOutputPhase;
+            if (process.platform === 'win32') fs.writeFileSync(release, 'release\n', { flag: 'wx' });
+            const output = observeTestProcessOutput(replies[coldOutput ? 5 : 7].resp_json.result,
+              coldOutput ? 'AC_COLD_SHELL_OK' : 'AC_TUNNEL_EXACT', params => {
               const index = requests.length;
               requests.push({ jsonrpc: '2.0', id: 10 + index, method: 'tools/call', params });
               requestIds.add(requestIdAt(index));
@@ -251,13 +261,15 @@ for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle', 'replay
               queued = index;
               return observed;
             });
-            exactShellOutput.catch(error => {
-              t.diagnostic(JSON.stringify({ phase: 'exact-output-observation',
+            if (coldOutput) coldShellOutput = output;
+            else exactShellOutput = output;
+            output.catch(error => {
+              t.diagnostic(JSON.stringify({ phase: coldOutput ? 'cold-output-observation' : 'exact-output-observation',
                 code: /^test_process_[a-z_]+$/.test(error.message) ? error.message : 'test_output_failed',
                 received: replies.length, requested: requests.length, pendingReads: outputReads.size,
-                outputGateExists: fs.existsSync(exactOutputRelease),
-                outputPhase: fs.existsSync(exactOutputPhase) && ['started', 'released'].includes(fs.readFileSync(exactOutputPhase, 'utf8'))
-                  ? fs.readFileSync(exactOutputPhase, 'utf8') : 'not-observed',
+                outputGateExists: fs.existsSync(release),
+                outputPhase: fs.existsSync(phase) && ['started', 'released'].includes(fs.readFileSync(phase, 'utf8'))
+                  ? fs.readFileSync(phase, 'utf8') : 'not-observed',
                 reads: outputReadTimings.map(({ opened, ...item }) => ({ ...item,
                   elapsedMs: Math.round(performance.now() - opened) })),
                 lastResponse, exitCode: child?.exitCode, stderrBytes }));
@@ -652,7 +664,13 @@ for (const mode of ['arguments', 'generated-profile', 'owned-lifecycle', 'replay
     if (provisionNode) {
       const shellResult = replies[5].resp_json.result;
       assert.notEqual(shellResult.isError, true);
-      assert.match(JSON.stringify(shellResult.content), /AC_COLD_SHELL_OK/);
+      assert.doesNotMatch(JSON.stringify(shellResult.content), /AC_COLD_SHELL_OK/,
+        'the cold command output is held until its original start reply');
+      assert.match(await coldShellOutput, /AC_COLD_SHELL_OK/);
+      assert.ok(outputReadTimings.length > 0, 'cold shell output requires a correlated read');
+      assert.equal(fs.readFileSync(coldOutputPhase, 'utf8'), 'released');
+      assert.equal(requests.filter(request => request.params?.name === 'start_process').length, 1,
+        'output observation must not replay the cold command');
     }
     if (exactShell) {
       assert.ok(toolNames.includes('agent_continue_start_process_exact'));

@@ -1,5 +1,41 @@
 # Agent Continue Development Handoff
 
+## Status Audit (2026-11-09 05:24 UTC)
+
+The owner asked what is actually blocking completion. This is a status audit,
+not a new authorization, connection, publication, or lifecycle acceptance.
+
+1. The current protected installation has real ordinary ChatGPT and Dot
+   administrator command, disposable-file and owned-process evidence below.
+   Do not repeat installation, binding or those settled test scripts.
+2. Current-installation extension-button Pause/Revoke and full browser quit /
+   reopen with running, paused and revoked intent remain unclosed live gates.
+   The extension-page automation refusal is an operator-channel limitation,
+   not evidence of missing user consent or a failed PowerShell transport.
+   Current installed-IAB live-site scheduler behavior and old-copy cleanup
+   also remain distinct from isolated final-ZIP scheduler regression evidence;
+   do not claim the owner's installed browser was updated by packaging alone.
+3. Main `adf2a79` contains source-only readiness / stale Pause / Revoke
+   readback fixes. Its Extension checks run 42562410256 is Success. These
+   follow-ups are not in the immutable public v3.0.4 assets.
+4. Native checks run 42562410523 failed at Windows cold-shell output checking:
+   start_process returned a valid running acknowledgement before marker output.
+   The local test repair reads the same PID through read_process_output instead
+   of treating start as completion. Deterministic gated Windows loopback passed
+   1/1 in 93.33 seconds; output-helper tests passed 11/11; package tests passed
+   34/34. This repair is uncommitted, and no hosted repaired-CI result exists yet.
+   Local cold-loopback used the pre-existing ConPTY fixture changes, which were
+   preserved and are not part of this repair. No live OpenAI grant was tested by
+   this loopback. Its fixture gate is not a production command deadline.
+5. Fresh authenticated IAB Store readback: 3.0.4 revision 00005 Pending review;
+   public version 2.1.0. New upload is disabled. Do not cancel or resubmit it
+   merely to refresh this audit. GitHub v3.0.4 is already published.
+
+Remaining work is lifecycle acceptance, repaired hosted native CI and deliberate
+release integration, not another broad rebuild or repeated permission request.
+The existing full Windows goal remains active. This audit does not claim the
+installed runtime is currently healthy without a fresh protected observation.
+
 ## Current Delivery Checkpoint (2026-11-08 America/Chicago)
 
 ### Actual Browser Connect And Both Chat Entrances

@@ -1,5 +1,27 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Status Audit: Cold Shell And Publication (2026-11-09 05:24 UTC)
+
+Authenticated IAB readback confirms Extension checks 42562410256 at adf2a79
+Success, while native checks 42562410523 failed Windows step 15. The failing
+assertion expected AC_COLD_SHELL_OK in start_process's initial output; the
+provider instead returned a running PID and requested read_process_output.
+
+The uncommitted test-only repair waits on that same PID after the correlated
+start acknowledgement. A deterministic gate ensures initial output lacks the
+marker and the later read supplies it; only one fixture start request is sent.
+Observed local checks: helper 11/11, Windows guided cold CMD loopback 1/1,
+package 34/34, all exit0. Cold-loopback duration 93330 ms; its diagnostics report
+portableNodeProvisioned, harmlessShellRoundtrip, pauseCycleVerified and
+pathDriftRestartVerified true, productionCredentials and realOpenAITunnelTested
+false. Existing local ConPTY fixture edits were present and left untouched.
+Log: `.artifacts/cold-shell-loopback-20261109.log`. This is not a hosted CI pass,
+numeric shell exit attestation or current installation's browser lifecycle test.
+
+Fresh Store Package readback: draft 3.0.4 / revision 00005 Pending review,
+published 2.1.0. No upload, cancellation, runtime mutation or reauthorization
+was performed during this audit. Public GitHub v3.0.4 remains unchanged.
+
 ## Browser Operation 65ef And Both Chat Administrator Proofs
 
 Checkpoint: 2026-11-08 America/Chicago. Owner-provided Devices screenshot
