@@ -1,6 +1,52 @@
 # Agent Continue Development Handoff
 
-## Current Delivery Checkpoint (2026-11-08 UTC)
+## Current Delivery Checkpoint (2026-11-08 America/Chicago)
+
+### Scheduler 3.0.4: Repeated Rewrite Starvation
+
+The owner requires configured-prompt submission even when composer text changes.
+A new browser regression against 3.0.3 restored unrelated text 10 ms after every
+input event. Its refill loop expired with zero submissions. This is a real
+missed behavioral case, not merely a stale warning or a user install mistake.
+The 3.0.4 candidate uses bounded event-input settling and final replacement,
+with a separately authorized synchronous transaction path only for editors
+exposing Tiptap's documented DOM owner. Vanilla ProseMirror does not expose that
+owner. A silent DOM-only final repaint was rejected after two repeated delayed
+model restores reproduced wrong-text submission. The candidate no longer uses
+that repaint. It retains exact-target, Pause, attachment and single-dispatch
+guards. A second regression reproduced a same-composer
+editor remount during pre-Stop authorization, and a migration regression
+exposed additional retired draft warnings; both have scoped fixes.
+
+Current full regression and publication receipts must be read in the runtime
+record; a source version bump is not publication. The existing 3.0.1 Store
+review still locks uploads. Do not withdraw it silently. The owner answered
+the specific 3.0.3 test-only protected-install/native-registration request
+with consent; this is not a new hosted Start, a platform grant, a shared-app
+restart, or permission to revive the settled r11 installation. These
+scheduler changes do not operate that administrator installation.
+
+Local release regression completed with exit0, including the actual one-minute
+Chromium alarm. The exact 3.0.4 preview ZIP also passed 16/16 MV3 and 6/6 PM
+integration cases after extraction. This is synthetic local browser acceptance,
+not an installed IAB update, live hosted operation, GitHub Release or Store
+submission. The release workflow must build and verify the final public pair.
+
+The specifically approved 3.0.3 protected installation is now complete:
+operation `72eaf030befa40a5a0e15a11f2d30433` returned
+`installed-ready-to-connect`, administrator child verified, registration changed,
+tunnel not started and chat not authorized. The first attempt had encountered
+the old revoked r11 HKLM64 registration. Its settled Revoke was read back and
+the exact inactive acceptance bridge was unenrolled; it was not reactivated.
+Native registration now points to the verified release digest's browser host.
+The owner subsequently approved connecting this same dedicated test installation
+and ordinary-chat lifecycle acceptance. That connection has not been started.
+Automatic IAB navigation to extension URLs is blocked by browser policy and must
+not be worked around with CDP, profile writes or an alternate browser surface.
+The user requested old duplicate removal; the supplied screenshot shows IAB
+3.0.0 and 2.1.0, but the latest native observation did not show the manager open.
+Neither copy was removed, disabled or replaced in this checkpoint. External
+Chrome's production task is still outside the acceptance scope.
 
 ### Published 3.0.3 And Remaining Live Gates
 

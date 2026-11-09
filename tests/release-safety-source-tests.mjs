@@ -4,6 +4,10 @@ const source = file => readFileSync(new URL(`../${file}`, import.meta.url), 'utf
 const background = source('background.js');
 const adapter = source('adapter.js');
 assert.doesNotMatch(background, /runScript\('MAIN'\)/);
+assert.match(background, /world: 'MAIN', func: editorCommit/);
+assert.match(background, /prompt: currentPrompt\(job\)/);
+assert.match(background, /editorCommitRunId === job.runId/);
+assert.doesNotMatch(source('editor-commit.js'), /chrome\.runtime|runId|__reactProps\$|fetch\(/);
 assert.doesNotMatch(adapter, /__reactProps\$|__reactEventHandlers\$/);
 assert.doesNotMatch(adapter, /someProp\('handleKeyDown'/);
 assert.doesNotMatch(adapter, /await wait\(100\)/);

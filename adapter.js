@@ -268,7 +268,16 @@ export async function pageAction(args) {
     return null;
   };
 
-  const fill = async (value, forceReplacement = false) => {
+  const normalizeRenderedPayload = value => normalizeLineEndings(value).replace(/\u00a0/g, ' ');
+  const payloadMatches = () => {
+    if (editor instanceof HTMLTextAreaElement) {
+      return normalizeLineEndings(editor.value) === normalizeLineEndings(prompt);
+    }
+    const current = plainDraft(editor, true);
+    return current !== null && normalizeRenderedPayload(current) === normalizeRenderedPayload(prompt);
+  };
+
+  const fill = (value, forceReplacement = false) => {
     if (!sameComposer()) return false;
     editor.focus({ preventScroll: true });
     if (!sameComposer()) return false;
@@ -330,34 +339,40 @@ export async function pageAction(args) {
       }
     };
 
+    const beforeInput = () => editor.dispatchEvent(new InputEvent('beforeinput', {
+      bubbles: true, composed: true, cancelable: true, inputType, data: value || null
+    }));
+    const mayWrite = () => sameComposer() && (!forceReplacement || (samePage() && withinDeadline() && !hasAttachment() && editable()));
+    const replaceAfter = replace => {
+      if (beforeInput()) return replace();
+      return handledInput().then(handled => handled || (forceReplacement && replace()));
+    };
+
     if (editor instanceof HTMLTextAreaElement) {
       const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
       if (!setter) return false;
       editor.setSelectionRange(0, editor.value.length);
-      if (!editor.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, composed: true, cancelable: true, inputType, data: value || null }))) {
-        const handled = await handledInput();
-        if (handled || !forceReplacement) return handled;
-      }
-      if (!sameComposer() || (forceReplacement && (!samePage() || hasAttachment()))) return false;
-      setter.call(editor, value);
-      editor.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType, data: value || null }));
-    } else {
-      const selection = window.getSelection();
-      const range = document.createRange();
+      return replaceAfter(() => {
+        if (!mayWrite()) return false;
+        setter.call(editor, value);
+        editor.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType, data: value || null }));
+        return forceReplacement || clean(textOf(editor)) === clean(value);
+      });
+    }
+
+    const selection = window.getSelection();
+    const range = document.createRange();
+    const selectContents = () => {
       range.selectNodeContents(editor);
       selection.removeAllRanges();
       selection.addRange(range);
-      if (!editor.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, composed: true, cancelable: true, inputType, data: value || null }))) {
-        const handled = await handledInput();
-        if (handled || !forceReplacement) return handled;
-        // A handler may have moved the caret while restoring other text.
-        // Replace the entire composer, never append at its new caret.
-        if (!sameComposer() || !samePage() || hasAttachment()) return false;
-        range.selectNodeContents(editor);
-        selection.removeAllRanges();
-        selection.addRange(range);
-      }
-      if (!sameComposer() || !selection.anchorNode || !editor.contains(selection.anchorNode)) return false;
+    };
+    selectContents();
+    return replaceAfter(() => {
+      if (!mayWrite()) return false;
+      // A beforeinput handler may move the caret. Replace, never append.
+      if (forceReplacement) selectContents();
+      if (!selection.anchorNode || !editor.contains(selection.anchorNode)) return false;
       let inputObserved = false;
       const observeInput = () => { inputObserved = true; };
       editor.addEventListener('input', observeInput, { capture: true });
@@ -372,8 +387,8 @@ export async function pageAction(args) {
         }
         if (!inputObserved) editor.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType, data: value || null }));
       } finally { editor.removeEventListener('input', observeInput, { capture: true }); }
-    }
-    return forceReplacement || clean(textOf(editor)) === clean(value);
+      return forceReplacement || clean(textOf(editor)) === clean(value);
+    });
   };
 
   const clearOwnDraft = async () => {
@@ -394,7 +409,7 @@ export async function pageAction(args) {
     if (!stops.length) return null;
     if (interrupted || stops.length !== 1 || !enabled(stops[0])) return result('blocked', '当前停止控件不可用或不唯一，稍后重试。');
     if (!await stillAllowed()) return result('cancelled', '已暂停，未打断 Agent。');
-    if (!sameComposer() || !stops[0].isConnected || !composer.contains(stops[0])) return result('blocked', '页面已变化。');
+    if (!keepComposer() || !stops[0].isConnected || !composer.contains(stops[0])) return result('blocked', '页面已变化。');
     if (hasAttachment()) return protectedDraft('输入框有附件，本次不提交。');
     if (!samePage() || !withinDeadline() || !enabled(stops[0])) return result('cancelled', '打断许可已失效。');
 
@@ -414,6 +429,23 @@ export async function pageAction(args) {
     return result('blocked', '已请求停止，输入框尚未恢复发送状态；稍后重试。');
   };
 
+  const confirmSubmission = async () => {
+    const confirmDeadline = Math.min(Date.now() + 6500, args.runDeadline);
+    while (Date.now() < confirmDeadline) {
+      if (!samePage()) return result('unknown', '提交后会话地址变化，无法确认结果；请检查后再继续。');
+      const messages = messageNodes('user');
+      const last = messages.at(-1);
+      const lastKey = messageKey(last);
+      const modernReceipt = !isDot && last?.getAttribute('data-chatgpt-search-unit-key')?.endsWith(':user');
+      if (last && (!modernReceipt || modernMessageKey(last)) && !beforeMessages.has(last)
+        && (!lastKey || !beforeKeys.has(lastKey)) && clean(textOf(last)) === clean(prompt)) {
+        return result('sent', useKeyboardOnly ? '已通过 Ctrl+Enter 提交，并在会话中确认新消息。' : '已确认发送并在会话中确认新消息。');
+      }
+      await wait(180);
+    }
+    return result('unknown', useKeyboardOnly ? '已发送 Ctrl+Enter，但未确认新消息；本周期不追加点击或重复按键。' : '已点击发送，但未确认新消息；本周期不立即重试。');
+  };
+
   try {
     if (!samePage() || !sameComposer()) return result('blocked', '页面已变化。');
     if (busy()) return result('busy', 'Agent 仍在运行。');
@@ -425,11 +457,28 @@ export async function pageAction(args) {
     if (!samePage() || !withinDeadline() || !keepComposer() || !editable()) return result('blocked', '输入框当前不可用，稍后重试。');
     if (hasAttachment()) return protectedDraft('输入框有附件，本次不提交。');
 
+    if (args.modelCommit === true) {
+      beforeAssistant = assistantState();
+      rememberVisibleHistory();
+      const commit = await chrome.runtime.sendMessage({ type: 'COMMIT_RUN', runId: args.runId });
+      if (commit?.ok === true && commit.supported === true && commit.dispatched === true) {
+        submitted = true;
+        return await confirmSubmission();
+      }
+      if (!(commit?.ok === true && commit.supported === false && commit.dispatched === false)) {
+        if (commit?.code === 'cancelled') return result('cancelled', '本次执行已取消。');
+        // No second method follows an uncertain or attempted model commit.
+        submitted = true;
+        return result('unknown', '页面未返回可确认的结果。');
+      }
+    }
+
     const accepted = await fill(prompt);
     inserted = accepted;
     if (accepted && sameComposer()) needsRefill = false;
     insertedDraftSnapshot = snapshotDraft();
-    await wait(60);
+    // Even matching DOM may precede a controlled input's model commit.
+    await wait(180);
 
     const findSendButton = (root = composer) => {
       const scope = root;
@@ -516,26 +565,8 @@ export async function pageAction(args) {
       ? result('blocked', '提交前 Agent 状态变化，稍后重新打断并发送。') : null;
     const stopped = lateStop();
     if (stopped) return stopped;
-    // Text changes request another replacement, never a deferred-send result.
-    // Yield through the extension-owned clock so controlled-input state commits
-    // and a pending Pause can cancel before the one submission attempt.
-    const normalizeRenderedPayload = value => normalizeLineEndings(value).replace(/\u00a0/g, ' ');
-    const payloadMatches = () => {
-      if (editor instanceof HTMLTextAreaElement) {
-        return normalizeLineEndings(editor.value) === normalizeLineEndings(prompt);
-      }
-      const current = plainDraft(editor, true);
-      return current !== null && normalizeRenderedPayload(current) === normalizeRenderedPayload(prompt);
-    };
-    for (;;) {
-      if (!samePage() || !keepComposer()) return result('blocked', '提交前页面已变化。');
-      if (!withinDeadline()) return result('cancelled', '本次发送许可已过期，未提交。');
+    if (needsRefill || !payloadMatches()) {
       if (!editable()) return result('blocked', '输入框当前不可用，稍后重试。');
-      if (hasAttachment()) return protectedDraft('提交前检测到附件，已保留输入框内容。');
-      if (busy()) return result('busy', 'Agent 仍在运行。');
-      const stopDuringFill = lateStop();
-      if (stopDuringFill) return stopDuringFill;
-      if (!needsRefill && payloadMatches()) break;
       const filledEditor = editor;
       const filled = await fill(prompt, true);
       if (!samePage() || !keepComposer()) return result('blocked', '提交前页面已变化。');
@@ -545,16 +576,52 @@ export async function pageAction(args) {
       }
       inserted = !needsRefill && payloadMatches();
       insertedDraftSnapshot = inserted ? snapshotDraft() : null;
+      // Give the page's controlled input one chance to settle. Waiting again
+      // after every rewrite lets a recurring page restore starve submission.
       await wait(180);
     }
-    inserted = true;
-    insertedDraftSnapshot = snapshotDraft();
+    if (!samePage() || !withinDeadline() || !keepComposer()) return result('blocked', '提交前页面已变化。');
+    if (!editable()) return result('blocked', '输入框当前不可用，稍后重试。');
+    if (busy()) return result('busy', 'Agent 仍在运行。');
+    if (hasAttachment()) return protectedDraft('提交前检测到附件，已保留输入框内容。');
+    const stopBeforeCommit = lateStop();
+    if (stopBeforeCommit) return stopBeforeCommit;
+
+    // An eventful correction must finish before dispatch: DOM equality alone
+    // cannot prove that an asynchronous controlled-input model has updated.
+    if (needsRefill || !payloadMatches()) {
+      const filled = await fill(prompt, true);
+      if (!filled) return result('blocked', '输入框当前不可用，稍后重试。');
+      await wait(180);
+    }
+    if (needsRefill || !payloadMatches()) {
+      const filled = await fill(prompt, true);
+      if (!filled) return result('blocked', '输入框当前不可用，稍后重试。');
+      await wait(180);
+    }
+    if (args.extensionClock !== true && !await stillAllowed()) {
+      return result('cancelled', '本次执行已取消。');
+    }
     if (!samePage() || !withinDeadline() || !sameComposer()) return result('blocked', '提交前页面已变化。');
     if (!editable()) return result('blocked', '输入框当前不可用，稍后重试。');
     if (busy()) return result('busy', 'Agent 仍在运行。');
     if (hasAttachment()) return protectedDraft('提交前检测到附件，已保留输入框内容。');
     const stopAfterFill = lateStop();
     if (stopAfterFill) return stopAfterFill;
+    // Never silently repaint a rich editor while its submission model differs.
+    // Standard synchronous input handlers receive the final replacement too.
+    if (!payloadMatches()) {
+      const finalFill = fill(prompt, true);
+      // Await only an actual asynchronous beforeinput handler. Awaiting a
+      // boolean would let a page microtask undo a synchronous replacement.
+      const accepted = finalFill && typeof finalFill.then === 'function' ? await finalFill : finalFill;
+      if (!accepted) return result('blocked', '输入框当前不可用，稍后重试。');
+      if (!samePage() || !withinDeadline() || !sameComposer() || !editable()) return result('blocked', '提交前页面已变化。');
+      if (hasAttachment()) return protectedDraft('提交前检测到附件，已保留输入框内容。');
+      if (busy() || lateStop()) return result('busy', 'Agent 仍在运行。');
+    }
+    inserted = true;
+    insertedDraftSnapshot = snapshotDraft();
     // The page can replace controls while the final authorization is pending.
     const currentButton = useKeyboardOnly ? null : findSendButton(composer);
     const sendButton = currentButton?.isConnected && composer.contains(currentButton) ? currentButton : null;
@@ -593,22 +660,7 @@ export async function pageAction(args) {
       dispatchKey(useKeyboardOnly || isDot);
     }
 
-    const confirmDeadline = Math.min(Date.now() + 6500, args.runDeadline);
-    while (Date.now() < confirmDeadline) {
-      if (!samePage()) return result('unknown', '提交后会话地址变化，无法确认结果；请检查后再继续。');
-      const messages = messageNodes('user');
-      const last = messages.at(-1);
-      // A same-text row buried under later activity cannot be attributed to this dispatch.
-      // A known row stays historical even if its message key hydrates or changes.
-      const lastKey = messageKey(last);
-      const modernReceipt = !isDot && last?.getAttribute('data-chatgpt-search-unit-key')?.endsWith(':user');
-      if (last && (!modernReceipt || modernMessageKey(last)) && !beforeMessages.has(last) && (!lastKey || !beforeKeys.has(lastKey)) && clean(textOf(last)) === clean(prompt)) {
-        return result('sent', useKeyboardOnly ? '已通过 Ctrl+Enter 提交，并在会话中确认新消息。' : '已确认发送并在会话中确认新消息。');
-      }
-      await wait(180);
-    }
-
-    return result('unknown', useKeyboardOnly ? '已发送 Ctrl+Enter，但未确认新消息；本周期不追加点击或重复按键。' : '已点击发送，但未确认新消息；本周期不立即重试。');
+    return await confirmSubmission();
   } catch (error) {
     return result(submitted ? 'unknown' : 'error', '页面操作未完成，未记录页面内容。');
   } finally {

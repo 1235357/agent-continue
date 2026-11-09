@@ -8,6 +8,22 @@ the configured prompt is reasserted and sending proceeds subject to the
 unchanged guards below. Composer text changes are not a reason to defer a cycle.
 If the page replaces the text editor inside the same composer, the extension
 refills it before dispatch. It does not follow an editor to another composer.
+There is no indefinite refill-and-wait cycle. The event adapter uses bounded
+settling opportunities, rechecks legacy-clock authorization afterward, and
+delivers a final replacement through input events, not a silent DOM repaint.
+For a selected editor exposing Tiptap's documented `dom.editor.view` owner,
+a separate fixed MAIN-world helper applies a ProseMirror model transaction and
+attempts submission in the same JavaScript turn. Vanilla ProseMirror does not
+expose this owner; it uses the event adapter. An editor that cannot accept the
+configured text is not permission to submit unrelated text. Tests cover the
+listed restoration patterns, not every possible third-party editor model.
+
+The background validates the current job, frame, tab, URL, run and deadline,
+records a one-attempt marker, and supplies the saved prompt rather than accepting
+a page-supplied command or payload. Run identifiers are never injected into MAIN.
+Only an explicit unsupported-view result before mutation allows event fallback;
+an uncertain or attempted model submission does not. A helper attempt alone is
+not a delivery receipt. The isolated adapter must still see a new user message.
 
 The task controls display this notice in English or Simplified Chinese:
 

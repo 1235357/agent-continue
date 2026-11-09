@@ -258,6 +258,12 @@ await scenario('Retired content-change notices are cleared on upgrade without ch
     [true, false, '打断前输入框发生变化，已保留当前内容。'],
     [true, true, 'The composer changed before interruption; its content was preserved.'],
     [false, true, '输入框内容发生变化，已保留当前内容。'],
+    [false, true, 'The composer contains a draft or attachments; skipping this cycle.'],
+    [false, true, '输入框已有草稿或附件，本次跳过。'],
+    [true, true, 'A new draft or attachments were detected; skipping this cycle.'],
+    [true, true, '检测到新草稿或附件，本次跳过。'],
+    [false, false, 'Another draft or attachments were detected after interruption and preserved.'],
+    [false, false, '打断后检测到其他草稿或附件，已保留。'],
   ]) {
     const legacy = { ...job, enabled, nextAt: enabled ? job.nextAt : null, statusText: message };
     const logs = [{ at: 1, event: 'draft', message, diagnostic: { code: 'composer-changed' } }];
@@ -453,6 +459,70 @@ await scenario('English runtime copy preserves private content and switches lang
   assert.equal((await h.message({ type: 'PAUSE' })).job.statusText, 'Manually paused; future scheduled sends have stopped.');
   await setLanguage('zh_CN');
   assert.equal((await h.message({ type: 'PAUSE' })).job.statusText, '已手动暂停；后续定时发送已停止。');
+});
+await scenario('Model commit uses stored prompt, exact frame, and a durable one-attempt marker', async () => {
+  const h = await harness();
+  const job = await h.start();
+  h.state.session.job = { ...job, phase: 'sending', runKind: 'send', runDeadline: Date.now() + 10000 };
+  h.pageResult = async () => ({ supported: true, dispatched: true, code: 'dispatched' });
+  const request = { type: 'COMMIT_RUN', runId: job.runId, prompt: 'UNTRUSTED_IGNORED' };
+  const before = h.state.injections.length;
+  assert.equal((await h.message(request, { ...h.sender(), frameId: 1 })).ok, false);
+  assert.equal(h.state.injections.length, before);
+  assert.equal((await h.message(request, h.sender())).dispatched, true);
+  const injection = h.state.injections.at(-1);
+  assert.equal(injection.world, 'MAIN');
+  assert.equal(injection.args[0].prompt, job.prompt);
+  assert.equal(injection.args[0].runId, undefined);
+  assert.equal(h.state.session.job.editorCommitRunId, job.runId);
+  assert.equal((await h.message(request, h.sender())).code, 'unknown');
+  assert.equal(h.state.injections.length, before + 1);
+  await h.message({ type: 'PAUSE' });
+  assert.equal((await h.message(request, h.sender())).ok, false);
+  assert.equal(h.state.injections.length, before + 1);
+});
+await scenario('An uncertain model injection never permits a second send method', async () => {
+  const h = await harness();
+  const job = await h.start();
+  h.state.session.job = { ...job, phase: 'sending', runKind: 'send', runDeadline: Date.now() + 10000 };
+  h.pageResult = async () => { throw new Error('UNLOGGED_PAGE_DATA'); };
+  const before = h.state.injections.length;
+  assert.equal((await h.message({ type: 'COMMIT_RUN', runId: job.runId }, h.sender())).code, 'unknown');
+  assert.equal((await h.message({ type: 'COMMIT_RUN', runId: job.runId }, h.sender())).code, 'unknown');
+  assert.equal(h.state.injections.length, before + 1);
+  assert.doesNotMatch(JSON.stringify(h.state.local.logs), /UNLOGGED_PAGE_DATA/);
+});
+await scenario('Pause arriving while the model-attempt marker is saved cancels injection', async () => {
+  const h = await harness();
+  const job = await h.start();
+  h.state.session.job = { ...job, phase: 'sending', runKind: 'send', runDeadline: Date.now() + 10000 };
+  const before = h.state.injections.length;
+  const save = h.chrome.storage.session.set;
+  let paused;
+  h.chrome.storage.session.set = async value => {
+    await save(value);
+    if (value.job?.editorCommitRunId && !paused) paused = h.message({ type: 'PAUSE' });
+  };
+  assert.equal((await h.message({ type: 'COMMIT_RUN', runId: job.runId }, h.sender())).code, 'cancelled');
+  await paused;
+  assert.equal(h.state.injections.length, before);
+  assert.equal(h.state.session.job.enabled, false);
+});
+await scenario('Model commit rejects expired, foreign-target, foreign-run and reply-only requests', async () => {
+  const h = await harness();
+  const job = await h.start();
+  const running = { ...job, phase: 'sending', runKind: 'send', runDeadline: Date.now() + 10000 };
+  const before = h.state.injections.length;
+  for (const state of [
+    { job: { ...running, runDeadline: Date.now() - 1 }, sender: h.sender(), runId: job.runId },
+    { job: running, sender: { ...h.sender(), url: 'https://chatgpt.com/c/different' }, runId: job.runId },
+    { job: running, sender: h.sender(), runId: 'other-run' },
+    { job: { ...running, runKind: 'reply-check' }, sender: h.sender(), runId: job.runId },
+  ]) {
+    h.state.session.job = copy(state.job);
+    assert.equal((await h.message({ type: 'COMMIT_RUN', runId: state.runId }, state.sender)).ok, false);
+  }
+  assert.equal(h.state.injections.length, before);
 });
 const failed=results.filter(x=>x.status==='FAIL').length;
 console.log(`RESULT ${results.length-failed}/${results.length} passed`);

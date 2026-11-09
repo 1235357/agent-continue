@@ -1,5 +1,81 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Scheduler 3.0.4 Repeated Rewrite Reproductions
+
+Three additional regressions were observed before their fixes:
+
+- In a real Chromium synthetic Dot page, restoring other composer text 10 ms
+  after every fill made the 3.0.3 algorithm expire without dispatch. The test
+  expected one configured-prompt receipt and observed `cancelled` instead.
+- Replacing just the editor while a valid pre-Stop authorization reply was
+  pending returned `blocked`, with no Stop or submission. The same composer,
+  target identity and scoped controls remained valid.
+- Initializing a legacy current status containing "The composer contains a
+  draft or attachments; skipping this cycle." left it unchanged. Chinese and
+  post-interruption variants are covered in the expanded migration test.
+
+The candidate uses bounded event-input settling and final replacement, recovers
+the pre-Stop in-place editor, and migrates old current-status variants without
+altering history. Two deferred-model restores exposed a wrong-text bug in an
+intermediate silent-DOM-repaint candidate: the strengthened tests failed 2/55.
+That repaint was removed. The current Dot suite passes 56/56, including both
+restoring-model cases and a 100 ms model commit with already-matching DOM.
+
+A separate fixed MAIN-world helper supports Tiptap's existing `dom.editor.view`
+owner and public ProseMirror transactions. Its first discovery assumption,
+`pmViewDesc.view`, failed against actual vanilla ProseMirror. The helper was
+corrected against Tiptap's official Editor.ts source; vanilla PM explicitly
+falls back to the event adapter. Tests do not manufacture a vanilla discovery
+success. The 9/9 direct browser cases use real official ProseMirror modules and
+an explicitly Tiptap-shaped DOM owner, not the full Tiptap package or a live
+ChatGPT editor. The 6/6 integrated MV3 PM cases cover vanilla fallback, one
+explicit owner/model-restore case, receipt counting and an actually hidden tab.
+The 81/81 helper unit cases use a model facade, including body-only Dot identity.
+Background 41/41 includes exact
+frame/run binding, saved-prompt authority, one-attempt persistence, rejected
+foreign/expired/reply-only requests and Pause during marker persistence.
+Release adapter 47/47 includes post-settling legacy-clock revocation.
+The MV3 priority regression now mutates after every input, on both ordinary
+ChatGPT and Dot fixture URLs, rather than only once. Tests use disposable
+Chromium profiles and synthetic intercepted pages, never production chats.
+Final local full-run log: `.artifacts/scheduler304-full-release.log`, exit0,
+with `TEST_REAL_DUE_ALARM=1`: 16/16 MV3, 6/6 PM integration and 9/9 direct editor
+browser cases. The intermediate `.artifacts/scheduler304-full-final.log` failed
+the microtask rewrite regression and is not final acceptance. Awaiting a boolean
+replacement result introduced a microtask gap; the final event path awaits only
+an actual asynchronous handler. The earlier
+`.artifacts/scheduler-304-full-regression.log` predates the model-commit changes
+and must not be used as their complete acceptance. Packaging unit tests passed
+34/34. Extracted preview ZIP
+`531736fcebe40fe03cdfb3ad23090af1081fe629a2b0628d9c7ea00624b411cb`
+passed 16/16 actual MV3 scenarios (including the real minute alarm and browser
+reopen) and 6/6 PM integration cases. Logs are
+`.artifacts/scheduler304-packaged-mv3.log` and
+`.artifacts/scheduler304-packaged-pm.log`. This preview is not the final public
+GitHub/Store pair or an installed live-site update.
+Final results and publication require their own receipts below.
+
+### Approved 3.0.3 Native Install, Not Hosted Delivery
+
+Exact release native ZIP `ef4529bcb4d5c508f63433cd328bd8e8c8e041c473d57658199a7dfbc693b68c`
+and stager `1da07714b44a3457abd95d64e7b4b60c0a490dde82db03b73c05285bf48de5d5`
+were used. The first operation `03f235059e9147be82adfe788848e02b` failed at
+the existing HKLM64 native-host collision, before the new installation receipt
+or new target root existed. It was not blindly replayed. The registered old
+bridge matched the dedicated revoked r11 installation and exact IAB origin;
+its settled Revoke read back stopped, owner unobserved, and it was unenrolled
+with ExitCode0, RegistryAbsent=true and RevocationPreserved=true.
+
+New operation `72eaf030befa40a5a0e15a11f2d30433` completed with exit0 and an
+actual protected installation receipt: `installed-ready-to-connect`,
+administratorChildVerified=true, registrationChanged=true, tunnelStarted=false,
+chatAuthorized=false. HKLM now references the new verified digest's browser host.
+No old Revoke or Start was replayed. This proves installation/registration only.
+The owner approved the next dedicated connection and ordinary-chat tests, but
+IAB policy currently refuses automated extension-URL navigation. No browser
+grant, hosted tool operation, browser reopen or new-candidate lifecycle receipt
+was inferred from the install result. No production connection was changed.
+
 ## Published 3.0.3 Packages And Real Browser Alarm
 
 [Release v3.0.3](https://github.com/1235357/agent-continue/releases/tag/v3.0.3)

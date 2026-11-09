@@ -139,6 +139,7 @@ export default {
   '页面已变化。': 'The page changed.',
   'Agent 仍在运行。': 'The Agent is still running.',
   '输入框当前不可用，稍后重试。': 'The composer is currently unavailable. Try again later.',
+  '页面未能接受配置的提示词，未提交。': 'The page did not accept the configured prompt. Nothing was submitted.',
   '输入框未接受完整填写，未点击发送；稍后重试。': 'The composer did not accept the full text; Send was not clicked. Try again later.',
   '已暂停，本次未提交。': 'Paused; this cycle was not submitted.',
   '检测到正在运行，本次未提交。': 'Running activity detected; this cycle was not submitted.',

@@ -354,17 +354,19 @@ try {
   assert.equal((await call(control, { type: 'SEND_NOW' })).ok, false);
   pass('Pause: actual alarms are removed, original autoDiscardable is restored and Send Now is rejected.');
 
+  for (const [route, label] of [['dots', 'Dot'], ['c', 'ordinary ChatGPT']]) {
   const priorityPage = await newTestPage(context);
-  await priorityPage.goto('https://chatgpt.com/dots/mv3-priority');
+  await priorityPage.goto(`https://chatgpt.com/${route}/mv3-priority`);
   const priorityTab = await workerTab(worker, priorityPage.url());
   const priorityPrompt = 'MV3 configured priority prompt';
   await priorityPage.evaluate(() => {
     const editor = document.querySelector('[contenteditable]');
     editor.textContent = 'Synthetic unsent text';
     editor.addEventListener('input', () => queueMicrotask(() => {
+      if (fixture.submits) return;
       editor.textContent = 'Synthetic composer mutation before send';
-      fixture.composerMutated = true;
-    }), { once: true });
+      fixture.composerMutations = (fixture.composerMutations || 0) + 1;
+    }));
   });
   const priorityStart = await call(control, { type: 'START', tabId: priorityTab.id, config: { prompt: priorityPrompt, extensionPriority: false, sendMethod: 'auto' } });
   assert.equal(priorityStart.ok, true, priorityStart.error);
@@ -373,11 +375,13 @@ try {
   await work.bringToFront();
   const prioritySend = await call(control, { type: 'SEND_NOW' });
   assert.equal(prioritySend.job.sentCount, 1, prioritySend.job.statusText);
-  const priorityProof = await priorityPage.evaluate(() => ({ mutated: fixture.composerMutated, clicks: fixture.sendClicks, keys: fixture.keyboardSends, texts: fixture.sentTexts }));
-  assert.deepEqual(priorityProof, { mutated: true, clicks: 1, keys: 0, texts: [priorityPrompt] });
+  const priorityProof = await priorityPage.evaluate(() => ({ mutations: fixture.composerMutations, clicks: fixture.sendClicks, keys: fixture.keyboardSends, texts: fixture.sentTexts }));
+  assert.ok(priorityProof.mutations >= 2, 'the page must restore text again after the settling refill');
+  assert.deepEqual({ clicks: priorityProof.clicks, keys: priorityProof.keys, texts: priorityProof.texts }, { clicks: 1, keys: 0, texts: [priorityPrompt] });
   await call(control, { type: 'PAUSE' });
   await priorityPage.close();
-  pass('Real isolated-world extension priority replaces text only and submits the configured payload once.');
+  pass(`Real isolated-world ${label}: repeated composer rewrites cannot starve one confirmed configured send.`);
+  }
 
   const clockPage = await newTestPage(context);
   await clockPage.goto('https://chatgpt.com/dots/mv3-clock');

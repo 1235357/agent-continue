@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.0.4] - 2026-11-08
+
+- Replace the unbounded refill-and-wait loop with bounded event-input settling
+  and a final configured-prompt replacement. Wait for deferred input handlers
+  even when the displayed text already matches; retain final Pause checks.
+- For editors exposing Tiptap's documented DOM owner, use an authorized,
+  synchronous model transaction and one scoped submission attempt. Keep run
+  identifiers in the extension, record the attempt before injection, and never
+  replay an uncertain attempt through another submission method. Editors without
+  that owner use the existing event adapter. Count only a new message receipt.
+- Recover an editor remount in the same composer while Stop authorization is
+  pending. Keep the bound target, manual Pause and attachment checks.
+- Clear additional legacy draft-protection notices from the current task on
+  upgrade without altering its schedule, prompt, pause state or history.
+
 ## [3.0.3] - 2026-11-08
 
 - If the page rebuilds the text editor in the same bound composer before

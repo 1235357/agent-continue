@@ -164,7 +164,7 @@ test('extension clock cancellation before dispatch does not submit', async () =>
   assert.equal(h.clocks().pageTimerCalls, 0);
 });
 
-test('repeated text changes during final settling reassert the prompt without replaying submission', async () => {
+test('repeated composer rewrites do not create an unbounded input transaction loop', async () => {
   let changes = 0;
   const h = fixture({
     args: { extensionClock: true, extensionPriority: false },
@@ -173,14 +173,14 @@ test('repeated text changes during final settling reassert the prompt without re
       return { ok: true, allowed: true };
     },
     authorizeWait: (state, message) => {
-      if (state.checks === 3 && message.delayMs === 180 && changes < 5) {
+      if (state.checks === 3 && message.delayMs === 180 && state.clicks === 0) {
         state.editor.value = 'intervening text ' + ++changes;
       }
       return true;
     },
   });
   assert.equal((await h.run()).status, 'sent');
-  assert.equal(changes, 5);
+  assert.equal(changes, 3, 'settling is bounded even when every wait restores text');
   assert.deepEqual(h.state.sentTexts, ['continue fixture']);
   assert.equal(h.state.clicks, 1);
 });
@@ -390,7 +390,7 @@ for (const [status, acceptDelay] of [['sent', 0], ['unknown', 10000]]) {
     const outcome = await f.run();
     assert.deepEqual({ status: outcome.status, sentTexts: f.state.sentTexts },
       { status, sentTexts: ['continue fixture'] });
-    assert.equal(f.state.checks, 3);
+    assert.equal(f.state.checks, 4, 'legacy-clock execution reauthorizes after settling');
     assert.equal(f.state.clicks, 1);
     assert.equal(f.state.keys, 0);
   });
@@ -402,14 +402,14 @@ test('priority replaces repeated text changes once without an authorization refi
     return { ok: true, allowed: true };
   } });
   assert.equal((await f.run()).status, 'sent');
-  assert.equal(f.state.checks, 3);
+  assert.equal(f.state.checks, 4, 'legacy-clock execution reauthorizes after settling');
   assert.deepEqual(f.state.sentTexts, ['continue fixture']);
   assert.equal(f.state.clicks, 1);
   assert.equal(f.state.keys, 0);
 });
 
 for (const [guard, status] of [['pause', 'cancelled'], ['attachment', 'draft'], ['identity loss', 'cancelled']]) {
-  for (const check of [2, 3]) {
+  for (const check of [2, 3, 4]) {
     test(`priority respects ${guard} at authorization check ${check}`, async () => {
       const f = fixture({ dot: true, args: { extensionPriority: true }, authorize: state => {
         if (state.checks >= 2) state.editor.value = `revision ${state.checks}`;

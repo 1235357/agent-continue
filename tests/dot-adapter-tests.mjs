@@ -167,6 +167,28 @@ try {
     assert.equal(await page.evaluate(() => fixture.sends), 1);
   });
 
+  await scenario('A page that restores other text after every fill still receives the configured prompt exactly once', async ({ page, args }) => {
+    await page.evaluate(() => {
+      const editor = document.querySelector('[data-composer-markdown]');
+      fixture.restores = 0;
+      editor.addEventListener('input', () => {
+        setTimeout(() => {
+          if (fixture.sends) return;
+          fixture.restores++;
+          editor.textContent = 'Composer state restored by the page';
+        }, 10);
+      });
+    });
+    const configured = 'Send this configured text only';
+    const outcome = await page.evaluate(pageAction, {
+      ...args, prompt: configured, runDeadline: Date.now() + 1800,
+    });
+    const state = await page.evaluate(() => ({ restores: fixture.restores, texts: fixture.sentTexts }));
+    assert.ok(state.restores > 0, 'the page must change the text before dispatch');
+    assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
+    assert.deepEqual(state.texts, [configured]);
+  });
+
   await scenario('Extension priority cannot submit an attachment-only draft', async ({ page, args }) => {
     await page.evaluate(() => {
       const file = document.createElement('button');
@@ -237,6 +259,26 @@ try {
     assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
     assert.deepEqual(await page.evaluate(() => fixture.actions), ['send']);
     assert.equal(await page.evaluate(() => fixture.stops), 0);
+  });
+  await scenario('An editor remount during Stop authorization does not skip the same composer', async ({ page, args }) => {
+    await page.evaluate(() => {
+      startWork();
+      const authorize = chrome.runtime.sendMessage;
+      chrome.runtime.sendMessage = async message => {
+        const reply = await authorize(message);
+        if (fixture.checks === 2) {
+          const original = document.querySelector('[data-composer-markdown]');
+          original.replaceWith(original.cloneNode(false));
+          bindComposer();
+        }
+        return reply;
+      };
+    });
+    const configured = 'Continue after the editor remount';
+    const outcome = await page.evaluate(pageAction, { ...args, prompt: configured });
+    assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
+    assert.deepEqual(await page.evaluate(() => fixture.actions), ['stop', 'send']);
+    assert.deepEqual(await page.evaluate(() => fixture.sentTexts), [configured]);
   });
   // Controlled-editor fixtures exercise browser event contracts. They do not
   // claim knowledge of Dot's private framework implementation.
@@ -328,6 +370,70 @@ try {
     assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
   });
 
+  await scenario('Matching DOM still allows a deferred input model to commit before submitting', async ({ page, args }) => {
+    const configured = 'Configured asynchronous model without any restoration';
+    await page.evaluate(() => {
+      const input = document.querySelector('[data-composer-markdown]');
+      fixture.controlledText = 'Old controlled-model value';
+      input.addEventListener('input', () => {
+        const value = input.innerText;
+        setTimeout(() => { fixture.controlledText = value; }, 100);
+      });
+      document.querySelector('button[aria-label="Send"]').addEventListener('click', event => {
+        event.stopImmediatePropagation();
+        fixture.sends++; fixture.sentTexts.push(fixture.controlledText);
+        appendMessage(fixture.controlledText, 'acct~dot~Msg~no-restore-' + fixture.sends);
+        input.textContent = '';
+      }, { capture: true });
+    });
+    const outcome = await page.evaluate(pageAction, { ...args, prompt: configured });
+    assert.deepEqual(await page.evaluate(() => fixture.sentTexts), [configured]);
+    assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
+  });
+  await scenario('A restoration during settling cannot submit stale delayed-input model text', async ({ page, args }) => {
+    const configured = 'Configured delayed-input model continuation';
+    await page.evaluate(() => {
+      const input = document.querySelector('[data-composer-markdown]');
+      fixture.controlledText = '';
+      fixture.settlingRestores = 0;
+      input.addEventListener('input', () => {
+        const value = input.innerText;
+        setTimeout(() => { fixture.controlledText = value; }, 100);
+      });
+      const authorize = chrome.runtime.sendMessage;
+      chrome.runtime.sendMessage = async message => {
+        if (message.type === 'WAIT_RUN') {
+          await new Promise(resolve => setTimeout(resolve, message.delayMs));
+          // Restore after the refill's model commit, before its settling wait returns.
+          if (message.delayMs === 180 && fixture.checks === 3 && !fixture.sends && fixture.settlingRestores < 2) {
+            input.textContent = 'Restored delayed-input controlled text';
+            fixture.controlledText = input.innerText;
+            fixture.settlingRestores++;
+          }
+          return { ok: true, allowed: fixture.allowed };
+        }
+        const reply = await authorize(message);
+        if (fixture.checks === 3) {
+          input.textContent = 'First intervening delayed-input controlled text';
+          fixture.controlledText = input.innerText;
+        }
+        return reply;
+      };
+      document.querySelector('button[aria-label="Send"]').addEventListener('click', event => {
+        event.stopImmediatePropagation();
+        fixture.sends++; fixture.sentTexts.push(fixture.controlledText);
+        appendMessage(fixture.controlledText, 'acct~dot~Msg~delayed-input-' + fixture.sends);
+        input.textContent = '';
+      }, { capture: true });
+    });
+    const outcome = await page.evaluate(pageAction, { ...args, prompt: configured, extensionClock: true, extensionPriority: false });
+    const state = await page.evaluate(() => ({ restores: fixture.settlingRestores, sends: fixture.sends, texts: fixture.sentTexts }));
+    assert.equal(state.restores, 2, 'both settling boundaries must restore the controlled model');
+    assert.deepEqual(state.texts, [configured]);
+    assert.equal(state.sends, 1);
+    assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
+  });
+
   await scenario('Priority overwrites a framework-restored different draft before the one send', async ({ page, args }) => {
     const restoredDraft = 'Restored synthetic human draft';
     await page.evaluate(restoredDraft => {
@@ -381,6 +487,56 @@ try {
     assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
     assert.deepEqual(await page.evaluate(() => [fixture.beforeInputs, fixture.frameworkReplacements, fixture.inputs, fixture.sends]), [1, 1, 1, 1]);
     assert.equal(await page.evaluate(() => fixture.sentTexts[0]), prompt);
+  });
+  await scenario('A restoration during settling awaits the cancelled-beforeinput model commit', async ({ page, args }) => {
+    const configured = 'Configured delayed-beforeinput model continuation';
+    await page.evaluate(() => {
+      const input = document.querySelector('[data-composer-markdown]');
+      fixture.controlledText = '';
+      fixture.settlingRestores = 0;
+      input.addEventListener('beforeinput', event => {
+        if (event.inputType !== 'insertText') return;
+        event.preventDefault(); fixture.beforeInputs++;
+        const value = event.data;
+        setTimeout(() => {
+          fixture.frameworkReplacements++;
+          fixture.controlledText = value;
+          input.textContent = value;
+          input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
+        }, 25);
+      });
+      const authorize = chrome.runtime.sendMessage;
+      chrome.runtime.sendMessage = async message => {
+        if (message.type === 'WAIT_RUN') {
+          await new Promise(resolve => setTimeout(resolve, message.delayMs));
+          // Only beforeinput's delayed handler can commit this submission model.
+          if (message.delayMs === 180 && fixture.checks === 3 && !fixture.sends && fixture.settlingRestores < 2) {
+            input.textContent = 'Restored delayed-beforeinput controlled text';
+            fixture.controlledText = input.innerText;
+            fixture.settlingRestores++;
+          }
+          return { ok: true, allowed: fixture.allowed };
+        }
+        const reply = await authorize(message);
+        if (fixture.checks === 3) {
+          input.textContent = 'First intervening delayed-beforeinput controlled text';
+          fixture.controlledText = input.innerText;
+        }
+        return reply;
+      };
+      document.querySelector('button[aria-label="Send"]').addEventListener('click', event => {
+        event.stopImmediatePropagation();
+        fixture.sends++; fixture.sentTexts.push(fixture.controlledText);
+        appendMessage(fixture.controlledText, 'acct~dot~Msg~delayed-beforeinput-' + fixture.sends);
+        input.textContent = '';
+      }, { capture: true });
+    });
+    const outcome = await page.evaluate(pageAction, { ...args, prompt: configured, extensionClock: true, extensionPriority: false });
+    const state = await page.evaluate(() => ({ restores: fixture.settlingRestores, sends: fixture.sends, texts: fixture.sentTexts }));
+    assert.equal(state.restores, 2, 'both settling boundaries must restore the controlled model');
+    assert.deepEqual(state.texts, [configured]);
+    assert.equal(state.sends, 1);
+    assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
   });
   await scenario('Force mode clicks an explicit Stop once before submitting when Stop replaces Send', async ({ page, args }) => {
     await page.evaluate(() => startWork());

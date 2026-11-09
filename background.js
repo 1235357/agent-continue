@@ -5,6 +5,7 @@ const t = createTranslator(runtimeCatalog);
 
 import { DEFAULT_CONFIG, DELIVERY_BEHAVIOR_VERSION, normalizeUrl, validateTarget, readConfig, currentPrompt, inQuietHours, MAX_PROMPT_CHARS } from './config.js';
 import { pageAction, translatePageResult } from './adapter.js';
+import { editorCommit } from './editor-commit.js';
 import { BUNDLED_PROMPT } from './preset.js';
 import { bindBrowserWake, BROWSER_DEVICE_MESSAGE } from './browser-wake.js';
 import { bindAdministratorBrowser, ADMIN_BROWSER_MESSAGE, ADMIN_BROWSER_PAUSE, ADMIN_BROWSER_PAUSE_RECONCILE,
@@ -69,10 +70,16 @@ const retiredDraftNotice = message => typeof message === 'string' && [
   'Content changed after refilling; the draft was preserved',
   'The composer content changed and was preserved.',
   'The composer changed before interruption; its content was preserved.',
+  'The composer contains a draft or attachments; skipping this cycle.',
+  'A new draft or attachments were detected; skipping this cycle.',
+  'Another draft or attachments were detected after interruption and preserved.',
   '填写后检测到内容变化，已保留草稿',
   '重新填写后检测到内容变化，已保留草稿',
   '输入框内容发生变化，已保留当前内容。',
   '打断前输入框发生变化，已保留当前内容。',
+  '输入框已有草稿或附件，本次跳过。',
+  '检测到新草稿或附件，本次跳过。',
+  '打断后检测到其他草稿或附件，已保留。',
 ].some(prefix => message.startsWith(prefix));
 
 async function getJob() { return (await chrome.storage.session.get('job')).job || null; }
@@ -386,6 +393,39 @@ async function waitRun(message, sender) {
   await new Promise(resolve => setTimeout(resolve, message.delayMs));
   return checkRun(message.runId, sender);
 }
+async function commitRun(message, sender) {
+  const permit = await transact(async () => {
+    const job = await getJob();
+    if (!job?.enabled || job.phase !== 'sending' || job.runKind === 'reply-check'
+      || job.runId !== message.runId || Date.now() >= job.runDeadline
+      || sender.tab?.id !== job.tabId || sender.frameId !== 0
+      || normalizeUrl(sender.url || sender.tab?.url) !== job.url) return null;
+    if (job.editorCommitRunId === job.runId) return { duplicate: true };
+    const version = intentVersion;
+    // Persist before crossing worlds. An uncertain invocation is never replayed.
+    await setJob({ ...job, editorCommitRunId: job.runId });
+    return { tabId: job.tabId, version, args: {
+      expectedUrl: job.url, targetIdentity: job.targetIdentity,
+      prompt: currentPrompt(job), sendMethod: job.sendMethod ?? 'auto', deadline: job.runDeadline,
+    } };
+  });
+  if (!permit) return { ok: false, code: 'cancelled' };
+  if (permit.duplicate) return { ok: false, code: 'unknown' };
+  if (permit.version !== intentVersion) return { ok: false, code: 'cancelled' };
+  try {
+    const frames = await chrome.scripting.executeScript({ target: { tabId: permit.tabId },
+      world: 'MAIN', func: editorCommit, args: [permit.args] });
+    const value = frames?.find(frame => frame.frameId === 0)?.result;
+    // Only an explicit, non-mutating unsupported view permits the legacy path.
+    if (value?.supported === false && value.dispatched === false && value.code === 'unsupported-view') {
+      return { ok: true, supported: false, dispatched: false };
+    }
+    if (value?.supported === true && value.dispatched === true) {
+      return { ok: true, supported: true, dispatched: true };
+    }
+    return { ok: false, code: value?.dispatched === false ? 'unavailable' : 'unknown' };
+  } catch { return { ok: false, code: 'unknown' }; }
+}
 async function runStillCurrent(snapshot) {
   return transact(async () => { const job = await getJob(); return Boolean(job?.enabled && job.phase === 'sending' && job.id === snapshot.id && job.runId === snapshot.runId && Date.now() < job.runDeadline); });
 }
@@ -502,7 +542,7 @@ async function runRound(force = false, expectedJobId = null) {
       const changed = result.assistantToken ? result.assistantToken !== snapshot.assistantToken : result.assistantCount > snapshot.assistantCount;
       if (result.status === 'ready') result = changed ? { status: 'reply-complete' } : { status: 'busy', message: t('等待新的 Agent 回复完成。') };
     } else {
-      result = await executePage({ mode: 'send', expectedUrl: snapshot.url, prompt: currentPrompt(snapshot), runId: snapshot.runId, runDeadline: snapshot.runDeadline, stopMarkers: snapshot.stopMarkers ?? [], waitForIdle: snapshot.waitForIdle ?? false, extensionPriority: true, extensionClock: true, sendMethod: snapshot.sendMethod ?? 'auto', targetIdentity: snapshot.targetIdentity }, snapshot.tabId, snapshot.runDeadline);
+      result = await executePage({ mode: 'send', expectedUrl: snapshot.url, prompt: currentPrompt(snapshot), runId: snapshot.runId, runDeadline: snapshot.runDeadline, stopMarkers: snapshot.stopMarkers ?? [], waitForIdle: snapshot.waitForIdle ?? false, extensionPriority: true, extensionClock: true, modelCommit: true, sendMethod: snapshot.sendMethod ?? 'auto', targetIdentity: snapshot.targetIdentity }, snapshot.tabId, snapshot.runDeadline);
     }
   } catch { result = snapshot.runKind === 'reply-check' ? { status: 'error', message: t('回复检查暂不可用，继续等待新回复。') } : { status: 'unknown', message: t('后台页面操作未确认。'), diagnosticCode: 'execution-exception' }; }
   return finishRound(snapshot, result);
@@ -586,13 +626,14 @@ async function dispatch(message, sender, version) {
   await initialized;
   if (!message || typeof message.type !== 'string') throw fail(t('无效请求。'));
   const ownExtensionPage = chrome.runtime.id && sender.id === chrome.runtime.id && typeof sender.url === 'string' && sender.url.startsWith(chrome.runtime.getURL(''));
-  if (!['CHECK_RUN', 'WAIT_RUN'].includes(message.type) && sender.tab && !ownExtensionPage) throw fail(t('此操作只能从扩展控制面板发起。'));
+  if (!['CHECK_RUN', 'WAIT_RUN', 'COMMIT_RUN'].includes(message.type) && sender.tab && !ownExtensionPage) throw fail(t('此操作只能从扩展控制面板发起。'));
   switch (message.type) {
     case 'GET_STATE': return transact(async () => ({ ok: true, job: await getJob(), config: await getConfig(), logs: (await chrome.storage.local.get('logs')).logs || [], availableTargets: await availableTargets() }));
     case 'CHECK_PAGE': return checkPage(message.tabId);
     case 'CHECK_TIMING': return timingDiagnostics();
     case 'CHECK_RUN': return checkRun(message.runId, sender);
     case 'WAIT_RUN': return waitRun(message, sender);
+    case 'COMMIT_RUN': return commitRun(message, sender);
     case 'START': return start(message.config, version, message.tabId);
     case 'PAUSE': return pause();
     case 'RESUME': return resume(version);

@@ -32,7 +32,7 @@ SOURCE_SCOPE = "SOURCE-SCOPE.md"
 SOURCE_REPOSITORY = "https://github.com/1235357/agent-continue"
 
 RUNTIME_FILES = (
-    "manifest.json", "background.js", "browser-wake.js", "admin-browser.js", "admin-control.js", "admin-installation-pause.js", "content.js", "adapter.js", "config.js", "preset.js",
+    "manifest.json", "background.js", "browser-wake.js", "admin-browser.js", "admin-control.js", "admin-installation-pause.js", "content.js", "adapter.js", "editor-commit.js", "config.js", "preset.js",
     "file-import.js", "popup.html", "popup.css", "popup.js", "README.md", "README.zh-CN.md",
     "i18n.js", "i18n-html.js", "i18n-popup.js", "i18n-runtime.js", "static-locale.js",
     "support.html", "support.css", "support.js", "support-info.js", "activity-export.js",

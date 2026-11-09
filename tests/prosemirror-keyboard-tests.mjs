@@ -35,7 +35,7 @@ let worker;
 let control;
 let passed = 0;
 
-function fixture({ noSend = false, rejectSynthetic = false } = {}) {
+function fixture({ noSend = false, rejectSynthetic = false, recurringRestore = false } = {}) {
   return `<!doctype html><meta charset="utf-8"><title>Official ProseMirror fixture</title>
   <style>${editorCss}body{font:16px sans-serif;padding:20px}.ProseMirror{min-height:90px;border:1px solid;padding:12px}.message-body{white-space:pre-wrap}</style>
   <main id="history"><article class="message-row" data-message-id="pm-account~pm-dot~old"><div class="message-body">Earlier synthetic response.</div></article></main>
@@ -67,6 +67,13 @@ function fixture({ noSend = false, rejectSynthetic = false } = {}) {
     }
   });
   window.pm.dom.addEventListener('keydown',event=>{fixture.lastKeyTrusted=event.isTrusted},true);
+  // Only this explicit Tiptap-compatible fixture exposes a documented DOM owner.
+  // The vanilla PM cases above exercise the unsupported-view event fallback.
+  if (${JSON.stringify(recurringRestore)}) window.pm.dom.editor={view:window.pm};
+  if (${JSON.stringify(recurringRestore)}) window.pm.dom.addEventListener('input', () => queueMicrotask(() => {
+    window.pm.dispatch(window.pm.state.tr.insertText('PAGE_RESTORED_OTHER_TEXT', 0, window.pm.state.doc.content.size));
+    fixture.restores = (fixture.restores || 0) + 1;
+  }));
   for(const type of ['keydown','keyup'])window.pm.dom.addEventListener(type,event=>{
     fixture.events.push({type,key:event.key,code:event.code,keyCode:event.keyCode,ctrlKey:event.ctrlKey,trusted:event.isTrusted});
   });
@@ -150,7 +157,7 @@ try {
     if (url.hostname === 'chatgpt.com' && modules.has(url.pathname)) return route.fulfill({ status: 200, contentType: 'text/javascript', body: modules.get(url.pathname) });
     if (url.hostname === 'chatgpt.com' && url.pathname.startsWith('/dots/pm-')) {
       const index = Number(url.pathname.split('-').at(-1));
-      return route.fulfill({ status: 200, contentType: 'text/html', body: fixture({ noSend: index === 3, rejectSynthetic: index === 4 }) });
+      return route.fulfill({ status: 200, contentType: 'text/html', body: fixture({ noSend: index === 3, rejectSynthetic: index === 4, recurringRestore: index === 6 }) });
     }
     if (url.hostname === 'pm-foreground.invalid') return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><textarea id="work">Unrelated synthetic document</textarea>' });
     return route.abort();
@@ -161,7 +168,7 @@ try {
   control = await newPage(`chrome-extension://${id}/popup.html?view=full`);
   await control.waitForFunction(() => !document.querySelector('#check').disabled);
 
-  await scenario('Official ProseMirror explicit keyboard strategy sends one isolated-world Ctrl+Enter, with no Send click', async page => {
+  await scenario('Official ProseMirror authorized model commit sends one Ctrl+Enter, with no Send click', async page => {
     await start(page, { sendMethod: 'ctrl-enter' });
     const sent = await call({ type: 'SEND_NOW' });
     assert.equal(sent.ok, true, sent.error);
@@ -223,6 +230,16 @@ try {
         assert.deepEqual(await getForeground(), before);
         assert.equal(await worker.evaluate(async () => (await chrome.tabs.query({ active: true, currentWindow: true }))[0].id), activeBefore);
       } finally { await foreground.close(); }
+  });
+  await scenario('Recurring official ProseMirror model restores cannot starve or alter one authorized submission', async page => {
+    await start(page, { sendMethod: 'button' });
+    const sent = await call({ type: 'SEND_NOW' });
+    assert.equal(sent.job.sentCount, 1, sent.job.statusText);
+    const observed = await inspect(page);
+    assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, 1, 1]);
+    assert.deepEqual(observed.sentTexts, [prompt]);
+    assert.equal(observed.restores, 1, 'A real model restore ran after the single input');
+    assert.equal(await worker.evaluate(async () => (await chrome.storage.session.get('job')).job.editorCommitRunId != null), true);
   });
   console.log(`RESULT ${passed}/${passed} official ProseMirror MV3 scenarios passed`);
 } finally {
