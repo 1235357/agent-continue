@@ -1,5 +1,61 @@
 # Agent Continue Development Handoff
 
+## 3.0.6 Paired Package And Guided-Close Evidence (2026-11-09)
+
+Core-send source remains main4be2739. The completed combined setup builder
+verified the current-source administrator closure and read-only stager Plan;
+it did not install, register or start anything. Receipt:
+.artifacts/release-306-combined-build.log. Setup ZIP SHA256
+cf3b2e226cbf3d63d4b58efe5f15c6ea1208df822036f99082e3d84ba974792d.
+The unchanged administrator ZIP was reused only after full current-source,
+inventory and upstream-pin verification, not on its old version label alone.
+
+Paired local candidates under dist/agent-continue-3.0.6-release-candidate:
+
+- GitHub ZIP9a966fb071314ac264d8a8217e3b949a77f9944b62d0621cdb66a82161615273.
+- Store ZIP3e3a6eb65396c20e10828da5fe886057abcb19e5552aa21c39fcb27f62d9ad5c.
+- Source ZIPbcc50606a0136fc21a705d6c8fb29c9a94e7f537791f712ed43371e1d389802e.
+
+After removing the GitHub outer AgentContinue/ directory, all251 files match
+the Store ZIP byte-for-byte. Six checked runtime modules match normalized main
+source. Manifest3.0.6 retains English default and unchanged permissions; the
+setup entry pins the completed v3.0.6 sidecars. No key/session/executable was
+added to the browser ZIP. Source archive explicitly pins4be2739 and is not a
+claim to contain subsequent documentation/test-only changes.
+
+The extracted final Store ZIP passed21/21 actual synthetic MV3/official-PM
+scenarios, including a natural one-minute hidden alarm,21s model readiness,
+8s receipt, lost/rejected result transport and late text/attachment changes.
+Log: .artifacts/release-306-public-store-browser-regression.log, exit0.
+Real root npm pack plus installed CLI test passed1/1, exit0:
+.artifacts/release-306-npm-tarball.log. Old generated npm closure was preserved
+in .artifacts/release-306-previous-generated before preparing v3.0.6.
+
+New test-fixture correction: a closing ConPTY stage now observes foreground
+installer exit instead of requiring EOF from a stream retained by detached
+descendants. The caller still checks the actual exit code and all observed
+post-pair output. A red counterexample preceded the fix;14 protocol tests pass.
+Actual local PowerShell-paired and CMD-unpaired loopback tests passed2/2 with
+file readback and pause verification, using compatible existing Node. Log:
+.artifacts/release-306-guided-local-regression.log, exit0. This is not cold
+portable-Node provisioning, browser-managed registration or real hosted access.
+
+Remote CI facts, read through authenticated IAB:
+Extension checks42687672332 for4be2739 succeeded in7m40s. Native run42687671867
+failed: Windows job129398739628 passed runtime download and packaged IPC, then
+paired mode failed terminal_timeout_1_control_only (115bytes,0cursor replies),
+and cold CMD failed terminal_timeout_skip_pair_control_only after acquisition
+exit0 (213926ms). The close-reader correction has not yet passed fresh CI and
+does not establish a fix for the first-prompt failure. Earlier run42579330833
+instead stopped at three HTTP504 downloads before reaching this terminal test;
+do not merge these different failures into one cause.
+
+These are built candidates and bounded tests, not installation into the owner's
+live browser or final delivery. Installed real-page sending and protected
+Pause/Revoke/full-browser-reopen acceptance remain open. No v3.0.6 tag, Release,
+Store upload/review cancellation, production VPN/MCP/IDE/research change or
+external Chrome task update occurred. Full goal remains active.
+
 ## 3.0.6 Core Send Repair And Candidate Evidence (2026-11-09)
 
 Priority remains the owner's actual stranded-composer report, not native CI.

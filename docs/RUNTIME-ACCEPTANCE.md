@@ -1,5 +1,35 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## 3.0.6 Final Store ZIP And Installer Fixture (2026-11-09)
+
+The paired public-format candidates are now built, not published. All251
+normalized-root files match between the GitHub and Store ZIPs; runtime source,
+version3.0.6, English default, unchanged permissions and completed setup-entry
+pins were checked. Full hashes and source pin4be2739 are in DEVELOPMENT-HANDOFF.
+The extracted final Store ZIP passed21/21 synthetic official-PM/MV3 cases with
+TEST_REAL_DUE_ALARM=1, exit0. Log:
+.artifacts/release-306-public-store-browser-regression.log.
+Real root npm pack plus installed CLI passed1/1, exit0:
+.artifacts/release-306-npm-tarball.log.
+
+A red test demonstrated a closing-stage reader error when the installer had
+exited but the pseudo-terminal stream remained open. It now polls foreground
+exit for close-only stages; live quiet children still time out, observed output
+is retained and the caller still checks the exit code.14 protocol tests pass.
+Real local PowerShell-paired and CMD-unpaired cases passed2/2, exit0, including
+loopback file roundtrip and pause, without cold portable-Node provisioning:
+.artifacts/release-306-guided-local-regression.log.
+
+Authoritative remote extension CI42687672332/4be2739 is Success. Native
+CI42687671867 Windows129398739628 failed paired first-prompt timeout and cold-CMD
+close timeout after successful acquisition. The close fix has not yet passed
+fresh CI; first-prompt root cause is unresolved. Earlier42579330833 HTTP504
+download exhaustion is a separate failure, not terminal evidence.
+
+No real installed-browser acceptance, hosted grant, protected installation,
+production mutation, v3.0.6 Release or new Store submission follows from these
+tests. Existing live tasks were not modified. Full goal stays active.
+
 ## 3.0.6 Live-Wait And Result-Channel Regression (2026-11-09)
 
 The fresh owner3.0.5 log overrides prior fixture passes: no-valid-result18748ms,

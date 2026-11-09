@@ -37,6 +37,33 @@ class Terminal:
 
 
 class GuidedTerminalTests(unittest.TestCase):
+    def test_close_stage_observes_exited_child_even_when_terminal_stream_stays_open(self):
+        terminal = Terminal(b"", "unused")
+        terminal.pty = terminal
+        terminal.isalive = lambda: False
+        terminal.recv = lambda size: (_ for _ in ()).throw(TimeoutError())
+        self.assertEqual(FIXTURE.read_stage(terminal, time.monotonic() + 0.03, "skip_pair"), "")
+
+    def test_close_stage_does_not_treat_a_quiet_live_child_as_exited(self):
+        terminal = Terminal(b"", "unused")
+        terminal.pty = terminal
+        terminal.isalive = lambda: True
+        terminal.recv = lambda size: (_ for _ in ()).throw(TimeoutError())
+        with self.assertRaisesRegex(FIXTURE.FixtureError, "^terminal_timeout_skip_pair_no_bytes$"):
+            FIXTURE.read_stage(terminal, time.monotonic() + 0.03, "skip_pair")
+
+    def test_close_stage_keeps_observed_output_for_the_callers_strict_check(self):
+        terminal = Terminal(b"UNEXPECTED_POST_PAIR\r\n", "unused")
+        terminal.pty = terminal
+        terminal.isalive = lambda: False
+        def read(size):
+            if terminal.chunks:
+                return terminal.chunks.pop(0)
+            raise TimeoutError()
+        terminal.recv = read
+        self.assertEqual(FIXTURE.read_stage(terminal, time.monotonic() + 1, "skip_pair"),
+                         "UNEXPECTED_POST_PAIR\r\n")
+
     def test_initial_cursor_query_is_answered_before_waiting_for_the_prompt(self):
         for query, response in ((b"\x1b[6n", "\x1b[1;1R"), (b"\x1b[?6n", "\x1b[?1;1R")):
             with self.subTest(query=query):

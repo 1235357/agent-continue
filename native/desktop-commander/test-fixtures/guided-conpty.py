@@ -123,12 +123,19 @@ def require_fixture(config):
 def read_stage(terminal, deadline, stage, *, prompt=None, line_count=None, echo=None):
     raw = bytearray()
     cursor_queries = 0
+    closing = prompt is None and line_count is None
     # PyWinPTY's socket reader supports a deadline even if the console goes quiet.
     while (remaining := deadline - time.monotonic()) > 0:
-        terminal.fileobj.settimeout(remaining)
+        terminal.fileobj.settimeout(min(remaining, 0.1) if closing else remaining)
         try:
             chunk = terminal.fileobj.recv(4096)
         except TimeoutError:
+            if closing:
+                # Detached descendants can retain the console stream after the
+                # foreground installer exits. The caller still checks its code.
+                if not terminal.pty.isalive():
+                    return VT_SEQUENCE.sub(b"", raw).decode("utf-8")
+                continue
             break
         if not chunk:
             if prompt is not None:
