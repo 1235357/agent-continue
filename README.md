@@ -4,7 +4,7 @@ English | [简体中文](https://github.com/1235357/agent-continue/blob/main/REA
 
 Schedule your own prompts in one existing ChatGPT or Your dot conversation. The Windows-enabled version also offers separately installed, explicitly authorized file, shell and process tools.
 
-**3.0.5 Windows-enabled source. Manifest V3. Free and MIT-licensed.**
+**3.0.6 Windows-enabled source candidate. Manifest V3. Free and MIT-licensed.**
 
 [Chrome Web Store](https://chromewebstore.google.com/detail/jpioilmpbolfokedaefmbfbjeaahfdkl) · [GitHub Releases](https://github.com/1235357/agent-continue/releases) · [Source](https://github.com/1235357/agent-continue) · [Changelog](https://github.com/1235357/agent-continue/blob/main/CHANGELOG.md) · [Privacy](https://github.com/1235357/agent-continue/blob/main/PRIVACY.md)
 
@@ -87,7 +87,9 @@ Each attempt requires a current background permit and uses one submission mechan
 
 **Scheduled sends replace unsent text in the bound conversation. Attachments are not submitted.** Every SEND, including **Send once now**, uses the configured prompt instead of existing composer text. Text changed after filling, including while authorization is pending, must not abort the send; the configured prompt is reasserted before submission. This policy is mandatory, not a Settings toggle. The legacy boolean `extensionPriority` remains accepted but normalizes to `true`, even when an old saved or imported configuration says `false`. **Resume** keeps the original prompt, target, interval and counts, not the retired draft-protection policy. Start/Resume add no modal, permission or runtime access grant. Detected attachments still block sending; Pause, current authorization and exact-target guards remain. See [Mandatory Composer Priority](https://github.com/1235357/agent-continue/blob/main/docs/COMPOSER-PRIORITY.md).
 
-A matching new user-message marker is required for confirmation. An empty composer or a busy indicator alone is not success. If confirmation is unavailable, the result remains **unknown**, the confirmed-send count does not increase, and no immediate retry occurs. A later attempt may occur after the full normal interval. This is not exactly-once delivery: an unconfirmed message may already have reached ChatGPT. Pause and inspect the conversation when the result is uncertain. Pausing cannot retract a submission already dispatched.
+A current enabled send has no fixed total readiness or receipt-wait cutoff. Delayed rendering and a missing injection return do not authorize another click: the same invocation keeps waiting, with an independent validated result-message channel, until a result, Pause or target invalidation. Finite individual command permits are renewed only for that live invocation; they are not a total waiting-time limit. This does not guarantee progress from a frozen page or an unavailable service.
+
+A matching new user-message marker is required for confirmation. An empty composer or a busy indicator alone is not success. A terminal uncertain result remains **unknown**, the confirmed-send count does not increase, and no immediate retry occurs. A later attempt may occur after the full normal interval. This is not exactly-once delivery: an unconfirmed message may already have reached ChatGPT. Pause and inspect the conversation when the result is uncertain. Pausing cannot retract a submission already dispatched. If page-side cancellation cannot be acknowledged, the interface reports that uncertainty and temporarily fences the old finite command permit instead of claiming it stopped.
 
 Confirmation is a page-level observation, not a service receipt. A known node reused for a new message remains uncertain. Historical content remounted with both a different node and a previously unseen ID cannot be reliably distinguished from a new acknowledgement by these DOM checks alone.
 

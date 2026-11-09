@@ -78,6 +78,7 @@ async function harness(seed = {}) {
         if (!state.tabs.has(id)) throw new Error('Synthetic tab is absent');
         return copy(state.tabs.get(id));
       },
+      async sendMessage(id, message) { return { revoked: true, runId: message.runId, resultToken: message.resultToken }; },
       async update(id, update) {
         assert.deepEqual(Object.keys(update), ['autoDiscardable'], 'A background task must never activate a tab');
         await h.beforeTabUpdate?.(id, update);
@@ -94,7 +95,7 @@ async function harness(seed = {}) {
         return [{ frameId: 0, result: await h.pageResult(request.args[0], request.target.tabId) }];
       },
     },
-    runtime: { onMessage: event() }, commands: { onCommand: event() },
+    runtime: { id: 'synthetic-extension', getURL: name => 'chrome-extension://synthetic/' + name, onMessage: event() }, commands: { onCommand: event() },
   };
   const h = {
     state, chrome,
@@ -104,7 +105,7 @@ async function harness(seed = {}) {
     },
     sender(id = state.session.job?.tabId ?? 7) {
       const tab = copy(state.tabs.get(id));
-      return { tab, frameId: 0, url: tab?.url };
+      return { id: 'synthetic-extension', tab, frameId: 0, url: tab?.url };
     },
     async start(config = {}, tabId = 7) {
       const response = await this.message({ type: 'START', tabId, config: { prompt: 'SYNTHETIC_CONTINUE', ...config } });
@@ -649,8 +650,13 @@ await scenario('Unexpected page exceptions cannot copy prompt content into opera
   const h = await harness();
   await h.start({ prompt: secret });
   h.pageResult = async () => { throw new Error(`Synthetic page failure containing ${secret}`); };
-  const result = await h.message({ type: 'SEND_NOW' });
-  assert.equal(result.job.unknownCount, 1);
+  const sending = h.message({ type: 'SEND_NOW' });
+  await until(() => h.sends().length === 1);
+  await delay(10);
+  assert.equal(h.state.session.job.phase, 'sending', 'A rejected transport must not impose a waiting cutoff or replay');
+  await h.message({ type: 'PAUSE' });
+  const result = await sending;
+  assert.equal(result.job.sentCount, 0);
   assert.ok(!JSON.stringify(h.state.local.logs).includes(secret));
   assert.ok(!result.job.statusText.includes(secret));
   await h.message({ type: 'CLEAR_DATA' });

@@ -28,6 +28,9 @@ export function buildActivityExport({ logs, extensionVersion, now = Date.now(), 
       if (typeof detail.durationMs === 'number' && Number.isFinite(detail.durationMs)) {
         entry.diagnostic.durationMs = Math.round(Math.max(0, Math.min(120000, detail.durationMs)));
       }
+      if (['page', 'prepare', 'readiness', 'dispatch', 'receipt'].includes(detail.stage)) entry.diagnostic.stage = detail.stage;
+      if (['none', 'execute-script', 'extension-message'].includes(detail.resultChannel)) entry.diagnostic.resultChannel = detail.resultChannel;
+      if (Number.isSafeInteger(detail.leaseRenewals) && detail.leaseRenewals >= 0) entry.diagnostic.leaseRenewals = Math.min(1000000, detail.leaseRenewals);
       if (detail.code === 'timing-probe') {
         if (['authorization', 'page-timers'].includes(detail.kind)) entry.diagnostic.kind = detail.kind;
         if (['result', 'invalid-result', 'api-rejected', 'watchdog-expired'].includes(detail.status)) entry.diagnostic.status = detail.status;

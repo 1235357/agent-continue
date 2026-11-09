@@ -1,6 +1,6 @@
 # Chrome Web Store Listing - English
 
-Canonical English listing source for Agent Continue **3.0.5** (unreleased candidate). This file does not change a saved Store listing, submit a package, publish a release or establish approval or installation. Actual availability and submission state require separate platform receipts. Historical v2.2.1 is a separate scheduler-only release; do not replace its assets or describe it as Windows-enabled. The repository's [Windows review notes](https://github.com/1235357/agent-continue/blob/main/docs/STORE-LISTING.windows-candidate.en.md) retain the disclosure and submission checks.
+Canonical English listing source for Agent Continue **3.0.6** (unreleased candidate). This file does not change a saved Store listing, submit a package, publish a release or establish approval or installation. Actual availability and submission state require separate platform receipts. Historical v2.2.1 is a separate scheduler-only release; do not replace its assets or describe it as Windows-enabled. The repository's [Windows review notes](https://github.com/1235357/agent-continue/blob/main/docs/STORE-LISTING.windows-candidate.en.md) retain the disclosure and submission checks.
 
 After final release and disclosure gates are closed, use the entire **Description** section, including the developer/support block, for the new listing draft. The copy uses plain-text URLs rather than relying on Markdown rendering. Do not withdraw an existing review merely to apply this source copy.
 
@@ -95,6 +95,8 @@ For a bug report, manually provide your extension version, browser version, oper
 Activity and support-page exports share schema 4 JSON diagnostics. Reports identify format agent-continue-activity and version 4, and contain extensionVersion, timestampMode, excludedEntries and logs. Retained entries include an allowlisted event, event timing and an optional diagnostic code and finite numeric durationMs rounded and bounded to 0–120000 ms. Stored free-text messages and unknown fields are omitted, but locally collected activity metadata remains.
 
 When a diagnostic code is timing-probe, the report can additionally include kind (authorization or page-timers), status (result, invalid-result, api-rejected or watchdog-expired), finite numeric firstMs rounded and bounded to 0–120000 ms, and actual boolean hidden, ok and allowed values, including false. These fields describe page visibility and probe/authorization outcomes; they are not a claim of no data collection or anonymity.
+
+Execution diagnostics can additionally contain stage (page, prepare, readiness, dispatch or receipt), resultChannel (none, execute-script or extension-message), and integer leaseRenewals bounded to 0–1000000. These are local progress facts, not proof of service acceptance. Run tokens, document identifiers and cancellation messages are omitted.
 
 Logs are timestamped locally; exports default to relative millisecond timings without exact timestamps or the export time. Include exact timestamps is off by default and available only on the support page, not in the Activity export. Review the complete JSON before optionally attaching a sanitized copy to the issue; exporting does not upload it, create an issue, or contact support automatically. Do not attach configuration backups.
 

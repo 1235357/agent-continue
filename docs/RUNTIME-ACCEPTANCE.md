@@ -1,5 +1,42 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## 3.0.6 Live-Wait And Result-Channel Regression (2026-11-09)
+
+The fresh owner3.0.5 log overrides prior fixture passes: no-valid-result18748ms,
+then execution-timeout20003ms after Pause/Start. Only the latter directly matches
+the old20s watchdog; the precise invalid-return cause remains unproved. No real
+configured prompt or active conversation was changed to reproduce this report.
+
+Current source has no total live readiness, post-Stop or receipt-wait cutoff.
+It keeps one enabled invocation and finite renewable MAIN permits, plus an
+independent authenticated/token/document-bound isolated-result message. Invalid
+or rejected injection returns do not authorize replay. Page-side cancellation
+is acknowledged or explicitly fenced as uncertain; counting still requires a
+matching post-dispatch DOM message, not a click or helper acknowledgement.
+
+Real official-ProseMirror MV3 failure found during final regression: a late
+text mutation followed by immediate isolated DOM correction clicked before the
+editor model converged, submitting LATE_OTHER_TEXT. After the settling/reobserve
+fix, cases17/20/21 pass with exact configured model-derived sentTexts,1click,
+0keyboard; late attachments produce0submissions. Earlier in-memory reviewer
+probes did not establish model convergence. Other fresh cases wait8s for a
+receipt and tolerate a result-message channel that never resolves.
+
+The full npm chain reached final11/11 with no failure markers:
+.artifacts/live-result-306-complete-regression-final.log.
+Its worker57/57, worker-v257/57, ordinary27/27, Dot56/56 and actual MV3/PM21/21
+groups all pass. The final preview ZIP has SHA256
+a2b8deaa97da0bb033c75a8fe397c624fdd5ed94cb66207a0c3fe7b2b5edc0dd;
+seven runtime files match source after deliberate CRLF normalization. Extracted
+runtime passed21/21 including the natural one-minute hidden alarm:
+.artifacts/live-result-306-final-extracted-natural-alarm.log.
+
+These are local synthetic acceptance results, not the owner's installed live
+ChatGPT/Dot page, native protected lifecycle acceptance, or service guarantees.
+Store readback remains draft3.0.4/revision00005 Pending review, published2.1.0,
+new upload disabled. No review canceled, Release published, production connection
+changed, or external Chrome original task updated. Full goal remains active.
+
 ## 3.0.5 Scheduler Candidate: Actual Background Fixture (2026-11-09)
 
 The latest owner report is an actual installed3.0.4 send failure, not a Windows

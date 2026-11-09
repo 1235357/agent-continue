@@ -12,6 +12,8 @@ Activity logs are local and do not record prompt bodies, imported filenames, or 
 
 Diagnostic exports omit stored free-text messages and use relative timings by default. Exact timestamps can be included only by explicitly selecting that option on the Support page. Even relative timing can reveal activity patterns. Exports are local downloads, not automatic uploads. Review them before sharing.
 
+Execution diagnostics can include a fixed local stage (page, prepare, readiness, dispatch or receipt), result channel (none, execute-script or extension-message), and a bounded integer lease-renewal count. Internal run tokens, document identifiers and cancellation messages are not exported. These fields do not prove service acceptance.
+
 ## Windows Setup and Credentials
 
 You run the Windows setup command yourself from a verified, extracted source bundle. Copying a command does not execute it. There is no custom Agent Continue EXE/MSI installer. This does not mean there are no executables: Node.js, the official tunnel client and locked upstream dependencies execute outside the browser.

@@ -97,6 +97,23 @@ test('duration is finite numeric only and bounded without string coercion', asyn
   }
 });
 
+test('execution progress export keeps only fixed stages, channels and bounded integer renewals', async () => {
+  const value = await build([{ at: now, event: 'unconfirmed', diagnostic: {
+    code: 'no-valid-result', stage: 'receipt', resultChannel: 'extension-message', leaseRenewals: 2,
+    prompt: secret, resultToken: secret, documentId: secret,
+  } }]);
+  assert.deepEqual(value.logs[0].diagnostic, { code: 'no-valid-result', stage: 'receipt', resultChannel: 'extension-message', leaseRenewals: 2 });
+  for (const invalid of [secret, null, true, {}, [], -1, 1.5, NaN, Infinity]) {
+    const report = await build([{ at: now, event: 'unconfirmed', diagnostic: {
+      code: 'adapter-result', stage: invalid, resultChannel: invalid, leaseRenewals: invalid,
+    } }]);
+    assert.deepEqual(report.logs[0].diagnostic, { code: 'adapter-result' });
+  }
+  const large = await build([{ at: now, event: 'unknown', diagnostic: { code: 'adapter-result', leaseRenewals: 2000000 } }]);
+  assert.equal(large.logs[0].diagnostic.leaseRenewals, 1000000);
+  assert.equal(JSON.stringify(value).includes(secret), false);
+});
+
 test('exports cap processing at the latest 200 local entries and do not mutate storage inputs', async () => {
   const input = Array.from({ length: 250 }, (_, n) => ({ at: now + n, event: 'sent', message: secret }));
   const before = structuredClone(input);

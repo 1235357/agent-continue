@@ -1,5 +1,32 @@
 # Changelog
 
+## [3.0.6] - Unreleased
+
+- Remove the fixed total send-wait deadline. A current enabled invocation stays
+  pending through delayed readiness or missing result transport until a result,
+  explicit cancellation or target invalidation; it is never re-dispatched merely
+  because time passed. Finite individual MAIN-command permits are refreshed for
+  that same live invocation and are not an overall waiting-time limit.
+- Preserve a same-invocation final result through an independently validated
+  extension message if the injection API returns no value or rejects. Neither
+  transport failure permits another click or counts dispatch as delivery.
+- Acknowledge cancellation in the isolated page before completing Pause. A
+  queued model submission cannot obtain its receipt-boundary handshake after
+  that acknowledgement. Unconfirmed revocation is shown explicitly and the old
+  finite submission permit is fenced before Resume; already-executed clicks
+  cannot be recalled.
+- Export fixed execution-stage, result-channel and bounded lease-renewal facts,
+  without prompt, conversation, URL, path, token or exception content.
+- Add actual disposable MV3 regressions for twenty-one-second readiness, lost
+  and rejected injection returns, and Pause before a queued final commit.
+  These fixtures do not establish the owner's installed live-site acceptance.
+- Continue waiting for delayed receipts and post-Stop readiness without the old
+  live 6.5-second and 3.5-second cutoffs. A stalled result-message publication
+  cannot block the independent injection return.
+- Recheck late text and attachments after the final legacy readiness wait. A
+  corrected unsupported rich editor must settle its model before reobservation
+  and dispatch; repainting its DOM alone does not establish the submitted text.
+
 ## [3.0.5] - 2026-11-09
 
 - Wait in the extension worker for delayed Send readiness after preparing a

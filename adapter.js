@@ -12,6 +12,23 @@ export function translatePageResult(value) {
 // This function is injected into one explicitly selected tab.
 // Executed in ISOLATED world with authoritative background permission checks.
 export async function pageAction(args) {
+  let revoked = false;
+  const cancel = (message, sender, sendResponse) => {
+    if (!['CANCEL_RUN', 'GRANT_RUN'].includes(message?.type) || message.runId !== args.runId || message.resultToken !== args.resultToken
+      || sender.id !== chrome.runtime.id) return false;
+    if (message.type === 'GRANT_RUN') {
+      if (revoked || !Number.isFinite(message.runDeadline)) return false;
+      args.runDeadline = message.runDeadline;
+      sendResponse({ granted: true, runId: args.runId, resultToken: args.resultToken, runDeadline: args.runDeadline });
+      return false;
+    }
+    revoked = true;
+    sendResponse({ revoked: true, runId: args.runId, resultToken: args.resultToken });
+    return false;
+  };
+  const cancellable = args.mode === 'send' && typeof args.resultToken === 'string';
+  if (cancellable) chrome.runtime.onMessage.addListener(cancel);
+  const action = async () => {
   const normalizeUrl = value => {
     try {
       const u = new URL(value);
@@ -98,15 +115,16 @@ export async function pageAction(args) {
     }
     return true;
   };
-  const withinDeadline = () => Number.isFinite(args.runDeadline) && Date.now() < args.runDeadline;
+  const withinDeadline = () => !revoked && Number.isFinite(args.runDeadline) && Date.now() < args.runDeadline;
   const forceInterrupt = args.waitForIdle !== true;
   const busy = () => !forceInterrupt && visibleMatches(busySelector).length > 0;
   const enabled = button => !!button && !button.disabled && button.getAttribute('aria-disabled') !== 'true';
-  const wait = async ms => {
+  const wait = async (ms, renew = true) => {
     // Hidden-page timers can be clamped beyond the round deadline. New workers
     // own the clock; older workers retain the previous adapter contract.
     if (args.extensionClock === true) {
-      const reply = await chrome.runtime.sendMessage({ type: 'WAIT_RUN', runId: args.runId, delayMs: ms });
+      const reply = await chrome.runtime.sendMessage({ type: 'WAIT_RUN', runId: args.runId, delayMs: ms, ...(!renew ? { renew: false } : {}) });
+      if (reply?.allowed === true && Number.isFinite(reply.runDeadline)) args.runDeadline = reply.runDeadline;
       if (reply?.ok !== true || reply.allowed !== true || !samePage() || !withinDeadline()) {
         throw new Error('run-wait-cancelled');
       }
@@ -116,10 +134,11 @@ export async function pageAction(args) {
   };
 
   const stillAllowed = async () => {
-    if (!samePage() || !withinDeadline()) return false;
+    if (!samePage() || revoked || (!args.resultToken && !withinDeadline())) return false;
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
       try {
         const reply = await chrome.runtime.sendMessage({ type: 'CHECK_RUN', runId: args.runId });
+        if (reply?.allowed === true && Number.isFinite(reply.runDeadline)) args.runDeadline = reply.runDeadline;
         return reply?.ok === true && reply.allowed === true && samePage() && withinDeadline();
       } catch {
         return false;
@@ -416,7 +435,7 @@ export async function pageAction(args) {
     stops[0].click();
     interrupted = true;
     const stopDeadline = Math.min(Date.now() + 3500, args.runDeadline);
-    while (Date.now() < stopDeadline) {
+    while (args.unlimitedReadiness === true || Date.now() < stopDeadline) {
       if (!await stillAllowed()) return result('cancelled', '已暂停，不再继续发送。');
       const next = findComposer();
       if (next) {
@@ -431,7 +450,8 @@ export async function pageAction(args) {
 
   const confirmSubmission = async () => {
     const confirmDeadline = Math.min(Date.now() + 6500, args.runDeadline);
-    while (Date.now() < confirmDeadline) {
+    while (args.unlimitedReadiness === true || Date.now() < confirmDeadline) {
+      if (revoked) return result('cancelled', '已暂停，本次未提交。');
       if (!samePage()) return result('unknown', '提交后会话地址变化，无法确认结果；请检查后再继续。');
       const messages = messageNodes('user');
       const last = messages.at(-1);
@@ -473,12 +493,31 @@ export async function pageAction(args) {
       };
       document.addEventListener(receiptEvent, captureReceiptBoundary, true);
       let commit;
+      let committing = true;
+      const observeLease = async () => {
+        // Read the same invocation's current command permit while COMMIT_RUN is
+        // pending. This observation does not prove MAIN progress or a submission.
+        while (committing && !revoked && samePage()) {
+          try { await wait(180, false); }
+          catch {
+            if (!committing || revoked || !samePage()) return;
+            try {
+              const reply = await chrome.runtime.sendMessage({ type: 'CHECK_RUN', runId: args.runId });
+              if (reply?.ok === true && reply.allowed === false) { revoked = true; return; }
+              if (reply?.allowed === true && Number.isFinite(reply.runDeadline)) args.runDeadline = reply.runDeadline;
+            } catch { /* A recoverable transport error is not a permanent run veto. */ }
+            await new Promise(resolve => setTimeout(resolve, 180));
+          }
+        }
+      };
       try {
+        if (args.extensionClock === true) observeLease().catch(() => undefined);
         commit = await chrome.runtime.sendMessage({ type: 'COMMIT_RUN', runId: args.runId, receiptBoundaryToken });
       } catch {
         submitted = true;
         return result('unknown', '页面未返回可确认的结果。');
       } finally {
+        committing = false;
         document.removeEventListener(receiptEvent, captureReceiptBoundary, true);
       }
       if (commit?.ok === true && commit.supported === true && commit.dispatched === true) {
@@ -546,7 +585,8 @@ export async function pageAction(args) {
     };
 
     const buttonDeadline = Math.min(Date.now() + 3200, args.runDeadline);
-    while (Date.now() < buttonDeadline) {
+    let observedSend = visibleMatches(sendSelector, composer).length > 0;
+    while (args.unlimitedReadiness === true || Date.now() < buttonDeadline) {
       if (!await stillAllowed()) {
         await clearOwnDraft();
         return result('cancelled', '已暂停，本次未提交。');
@@ -573,6 +613,14 @@ export async function pageAction(args) {
       }
       if (useKeyboardOnly) {
         break;
+      }
+      observedSend ||= visibleMatches(sendSelector, composer).length > 0;
+      if (args.unlimitedReadiness === true && sendMethod === 'auto' && !observedSend) {
+        // Auto can use its documented keyboard method only if no Send control
+        // exists, not as a timeout fallback from a known disabled control.
+        await wait(150);
+        observedSend = visibleMatches(sendSelector, composer).length > 0;
+        if (!observedSend) break;
       }
       await wait(150);
     }
@@ -651,9 +699,42 @@ export async function pageAction(args) {
     inserted = true;
     insertedDraftSnapshot = snapshotDraft();
     // The page can replace controls while the final authorization is pending.
-    const currentButton = useKeyboardOnly ? null : findSendButton(composer);
-    const sendButton = currentButton?.isConnected && composer.contains(currentButton) ? currentButton : null;
-    if (sendMethod === 'button' && !sendButton) return result('blocked', '发送按钮已不可用。');
+    let currentButton = useKeyboardOnly ? null : findSendButton(composer);
+    let sendButton = currentButton?.isConnected && composer.contains(currentButton) ? currentButton : null;
+    observedSend ||= visibleMatches(sendSelector, composer).length > 0;
+    while (!useKeyboardOnly && (observedSend || sendMethod === 'button') && !sendButton
+      && (args.unlimitedReadiness === true || Date.now() < buttonDeadline)) {
+      if (!await stillAllowed()) return result('cancelled', '已暂停，本次未提交。');
+      if (!samePage() || !keepComposer() || !editable()) return result('blocked', '提交前页面已变化。');
+      if (hasAttachment()) return protectedDraft('提交前检测到附件，已保留输入框内容。');
+      if (busy() || lateStop()) return result('busy', 'Agent 仍在运行。');
+      if (needsRefill || !payloadMatches()) {
+        if (!await fill(prompt, true)) return result('blocked', '输入框当前不可用，稍后重试。');
+        needsRefill = false;
+      }
+      await wait(150);
+      if (!samePage() || !keepComposer()) return result('blocked', '提交前页面已变化。');
+      if (!withinDeadline()) return result('cancelled', '已暂停，本次未提交。');
+      if (hasAttachment()) return protectedDraft('提交前检测到附件，已保留输入框内容。');
+      if (!editable()) return result('blocked', '输入框当前不可用，稍后重试。');
+      if (busy() || lateStop()) return result('busy', 'Agent 仍在运行。');
+      if (needsRefill || !payloadMatches()) {
+        const correction = fill(prompt, true);
+        const accepted = correction && typeof correction.then === 'function' ? await correction : correction;
+        if (!accepted) return result('blocked', '输入框当前不可用，稍后重试。');
+        needsRefill = false;
+        if (!samePage() || !withinDeadline() || !keepComposer() || !editable()) return result('blocked', '提交前页面已变化。');
+        if (hasAttachment()) return protectedDraft('提交前检测到附件，已保留输入框内容。');
+        if (busy() || lateStop()) return result('busy', 'Agent 仍在运行。');
+        // Unsupported rich editors can apply DOM input to their model after
+        // this stack. Reobserve rather than clicking with only a DOM repaint.
+        await wait(180);
+        continue;
+      }
+      currentButton = findSendButton(composer);
+      sendButton = currentButton?.isConnected && composer.contains(currentButton) ? currentButton : null;
+    }
+    if (!useKeyboardOnly && (observedSend || sendMethod === 'button') && !sendButton) return result('blocked', '发送按钮已不可用。');
 
     beforeAssistant = assistantState();
     rememberVisibleHistory();
@@ -696,5 +777,19 @@ export async function pageAction(args) {
     if (document.activeElement === editor && previousFocus && previousFocus !== editor && previousFocus.isConnected) {
       try { previousFocus.focus({ preventScroll: true }); } catch {}
     }
+  }
+  };
+  try {
+    const value = await action();
+    if (cancellable) {
+      try {
+        // Do not make the injection return wait for this channel's response.
+        // Either transport must be able to finish independently of the other.
+        Promise.resolve(chrome.runtime.sendMessage({ type: 'PAGE_RESULT', runId: args.runId, resultToken: args.resultToken, result: value })).catch(() => undefined);
+      } catch { /* The ordinary injection return remains an independent result channel. */ }
+    }
+    return value;
+  } finally {
+    if (cancellable) chrome.runtime.onMessage.removeListener(cancel);
   }
 }

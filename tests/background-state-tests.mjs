@@ -60,6 +60,7 @@ async function harness(seed={}) {
     tabs:{
       async query(){return [copy(state.tab)];},
       async get(id){if(id!==state.tab.id) throw new Error('Tab missing');return copy(state.tab);},
+      async sendMessage(id,message){return {revoked:true,runId:message.runId,resultToken:message.resultToken};},
       async update(id,update){
         assert.deepEqual(Object.keys(update),['autoDiscardable'],'Background module must never activate a tab');
         state.tabUpdates.push({id,...update});
@@ -75,7 +76,7 @@ async function harness(seed={}) {
         return [{frameId:0,result}];
       },
     },
-    runtime:{onMessage:event()},commands:{onCommand:event()},
+    runtime:{id:'fixture-extension',getURL:name=>'chrome-extension://fixture/'+name,onMessage:event()},commands:{onCommand:event()},
   };
   const h={state,chrome,pageResult:async args=>({status:args.mode==='check'?'ready':'sent',message:'mock'}),
     message(message,sender={id:'fixture-extension',url:'chrome-extension://fixture/popup.html'}){
@@ -83,7 +84,7 @@ async function harness(seed={}) {
         message={receiptBoundaryToken:'00000000-0000-0000-0000-000000000001',...message};
       return new Promise(resolve=>chrome.runtime.onMessage.listeners[0](message,sender,resolve));
     },
-    sender(){return {tab:copy(state.tab),frameId:0,documentId:'synthetic-bound-document',url:state.tab.url};},
+    sender(){return {id:'fixture-extension',tab:copy(state.tab),frameId:0,documentId:'synthetic-bound-document',url:state.tab.url};},
     async start(config={}){
       const reply=await this.message({type:'START',config:{intervalMinutes:30,prompt:'Continue mock task.',maxSends:0,...config}});
       assert.equal(reply.ok,true,JSON.stringify(reply));return reply.job;
@@ -176,6 +177,94 @@ await scenario('A pause invalidates the token and a late result cannot restart t
   assert.equal(h.state.alarms.size,0);
 });
 
+await scenario('A finite command permit without an active invocation cannot be revived by an observer',async()=>{
+  const h=await harness();const job=await h.start();
+  const lease=Date.now()+8000;
+  h.state.session.job={...job,phase:'sending',runKind:'send',runDeadline:lease};
+  const runId=job.runId;
+  assert.equal((await h.message({type:'WAIT_RUN',runId,delayMs:50,renew:false},h.sender())).runDeadline,lease);
+  assert.equal(h.state.session.job.runDeadline,lease);
+  assert.equal((await h.message({type:'CHECK_RUN',runId}, {...h.sender(),frameId:1})).allowed,false);
+  assert.equal(h.state.session.job.runDeadline,lease);
+  const renewed=await h.message({type:'CHECK_RUN',runId},h.sender());
+  assert.equal(renewed.allowed,true);
+  assert.ok(renewed.runDeadline>=Date.now()+19000);
+  h.state.session.job.runDeadline=Date.now()-1;
+  assert.equal((await h.message({type:'CHECK_RUN',runId},h.sender())).allowed,false);
+  await h.message({type:'PAUSE'});
+});
+
+await scenario('A redundant page receipt survives a missing injection result and rejects wrong origins, runs and tokens',async()=>{
+  const h=await harness();await h.start();const gate=deferred();
+  h.pageResult=()=>gate.promise;
+  const round=h.message({type:'SEND_NOW'});
+  await until(()=>h.state.injections.some(item=>item.args[0].mode==='send'));
+  const args=h.state.injections.find(item=>item.args[0].mode==='send').args[0];
+  const receipt={type:'PAGE_RESULT',runId:args.runId,resultToken:args.resultToken,result:{status:'sent',message:'Fixture receipt'}};
+  assert.match(args.resultToken,/^[a-f0-9-]{36}$/);
+  assert.equal((await h.message({type:'CHECK_RUN',runId:args.runId},h.sender())).allowed,true);
+  for(const sender of [{...h.sender(),id:'other-extension'},{...h.sender(),frameId:1},
+    {...h.sender(),url:'https://chatgpt.com/c/other'},{...h.sender(),tab:{...h.state.tab,id:99}},
+    {...h.sender(),documentId:'another-document'}]) {
+    assert.equal((await h.message(receipt,sender)).ok,false);
+  }
+  assert.equal((await h.message({...receipt,resultToken:'wrong'},h.sender())).ok,false);
+  assert.equal((await h.message({...receipt,runId:'wrong'},h.sender())).ok,false);
+  assert.equal((await h.message({...receipt,result:{status:'invented'}},h.sender())).ok,false);
+  assert.equal((await h.message({type:'CHECK_RUN',runId:args.runId},{...h.sender(),documentId:'another-document'})).allowed,false);
+  gate.resolve(null);
+  await delay(10);
+  assert.equal(h.state.session.job.phase,'sending','Missing return waits for the same invocation, not another send');
+  assert.equal((await h.message(receipt,h.sender())).ok,true);
+  assert.equal((await round).job.sentCount,1);
+  assert.equal((await h.message(receipt,h.sender())).ok,false,'A settled receipt cannot increment again');
+  assert.equal(h.state.injections.filter(item=>item.args[0].mode==='send').length,1);
+  assert.equal(h.state.session.job.sentCount,1);
+  await h.message({type:'PAUSE'});
+});
+
+await scenario('Pause rejects a pending redundant result without waiting for an unresolved injection',async()=>{
+  const h=await harness();await h.start();const gate=deferred();h.pageResult=()=>gate.promise;
+  const round=h.message({type:'SEND_NOW'});
+  await until(()=>h.state.injections.some(item=>item.args[0].mode==='send'));
+  const args=h.state.injections.find(item=>item.args[0].mode==='send').args[0];
+  await h.message({type:'PAUSE'});
+  assert.equal((await round).job.enabled,false);
+  assert.equal((await h.message({type:'PAGE_RESULT',runId:args.runId,resultToken:args.resultToken,result:{status:'sent'}},h.sender())).ok,false);
+  gate.resolve({status:'sent'});
+  assert.equal(h.state.session.job.sentCount,0);
+});
+
+await scenario('An injection API rejection cannot discard a later valid same-invocation receipt',async()=>{
+  const h=await harness();await h.start();h.pageResult=async()=>{throw new Error('PRIVATE_SENTINEL');};
+  const round=h.message({type:'SEND_NOW'});
+  await until(()=>h.state.injections.some(item=>item.args[0].mode==='send'));
+  await delay(10);
+  const args=h.state.injections.find(item=>item.args[0].mode==='send').args[0];
+  assert.equal(h.state.session.job.phase,'sending');
+  assert.equal((await h.message({type:'PAGE_RESULT',runId:args.runId,resultToken:args.resultToken,result:{status:'sent'}},h.sender())).ok,true);
+  assert.equal((await round).job.sentCount,1);
+  assert.equal(h.state.injections.filter(item=>item.args[0].mode==='send').length,1);
+  await h.message({type:'PAUSE'});
+});
+
+await scenario('Pause awaits exact page revocation; missing acknowledgement is visible and fences the old permit',async()=>{
+  const h=await harness();await h.start();const gate=deferred();h.pageResult=()=>gate.promise;
+  const round=h.message({type:'SEND_NOW'});
+  await until(()=>h.state.injections.some(item=>item.args[0].mode==='send'));
+  h.chrome.tabs.sendMessage=async()=>({revoked:true,runId:'wrong',resultToken:'wrong'});
+  const paused=await h.message({type:'PAUSE'});
+  assert.equal(paused.job.enabled,false);
+  assert.ok(paused.job.submissionFenceUntil>Date.now());
+  assert.match(paused.job.statusText,/尚未确认/);
+  assert.equal((await round).job.sentCount,0);
+  assert.equal((await h.message({type:'RESUME'})).ok,false);
+  assert.equal((await h.message({type:'START',config:{intervalMinutes:30,prompt:'A new synthetic job'}})).ok,false);
+  await h.message({type:'CLEAR_DATA'});
+  assert.equal((await h.message({type:'START',config:{intervalMinutes:30,prompt:'A new synthetic job'}})).ok,false,'Clear Data must not erase an outstanding page permit fence');
+  gate.resolve({status:'sent'});
+});
+
 await scenario('Pause cancels a pending start self-check',async()=>{
   const h=await harness();const gate=deferred();h.pageResult=()=>gate.promise;
   const start=h.message({type:'START',config:{intervalMinutes:30,prompt:'Continue.',maxSends:0}});
@@ -187,7 +276,7 @@ await scenario('Pause cancels a pending start self-check',async()=>{
   assert.equal(h.state.alarms.size,0);
 });
 
-await scenario('Expired run tokens and different sender tabs are rejected',async()=>{
+await scenario('A live waiting invocation can refresh its command permit, but foreign tabs and paused runs cannot',async()=>{
   const h=await harness();await h.start();const gate=deferred();h.pageResult=()=>gate.promise;
   const round=h.message({type:'SEND_NOW'});
   await until(()=>h.state.injections.some(x=>x.args[0].mode==='send'));
@@ -195,8 +284,10 @@ await scenario('Expired run tokens and different sender tabs are rejected',async
   const wrong=h.sender();wrong.tab.id=8;
   assert.equal((await h.message({type:'CHECK_RUN',runId},wrong)).allowed,false);
   h.state.session.job.runDeadline=Date.now()-1;
+  assert.equal((await h.message({type:'CHECK_RUN',runId},h.sender())).allowed,true);
+  await h.message({type:'PAUSE'});
   assert.equal((await h.message({type:'CHECK_RUN',runId},h.sender())).allowed,false);
-  await h.message({type:'PAUSE'});gate.resolve({status:'cancelled'});await round;
+  gate.resolve({status:'cancelled'});await round;
 });
 
 await scenario('Busy checks retry later and count only confirmed sends',async()=>{
@@ -400,8 +491,6 @@ await scenario('START repairs malformed logs without changing the interval or se
 
 for (const [name, pageResult, code] of [
   ['adapter uncertainty', async()=>({status:'unknown'}), 'adapter-result'],
-  ['missing adapter result', async()=>null, 'no-valid-result'],
-  ['execution exception', async()=>{throw new Error('PRIVATE_SENTINEL');}, 'execution-exception'],
 ]) {
   await scenario(`Diagnostic classifies ${name} without raw exception or prompt`, async()=>{
     const h=await harness();await h.start();h.pageResult=pageResult;
@@ -413,6 +502,27 @@ for (const [name, pageResult, code] of [
     assert.doesNotMatch(JSON.stringify(h.state.local.logs),/PRIVATE_SENTINEL|Continue mock task\./);
     assert.ok(h.state.injections.every(item=>item.world==='ISOLATED'));
     await h.message({type:'PAUSE'});
+  });
+}
+for (const [name, pageResult, code] of [
+  ['missing injection return', async()=>null, 'no-valid-result'],
+  ['rejected injection transport', async()=>{throw new Error('PRIVATE_SENTINEL');}, 'execution-exception'],
+]) {
+  await scenario(`No fixed wait limit for ${name}; Pause still ends the same invocation without replay`,async()=>{
+    const h=await harness();await h.start();h.pageResult=pageResult;
+    const round=h.message({type:'SEND_NOW'});
+    await until(()=>h.state.injections.some(item=>item.args[0].mode==='send'));
+    await delay(20100);
+    assert.equal(h.state.session.job.phase,'sending');
+    assert.equal(h.state.session.job.sentCount,0);
+    assert.ok(h.state.session.job.runDeadline>Date.now());
+    const entry=h.state.local.logs.findLast(item=>item.event==='busy');
+    assert.equal(entry.diagnostic.code,code);
+    assert.equal(h.state.local.logs.some(item=>item.event==='unconfirmed'),false);
+    assert.doesNotMatch(JSON.stringify(h.state.local.logs),/PRIVATE_SENTINEL|Continue mock task\./);
+    assert.equal(h.state.injections.filter(item=>item.args[0].mode==='send').length,1);
+    await h.message({type:'PAUSE'});
+    assert.equal((await round).job.enabled,false);
   });
 }
 await scenario('Mandatory priority reaches the adapter even for a legacy false flag and logs only bounded diagnostics', async()=>{
@@ -662,6 +772,21 @@ await scenario('Model commit rejects expired, foreign-target, foreign-run and re
     assert.equal((await h.message({ type: 'COMMIT_RUN', runId: state.runId }, state.sender)).ok, false);
   }
   assert.equal(h.state.injections.length, before);
+});
+await scenario('An explicitly expired unattempted MAIN phase is refreshed inside the same reservation, never a second submit',async()=>{
+  const h=await harness();const job=await h.start();
+  h.state.session.job={...job,phase:'sending',runKind:'send',runDeadline:Date.now()+10000};
+  let preparations=0;
+  h.pageResult=async args=>{
+    if(args.phase==='prepare' && ++preparations===1) return {supported:false,dispatched:false,code:'expired'};
+    return {supported:true,dispatched:args.phase==='commit',code:args.phase==='prepare'?'prepared':args.phase==='observe'?'ready':'dispatched',hasSend:true};
+  };
+  const result=await h.message({type:'COMMIT_RUN',runId:job.runId},h.sender());
+  assert.equal(result.dispatched,true);
+  assert.equal(preparations,2);
+  assert.equal(h.state.injections.filter(item=>item.args[0].phase==='commit').length,1);
+  assert.equal(h.state.session.job.editorCommitRunId,job.runId);
+  await h.message({type:'PAUSE'});
 });
 const failed=results.filter(x=>x.status==='FAIL').length;
 console.log(`RESULT ${results.length-failed}/${results.length} passed`);

@@ -15,6 +15,7 @@ const playwright = process.env.PLAYWRIGHT_MODULE_PATH
   : await import('playwright');
 const headed = process.env.TEST_HEADED === '1';
 const testRealDueAlarm = process.env.TEST_REAL_DUE_ALARM === '1';
+const selectedCases = process.env.TEST_PM_CASES?.split(',').map(Number);
 const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-continue-pm-keyboard-'));
 const moduleNames = ['prosemirror-view', 'prosemirror-state', 'prosemirror-model', 'prosemirror-schema-basic',
   'prosemirror-keymap', 'prosemirror-transform', 'orderedmap', 'w3c-keyname'];
@@ -36,7 +37,7 @@ let worker;
 let control;
 let passed = 0;
 
-function fixture({ noSend = false, rejectSynthetic = false, recurringRestore = false, supported = false, sendActivationDelayMs = 0,
+function fixture({ noSend = false, rejectSynthetic = false, recurringRestore = false, supported = false, sendActivationDelayMs = 0, receiptDelayMs = 0,
   manualReceiptDuringReadiness = false, ignoreButtonSubmit = false } = {}) {
   return `<!doctype html><meta charset="utf-8"><title>Official ProseMirror fixture</title>
   <style>${editorCss}body{font:16px sans-serif;padding:20px}.ProseMirror{min-height:90px;border:1px solid;padding:12px}.message-body{white-space:pre-wrap}</style>
@@ -56,8 +57,11 @@ function fixture({ noSend = false, rejectSynthetic = false, recurringRestore = f
     if(!text.trim())return;
     fixture.submits++;fixture.sentTexts.push(text);
     fixture.submissionStates.push({method,hidden:document.hidden,focused:document.hasFocus(),sendDisabled:button?.disabled});
-    const row=document.createElement('article');row.className='message-row self';row.dataset.messageId='pm-account~pm-dot~new-'+fixture.submits;
-    const body=document.createElement('div');body.className='message-body';body.textContent=text;row.append(body);document.querySelector('#history').append(row);
+    const insertReceipt=()=>{
+      const row=document.createElement('article');row.className='message-row self';row.dataset.messageId='pm-account~pm-dot~new-'+fixture.submits;
+      const body=document.createElement('div');body.className='message-body';body.textContent=text;row.append(body);document.querySelector('#history').append(row);
+    };
+    if(${JSON.stringify(receiptDelayMs)}>0)setTimeout(insertReceipt,${JSON.stringify(receiptDelayMs)});else insertReceipt();
     window.pm.dispatch(window.pm.state.tr.delete(0,window.pm.state.doc.content.size));
   };
   window.pm=new EditorView(document.querySelector('#editorMount'),{
@@ -96,7 +100,7 @@ function fixture({ noSend = false, rejectSynthetic = false, recurringRestore = f
     fixture.events.push({type,key:event.key,code:event.code,keyCode:event.keyCode,ctrlKey:event.ctrlKey,trusted:event.isTrusted});
   });
   if(button)button.addEventListener('click',()=>{fixture.buttonClicks++;submit('button')});
-  window.fixtureReady=true;
+    window.fixtureReady=true;
   </script>`;
 }
 
@@ -156,12 +160,22 @@ async function start(page, config = {}) {
   return result;
 }
 async function scenario(name, callback) {
-  const page = await newPage('https://chatgpt.com/dots/pm-' + (++passed));
+  const index = ++passed;
+  if (selectedCases && !selectedCases.includes(index)) return;
+  const page = await newPage('https://chatgpt.com/dots/pm-' + index);
+  let timeout;
   try {
     await page.waitForFunction(() => window.fixtureReady);
-    await callback(page);
+    await Promise.race([callback(page), new Promise((_, reject) => {
+      const timeoutMs = testRealDueAlarm && index === 6 ? 155000 : 60000;
+      timeout = setTimeout(() => reject(new Error(`Synthetic browser scenario exceeded ${timeoutMs}ms`)), timeoutMs);
+    })]);
     console.log('PASS ' + name);
+  } catch (error) {
+    console.log('SYNTHETIC FAILURE STATE ' + JSON.stringify({ fixture: await inspect(page), job: (await call({ type: 'GET_STATE' })).job }));
+    throw error;
   } finally {
+    clearTimeout(timeout);
     await call({ type: 'PAUSE' });
     await page.close();
   }
@@ -177,7 +191,9 @@ try {
       const index = Number(url.pathname.split('-').at(-1));
       return route.fulfill({ status: 200, contentType: 'text/html', body: fixture({
         noSend: index === 3, rejectSynthetic: [4, 6, 8, 9, 10].includes(index),
-        supported: [6, 7, 8, 9, 10].includes(index), sendActivationDelayMs: [6, 8, 9, 10].includes(index) ? 100 : 0,
+        supported: [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 19].includes(index),
+        sendActivationDelayMs: [11, 16].includes(index) ? 21000 : [17, 20, 21].includes(index) ? 200 : [6, 8, 9, 10, 12, 13, 14, 15].includes(index) ? 100 : 0,
+        receiptDelayMs: index === 18 ? 8000 : 0,
         manualReceiptDuringReadiness: index === 9 || index === 10, ignoreButtonSubmit: index === 9,
         recurringRestore: index === 7,
       }) });
@@ -220,10 +236,14 @@ try {
   });
   await scenario('A trusted-event-only keymap remains unconfirmed without replaying through Send', async page => {
     await start(page, { sendMethod: 'ctrl-enter' });
-    const sent = await call({ type: 'SEND_NOW' });
-    assert.equal(sent.ok, true, sent.error);
+    const sending = call({ type: 'SEND_NOW' });
+    await page.waitForFunction(() => fixture.keyboardCommands === 1);
+    assert.equal((await call({ type: 'GET_STATE' })).job.phase, 'sending');
+    assert.equal((await call({ type: 'GET_STATE' })).job.sentCount, 0);
+    await call({ type: 'PAUSE' });
+    const sent = await sending;
+    assert.equal(sent.job.enabled, false);
     assert.equal(sent.job.sentCount, 0);
-    assert.equal(sent.job.lastResult, 'unknown');
     const observed = await inspect(page);
     assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [1, 0, 0]);
     assert.equal(observed.editorEmpty, false);
@@ -431,10 +451,19 @@ try {
         await foreground.locator('#work').focus();
         await page.waitForFunction(() => document.hidden && !document.hasFocus());
         await start(page, { sendMethod: 'auto' });
-        const sent = await call({ type: 'SEND_NOW' });
+        const sending = call({ type: 'SEND_NOW' });
+        if (!accepted) {
+          await page.waitForFunction(() => fixture.buttonClicks === 1, null, { polling: 100 });
+          const waiting = (await call({ type: 'GET_STATE' })).job;
+          assert.equal(waiting.phase, 'sending');
+          assert.equal(waiting.sentCount, 0);
+          await call({ type: 'PAUSE' });
+        }
+        const sent = await sending;
         assert.equal(sent.ok, true, sent.error);
         assert.equal(sent.job.sentCount, accepted ? 1 : 0, sent.job.statusText);
-        assert.equal(sent.job.lastResult, accepted ? 'sent' : 'unknown');
+        if (accepted) assert.equal(sent.job.lastResult, 'sent');
+        else assert.equal(sent.job.enabled, false);
         const observed = await inspect(page);
         assert.deepEqual(observed.manualReceipt, { text: prompt, hidden: true });
         assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, 1, accepted ? 1 : 0]);
@@ -444,7 +473,252 @@ try {
       } finally { await foreground.close(); }
     });
   }
-  console.log(`RESULT ${passed}/${passed} official ProseMirror MV3 scenarios passed`);
+  await scenario('An active hidden model send survives more than twenty seconds of framework readiness without a second submission', async page => {
+    const foreground = await newPage('https://pm-foreground.invalid/slow-readiness');
+    try {
+      await foreground.bringToFront();
+      await foreground.locator('#work').focus();
+      await page.waitForFunction(() => document.hidden && !document.hasFocus());
+      await start(page, { sendMethod: 'auto' });
+      const sent = await call({ type: 'SEND_NOW' });
+      assert.equal(sent.job.sentCount, 1, sent.job.statusText);
+      assert.equal(sent.job.lastResult, 'sent');
+      const observed = await inspect(page);
+      assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, 1, 1]);
+      assert.deepEqual(observed.sentTexts, [prompt]);
+      assert.ok(observed.sendActivations[0].elapsedMs >= 21000);
+      assert.equal(observed.visibility, 'hidden');
+      assert.equal(await foreground.locator('#work').inputValue(), 'Unrelated synthetic document');
+      assert.equal(await foreground.evaluate(() => document.hasFocus()), true);
+    } finally { await foreground.close(); }
+  });
+  await scenario('A lost executeScript return still records the same hidden submission once through the extension result channel', async page => {
+    const foreground = await newPage('https://pm-foreground.invalid/lost-return');
+    try {
+      await foreground.bringToFront();
+      await foreground.locator('#work').focus();
+      await page.waitForFunction(() => document.hidden && !document.hasFocus());
+      await start(page, { sendMethod: 'auto' });
+      await worker.evaluate(() => {
+        globalThis.originalExecuteScript = chrome.scripting.executeScript;
+        globalThis.droppedSendReturns = 0;
+        chrome.scripting.executeScript = async request => {
+          const frames = await originalExecuteScript(request);
+          if (request.func.name === 'pageAction' && request.args[0].mode === 'send') {
+            droppedSendReturns++;
+            return frames.map(frame => ({ frameId: frame.frameId }));
+          }
+          return frames;
+        };
+      });
+      const sent = await call({ type: 'SEND_NOW' });
+      assert.equal(sent.job.sentCount, 1, sent.job.statusText);
+      assert.equal(sent.job.lastResult, 'sent');
+      for (let i = 0; i < 20 && !await worker.evaluate(() => droppedSendReturns); i++) await new Promise(resolve => setTimeout(resolve, 20));
+      assert.equal(await worker.evaluate(() => droppedSendReturns), 1, 'The injection return was actually removed');
+      const observed = await inspect(page);
+      assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, 1, 1]);
+      assert.deepEqual(observed.sentTexts, [prompt]);
+      assert.equal(observed.visibility, 'hidden');
+      assert.equal(await foreground.evaluate(() => document.hasFocus()), true);
+    } finally {
+      await worker.evaluate(() => { chrome.scripting.executeScript = originalExecuteScript; delete globalThis.originalExecuteScript; });
+      await foreground.close();
+    }
+  });
+  await scenario('An injection API rejection before the page result still confirms one actual hidden submission', async page => {
+    await start(page, { sendMethod: 'auto' });
+    await worker.evaluate(() => {
+      globalThis.originalExecuteScript = chrome.scripting.executeScript;
+      globalThis.rejectedSendReturns = 0;
+      chrome.scripting.executeScript = async request => {
+        const execution = originalExecuteScript(request);
+        if (request.func.name === 'pageAction' && request.args[0].mode === 'send') {
+          execution.catch(() => undefined);
+          rejectedSendReturns++;
+          throw new Error('Synthetic injection transport rejection');
+        }
+        return execution;
+      };
+    });
+    try {
+      const sent = await call({ type: 'SEND_NOW' });
+      assert.equal(sent.job.sentCount, 1, sent.job.statusText);
+      assert.equal(await worker.evaluate(() => rejectedSendReturns), 1);
+      const observed = await inspect(page);
+      assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, 1, 1]);
+      assert.deepEqual(observed.sentTexts, [prompt]);
+    } finally { await worker.evaluate(() => { chrome.scripting.executeScript = originalExecuteScript; delete globalThis.originalExecuteScript; }); }
+  });
+  await scenario('Pause acknowledges page revocation before an already-queued final MAIN commit is released', async page => {
+    await start(page, { sendMethod: 'auto' });
+    await worker.evaluate(() => {
+      globalThis.originalExecuteScript = chrome.scripting.executeScript;
+      globalThis.releaseHeldCommit = null;
+      chrome.scripting.executeScript = request => {
+        if (request.func.name === 'editorCommit' && request.args[0].phase === 'commit') {
+          return new Promise((resolve, reject) => {
+            releaseHeldCommit = () => originalExecuteScript(request).then(frames => { resolve(frames); return frames; }, reject);
+          });
+        }
+        return originalExecuteScript(request);
+      };
+    });
+    const sending = call({ type: 'SEND_NOW' });
+    try {
+      for (let i = 0; i < 200 && !await worker.evaluate(() => !!releaseHeldCommit); i++) await new Promise(resolve => setTimeout(resolve, 20));
+      assert.equal(await worker.evaluate(() => !!releaseHeldCommit), true);
+      const paused = await call({ type: 'PAUSE' });
+      assert.equal(paused.job.enabled, false);
+      assert.equal(paused.job.submissionFenceUntil ?? null, null, 'The isolated page actually acknowledged revocation');
+      const frames = await worker.evaluate(() => releaseHeldCommit());
+      assert.equal(frames[0].result.dispatched, false);
+      assert.equal((await sending).job.sentCount, 0);
+      const observed = await inspect(page);
+      assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, 0, 0]);
+    } finally {
+      await worker.evaluate(() => { chrome.scripting.executeScript = originalExecuteScript; delete globalThis.originalExecuteScript; delete globalThis.releaseHeldCommit; });
+      await sending;
+    }
+  });
+  await scenario('A queued MAIN permit expiring before execution refreshes without ending the wait or repeating a submission', async page => {
+    await start(page, { sendMethod: 'auto' });
+    await worker.evaluate(() => {
+      globalThis.originalExecuteScript = chrome.scripting.executeScript;
+      globalThis.delayedCommitOnce = false;
+      globalThis.expiredCommitResults = 0;
+      chrome.scripting.executeScript = async request => {
+        if (request.func.name === 'editorCommit' && request.args[0].phase === 'commit' && !delayedCommitOnce) {
+          delayedCommitOnce = true;
+          await new Promise(resolve => setTimeout(resolve, 21100));
+          const frames = await originalExecuteScript(request);
+          if (frames[0]?.result.code === 'expired' && frames[0].result.dispatched === false) expiredCommitResults++;
+          return frames;
+        }
+        return originalExecuteScript(request);
+      };
+    });
+    try {
+      const sent = await call({ type: 'SEND_NOW' });
+      assert.equal(sent.job.sentCount, 1, sent.job.statusText);
+      assert.equal(await worker.evaluate(() => expiredCommitResults), 1);
+      const observed = await inspect(page);
+      assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, 1, 1]);
+      assert.deepEqual(observed.sentTexts, [prompt]);
+    } finally { await worker.evaluate(() => { chrome.scripting.executeScript = originalExecuteScript; delete globalThis.originalExecuteScript; }); }
+  });
+  await scenario('A single isolated permit-observer transport failure cannot strand a delayed Send', async page => {
+    await start(page, { sendMethod: 'auto' });
+    const tabId = await worker.evaluate(async url => (await chrome.tabs.query({})).find(tab => tab.url === url).id, page.url());
+    await worker.evaluate(tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => {
+      const send = chrome.runtime.sendMessage.bind(chrome.runtime);
+      let rejected = false;
+      chrome.runtime.sendMessage = message => {
+        if (!rejected && message.type === 'WAIT_RUN' && message.renew === false) {
+          rejected = true;
+          return Promise.reject(new Error('Synthetic one-off observer transport failure'));
+        }
+        return send(message);
+      };
+    } }), tabId);
+    const sent = await call({ type: 'SEND_NOW' });
+    assert.equal(sent.job.sentCount, 1, sent.job.statusText);
+    const observed = await inspect(page);
+    assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, 1, 1]);
+    assert.deepEqual(observed.sentTexts, [prompt]);
+  });
+  await scenario('Legacy fallback waits for a known Send after final prompt correction rather than choosing keyboard', async page => {
+    await page.evaluate(() => {
+      document.addEventListener('fixture-late-change', () => {
+        pm.dispatch(pm.state.tr.insertText('RESTORED_UNSENT_TEXT', 0, pm.state.doc.content.size));
+        fixture.lateChanges = (fixture.lateChanges || 0) + 1;
+      });
+    });
+    await start(page, { sendMethod: 'auto' });
+    const tabId = await worker.evaluate(async url => (await chrome.tabs.query({})).find(tab => tab.url === url).id, page.url());
+    await worker.evaluate(tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => {
+      const send = chrome.runtime.sendMessage.bind(chrome.runtime);
+      let changed = false;
+      chrome.runtime.sendMessage = async message => {
+        const reply = await send(message);
+        if (!changed && message.type === 'CHECK_RUN' && document.querySelector('[contenteditable]').textContent.includes('PM_SYNTHETIC_FIRST_PARAGRAPH')) {
+          changed = true;
+          document.dispatchEvent(new Event('fixture-late-change'));
+        }
+        return reply;
+      };
+    } }), tabId);
+    const sent = await call({ type: 'SEND_NOW' });
+    assert.equal(sent.job.sentCount, 1, sent.job.statusText);
+    const observed = await inspect(page);
+    assert.equal(observed.lateChanges, 1);
+    assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, 1, 1]);
+    assert.deepEqual(observed.sentTexts, [prompt]);
+  });
+  await scenario('A receipt arriving after the retired 6.5-second cutoff confirms exactly one submission', async page => {
+    await start(page, { sendMethod: 'auto' });
+    const sent = await call({ type: 'SEND_NOW' });
+    assert.equal(sent.job.sentCount, 1, sent.job.statusText);
+    const observed = await inspect(page);
+    assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, 1, 1]);
+    assert.deepEqual(observed.sentTexts, [prompt]);
+  });
+  await scenario('An unresponsive result-message channel cannot hold the independent injection result', async page => {
+    await start(page, { sendMethod: 'auto' });
+    const tabId = await worker.evaluate(async url => (await chrome.tabs.query({})).find(tab => tab.url === url).id, page.url());
+    await worker.evaluate(tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => {
+      const send = chrome.runtime.sendMessage.bind(chrome.runtime);
+      chrome.runtime.sendMessage = message => message.type === 'PAGE_RESULT' ? new Promise(() => {}) : send(message);
+    } }), tabId);
+    const sent = await call({ type: 'SEND_NOW' });
+    assert.equal(sent.job.sentCount, 1, sent.job.statusText);
+    const observed = await inspect(page);
+    assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, 1, 1]);
+  });
+  for (const mutation of ['text', 'attachment']) {
+    await scenario(`Legacy final readiness rechecks a late ${mutation} mutation before any click`, async page => {
+      await page.evaluate(mutation => {
+        document.addEventListener('fixture-late-change', () => {
+          pm.dispatch(pm.state.tr.insertText('RESTORED_UNSENT_TEXT', 0, pm.state.doc.content.size));
+          fixture.lateChanges = (fixture.lateChanges || 0) + 1;
+        });
+        document.addEventListener('fixture-wait-finished', () => {
+          if (!fixture.lateChanges || fixture.finalMutation || !pm.state.doc.textContent.includes('PM_SYNTHETIC_FIRST_PARAGRAPH')) return;
+          fixture.finalMutation = mutation;
+          if (mutation === 'text') pm.dispatch(pm.state.tr.insertText('LATE_OTHER_TEXT', 0, pm.state.doc.content.size));
+          else {
+            const attachment = document.createElement('span');
+            attachment.dataset.testid = 'attachment';
+            attachment.textContent = 'Synthetic attachment';
+            document.querySelector('[data-composer-body]').append(attachment);
+          }
+          document.querySelector('button[aria-label="Send"]').disabled = false;
+        });
+      }, mutation);
+      await start(page, { sendMethod: 'auto' });
+      const tabId = await worker.evaluate(async url => (await chrome.tabs.query({})).find(tab => tab.url === url).id, page.url());
+      await worker.evaluate(tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => {
+        const send = chrome.runtime.sendMessage.bind(chrome.runtime);
+        let changed = false;
+        chrome.runtime.sendMessage = async message => {
+          const reply = await send(message);
+          if (!changed && message.type === 'CHECK_RUN' && document.querySelector('[contenteditable]').textContent.includes('PM_SYNTHETIC_FIRST_PARAGRAPH')) {
+            changed = true;
+            document.dispatchEvent(new Event('fixture-late-change'));
+          }
+          if (message.type === 'WAIT_RUN' && message.delayMs === 150) document.dispatchEvent(new Event('fixture-wait-finished'));
+          return reply;
+        };
+      } }), tabId);
+      const sent = await call({ type: 'SEND_NOW' });
+      const observed = await inspect(page);
+      assert.equal(observed.finalMutation, mutation, 'The intended last-wait mutation actually occurred');
+      assert.equal(sent.job.sentCount, mutation === 'text' ? 1 : 0, sent.job.statusText);
+      assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, mutation === 'text' ? 1 : 0, mutation === 'text' ? 1 : 0]);
+      assert.deepEqual(observed.sentTexts, mutation === 'text' ? [prompt] : []);
+    });
+  }
+  console.log(`RESULT ${selectedCases ? selectedCases.length : passed}/${selectedCases ? selectedCases.length : passed} official ProseMirror MV3 scenarios passed`);
 } finally {
   await closeBrowser();
   await fs.rm(profile, { recursive: true, force: true });

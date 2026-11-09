@@ -1,5 +1,59 @@
 # Agent Continue Development Handoff
 
+## 3.0.6 Core Send Repair And Candidate Evidence (2026-11-09)
+
+Priority remains the owner's actual stranded-composer report, not native CI.
+The latest owner instruction is no total send-wait limit. Current source removes
+the live20s outer cutoff, live6.5s receipt cutoff and live3.5s Stop-recovery cutoff.
+Finite individual MAIN permits still require the same enabled run, exact target
+and pending invocation; a paused/replaced run cannot renew. Both normal injection
+return and a validated isolated-result message can settle the same operation.
+A lost/rejected return keeps waiting without a second submit. PAGE_RESULT
+publication is nonblocking so that one stalled channel cannot block the other.
+
+Pause first persists disabled intent and sends token/document-bound revocation.
+Acknowledged page revocation prevents a queued final MAIN handshake. Missing
+acknowledgement is explicit uncertainty with a finite-permit fence retained even
+after Clear Data, not proof that an earlier click was stopped. New diagnostics
+contain only fixed stage/channel fields and a bounded renewal counter, no prompt,
+history, raw exception, full URL, path, run token or document identity.
+
+Independent review found final legacy-readiness text/attachment changes were not
+rechecked after waiting. Actual official-ProseMirror MV3 fault injection then
+found another real race: an isolated DOM repaint followed by immediate click
+submitted LATE_OTHER_TEXT from the stale model. The final correction now settles
+and reobserves the same attempt before selecting Send. Text changes restore the
+configured prompt; attachments still produce zero submissions. In-memory probes
+alone did not establish this framework behavior. Older direct-adapter contracts
+retain their finite readiness limit; the shipped worker enables unlimited waiting.
+
+Fresh full npm chain reached its final11/11 official PM runner with no failure
+markers. Raw log:.artifacts/live-result-306-complete-regression-final.log.
+It includes worker57/57, worker-v257/57, ordinary adapter27/27, Dot56/56,
+actual MV3/official PM21/21, device UI65/65 and setup UI66/66. Native protected
+installation, production credentials and real service requests are not covered
+by these local synthetic checks. Two earlier attempts stopped after exposing
+test watchdog/compatibility issues; do not present their logs as full-suite passes.
+
+Final preview ZIP:
+dist/agent-continue-3.0.6-final-candidate/agent-continue-3.0.6-windows-device-preview.zip
+SHA256:a2b8deaa97da0bb033c75a8fe397c624fdd5ed94cb66207a0c3fe7b2b5edc0dd.
+The seven inspected runtime files match source after the packager's deliberate
+CRLF-to-LF normalization; raw-byte comparison initially differed for that reason.
+Extracted actual runtime passed21/21 with a natural one-minute Chromium alarm,
+hidden foreground preservation,21s delayed readiness, lost/rejected results,
+queued-commit Pause, expired no-dispatch permit renewal, observer failure,
+late text/attachment mutations and an8s delayed receipt.
+Log:.artifacts/live-result-306-final-extracted-natural-alarm.log.
+This candidate supersedes earlier3.0.6 preview pins, not immutable public assets.
+
+Fresh authenticated IAB readback: Store draft3.0.4/revision00005 Pending review,
+published2.1.0; Upload new package disabled. No review canceled or upload made.
+No owner's installed extension, external Chrome original job, VPN, native MCP,
+IDE or research task was changed. Current installed live-site scheduler
+acceptance, current-installation lifecycle gates, native CI and formal Release /
+Store resubmission remain open. The complete Windows-first goal stays active.
+
 ## Fresh Owner Failure Overrides Fixture Passes (2026-11-09 07:21 UTC)
 
 The owner exported agent-continue-activity (3).json from the currently failing
