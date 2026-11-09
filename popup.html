@@ -53,12 +53,12 @@
           <div class="section-heading"><h3 id="promptLabel">重复发送的提示词</h3><span id="promptCount" class="quiet-tag">0 字符</span></div>
           <div id="sealedPrompt" class="sealed-prompt"><span class="lock-symbol" aria-hidden="true">⌁</span><strong id="sealedLabel">正文已隐藏</strong><p>只有点击显示时，正文才会出现在这个界面。</p></div>
           <label class="sr-only" for="prompt">提示词正文</label>
-          <textarea id="prompt" rows="7" maxlength="100000" spellcheck="false" autocomplete="off" placeholder="输入需要重复发送的完整提示词…" hidden></textarea>
+          <textarea id="prompt" rows="7" spellcheck="false" autocomplete="off" placeholder="输入需要重复发送的完整提示词…" hidden></textarea>
           <div class="button-row"><button id="togglePrompt">显示 / 编辑正文</button><button id="importPrompt">从文件导入</button></div>
           <input id="promptFile" type="file" hidden>
           <div id="dropZone" class="drop-zone" tabindex="0" role="button" aria-label="选择或拖入提示词文件">拖入 TXT、Markdown、DOCX 或 PDF 文件</div>
           <p id="importStatus" class="helper" role="status">导入时在本地解析；不向开发者发送内容。</p>
-          <details class="small-details"><summary>文件格式与编码</summary><label for="encoding">文本编码</label><select id="encoding"><option value="auto">自动识别（优先 UTF-8）</option><option value="utf-8">UTF-8</option><option value="gb18030">GB18030 / GBK</option><option value="utf-16le">UTF-16 LE</option><option value="utf-16be">UTF-16 BE</option></select><p>支持常见文本文件、DOCX 和可提取文字的 PDF。扫描件需要先转换为文字；文件最大 5 MB，提示词最多 10 万字符。原文不会被自动改写。</p></details>
+          <details class="small-details"><summary>文件格式与编码</summary><label for="encoding">文本编码</label><select id="encoding"><option value="auto">自动识别（优先 UTF-8）</option><option value="utf-8">UTF-8</option><option value="gb18030">GB18030 / GBK</option><option value="utf-16le">UTF-16 LE</option><option value="utf-16be">UTF-16 BE</option></select><p>支持常见文本文件、DOCX 和可提取文字的 PDF。扫描件需先转换为文字。提示词不设字符上限，实际容量受浏览器存储、内存和目标平台限制。DOCX/PDF 文件最多 5 MiB；DOCX 正文 XML 最多 4 MiB，PDF 最多 100 页、解析最多 20 秒。原文不会被自动改写。</p></details>
         </section>
         <section class="card queue-card">
           <div class="section-heading"><h3>提示词队列</h3><span id="queueCount" class="quiet-tag">0 / 50</span></div>
@@ -67,7 +67,7 @@
           <div id="queueEmpty" class="empty-state">队列还是空的。可加入当前提示词，或一次导入多个文件。</div>
           <div class="button-row"><button id="addToQueue">加入当前提示词</button><button id="importQueue">批量导入文件</button></div>
           <input id="queueFiles" type="file" multiple hidden>
-          <div id="queueEditor" class="queue-editor" hidden><label for="queueName">队列项名称</label><input id="queueName" maxlength="80"><label for="queueText">队列项正文</label><textarea id="queueText" rows="5" maxlength="100000" spellcheck="false" autocomplete="off"></textarea><div class="button-row"><button id="saveQueueItem" class="primary">保存这一项</button><button id="cancelQueueEdit">取消并隐藏</button></div></div>
+          <div id="queueEditor" class="queue-editor" hidden><label for="queueName">队列项名称</label><input id="queueName" maxlength="80"><label for="queueText">队列项正文</label><textarea id="queueText" rows="5" spellcheck="false" autocomplete="off"></textarea><div class="button-row"><button id="saveQueueItem" class="primary">保存这一项</button><button id="cancelQueueEdit">取消并隐藏</button></div></div>
         </section>
         <section class="card template-card">
           <div class="section-heading"><h3>本地模板</h3><span class="quiet-tag">不上传云端</span></div>

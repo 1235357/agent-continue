@@ -1,5 +1,48 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## 3.0.5 Scheduler Candidate: Actual Background Fixture (2026-11-09)
+
+The latest owner report is an actual installed3.0.4 send failure, not a Windows
+MCP symptom. Reproduction in official ProseMirror before the fix: delayed Send
+activation100ms, synchronous configured-model write, ignored synthetic Ctrl+Enter,
+zero button clicks/submissions, text left unsent despite dispatched=true.
+
+The updated helper/worker uses one durable reservation, prepare/observe/commit,
+extension-worker readiness timing, sticky scoped Send presence and document-ID
+pinning. Final changed-model correction emits no second input/change cycle.
+An explicitly unattempted submission is not a sent receipt or an unknown send.
+The new fixed diagnostic codes contain no prompt, path, URL or exception content.
+
+Local checks read back this continuation: helper85/85; state50/50; official PM
+helper11/11; official PM real MV3 expedited-alarm8/8, including a >100000-character
+prompt submitted intact while hidden; natural one-minute MV3 alarm7/7 before the
+additional long-prompt case; prompt/localization/support/disclosure51/51. Natural
+alarm was not SEND_NOW or a manual key: one click, one matching new message,
+sentCount1, zero synthetic keys, no foreground tab/window/focus/selection change.
+Pause and a subsequently delivered stale heartbeat produced no extra submission.
+The complete post-integration npm test exited0. A subsequent narrow correction
+retains Send presence observed at commit entry through a synchronous unmount;
+the added85th unit test passes. Final packaged regression is recorded separately.
+
+The final ZIP extracted under dist/agent-continue-3.0.5-candidate subsequently
+passed8/8 official PM MV3 scenarios with TEST_REAL_DUE_ALARM=1 and12/12 prompt
+capacity tests. Log: .artifacts/scheduler-305-final-package-background.log and
+.artifacts/scheduler-305-final-package-prompts.log. The natural browser alarm
+was delivered while the target remained hidden; no SEND_NOW or manual key
+triggered that case. The long-prompt case is an additional extension-control send,
+not a claim that the natural alarm used a long prompt. ZIP SHA25651f24d26...a7b385,
+Store ZIP3d1a77f8...95ca54, with full digests in DEVELOPMENT-HANDOFF.md.
+
+Removed application prompt/queue-text caps, plain-text/config import byte caps and
+textarea maxlength. DOCX/PDF file/decompression/page/time safeguards remain.
+Large fixture success is not unlimited platform capacity. No installed extension,
+existing task, real account permission, production connection or native runtime
+was changed by these checks. Source3.0.5 and local ZIPs are unreleased candidates.
+
+An already-admitted final injection cannot be recalled by Pause. This testing does
+not close live-site scheduler, concurrent matching-message attribution, installed
+browser-button lifecycle or full quit/reopen acceptance. Keep the full goal active.
+
 ## Status Audit: Cold Shell And Publication (2026-11-09 05:24 UTC)
 
 Authenticated IAB readback confirms Extension checks 42562410256 at adf2a79

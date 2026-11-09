@@ -55,6 +55,7 @@ function fixture(options) {
   const text=view=>view.state.doc.textBetween(0,view.state.doc.content.size,'\\n','\\n');
   const domText=view=>Array.from(view.dom.children,node=>node.textContent).join('\\n');
   let button=document.querySelector('#send');
+  let sendActivationTimer;
   const submit=()=>{stats.submits++;stats.sentTexts.push(text(pm));stats.sentDOMTexts.push(domText(pm));stats.events.push('submit')};
   const wireButton=()=>{if(button)button.addEventListener('click',()=>{stats.clicks++;submit()})};
   wireButton();
@@ -76,7 +77,16 @@ function fixture(options) {
         'Enter':()=>{stats.commands++;if(!options.rejectSynthetic||stats.lastKeyTrusted)submit();return true}
       })]}),
       attributes:{role:'textbox','aria-label':'Message','data-composer-markdown':''},
-      dispatchTransaction(tr){pm.updateState(pm.state.apply(tr));stats.updates++;if(button)button.disabled=!pm.state.doc.textContent.trim()}
+      dispatchTransaction(tr){
+        pm.updateState(pm.state.apply(tr));stats.updates++;
+        if(button){
+          if(options.sendActivationDelayMs){
+            button.disabled=true;
+            clearTimeout(sendActivationTimer);
+            sendActivationTimer=setTimeout(()=>{button.disabled=!pm.state.doc.textContent.trim()},options.sendActivationDelayMs);
+          }else button.disabled=!pm.state.doc.textContent.trim();
+        }
+      }
     });
     if(!options.noOwner)pm.dom.editor={view:pm};
     const reset=()=>{
@@ -247,6 +257,41 @@ try {
       assert.equal(result.dispatched, true);
       const observed = await inspect(page);
       assert.deepEqual([observed.commands, observed.clicks, observed.submits], [1, 0, 0]);
+    });
+  await scenario('Auto clicks a synchronously enabled Send even when synthetic keyboard submission is rejected',
+    { dot: true, rejectSynthetic: true }, async (page, args) => {
+      const result = await commit(page, { ...args, sendMethod: 'auto' });
+      assert.deepEqual(result, { supported: true, dispatched: true, method: 'button', code: 'dispatched' });
+      const observed = await inspect(page);
+      submittedOnce(observed);
+      assert.deepEqual(observed.keys, []);
+    });
+  await scenario('Auto waits for delayed Send activation instead of prematurely dispatching ignored Ctrl+Enter',
+    { dot: true, rejectSynthetic: true, sendActivationDelayMs: 100 }, async (page, args) => {
+      await page.evaluate(() => {
+        fixture.sendDisabledAtKeydown = [];
+        pm.dom.addEventListener('keydown', () => {
+          fixture.sendDisabledAtKeydown.push(document.querySelector('#send').disabled);
+        }, true);
+      });
+      const result = await commit(page, { ...args, sendMethod: 'auto' });
+      assert.deepEqual(result, { supported: true, dispatched: false, method: null, code: 'waiting-send' });
+      const observed = await inspect(page);
+      assert.equal(observed.updates, 1, 'The official model transaction is synchronous and succeeds once');
+      assert.equal(observed.model, prompt);
+      assert.deepEqual([observed.commands, observed.clicks, observed.submits], [0, 0, 0]);
+      assert.deepEqual(observed.sentTexts, []);
+      assert.deepEqual(observed.sendDisabledAtKeydown, []);
+      assert.deepEqual(observed.keys, []);
+      await page.waitForFunction(() => !document.querySelector('#send').disabled, null, { timeout: 3000 });
+      const ready = await commit(page, { ...args, phase: 'observe', sendMethod: 'auto' });
+      assert.equal(ready.code, 'ready');
+      assert.equal((await inspect(page)).updates, 1, 'Observation cannot restart button activation');
+      assert.equal((await commit(page, { ...args, phase: 'commit', sendMethod: 'auto' })).method, 'button');
+      const submitted = await inspect(page);
+      submittedOnce(submitted);
+      assert.equal(submitted.updates, 1, 'An unchanged prepared model is not rewritten before clicking');
+      assert.deepEqual(submitted.keys, []);
     });
   await scenario('actually hidden browser tab sends once without changing foreground text or selection',
     { dot: true }, async (page, args) => {

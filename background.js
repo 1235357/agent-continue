@@ -3,7 +3,7 @@ import runtimeCatalog from './i18n-runtime.js';
 
 const t = createTranslator(runtimeCatalog);
 
-import { DEFAULT_CONFIG, DELIVERY_BEHAVIOR_VERSION, normalizeUrl, validateTarget, readConfig, currentPrompt, inQuietHours, MAX_PROMPT_CHARS } from './config.js';
+import { DEFAULT_CONFIG, DELIVERY_BEHAVIOR_VERSION, normalizeUrl, validateTarget, readConfig, currentPrompt, inQuietHours } from './config.js';
 import { pageAction, translatePageResult } from './adapter.js';
 import { editorCommit } from './editor-commit.js';
 import { BUNDLED_PROMPT } from './preset.js';
@@ -109,7 +109,7 @@ async function logEvent(event, message, diagnostic = null) {
   const stored = (await chrome.storage.local.get('logs')).logs;
   const logs = Array.isArray(stored) ? stored.filter(entry => entry && typeof entry === 'object' && !Array.isArray(entry)
     && Number.isFinite(entry.at) && typeof entry.event === 'string' && entry.event.length > 0 && typeof entry.message === 'string') : [];
-  const codes = ['adapter-result', 'execution-exception', 'execution-timeout', 'no-valid-result', 'existing-draft', 'composer-changed', 'timing-probe'];
+  const codes = ['adapter-result', 'execution-exception', 'execution-timeout', 'no-valid-result', 'existing-draft', 'composer-changed', 'timing-probe', 'send-not-ready', 'commit-not-dispatched'];
   const detail = diagnostic && codes.includes(diagnostic.code)
     ? { diagnostic: { code: diagnostic.code, ...(Number.isFinite(diagnostic.durationMs)
       ? { durationMs: Math.max(0, Math.min(120000, diagnostic.durationMs)) } : {}) } } : {};
@@ -220,7 +220,9 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS) {
       return { status: 'unknown', message: t('页面未返回可确认的结果。'), diagnosticCode: 'no-valid-result' };
     }
     // Return only bounded adapter status fields.
-    const diagnosticCode = value.status === 'draft' && value.diagnosticCode === 'existing-draft' ? value.diagnosticCode : null;
+    const diagnosticCode = (value.status === 'draft' && value.diagnosticCode === 'existing-draft')
+      || (value.status === 'busy' && value.diagnosticCode === 'send-not-ready')
+      || (value.status === 'blocked' && value.diagnosticCode === 'commit-not-dispatched') ? value.diagnosticCode : null;
     return { status: value.status, message: String(value.message || '').slice(0, 300), identity: typeof value.identity === 'string' ? value.identity.slice(0, 500) : null, assistantToken: typeof value.assistantToken === 'string' ? value.assistantToken.slice(0, 500) : null, assistantCount: Number(value.assistantCount) || 0, diagnosticCode };
   } catch (error) {
     if (watchdogExpired) return { status: 'unknown', message: t('页面操作超时，本周期结果未确认。'), diagnosticCode: 'execution-timeout' };
@@ -404,7 +406,7 @@ async function commitRun(message, sender) {
     const version = intentVersion;
     // Persist before crossing worlds. An uncertain invocation is never replayed.
     await setJob({ ...job, editorCommitRunId: job.runId });
-    return { tabId: job.tabId, version, args: {
+    return { tabId: job.tabId, documentId: sender.documentId, version, args: {
       expectedUrl: job.url, targetIdentity: job.targetIdentity,
       prompt: currentPrompt(job), sendMethod: job.sendMethod ?? 'auto', deadline: job.runDeadline,
     } };
@@ -413,17 +415,62 @@ async function commitRun(message, sender) {
   if (permit.duplicate) return { ok: false, code: 'unknown' };
   if (permit.version !== intentVersion) return { ok: false, code: 'cancelled' };
   try {
-    const frames = await chrome.scripting.executeScript({ target: { tabId: permit.tabId },
-      world: 'MAIN', func: editorCommit, args: [permit.args] });
-    const value = frames?.find(frame => frame.frameId === 0)?.result;
+    const allowed = async () => {
+      const checked = await checkRun(message.runId, sender);
+      return checked.allowed && permit.version === intentVersion;
+    };
+    let requireButton = false;
+    let absentSendObserved = false;
+    const invoke = async phase => {
+      const target = { tabId: permit.tabId, ...(permit.documentId ? { documentIds: [permit.documentId] } : {}) };
+      const frames = await chrome.scripting.executeScript({ target,
+        world: 'MAIN', func: editorCommit, args: [{ ...permit.args, phase, requireButton }] });
+      return frames?.find(frame => frame.frameId === 0)?.result;
+    };
+    const notDispatched = value => ({ ok: false, dispatched: false, code: 'not-dispatched',
+      reason: ['waiting-send', 'send-unavailable', 'send-ambiguous', 'attachments', 'busy'].includes(value?.code)
+        ? value.code : 'commit-unavailable' });
+    if (!await allowed()) return { ok: false, code: 'cancelled' };
+    const prepared = await invoke('prepare');
+    if (!await allowed()) return { ok: false, code: 'cancelled' };
     // Only an explicit, non-mutating unsupported view permits the legacy path.
-    if (value?.supported === false && value.dispatched === false && value.code === 'unsupported-view') {
+    if (prepared?.supported === false && prepared.dispatched === false && prepared.code === 'unsupported-view') {
       return { ok: true, supported: false, dispatched: false };
     }
-    if (value?.supported === true && value.dispatched === true) {
-      return { ok: true, supported: true, dispatched: true };
+    if (prepared?.dispatched !== false) return { ok: false, code: 'unknown' };
+    if (!prepared.supported || prepared.code !== 'prepared') return notDispatched(prepared);
+    requireButton = prepared.hasSend === true;
+    // The extension worker, not a throttled hidden-page timer, owns settling.
+    // Waiting is read-only; the durable reservation still permits only one send.
+    while (await allowed()) {
+      const observation = await invoke('observe');
+      if (!await allowed()) return { ok: false, code: 'cancelled' };
+      if (observation?.dispatched !== false) return { ok: false, code: 'unknown' };
+      requireButton ||= observation.hasSend === true;
+      if (observation.supported && observation.code === 'ready') {
+        // Give an initially absent Auto control one worker-owned render turn.
+        // Once seen, its temporary removal must never enable keyboard fallback.
+        if (permit.args.sendMethod === 'auto' && observation.hasSend === false
+          && !requireButton && !absentSendObserved) {
+          absentSendObserved = true;
+          await new Promise(resolve => setTimeout(resolve, 150));
+          continue;
+        }
+        const value = await invoke('commit');
+        if (value?.supported === true && value.dispatched === true) {
+          return { ok: true, supported: true, dispatched: true };
+        }
+        if (value?.dispatched !== false) return { ok: false, code: 'unknown' };
+        // A final model correction may itself schedule a new framework render.
+        // Only a proven no-dispatch wait may continue inside this reservation.
+        if (value.code !== 'waiting-send') return notDispatched(value);
+        requireButton = true;
+      } else if (!observation.supported || observation.code !== 'waiting-send') {
+        return notDispatched(observation);
+      }
+      await new Promise(resolve => setTimeout(resolve, 150));
     }
-    return { ok: false, code: value?.dispatched === false ? 'unavailable' : 'unknown' };
+    return { ok: false, dispatched: false, code: 'not-dispatched', reason: 'waiting-send' };
   } catch { return { ok: false, code: 'unknown' }; }
 }
 async function runStillCurrent(snapshot) {
@@ -555,13 +602,12 @@ async function initializePrivatePreset() {
     const response = await fetch(chrome.runtime.getURL('private/prompt.txt'));
     if (!response.ok) return;
     const bytes = await response.arrayBuffer();
-    if (bytes.byteLength > 5 * 1024 * 1024) return;
     let text;
     const view = new Uint8Array(bytes);
     if (view[0] === 0xff && view[1] === 0xfe) text = new TextDecoder('utf-16le').decode(bytes);
     else if (view[0] === 0xfe && view[1] === 0xff) text = new TextDecoder('utf-16be').decode(bytes);
     else { try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { text = new TextDecoder('gb18030', { fatal: true }).decode(bytes); } }
-    if (!text.trim() || text.length > MAX_PROMPT_CHARS) return;
+    if (!text.trim()) return;
     // No telemetry, hashing, console output, preview or automatic submission.
     await chrome.storage.local.set({ config: { ...DEFAULT_CONFIG, prompt: text, promptSource: 'private-file' }, privatePresetImported: true });
   } catch { /* User can still import through the local file picker. */ }

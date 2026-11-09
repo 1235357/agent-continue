@@ -26,8 +26,8 @@
 
 ## 处理限额
 
-- 每个输入文件最多 **5 MiB**。
-- 提取结果最多 **100,000 个 JavaScript 字符单元**；超出会拒绝导入，绝不静默截断。
+- 纯文本、结构化文本和 HTML 不设置文件字节上限或提取后字符上限；提示词和队列正文不设人为字符上限。实际容量受浏览器存储、内存、消息传递及目标平台限制；不会静默截断。
+- DOCX/PDF 输入文件最多 **5 MiB**，这是二进制文档解析的资源防护，不是提示词长度限制。
 - DOCX 正文 XML 解压后最多 **4 MiB**；同时检查声明大小与实际流式输出大小，校验 CRC，并拒绝加密、ZIP64、多卷 ZIP、重复正文、损坏结构和 XML 实体声明。
 - PDF 最多 **100 页**，解析最多 **20 秒**。超时终止 Worker；清理等待也有上限。
 - 空文件、无有效文字或包含二进制控制字符的“文本文件”会被拒绝。
@@ -44,7 +44,7 @@ const { text, format, warnings } = await importPromptFile(file, {
 // Store `text` locally as the runtime prompt. Do not log or auto-reveal it.
 ```
 
-导入器只返回结果，不修改扩展配置，也不主动发送聊天。错误提供固定 `code` 与不含文档内容的中文 `message`。例如 `FILE_TOO_LARGE`、`TEXT_TOO_LARGE`、`ENCODING`、`ENCRYPTED`、`PDF_NO_TEXT`、`PDF_TIMEOUT`。调用方应显示这种受控错误，不展示底层解析器异常或堆栈。
+导入器只返回结果，不修改扩展配置，也不主动发送聊天。错误提供固定 `code` 与不含文档内容的本地化 `message`。例如 `FILE_TOO_LARGE`（DOCX/PDF）、`ENCODING`、`ENCRYPTED`、`PDF_NO_TEXT`、`PDF_TIMEOUT`。调用方应显示这种受控错误，不展示底层解析器异常或堆栈。
 
 `file-import.js` 必须从扩展页面调用，而不是注入到聊天页面。TXT 等纯文本路径不加载 PDF.js；只有导入 PDF 时动态加载本地模块。PDF.js 的主模块、Worker 和字体/CMap 资源全部来自扩展自身目录。
 

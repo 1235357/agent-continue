@@ -13,7 +13,7 @@ function t(key, ...values) {
 await initializeLanguage();
 
 import { DEFAULT_CONFIG, normalizeUrl, readConfig } from './config.js';
-import { importPromptFile, SUPPORTED_ACCEPT, MAX_PROMPT_CHARS } from './file-import.js';
+import { importPromptFile, SUPPORTED_ACCEPT } from './file-import.js';
 import { buildActivityExport } from './activity-export.js';
 
 const $ = id => document.getElementById(id);
@@ -74,8 +74,6 @@ if (fullView) {
 }
 $('promptFile').accept = SUPPORTED_ACCEPT;
 $('queueFiles').accept = SUPPORTED_ACCEPT;
-$('prompt').maxLength = MAX_PROMPT_CHARS || 100000;
-$('queueText').maxLength = MAX_PROMPT_CHARS || 100000;
 
 function setMessage(id, message) {
   if (lastTranslation?.message === message) messageRecipes.set(id, lastTranslation.render);
@@ -521,7 +519,7 @@ $('addToQueue').addEventListener('click', () => {
 $('saveQueueItem').addEventListener('click', () => {
   if (!canEdit() || queueEditing == null) return;
   const text = $('queueText').value;
-  if (!text.trim() || text.length > (MAX_PROMPT_CHARS || 100000)) { tell(t('队列提示词不能为空，且不能超过 10 万字符。'), true); return; }
+  if (!text.trim()) { tell(t('队列提示词不能为空。'), true); return; }
   const next = clone(draftConfig);
   next.queue[queueEditing] = { name: $('queueName').value.trim() || t`提示词 ${queueEditing + 1}`, text };
   try { draftConfig = readConfig(next, { allowEmpty: true }); } catch (error) { tell(safeFailure(error), true); return; }
@@ -604,7 +602,6 @@ $('configFile').addEventListener('change', async event => {
   const originalDraft = clone(draftConfig);
   importing = true; hidePrompt(); closeQueueEditor(); paint(latestJob);
   try {
-    if (file.size > 10 * 1024 * 1024) throw new Error(t('配置文件不能超过 10 MB。'));
     let value; try { value = JSON.parse(await file.text()); } catch { throw new Error(t('配置文件不是有效的 JSON。')); }
     if (importEpoch !== contentEpoch) throw new Error(t('导入已取消。'));
     const next = checkedImport(value);

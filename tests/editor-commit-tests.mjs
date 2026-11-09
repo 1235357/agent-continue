@@ -398,6 +398,59 @@ test('auto prefers scoped Send; ctrl-enter never clicks an available Send', () =
   assert.equal(keyboard.state.metrics.keys.length, 2);
 });
 
+test('model preparation and read-only readiness wait for delayed Send before one commit', () => {
+  const h = fixture({ dot: true, disabled: true });
+  const prepared = h.run({ phase: 'prepare', sendMethod: 'auto' });
+  assert.equal(prepared.code, 'prepared');
+  assert.equal(prepared.supported, true);
+  assert.equal(prepared.dispatched, false);
+  noDispatch(h);
+  const before = structuredClone(h.state.metrics);
+  const waiting = h.run({ phase: 'observe', sendMethod: 'auto' });
+  assert.equal(waiting.code, 'waiting-send');
+  assert.equal(waiting.dispatched, false);
+  assert.deepEqual(h.state.metrics, before, 'readiness cannot modify the model, focus or events');
+  h.state.buttons[0].disabled = false;
+  assert.equal(h.run({ phase: 'observe', sendMethod: 'auto' }).code, 'ready');
+  h.state.setText('PAGE_CHANGED_WHILE_WAITING');
+  assert.equal(h.run({ phase: 'commit', sendMethod: 'auto' }).dispatched, true);
+  assert.equal(h.state.metrics.clicks, 1);
+  assert.deepEqual(h.state.metrics.keys, []);
+  assert.deepEqual(h.state.metrics.sent, [h.args.prompt]);
+  assert.deepEqual(h.state.metrics.events, before.events, 'Final model correction cannot repeat the input/restore cycle');
+});
+
+test('observation preserves explicit keyboard choice without changing a disabled model', () => {
+  const h = fixture({ disabled: true });
+  const before = structuredClone(h.state.metrics);
+  assert.equal(h.run({ phase: 'observe', sendMethod: 'ctrl-enter' }).code, 'ready');
+  assert.deepEqual(h.state.metrics, before);
+  assert.equal(h.run({ phase: 'invalid' }).code, 'invalid-phase');
+  noDispatch(h);
+});
+test('a previously observed Send can disappear temporarily without triggering keyboard fallback', () => {
+  const h = fixture({ dot: true, disabled: true });
+  assert.equal(h.run({ phase: 'prepare', sendMethod: 'auto' }).hasSend, true);
+  for (const send of h.state.buttons) send.isConnected = false;
+  assert.equal(h.run({ phase: 'observe', sendMethod: 'auto', requireButton: true }).code, 'waiting-send');
+  assert.equal(h.run({ phase: 'commit', sendMethod: 'auto', requireButton: true }).dispatched, false);
+  noDispatch(h);
+  h.state.replaceButton();
+  h.state.buttons[0].disabled = false;
+  assert.equal(h.run({ phase: 'commit', sendMethod: 'auto', requireButton: true }).method, 'button');
+  assert.equal(h.state.metrics.clicks, 1);
+  assert.deepEqual(h.state.metrics.keys, []);
+});
+test('Send present at final commit entry remains required if the corrective transaction unmounts it', () => {
+  const h = fixture({ dot: true, disabled: true, onCommit(state) {
+    for (const send of state.buttons) send.isConnected = false;
+  } });
+  assert.equal(h.run({ phase: 'commit', sendMethod: 'auto', requireButton: false }).code, 'waiting-send');
+  assert.equal(h.state.metrics.transactions, 1);
+  assert.deepEqual(h.state.view.state.doc.lines.join('\n'), h.args.prompt);
+  noDispatch(h);
+});
+
 test('disabled Send blocks button-only but does not block keyboard-only', () => {
   const h = fixture({ disabled: true });
   assert.equal(h.run().dispatched, false);

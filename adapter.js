@@ -467,6 +467,13 @@ export async function pageAction(args) {
       }
       if (!(commit?.ok === true && commit.supported === false && commit.dispatched === false)) {
         if (commit?.code === 'cancelled') return result('cancelled', '本次执行已取消。');
+        if (commit?.code === 'not-dispatched' && commit.dispatched === false) {
+          // Known no-attempt is not an uncertain send. Let the normal readiness
+          // retry run, rather than strand a filled composer for a full interval.
+          if (commit.reason === 'attachments') return protectedDraft('输入框有附件，本次不提交。');
+          if (['waiting-send', 'busy'].includes(commit.reason)) return result('busy', '发送控件尚未就绪，稍后自动检查。', 'send-not-ready');
+          return result('blocked', '发送控件当前不可用，稍后自动检查。', 'commit-not-dispatched');
+        }
         // No second method follows an uncertain or attempted model commit.
         submitted = true;
         return result('unknown', '页面未返回可确认的结果。');

@@ -55,6 +55,13 @@ test('unknown diagnostics and all free-form diagnostic data are omitted', async 
     assert.deepEqual(value.logs, [{ elapsedMs: 0, event: 'unknown' }]);
   }
 });
+test('known readiness and no-dispatch diagnostics export no prompt, exception or page data', async () => {
+  for (const code of ['send-not-ready', 'commit-not-dispatched']) {
+    const value = await build([{ at: now, event: 'busy', diagnostic: { code, durationMs: 150, reason: secret } }]);
+    assert.deepEqual(value.logs[0].diagnostic, { code, durationMs: 150 });
+    assert.equal(JSON.stringify(value).includes(secret), false);
+  }
+});
 
 test('timing diagnostics export only bounded numbers, fixed enums and actual booleans', async () => {
   const value = await build([{ at: now, event: 'timing-diagnostics', message: secret,

@@ -101,7 +101,7 @@ Page changes can break compatibility. This extension sends messages; it does not
 
 Text and Markdown files, structured text, HTML, DOCX, and text-based PDF are processed locally. HTML is reduced to text without executing its scripts; DOCX and PDF import extract text rather than preserve layout. PDF parsing uses bundled PDF.js resources, not an online converter or runtime CDN. Scanned PDFs need OCR elsewhere; legacy `.doc`, encrypted documents, and password-protected PDFs are not supported.
 
-Limits: 5 MiB per file, 100,000 characters per prompt, 50 queue items and 600,000 queue characters in total; DOCX body XML is limited to 4 MiB and PDF import to 100 pages. Encoding detection and reading order can be imperfect. Review extracted text before using sensitive or layout-dependent documents. See [File Formats](https://github.com/1235357/agent-continue/blob/main/docs/FILE_FORMATS.md).
+There is no application-set prompt character limit, aggregate queue-text limit, or plain-text file byte limit. The queue supports 50 items. Browser storage, available memory, browser messaging and the target service still impose practical limits; oversized payloads are never silently truncated. Document-parser safeguards remain: DOCX/PDF input up to 5 MiB, DOCX body XML up to 4 MiB, and PDF import up to 100 pages with a 20-second parsing timeout. Encoding detection and reading order can be imperfect. Review extracted text before using sensitive or layout-dependent documents. See [File Formats](https://github.com/1235357/agent-continue/blob/main/docs/FILE_FORMATS.md).
 
 ## Privacy and Permissions
 

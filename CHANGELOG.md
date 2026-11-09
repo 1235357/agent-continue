@@ -1,5 +1,22 @@
 # Changelog
 
+## [3.0.5] - Unreleased
+
+- Wait in the extension worker for delayed Send readiness after preparing a
+  controlled editor. A present but disabled or temporarily unmounted Send no
+  longer causes Auto to dispatch an ignored keyboard event. Pin the sender's
+  document across stages, recheck authorization, and submit at most once.
+- Reassert changed model text without repeating the input/restore cycle. Known
+  no-dispatch outcomes are distinct from uncertain delivery and use the normal
+  readiness retry rather than an entire send-interval delay. Pause, attachments,
+  exact targets and receipt-based counting remain in force.
+- Remove application-set prompt, queue-text, plain-text import and config-import
+  size caps, including both textarea maxlength attributes. Preserve user text
+  verbatim; browser/platform capacity and DOCX/PDF parser safeguards still apply.
+- Add hidden-tab, real Chromium-alarm regression coverage for delayed Send,
+  rejected synthetic keys, exact single-message counting and post-Pause silence.
+  These fixtures do not establish delivery on every live ChatGPT or Dot build.
+
 ## [3.0.4] - 2026-11-08
 
 - Replace the unbounded refill-and-wait loop with bounded event-input settling

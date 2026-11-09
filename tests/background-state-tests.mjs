@@ -81,7 +81,7 @@ async function harness(seed={}) {
     message(message,sender={id:'fixture-extension',url:'chrome-extension://fixture/popup.html'}){
       return new Promise(resolve=>chrome.runtime.onMessage.listeners[0](message,sender,resolve));
     },
-    sender(){return {tab:copy(state.tab),frameId:0,url:state.tab.url};},
+    sender(){return {tab:copy(state.tab),frameId:0,documentId:'synthetic-bound-document',url:state.tab.url};},
     async start(config={}){
       const reply=await this.message({type:'START',config:{intervalMinutes:30,prompt:'Continue mock task.',maxSends:0,...config}});
       assert.equal(reply.ok,true,JSON.stringify(reply));return reply.job;
@@ -464,7 +464,8 @@ await scenario('Model commit uses stored prompt, exact frame, and a durable one-
   const h = await harness();
   const job = await h.start();
   h.state.session.job = { ...job, phase: 'sending', runKind: 'send', runDeadline: Date.now() + 10000 };
-  h.pageResult = async () => ({ supported: true, dispatched: true, code: 'dispatched' });
+  h.pageResult = async args => ({ supported: true, dispatched: args.phase === 'commit',
+    code: args.phase === 'prepare' ? 'prepared' : args.phase === 'observe' ? 'ready' : 'dispatched' });
   const request = { type: 'COMMIT_RUN', runId: job.runId, prompt: 'UNTRUSTED_IGNORED' };
   const before = h.state.injections.length;
   assert.equal((await h.message(request, { ...h.sender(), frameId: 1 })).ok, false);
@@ -472,14 +473,136 @@ await scenario('Model commit uses stored prompt, exact frame, and a durable one-
   assert.equal((await h.message(request, h.sender())).dispatched, true);
   const injection = h.state.injections.at(-1);
   assert.equal(injection.world, 'MAIN');
+  assert.deepEqual(injection.target.documentIds, ['synthetic-bound-document']);
   assert.equal(injection.args[0].prompt, job.prompt);
   assert.equal(injection.args[0].runId, undefined);
   assert.equal(h.state.session.job.editorCommitRunId, job.runId);
   assert.equal((await h.message(request, h.sender())).code, 'unknown');
-  assert.equal(h.state.injections.length, before + 1);
+  assert.equal(h.state.injections.length, before + 3);
+  assert.deepEqual(h.state.injections.slice(before).map(item => item.args[0].phase), ['prepare', 'observe', 'commit']);
   await h.message({ type: 'PAUSE' });
   assert.equal((await h.message(request, h.sender())).ok, false);
-  assert.equal(h.state.injections.length, before + 1);
+  assert.equal(h.state.injections.length, before + 3);
+});
+await scenario('Delayed Send is observed in the worker before exactly one submission, without activating the tab', async () => {
+  const h = await harness();
+  const job = await h.start();
+  h.state.session.job = { ...job, phase: 'sending', runKind: 'send', runDeadline: Date.now() + 10000 };
+  let observations = 0;
+  h.pageResult = async args => {
+    assert.equal(h.state.session.job.editorCommitRunId, job.runId, 'Reserve before preparation');
+    return { supported: true, dispatched: args.phase === 'commit', code: args.phase === 'prepare'
+      ? 'prepared' : args.phase === 'observe' ? ++observations === 1 ? 'waiting-send' : 'ready' : 'dispatched' };
+  };
+  const before = h.state.injections.length;
+  assert.equal((await h.message({ type: 'COMMIT_RUN', runId: job.runId }, h.sender())).dispatched, true);
+  assert.deepEqual(h.state.injections.slice(before).map(item => item.args[0].phase), ['prepare', 'observe', 'observe', 'commit']);
+  assert.ok(h.state.tabUpdates.every(update => !('active' in update)));
+});
+await scenario('Observed Send presence persists across framework unmounts within one reservation', async () => {
+  const h = await harness();
+  const job = await h.start();
+  h.state.session.job = { ...job, phase: 'sending', runKind: 'send', runDeadline: Date.now() + 10000 };
+  h.pageResult = async args => {
+    if (args.phase === 'prepare') return { supported: true, dispatched: false, code: 'prepared', hasSend: true };
+    assert.equal(args.requireButton, true);
+    return { supported: true, dispatched: args.phase === 'commit', code: args.phase === 'observe' ? 'ready' : 'dispatched' };
+  };
+  assert.equal((await h.message({ type: 'COMMIT_RUN', runId: job.runId }, h.sender())).dispatched, true);
+});
+await scenario('Auto waits one render turn for an initially absent Send instead of prematurely choosing keyboard', async () => {
+  const h = await harness();
+  const job = await h.start({ sendMethod: 'auto' });
+  h.state.session.job = { ...job, phase: 'sending', runKind: 'send', runDeadline: Date.now() + 10000 };
+  let observations = 0;
+  h.pageResult = async args => {
+    if (args.phase === 'prepare') return { supported: true, dispatched: false, code: 'prepared', hasSend: false };
+    if (args.phase === 'observe') return { supported: true, dispatched: false, code: 'ready', hasSend: ++observations > 1 };
+    assert.equal(observations, 2);
+    assert.equal(args.requireButton, true);
+    return { supported: true, dispatched: true, code: 'dispatched' };
+  };
+  assert.equal((await h.message({ type: 'COMMIT_RUN', runId: job.runId }, h.sender())).dispatched, true);
+});
+await scenario('A disabled Send first appearing at final correction stays required through its later unmount', async () => {
+  const h = await harness();
+  const job = await h.start({ sendMethod: 'auto' });
+  h.state.session.job = { ...job, phase: 'sending', runKind: 'send', runDeadline: Date.now() + 10000 };
+  let observations = 0, commits = 0;
+  h.pageResult = async args => {
+    if (args.phase === 'prepare') return { supported: true, dispatched: false, code: 'prepared', hasSend: false };
+    if (args.phase === 'observe') {
+      observations++;
+      if (commits === 1 && observations === 3) {
+        assert.equal(args.requireButton, true, 'A waiting commit is evidence a scoped button must remain required');
+        return { supported: true, dispatched: false, code: 'waiting-send', hasSend: false };
+      }
+      if (observations >= 4) return { supported: true, dispatched: false, code: 'ready', hasSend: true };
+      return { supported: true, dispatched: false, code: 'ready', hasSend: false };
+    }
+    if (++commits === 1) return { supported: true, dispatched: false, code: 'waiting-send' };
+    return { supported: true, dispatched: true, code: 'dispatched' };
+  };
+  assert.equal((await h.message({ type: 'COMMIT_RUN', runId: job.runId }, h.sender())).dispatched, true);
+  assert.equal(commits, 2, 'Only the known no-dispatch correction is repeated');
+});
+await scenario('A replaced document cannot receive a later phase through tabId fallback', async () => {
+  const h = await harness();
+  const job = await h.start();
+  h.state.session.job = { ...job, phase: 'sending', runKind: 'send', runDeadline: Date.now() + 10000 };
+  const before = h.state.injections.length;
+  h.chrome.scripting.executeScript = async request => {
+    h.state.injections.push(request);
+    assert.deepEqual(request.target.documentIds, ['synthetic-bound-document']);
+    if (request.args[0].phase !== 'prepare') throw new Error('Bound document no longer exists');
+    return [{ frameId: 0, result: { supported: true, dispatched: false, code: 'prepared' } }];
+  };
+  assert.equal((await h.message({ type: 'COMMIT_RUN', runId: job.runId }, h.sender())).code, 'unknown');
+  assert.deepEqual(h.state.injections.slice(before).map(item => item.args[0].phase), ['prepare', 'observe']);
+});
+for (const stage of ['prepare', 'observe']) {
+  await scenario(`Pause during ${stage} prevents the final submission`, async () => {
+    const h = await harness();
+    const job = await h.start();
+    h.state.session.job = { ...job, phase: 'sending', runKind: 'send', runDeadline: Date.now() + 10000 };
+    h.pageResult = async args => {
+      if (args.phase === stage) await h.message({ type: 'PAUSE' });
+      return { supported: true, dispatched: false, code: args.phase === 'prepare' ? 'prepared' : 'ready' };
+    };
+    const before = h.state.injections.length;
+    assert.equal((await h.message({ type: 'COMMIT_RUN', runId: job.runId }, h.sender())).code, 'cancelled');
+    assert.ok(!h.state.injections.slice(before).some(item => item.args[0].phase === 'commit'));
+    assert.equal(h.state.session.job.enabled, false);
+  });
+}
+await scenario('A final correction waits only after explicit no-dispatch; unknown never replays commit', async () => {
+  for (const finalCode of ['waiting-send', 'unknown']) {
+    const h = await harness();
+    const job = await h.start();
+    h.state.session.job = { ...job, phase: 'sending', runKind: 'send', runDeadline: Date.now() + 10000 };
+    let commits = 0;
+    h.pageResult = async args => {
+      if (args.phase === 'commit') {
+        if (++commits === 1) return finalCode === 'unknown' ? undefined
+          : { supported: true, dispatched: false, code: 'waiting-send' };
+        return { supported: true, dispatched: true, code: 'dispatched' };
+      }
+      return { supported: true, dispatched: false, code: args.phase === 'prepare' ? 'prepared' : 'ready' };
+    };
+    const result = await h.message({ type: 'COMMIT_RUN', runId: job.runId }, h.sender());
+    assert.equal(commits, finalCode === 'unknown' ? 1 : 2);
+    assert.equal(result.code, finalCode === 'unknown' ? 'unknown' : undefined);
+    assert.equal(result.dispatched, finalCode === 'unknown' ? undefined : true);
+  }
+});
+await scenario('Ambiguous controls are a proven no-dispatch result, not a replay or uncertain send', async () => {
+  const h = await harness();
+  const job = await h.start();
+  h.state.session.job = { ...job, phase: 'sending', runKind: 'send', runDeadline: Date.now() + 10000 };
+  h.pageResult = async args => ({ supported: true, dispatched: false,
+    code: args.phase === 'prepare' ? 'prepared' : 'send-ambiguous' });
+  assert.deepEqual(await h.message({ type: 'COMMIT_RUN', runId: job.runId }, h.sender()),
+    { ok: false, dispatched: false, code: 'not-dispatched', reason: 'send-ambiguous' });
 });
 await scenario('An uncertain model injection never permits a second send method', async () => {
   const h = await harness();

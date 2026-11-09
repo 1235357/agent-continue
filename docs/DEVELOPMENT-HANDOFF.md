@@ -1,5 +1,64 @@
 # Agent Continue Development Handoff
 
+## Scheduler Priority And 3.0.5 Candidate (2026-11-09)
+
+The owner's latest actual 3.0.4 screenshot shows configured text stranded in the
+Dot composer, unconfirmed status and zero sends. This supersedes any inference
+that a passing fixture suite means the installed scheduler is fixed. The owner
+requires fully automatic BACKGROUND sending, redundancy for transient readiness,
+and no application-set prompt length cap. Manual foreground Control+Enter is a
+diagnostic, not acceptance of automatic delivery.
+
+Reproduced before changing the helper: official ProseMirror, synchronous model
+update, Send enabled 100 ms later, and rejected synthetic keys. Old Auto reported
+Ctrl+Enter dispatched while actual submissions remained zero and text stayed in
+the model. The candidate stages prepare / read-only observe / atomic commit
+inside one durable COMMIT_RUN reservation. Worker timers own readiness waits;
+Send presence is sticky across unmounts, including first appearance at final
+correction. The captured document ID pins later injections. Changed prompt text
+is reasserted without another input/restore loop. Known no-dispatch outcomes use
+the readiness retry instead of masquerading as uncertain delivery for 20 minutes.
+
+Prompt, aggregate queue-text, textarea, plain-text import and config-import caps
+are removed. Long text is not silently truncated. Browser memory/storage/message
+and destination-service limits still exist. DOCX/PDF parser resource safeguards
+remain. Queue count, interval, stop-marker bounds and explicit Pause remain.
+
+Observed local evidence: helper85/85, worker50/50, official PM helper11/11,
+official PM MV3 hidden/large-prompt8/8, natural one-minute background alarm7/7,
+and prompt/localization/support/disclosure51/51. The natural alarm test submits
+once with count1 and zero keys while the target stays actually hidden; foreground
+text/selection/tab/window focus do not change. A stale alarm after Pause is silent.
+The complete post-integration npm test exited0. A final narrow review correction
+then made commit-entry Send presence sticky within that same helper call, with
+its added85th unit test passing; packaged regression is tracked separately.
+Disposable fixture browsers
+are not the owner's live Chrome or real ChatGPT/Dot page.
+
+Final candidate ZIP readback also passed: extracted3.0.5 runtime completed8/8
+official PM MV3 scenarios with TEST_REAL_DUE_ALARM=1, including the natural
+one-minute hidden alarm and exact long-prompt submission; extracted prompt-limit
+tests12/12. Files: dist/agent-continue-3.0.5-candidate/agent-continue-3.0.5.zip
+(SHA25651f24d264024efea249a72389d03166a81a34dd1e67a097e6cf4102d76a7b385)
+and agent-continue-3.0.5-store.zip
+(SHA2563d1a77f83cda4fdaac923b1bf11040dfa35b6d0503b9cdcd381acfdbab95ca54).
+No installed-extension update or publication is implied by these package checks.
+
+Manifest3.0.5 is an UNRELEASED candidate, not a replacement public v3.0.4 asset.
+No installed IAB update, live-site scheduler fix, lifecycle closure, new GitHub
+Release or Store submission is claimed. Last Store readback remains3.0.4 revision
+00005 Pending review; do not cancel merely because a candidate package exists.
+The last checked GitHub main was c145de3 (cold-shell test repair committed and
+pushed); prior audit text calling it uncommitted is historical. Its extension CI
+succeeded. Native CI was not all green: Ubuntu asset acquisition returned504 and
+the Windows guided stage exposed a separate control-only terminal timeout.
+
+Review boundaries: Pause prevents new preparation/observation from reaching final
+admission; it cannot retract a final executeScript already handed to Chromium.
+Receipt-baseline concurrency during preparation and complete current-installation
+Pause/Revoke/reopen remain separate open work. No production VPN/MCP/IDE/research
+or external Chrome task/prompt/interval was changed. Original goal stays active.
+
 ## Status Audit (2026-11-09 05:24 UTC)
 
 The owner asked what is actually blocking completion. This is a status audit,

@@ -1,6 +1,6 @@
 # Chrome Web Store Listing - English
 
-Canonical English listing source for Agent Continue **3.0.4**. This file does not change a saved Store listing, submit a package, publish a release or establish approval or installation. Actual availability and submission state require separate platform receipts. Historical v2.2.1 is a separate scheduler-only release; do not replace its assets or describe it as Windows-enabled. The repository's [Windows review notes](https://github.com/1235357/agent-continue/blob/main/docs/STORE-LISTING.windows-candidate.en.md) retain the disclosure and submission checks.
+Canonical English listing source for Agent Continue **3.0.5** (unreleased candidate). This file does not change a saved Store listing, submit a package, publish a release or establish approval or installation. Actual availability and submission state require separate platform receipts. Historical v2.2.1 is a separate scheduler-only release; do not replace its assets or describe it as Windows-enabled. The repository's [Windows review notes](https://github.com/1235357/agent-continue/blob/main/docs/STORE-LISTING.windows-candidate.en.md) retain the disclosure and submission checks.
 
 After final release and disclosure gates are closed, use the entire **Description** section, including the developer/support block, for the new listing draft. The copy uses plain-text URLs rather than relying on Markdown rendering. Do not withdraw an existing review merely to apply this source copy.
 
@@ -55,6 +55,8 @@ Agent Continue supports user-directed workflows in ChatGPT: schedule your own pr
 Repeat one prompt, loop a queue, or run a queue once. Set an interval from 1 to 10080 minutes, optionally time the next send after a reply ends, and configure quiet hours, stop markers, or a confirmed-send limit. The default repeats one prompt every 20 minutes and attempts to interrupt an active response when due; waiting for idle is an option.
 
 Type your prompt or import text from a local document. Document parsing takes place locally with bundled resources. Text extraction does not preserve every layout, and scanned documents require OCR elsewhere. Prompt text is hidden until explicitly revealed. Local templates and up to 200 activity entries help manage repeated work.
+
+The candidate removes application-set prompt and aggregate queue-text character caps, plain-text input byte limits, and config-import byte limits. Browser storage, memory, messaging and the destination service still impose capacity limits. Binary document parser resource safeguards remain; no text is silently truncated to make it fit. Fixed `send-not-ready` and `commit-not-dispatched` diagnostics distinguish a known unattempted submission from uncertain delivery without adding prompt, URL or exception content to exports.
 
 The interface defaults to English and offers a Simplified Chinese language switch. Your language preference is stored locally; your prompts and custom content are not translated. The Developer & support page shows the developer contacts and installed extension version and offers the same language choices.
 

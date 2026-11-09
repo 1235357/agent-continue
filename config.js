@@ -3,8 +3,6 @@ import runtimeCatalog from './i18n-runtime.js';
 
 const t = createTranslator(runtimeCatalog);
 
-export const MAX_PROMPT_CHARS = 100000;
-export const MAX_QUEUE_CHARS = 600000;
 // Stored records from 0.2.0 did not distinguish the old waiting default from a
 // deliberate choice. Versioned records preserve choices made after the change.
 export const DELIVERY_BEHAVIOR_VERSION = 1;
@@ -47,7 +45,8 @@ export function readConfig(value = {}, { allowEmpty = false } = {}) {
   const intervalMinutes = Number(value.intervalMinutes ?? DEFAULT_CONFIG.intervalMinutes);
   const maxSends = Number(value.maxSends ?? DEFAULT_CONFIG.maxSends);
   // Validate whitespace without changing the user's original prompt.
-  const prompt = String(value.prompt ?? DEFAULT_CONFIG.prompt);
+  const prompt = value.prompt === undefined ? DEFAULT_CONFIG.prompt : value.prompt;
+  if (typeof prompt !== 'string') throw new Error(t('提示词必须是文本。'));
   const markerInput = value.stopMarkers ?? DEFAULT_CONFIG.stopMarkers;
   if (!Array.isArray(markerInput) || markerInput.length > 20 || markerInput.some(marker => typeof marker !== 'string' || marker.length > 100 || /[\r\n]/.test(marker))) {
     throw new Error(t('停止标记最多 20 条，每条最多 100 个字符，且不能包含换行。'));
@@ -55,7 +54,6 @@ export function readConfig(value = {}, { allowEmpty = false } = {}) {
   const stopMarkers = [...new Set(markerInput.map(marker => marker.trim()).filter(Boolean))];
   if (!Number.isFinite(intervalMinutes) || intervalMinutes < 1 || intervalMinutes > 10080) throw new Error(t('发送间隔必须为 1 至 10080 分钟。'));
   if (!Number.isInteger(maxSends) || maxSends < 0 || maxSends > 1000000) throw new Error(t('发送上限必须是 0 至 1000000 的整数；0 表示不限。'));
-  if (prompt.length > MAX_PROMPT_CHARS) throw new Error(t('单条提示词最多 100000 个字符。'));
   const mode = value.mode ?? DEFAULT_CONFIG.mode;
   const scheduleMode = value.scheduleMode ?? DEFAULT_CONFIG.scheduleMode;
   const sendMethod = value.sendMethod ?? DEFAULT_CONFIG.sendMethod;
@@ -65,10 +63,9 @@ export function readConfig(value = {}, { allowEmpty = false } = {}) {
   const queueInput = value.queue ?? [];
   if (!Array.isArray(queueInput) || queueInput.length > 50) throw new Error(t('队列最多包含 50 条提示词。'));
   const queue = queueInput.map((item, index) => {
-    if (!item || typeof item.text !== 'string' || !item.text.trim() || item.text.length > MAX_PROMPT_CHARS) throw new Error(t('队列中每条提示词须为 1 至 100000 个字符。'));
+    if (!item || typeof item.text !== 'string' || !item.text.trim()) throw new Error(t('队列提示词必须是非空文本。'));
     return { name: String(item.name || `提示词 ${index + 1}`).slice(0, 100), text: item.text };
   });
-  if (queue.reduce((n, item) => n + item.text.length, 0) > MAX_QUEUE_CHARS) throw new Error(t('队列总长度最多 600000 个字符，请分批导入。'));
   if (!allowEmpty && ((mode === 'repeat' && !prompt.trim()) || (mode !== 'repeat' && !queue.length))) throw new Error(mode === 'repeat' ? t('请先输入或导入提示词。') : t('请先向队列添加提示词。'));
   const booleans = {};
   for (const key of ['preventDiscard', 'keepAwake', 'waitForIdle', 'startImmediately', 'extensionPriority']) {

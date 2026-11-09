@@ -66,7 +66,7 @@ export default {
   '文件格式与编码': 'File formats and encoding',
   '文本编码': 'Text encoding',
   '自动识别（优先 UTF-8）': 'Auto-detect (prefer UTF-8)',
-  '支持常见文本文件、DOCX 和可提取文字的 PDF。扫描件需要先转换为文字；文件最大 5 MB，提示词最多 10 万字符。原文不会被自动改写。': 'Supports common text files, DOCX, and text-based PDFs. Convert scanned files to text first. Maximum file size: 5 MB; maximum prompt length: 100,000 characters. Original text is not rewritten automatically.',
+  '支持常见文本文件、DOCX 和可提取文字的 PDF。扫描件需先转换为文字。提示词不设字符上限，实际容量受浏览器存储、内存和目标平台限制。DOCX/PDF 文件最多 5 MiB；DOCX 正文 XML 最多 4 MiB，PDF 最多 100 页、解析最多 20 秒。原文不会被自动改写。': 'Supports common text files, DOCX, and text-based PDFs. Convert scanned files to text first. There is no application-set prompt character limit; browser storage, memory, and the target platform still impose practical limits. DOCX/PDF files are limited to 5 MiB; DOCX body XML to 4 MiB; PDFs to 100 pages and 20 seconds of parsing. Original text is not rewritten automatically.',
   '提示词队列': 'Prompt queue',
   '按顺序发送不同提示词；在“任务”中选择循环或执行一遍。': 'Send different prompts in order. Choose loop or run once in Task.',
   '队列还是空的。可加入当前提示词，或一次导入多个文件。': 'The queue is empty. Add the current prompt or import multiple files.',

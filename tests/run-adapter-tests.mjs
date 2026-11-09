@@ -46,6 +46,22 @@ async function scenario(name, body) {
 }
 
 try {
+  for (const [reason, status, diagnosticCode] of [
+    ['waiting-send', 'busy', 'send-not-ready'], ['send-ambiguous', 'blocked', 'commit-not-dispatched'],
+  ]) {
+    await scenario(`Known no-dispatch ${reason} is not counted or reported as uncertain delivery`, async ({ page, args }) => {
+      await page.evaluate(reason => {
+        const original = chrome.runtime.sendMessage;
+        chrome.runtime.sendMessage = request => request.type === 'COMMIT_RUN'
+          ? Promise.resolve({ ok: false, code: 'not-dispatched', dispatched: false, reason }) : original(request);
+      }, reason);
+      const outcome = await page.evaluate(pageAction, { ...args, modelCommit: true });
+      assert.equal(outcome.status, status, JSON.stringify(outcome));
+      assert.equal(outcome.diagnosticCode, diagnosticCode);
+      assert.equal(await page.evaluate(() => fixture.sendClicks), 0);
+      assert.equal(await page.evaluate(() => fixture.inputEvents), 0, 'No fallback model mutation after COMMIT_RUN');
+    });
+  }
   await scenario('Read-only self-check does not fill or submit', async ({page,args}) => {
     const outcome = await page.evaluate(pageAction, {...args,mode:'check',runId:null});
     assert.equal(outcome.status,'ready',JSON.stringify(outcome));

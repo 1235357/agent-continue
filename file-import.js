@@ -6,8 +6,8 @@ const t = createTranslator(runtimeCatalog);
 // All document processing stays inside this extension. Never log document data,
 // file names, parser errors, or extracted text. A caller may choose to reveal the
 // returned text locally, but it must not include it in diagnostic reports.
+// Binary document parser resource bound, not a prompt or plain-text byte limit.
 export const MAX_FILE_BYTES = 5 * 1024 * 1024;
-export const MAX_PROMPT_CHARS = 100_000;
 export const SUPPORTED_ACCEPT = '.txt,.md,.markdown,.csv,.tsv,.json,.jsonl,.yaml,.yml,.xml,.log,.ini,.cfg,.conf,.rst,.tex,.html,.htm,.docx,.pdf';
 
 const TEXT_FORMATS = new Set('txt md markdown csv tsv json jsonl yaml yml xml log ini cfg conf rst tex'.split(' '));
@@ -28,7 +28,6 @@ class ImportError extends Error {
 const fail = (code, message) => { throw new ImportError(code, message); };
 
 function validateText(text) {
-  if (text.length > MAX_PROMPT_CHARS) fail('TEXT_TOO_LARGE', t('提取的文字超过 100,000 个字符，请缩短文档后导入。'));
   if (!text.trim()) fail('EMPTY_TEXT', t('文件中没有可用文字。'));
   if (/[\u0000-\u0008\u000b\u000e-\u001f]/.test(text)) {
     fail('BINARY_TEXT', t('文件包含非文本控制字符，请保存为 UTF-8 纯文本后再导入。'));
@@ -69,7 +68,6 @@ function htmlToText(source) {
   let output = '';
   const append = value => {
     output += value;
-    if (output.length > MAX_PROMPT_CHARS) fail('TEXT_TOO_LARGE', t('提取的文字超过 100,000 个字符，请缩短文档后导入。'));
   };
   function visit(node) {
     if (node.nodeType === Node.TEXT_NODE) { append(node.nodeValue || ''); return; }
@@ -182,7 +180,6 @@ async function docxToText(bytes) {
   let text = '';
   const append = value => {
     text += value;
-    if (text.length > MAX_PROMPT_CHARS) fail('TEXT_TOO_LARGE', t('提取的文字超过 100,000 个字符，请缩短文档后导入。'));
   };
   const visit = node => {
     if (node.nodeType !== Node.ELEMENT_NODE) return;
@@ -245,7 +242,6 @@ async function pdfToText(bytes) {
               if (typeof item.str !== 'string') continue;
               text += item.str;
               if (item.hasEOL) text += '\n';
-              if (text.length > MAX_PROMPT_CHARS) fail('TEXT_TOO_LARGE', t('提取的文字超过 100,000 个字符，请缩短文档后导入。'));
             }
           }
         } finally {
@@ -302,14 +298,15 @@ export async function importPromptFile(file, { encoding = 'auto' } = {}) {
   }
   if (!ENCODINGS.has(encoding)) fail('ENCODING', t('不支持所选文件编码。'));
   if (file.size < 1) fail('EMPTY_FILE', t('所选文件是空文件。'));
-  if (file.size > MAX_FILE_BYTES) fail('FILE_TOO_LARGE', t('文件超过 5 MiB，请缩短文档后导入。'));
   const format = file.name.split('.').at(-1).toLowerCase();
   if (!TEXT_FORMATS.has(format) && !['html', 'htm', 'docx', 'pdf'].includes(format)) {
     fail('FORMAT', t('不支持这种文件格式。可导入 TXT、Markdown、常见文本格式、HTML、DOCX 或带文本层的 PDF。'));
   }
+  const boundedDocument = format === 'docx' || format === 'pdf';
+  if (boundedDocument && file.size > MAX_FILE_BYTES) fail('FILE_TOO_LARGE', t('文件超过 5 MiB，请缩短文档后导入。'));
   try {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    if (bytes.length !== file.size || bytes.length > MAX_FILE_BYTES) fail('FILE_SIZE', t('读取的文件大小不一致，请重新选择文件。'));
+    if (bytes.length !== file.size || (boundedDocument && bytes.length > MAX_FILE_BYTES)) fail('FILE_SIZE', t('读取的文件大小不一致，请重新选择文件。'));
     let text;
     let warnings = [];
     if (format === 'docx') {

@@ -138,13 +138,27 @@ try {
     const result = await runImport('sample.txt', Buffer.from([0xff]), { encoding: 'utf-8' });
     assert.equal(result.code, 'ENCODING'); assert.equal(result.message.includes('sentinel'), false);
   });
-  await test('File-byte and extracted-text caps are enforced', async () => {
+  await test('Text imports exceed former character and byte caps without changing content', async () => {
+    const result = await page.evaluate(async () => {
+      const text = ' \t' + 'x'.repeat(5 * 1024 * 1024 + 1) + '\r\n  ';
+      const imported = await window.importer.importPromptFile(new File([text], 'large.txt'));
+      return { exact: imported.text === text, length: imported.text.length };
+    });
+    assert.equal(result.exact, true);
+    assert.ok(result.length > 5 * 1024 * 1024);
+  });
+  await test('Binary document byte caps remain parser resource safeguards', async () => {
     const metadataOnly = await page.evaluate(async () => {
-      try { await window.importer.importPromptFile({ name: 'sample.txt', size: 6 * 1024 * 1024, arrayBuffer() { throw new Error('must not read'); } }); }
+      try { await window.importer.importPromptFile({ name: 'sample.docx', size: 6 * 1024 * 1024, arrayBuffer() { throw new Error('must not read'); } }); }
       catch (error) { return error.code; }
     });
     assert.equal(metadataOnly, 'FILE_TOO_LARGE');
-    assert.equal((await runImport('large.txt', Buffer.from('x'.repeat(100001)))).code, 'TEXT_TOO_LARGE');
+  });
+  await test('HTML and DOCX extraction exceed 100000 characters without truncating text', async () => {
+    const text = '  ' + 'x'.repeat(100001) + '\t  ';
+    assert.equal((await runImport('large.html', Buffer.from('<pre>' + text + '</pre>'))).text, text + '\n');
+    const xml = '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t xml:space="preserve">' + text + '</w:t></w:r></w:p></w:body></w:document>';
+    assert.equal((await runImport('large.docx', docx(xml))).text, text + '\n');
   });
   await test('HTML extracts text from an inert fragment without script execution or resource fetches', async () => {
     const html = '<html><head><style>hidden css</style></head><body><p>First &amp; line</p><p>Second<br>third</p><script>globalThis.privateImportExecuted=true</script><img src="https://do-not-request.invalid/private"><iframe src="https://do-not-request.invalid/frame"></iframe></body></html>';

@@ -1,5 +1,9 @@
 // Runtime copy only. Never use this catalog to translate user-owned content.
 export default {
+  '提示词必须是文本。': 'The prompt must be text.',
+  '队列提示词必须是非空文本。': 'Queued prompts must be nonempty text.',
+  '发送控件尚未就绪，稍后自动检查。': 'The send control is not ready yet. Checking again automatically.',
+  '发送控件当前不可用，稍后自动检查。': 'The send control is currently unavailable. Checking again automatically.',
   '任务仍在运行；下次发送使用配置的提示词。': 'The task is running. The next send uses the configured prompt.',
   '停止标记最多 20 条，每条最多 100 个字符，且不能包含换行。': 'Use at most 20 stop markers, each up to 100 characters without line breaks.',
   '发送间隔必须为 1 至 10080 分钟。': 'The send interval must be between 1 and 10080 minutes.',

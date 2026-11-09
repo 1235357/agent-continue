@@ -1,13 +1,14 @@
 // Candidate only. The caller authorizes immediately before MAIN-world injection
 // and owns integration, receipts, and cross-call deduplication. No async gap is
 // permitted between the model transaction and the single submission attempt.
-// Args: { expectedUrl, targetIdentity?, prompt, sendMethod?, deadline }.
+// Args: { expectedUrl, targetIdentity?, prompt, sendMethod?, deadline, phase? }.
+// prepare writes without submitting; observe is read-only; commit is atomic.
 // deadline is an absolute Date.now() deadline, not a runtime permission check.
 export function editorCommit(args) {
   let supported = false;
   let dispatched = false;
   let method = null;
-  const result = code => ({ supported, dispatched, method, code });
+  const result = (code, extra = {}) => ({ supported, dispatched, method, code, ...extra });
 
   try {
     if (!args || typeof args.expectedUrl !== 'string' || typeof args.prompt !== 'string'
@@ -17,6 +18,8 @@ export function editorCommit(args) {
     }
     const sendMethod = args.sendMethod ?? 'auto';
     if (!['auto', 'button', 'ctrl-enter'].includes(sendMethod)) return result('invalid-method');
+    const phase = args.phase ?? 'commit';
+    if (!['prepare', 'observe', 'commit'].includes(phase)) return result('invalid-phase');
     const prompt = args.prompt.replace(/\r\n?/g, '\n');
     if (!prompt.trim()) return result('empty-payload');
     const expected = new URL(args.expectedUrl);
@@ -102,6 +105,27 @@ export function editorCommit(args) {
     };
     const initialFailure = guard();
     if (initialFailure) return result(initialFailure);
+    // A present but disabled Send is not permission to fall back to a keyboard
+    // event. Controlled frameworks may enable it in their next render.
+    const sendSelector = 'button[data-testid="send-button"], button[data-testid="composer-submit-button"], button[data-testid="fruitjuice-send-button"], button[aria-label="Send prompt"], button[aria-label="Send message"], button[aria-label="Send"], button[aria-label="\u53d1\u9001\u63d0\u793a"], button[aria-label="\u53d1\u9001\u6d88\u606f"], button[aria-label="\u53d1\u9001"]';
+    const sendControls = () => [...new Set([...composer.querySelectorAll(sendSelector)]
+      .filter(button => composer.contains(button) && visible(button)))];
+    const enabledSend = button => !button.disabled && button.getAttribute('aria-disabled') !== 'true'
+      && !button.closest('[aria-disabled="true"], [inert]');
+    const readiness = () => {
+      if (sendMethod === 'ctrl-enter') return 'ready';
+      const controls = sendControls();
+      const sends = controls.filter(enabledSend);
+      if (sends.length > 1) return 'send-ambiguous';
+      if (sends.length === 1) return 'ready';
+      if (controls.length) return 'waiting-send';
+      return args.requireButton === true || initiallyHasSend ? 'waiting-send' : sendMethod === 'button' ? 'send-unavailable' : 'ready';
+    };
+    const initiallyHasSend = sendControls().length > 0;
+    if (phase === 'observe') {
+      supported = true;
+      return result(readiness(), { hasSend: initiallyHasSend });
+    }
     const logicalText = doc => doc.textBetween(0, doc.content.size, '\n', '\n');
     const prepare = state => {
       const paragraphs = prompt.split('\n').map(line =>
@@ -111,23 +135,31 @@ export function editorCommit(args) {
       if (logicalText(transaction.doc) !== prompt) throw new Error('unsupported-document');
       return transaction;
     };
-    const state = view.state;
-    let transaction = prepare(state);
-    supported = true;
-    if (view.state !== state) transaction = prepare(view.state);
-    let failure = guard();
-    if (failure) return result(failure);
-    view.dispatch(transaction);
-    failure = guard();
-    if (failure) return result(failure);
-    editor.focus({ preventScroll: true });
-    failure = guard();
-    if (failure) return result(failure);
-    for (const type of ['input', 'change']) {
-      editor.dispatchEvent(new Event(type, { bubbles: true, composed: true }));
+    let failure;
+    // After preparation, don't restart the framework's delayed activation by
+    // redundantly dispatching the same model. Changed text is still replaced.
+    if (args.phase !== 'commit' || logicalText(view.state.doc) !== prompt) {
+      const state = view.state;
+      let transaction = prepare(state);
+      supported = true;
+      if (view.state !== state) transaction = prepare(view.state);
       failure = guard();
       if (failure) return result(failure);
+      view.dispatch(transaction);
+      failure = guard();
+      if (failure) return result(failure);
+      if (args.phase !== 'commit') {
+        editor.focus({ preventScroll: true });
+        failure = guard();
+        if (failure) return result(failure);
+        for (const type of ['input', 'change']) {
+          editor.dispatchEvent(new Event(type, { bubbles: true, composed: true }));
+          failure = guard();
+          if (failure) return result(failure);
+        }
+      }
     }
+    supported = true;
 
     // Page-controlled content changes do not veto the send. Reassert once from
     // the current public model, without another event/settling cycle or a loop.
@@ -141,15 +173,12 @@ export function editorCommit(args) {
       || (logicalText(view.state.doc) !== prompt ? 'model-not-synchronous' : null);
     failure = committedGuard();
     if (failure) return result(failure);
+    if (phase === 'prepare') return result('prepared', { hasSend: initiallyHasSend || sendControls().length > 0 });
 
     // Exact known Send identifiers only, never a page-wide or generic control.
-    const sendSelector = 'button[data-testid="send-button"], button[data-testid="composer-submit-button"], button[data-testid="fruitjuice-send-button"], button[aria-label="Send prompt"], button[aria-label="Send message"], button[aria-label="Send"], button[aria-label="\u53d1\u9001\u63d0\u793a"], button[aria-label="\u53d1\u9001\u6d88\u606f"], button[aria-label="\u53d1\u9001"]';
-    const sends = sendMethod === 'ctrl-enter' ? [] : [...new Set([...composer.querySelectorAll(sendSelector)]
-      .filter(button => composer.contains(button) && visible(button)
-        && !button.disabled && button.getAttribute('aria-disabled') !== 'true'
-        && !button.closest('[aria-disabled="true"], [inert]')))];
-    if (sends.length > 1) return result('send-ambiguous');
-    if (sendMethod === 'button' && !sends.length) return result('send-unavailable');
+    const ready = readiness();
+    if (ready !== 'ready') return result(ready);
+    const sends = sendMethod === 'ctrl-enter' ? [] : sendControls().filter(enabledSend);
     failure = committedGuard();
     if (failure) return result(failure);
     if (sends.length === 1) {
