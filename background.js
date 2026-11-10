@@ -612,9 +612,22 @@ async function commitRun(message, sender) {
           if (!granted) { await new Promise(resolve => setTimeout(resolve, 150)); continue; }
           if (!await allowed()) return { supported: true, dispatched: false, code: 'cancelled' };
         }
-        const frames = await chrome.scripting.executeScript({ target,
-          world: 'MAIN', func: editorCommit, args: [{ ...permit.args, phase, requireButton }] });
-        const value = frames?.find(frame => frame.frameId === 0)?.result;
+        let value;
+        try {
+          const frames = await chrome.scripting.executeScript({ target,
+            world: 'MAIN', func: editorCommit, args: [{ ...permit.args, phase, requireButton }] });
+          value = frames?.find(frame => frame.frameId === 0)?.result;
+        } catch (error) {
+          // Prepare/observe cannot submit. Losing their transport may retry the
+          // same reservation; an uncertain commit must never be replayed.
+          if (phase === 'commit') throw error;
+          await new Promise(resolve => setTimeout(resolve, 150));
+          continue;
+        }
+        if (value == null && phase !== 'commit') {
+          await new Promise(resolve => setTimeout(resolve, 150));
+          continue;
+        }
         if (!(value?.dispatched === false && value.code === 'expired')) return value;
         // The finite IPC permit expired before execution, with explicit proof
         // that no submission occurred. Keep the same reservation and wait.

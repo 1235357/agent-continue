@@ -672,19 +672,23 @@ await scenario('A disabled Send first appearing at final correction stays requir
   assert.equal((await h.message({ type: 'COMMIT_RUN', runId: job.runId }, h.sender())).dispatched, true);
   assert.equal(commits, 2, 'Only the known no-dispatch correction is repeated');
 });
-await scenario('A replaced document cannot receive a later phase through tabId fallback', async () => {
+await scenario('A replaced document waits only on the bound document until Pause, never tabId fallback', async () => {
   const h = await harness();
   const job = await h.start();
   h.state.session.job = { ...job, phase: 'sending', runKind: 'send', runDeadline: Date.now() + 10000 };
   const before = h.state.injections.length;
+  let observations = 0;
   h.chrome.scripting.executeScript = async request => {
     h.state.injections.push(request);
     assert.deepEqual(request.target.documentIds, ['synthetic-bound-document']);
-    if (request.args[0].phase !== 'prepare') throw new Error('Bound document no longer exists');
+    if (request.args[0].phase !== 'prepare') {
+      if (++observations === 2) await h.message({ type: 'PAUSE' });
+      throw new Error('Bound document no longer exists');
+    }
     return [{ frameId: 0, result: { supported: true, dispatched: false, code: 'prepared' } }];
   };
-  assert.equal((await h.message({ type: 'COMMIT_RUN', runId: job.runId }, h.sender())).code, 'unknown');
-  assert.deepEqual(h.state.injections.slice(before).map(item => item.args[0].phase), ['prepare', 'observe']);
+  assert.equal((await h.message({ type: 'COMMIT_RUN', runId: job.runId }, h.sender())).code, 'cancelled');
+  assert.deepEqual(h.state.injections.slice(before).map(item => item.args[0].phase), ['prepare', 'observe', 'observe']);
 });
 for (const stage of ['prepare', 'observe']) {
   await scenario(`Pause during ${stage} prevents the final submission`, async () => {
@@ -734,11 +738,14 @@ await scenario('An uncertain model injection never permits a second send method'
   const h = await harness();
   const job = await h.start();
   h.state.session.job = { ...job, phase: 'sending', runKind: 'send', runDeadline: Date.now() + 10000 };
-  h.pageResult = async () => { throw new Error('UNLOGGED_PAGE_DATA'); };
+  h.pageResult = async args => {
+    if (args.phase === 'commit') throw new Error('UNLOGGED_PAGE_DATA');
+    return { supported: true, dispatched: false, code: args.phase === 'prepare' ? 'prepared' : 'ready', hasSend: true };
+  };
   const before = h.state.injections.length;
   assert.equal((await h.message({ type: 'COMMIT_RUN', runId: job.runId }, h.sender())).code, 'unknown');
   assert.equal((await h.message({ type: 'COMMIT_RUN', runId: job.runId }, h.sender())).code, 'unknown');
-  assert.equal(h.state.injections.length, before + 1);
+  assert.equal(h.state.injections.length, before + 3);
   assert.doesNotMatch(JSON.stringify(h.state.local.logs), /UNLOGGED_PAGE_DATA/);
 });
 await scenario('Pause arriving while the model-attempt marker is saved cancels injection', async () => {

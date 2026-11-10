@@ -1,5 +1,32 @@
 # Agent Continue Development Handoff
 
+## 3.0.8 Preparation Transport Recovery (2026-11-10 UTC)
+
+The fresh owner log's prepare-stage unknown led to a further reproducible defect:
+an editorCommit prepare response lost after filling caused unknown/count0, no
+click and a full-interval wait. Synthetic supported-MV3 reproduction exited1:
+.artifacts/prepare-response-loss-supported-red.log. This matches a possible owner
+failure mechanism, not proof of the precise installed owner's exception.
+
+Worker invocation now retries only preparation/readiness transport or absent
+results inside the same reservation and exact document. Those phases cannot
+submit. Actual commit ambiguity remains non-replayable; no alternate send method
+or second admission is introduced. Pause stops persistent preparation failure.
+No total send-wait deadline or application prompt cap was added.
+
+New cases30-32 pass: lost prepare return, persistent failure plus Pause, missing
+prepare/observe result. Complete MV332/32 passed with exit0 in
+.artifacts/prepare-full-mv3-regression.log; background state57/57 passed with
+exit0 in .artifacts/prepare-worker-state-final.log. The earlier whole3.0.7 command
+loaded its extension copy before the fix and later saw the new test; it exited1
+at case30 and must not be called a final green regression. New whole run required.
+
+Release42774368241/v3.0.7 was explicitly canceled before publication. Actual IAB
+readback: canceled5m11s. The tag remains; it is not a release or successful cold
+smoke. Store currently holds draft3.0.6 with public2.1.0, not submitted. English
+listing and all three privacy certifications were reread, already saved; no
+additional data access was granted. Use3.0.8 as the next immutable release source.
+
 ## 3.0.7 Delivery Follow-Up (2026-11-10 UTC)
 
 Supersedes pending test/release statements below. Main5355842 was pushed; its

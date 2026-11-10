@@ -197,7 +197,7 @@ try {
       const index = Number(url.pathname.split('-').at(-1));
       return route.fulfill({ status: 200, contentType: 'text/html', body: fixture({
         noSend: index === 3, rejectSynthetic: [4, 6, 8, 9, 10].includes(index),
-        supported: [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 19, 22, 23, 24, 25, 26, 28, 29].includes(index),
+        supported: [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 19, 22, 23, 24, 25, 26, 28, 29, 30, 31, 32].includes(index),
         sendActivationDelayMs: index === 25 ? 2500 : [11, 16].includes(index) ? 21000 : [17, 20, 21].includes(index) ? 200 : [6, 8, 9, 10, 12, 13, 14, 15].includes(index) ? 100 : 0,
         receiptDelayMs: index === 18 ? 8000 : index === 28 ? 800 : index === 29 ? 5000 : 0,
         manualReceiptDuringReadiness: index === 9 || index === 10, ignoreButtonSubmit: index === 9,
@@ -955,6 +955,90 @@ try {
     assert.equal(current.job.enabled, false);
     assert.equal(current.job.sentCount, 0);
     assert.deepEqual([(await inspect(page)).buttonClicks, (await inspect(page)).submits], [1, 1]);
+  });
+  await scenario('A lost prepare response retries preparation without stranding the filled composer or duplicating submission', async page => {
+    await start(page, { sendMethod: 'auto' });
+    await worker.evaluate(() => {
+      globalThis.originalExecuteScript = chrome.scripting.executeScript;
+      globalThis.prepareResponseLost = false;
+      chrome.scripting.executeScript = async request => {
+        const frames = await originalExecuteScript(request);
+        if (request.func.name === 'editorCommit' && request.args[0].phase === 'prepare' && !prepareResponseLost) {
+          prepareResponseLost = true;
+          throw new Error('Synthetic lost prepare response');
+        }
+        return frames;
+      };
+    });
+    try {
+      const sent = await call({ type: 'SEND_NOW' });
+      assert.equal(await worker.evaluate(() => prepareResponseLost), true);
+      assert.equal(sent.job.sentCount, 1, sent.job.statusText);
+      assert.equal(sent.job.unknownCount, 0);
+      const observed = await inspect(page);
+      assert.deepEqual([observed.buttonClicks, observed.submits], [1, 1]);
+      assert.deepEqual(observed.sentTexts, [prompt]);
+    } finally {
+      await worker.evaluate(() => { chrome.scripting.executeScript = originalExecuteScript; delete globalThis.originalExecuteScript; });
+    }
+  });
+  await scenario('Pause cancels persistent prepare transport failure without submitting or replaying a commit', async page => {
+    await start(page, { sendMethod: 'auto' });
+    await worker.evaluate(() => {
+      globalThis.originalExecuteScript = chrome.scripting.executeScript;
+      globalThis.prepareFailures = 0;
+      chrome.scripting.executeScript = async request => {
+        if (request.func.name === 'editorCommit' && request.args[0].phase === 'prepare') {
+          prepareFailures++;
+          throw new Error('Synthetic unavailable prepare transport');
+        }
+        return originalExecuteScript(request);
+      };
+    });
+    const sending = call({ type: 'SEND_NOW' });
+    try {
+      const observationDeadline = Date.now() + 5000;
+      while (await worker.evaluate(() => prepareFailures) < 2 && Date.now() < observationDeadline)
+        await new Promise(resolve => setTimeout(resolve, 25));
+      assert.ok(await worker.evaluate(() => prepareFailures >= 2));
+      await call({ type: 'PAUSE' });
+      await sending;
+      const state = await call({ type: 'GET_STATE' });
+      assert.equal(state.job.enabled, false);
+      assert.equal(state.job.sentCount, 0);
+      assert.deepEqual([(await inspect(page)).buttonClicks, (await inspect(page)).submits], [0, 0]);
+    } finally {
+      await call({ type: 'PAUSE' });
+      await worker.evaluate(() => { chrome.scripting.executeScript = originalExecuteScript; delete globalThis.originalExecuteScript; });
+      await sending;
+    }
+  });
+  await scenario('Missing prepare and observe results recover within the same one-submit reservation', async page => {
+    await start(page, { sendMethod: 'auto' });
+    await worker.evaluate(() => {
+      globalThis.originalExecuteScript = chrome.scripting.executeScript;
+      globalThis.missingPhases = [];
+      chrome.scripting.executeScript = async request => {
+        const frames = await originalExecuteScript(request);
+        const phase = request.args?.[0]?.phase;
+        if (request.func.name === 'editorCommit' && ['prepare','observe'].includes(phase) && !missingPhases.includes(phase)) {
+          missingPhases.push(phase);
+          return [];
+        }
+        return frames;
+      };
+    });
+    try {
+      const sent = await call({ type: 'SEND_NOW' });
+      assert.deepEqual(await worker.evaluate(() => missingPhases), ['prepare','observe']);
+      assert.equal(sent.job.sentCount, 1, sent.job.statusText);
+      assert.equal(sent.job.unknownCount, 0);
+      const observed = await inspect(page);
+      assert.deepEqual([observed.buttonClicks, observed.submits], [1, 1]);
+      assert.deepEqual(observed.sentTexts, [prompt]);
+    } finally {
+      await worker.evaluate(() => { chrome.scripting.executeScript = originalExecuteScript; delete globalThis.originalExecuteScript; });
+    }
   });
   console.log(`RESULT ${selectedCases ? selectedCases.length : passed}/${selectedCases ? selectedCases.length : passed} official ProseMirror MV3 scenarios passed`);
 } finally {

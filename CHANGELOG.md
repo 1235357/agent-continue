@@ -1,6 +1,19 @@
 # Changelog
 
-## [3.0.7] - Unreleased
+## [3.0.8] - Unreleased
+
+- Retry lost preparation/readiness transport and missing results within the same
+  authorized background invocation, instead of abandoning a filled composer for
+  an entire interval. No total live-send waiting deadline is introduced.
+- Only prepare/observe may recover this way. An uncertain submission is never
+  repeated, and Pause or a changed target still revokes the invocation.
+- Retain 3.0.6's delayed-receipt counting and modern unmodified PDF.js fixes and
+  3.0.7's ordinary-account metadata/compiler environment correction.
+- Actual disposable MV332/32 and background state57/57 passed. The old3.0.7
+  publication run was canceled before release when this prepare defect was
+  reproduced. Tags remain immutable; no old Release assets were replaced.
+
+## [3.0.7] - Unpublished Candidate
 
 - Preserve all 3.0.6 scheduler receipt recovery and modern PDF.js fixes below.
 - Give Windows read-only metadata queries an owned writable compiler temporary
