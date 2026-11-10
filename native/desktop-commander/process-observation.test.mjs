@@ -109,6 +109,49 @@ test('missing Windows helper is unknown, never process exit evidence', { skip: !
   } finally { fs.readFileSync = read; }
 });
 
+test('Windows query gives the compiler its own writable temporary directory and removes it',
+  { skip: !api || process.platform !== 'win32' }, async () => {
+    const original = childProcess.execFile;
+    let queryTemporary;
+    childProcess.execFile = function(_file, _args, options, callback) {
+      queryTemporary = options.env.TEMP;
+      assert.ok(queryTemporary, 'the compiler must not fall back to the system temporary directory');
+      assert.equal(options.env.TMP, queryTemporary);
+      assert.notEqual(queryTemporary, os.tmpdir());
+      assert.equal(fs.lstatSync(queryTemporary).isSymbolicLink(), false);
+      fs.writeFileSync(path.join(queryTemporary, 'compiler-fixture.tmp'), 'owned fixture');
+      callback(null, '[]', '');
+    };
+    syncBuiltinESMExports();
+    try {
+      assert.equal(await api.hasExited({ pid: process.pid, startTime: '1', executable: process.execPath }), true);
+      assert.equal(fs.existsSync(queryTemporary), false);
+    } finally {
+      childProcess.execFile = original;
+      syncBuiltinESMExports();
+    }
+  });
+
+test('failed Windows query removes only its own compiler scratch and remains unknown',
+  { skip: !api || process.platform !== 'win32' }, async () => {
+    const original = childProcess.execFile;
+    let queryTemporary;
+    childProcess.execFile = function(_file, _args, options, callback) {
+      queryTemporary = options.env.TEMP;
+      fs.writeFileSync(path.join(queryTemporary, 'compiler-fixture.tmp'), 'owned fixture');
+      callback(Object.assign(new Error('fixture'), { code: 'ETIMEDOUT' }), '', 'private error text');
+    };
+    syncBuiltinESMExports();
+    try {
+      await assert.rejects(api.hasExited({ pid: process.pid, startTime: '1', executable: process.execPath }),
+        error => error.message === 'process_observation_failed');
+      assert.equal(fs.existsSync(queryTemporary), false);
+    } finally {
+      childProcess.execFile = original;
+      syncBuiltinESMExports();
+    }
+  });
+
 test('Windows metadata generations must agree and JSON preserves Unicode', { skip: process.platform !== 'win32', timeout: 20000 }, async t => {
   const source = fs.readFileSync(new URL('./windows-process-query.cs', import.meta.url), 'utf8');
   const unicode = 'C:\\owned-\u6d4b\u8bd5\\node.exe';

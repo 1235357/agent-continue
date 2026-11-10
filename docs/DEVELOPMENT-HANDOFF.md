@@ -1,5 +1,36 @@
 # Agent Continue Development Handoff
 
+## 3.0.7 Delivery Follow-Up (2026-11-10 UTC)
+
+Supersedes pending test/release statements below. Main5355842 was pushed; its
+complete npm regression exited0, including29/29 actual-MV3 and11/11 editor cases.
+The exact local Store ZIP passed natural hidden one-minute delivery plus delayed
+receipt cases3/3 and actual import19/19. These are disposable browser fixtures,
+not the owner's installed Dot. Store draft3.0.6 was uploaded successfully, not
+submitted; public version remains2.1.0 at the authenticated readback.
+
+Immutable tagv3.0.6 Release42766560124 FAILED at process_observation_failed during
+ordinary-token stdio smoke. No Release or downloadable sidecars were published.
+Native42765656980 also FAILED cold ZIP-fixture preparation after15seconds; earlier
+PowerShell/CMD loopback steps passed. Never describe either workflow as green.
+
+New source gives Add-Type metadata queries a dedicated writable TEMP/TMP instead
+of allowing the stripped child environment to fall back to a system directory.
+Before/after regression reproduces the missing-directory contract; cleanup is
+covered on success/failure. Exact fresh-account CI causality remains to be tested.
+No identity requirement or OS-query timeout is relaxed. Stdio now emits closed
+query timing/error-kind diagnostics, not raw errors or command lines. ZIP fixture
+preparation has a separate60second bound; actual launcher actions retain15seconds.
+Local metadata/stdio12passed,1Linux skip; hosted fixture12/12 passed. New version
+identity is3.0.7; do not rewritev3.0.6 or substitute mismatching setup pins.
+
+The newly rebuilt local administrator ZIP9f3ca795f8e396eca554f03bdadcd2fbeffa6b103de46a1879825ed99a767ece
+passed actual extracted-bundle ordinary-token smoke:67RPC replies, file roundtrip,
+managed-process OS observation/stop, stdin-close exit0, no network/browser attempt.
+Log:.artifacts/release-307-metadata-temp-smoke-absolute.log. Earlier relative-path
+smoke invocations failed Plan; those are not passes. This local result is not a
+GitHub fresh-account run, hosted administrator acceptance, installation or release.
+
 ## Fresh Owner Log And Store Remediation (2026-11-10 UTC)
 
 The owner's new activity(3) file is725bytes, modified05:41:35UTC, format4,

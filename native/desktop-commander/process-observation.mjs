@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { execFile } from 'node:child_process';
 
 const invalid = () => { throw new Error('invalid_process_identity'); };
@@ -34,12 +35,22 @@ async function windowsQuery(field, pid) {
   const source = fs.readFileSync(new URL('./windows-process-query.cs', import.meta.url), 'utf8');
   if (Buffer.byteLength(source) > 65536 || source.includes("\n'@")) unknown();
   const script = `$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';$PSModuleAutoLoadingPreference='None';Import-Module ([IO.Path]::Combine($PSHOME,'Modules','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Utility.psd1'));[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);Add-Type -TypeDefinition @'\n${source}\n'@\n$r=[AgentContinueProcessQuery]::Query(${pid},$${field === 'ParentProcessId' ? 'true' : 'false'});[Console]::WriteLine((ConvertTo-Json -InputObject @($r) -Compress))`;
-  const stdout = await new Promise((resolve, reject) => execFile(path.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
-    ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], {
-      windowsHide: true, shell: false, timeout: 5000, maxBuffer: 65536, encoding: 'utf8',
-      env: { SystemRoot: root, WINDIR: root,
-        PSModulePath: path.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'Modules') },
-    }, (error, out, stderr) => error || stderr ? reject(new Error('process_observation_failed')) : resolve(out)));
+  // Windows PowerShell compiles Add-Type on disk. A stripped environment must
+  // not make a fresh ordinary account fall back to the system TEMP directory.
+  const temporaryRoot = fs.realpathSync.native(os.tmpdir());
+  const temporary = fs.mkdtempSync(path.join(temporaryRoot, 'ac-process-query-'));
+  let stdout;
+  try {
+    stdout = await new Promise((resolve, reject) => execFile(path.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+      ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], {
+        windowsHide: true, shell: false, timeout: 5000, maxBuffer: 65536, encoding: 'utf8',
+        env: { SystemRoot: root, WINDIR: root, TEMP: temporary, TMP: temporary,
+          PSModulePath: path.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'Modules') },
+      }, (error, out, stderr) => error || stderr ? reject(new Error('process_observation_failed')) : resolve(out)));
+  } finally {
+    if (path.dirname(temporary) !== temporaryRoot || fs.realpathSync.native(temporary) !== temporary) unknown();
+    fs.rmSync(temporary, { recursive: true, maxRetries: 3, retryDelay: 50 });
+  }
   const rows = JSON.parse(stdout.replace(/^\uFEFF/, '').trim());
   if (!Array.isArray(rows) || rows.length > 256) unknown();
   for (const row of rows) {

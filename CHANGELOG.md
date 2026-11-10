@@ -1,6 +1,17 @@
 # Changelog
 
-## [3.0.6] - Unreleased
+## [3.0.7] - Unreleased
+
+- Preserve all 3.0.6 scheduler receipt recovery and modern PDF.js fixes below.
+- Give Windows read-only metadata queries an owned writable compiler temporary
+  directory in stripped ordinary-account environments, with cleanup on success
+  and failure. Identity checks and the five-second OS-query budget remain intact.
+- Separate cold ZIP-fixture assembly loading from the unchanged 15-second launch
+  watchdog. Add closed timing diagnostics to actual stdio metadata observation.
+- 3.0.6's immutable tag was not published: its release workflow failed ordinary-
+  token process observation. Do not treat its uploaded Store draft as submitted.
+
+## [3.0.6] - Unpublished Candidate
 
 - Keep observing the same submitted message when the worker wait transport
   rejects transiently after dispatch. Do not turn that exception into a terminal

@@ -104,9 +104,9 @@ test('Windows hosted acceptance launcher with a local stub ZIP', {skip: process.
   // PATHEXT keeps Windows PowerShell's nested .exe invocation synchronous.
   const env = {SystemRoot, OS: 'Windows_NT', PATH: [system32, path.dirname(powershell)].join(';'),
     PATHEXT: '.COM;.EXE;.BAT;.CMD', USERPROFILE: scratch, LOCALAPPDATA: scratch, TEMP: scratch, TMP: scratch};
-  function run(args, cwd, extraEnv = {}) {
+  function run(args, cwd, extraEnv = {}, timeout = 15000) {
     const result = spawnSync(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', ...args], {
-      cwd, env: {...env, ...extraEnv}, windowsHide: true, encoding: 'utf8', timeout: 15000, maxBuffer: 64 * 1024,
+      cwd, env: {...env, ...extraEnv}, windowsHide: true, encoding: 'utf8', timeout, maxBuffer: 64 * 1024,
     });
     assert.ifError(result.error);
     assert.equal(result.signal, null);
@@ -121,15 +121,15 @@ test('Windows hosted acceptance launcher with a local stub ZIP', {skip: process.
   const sums = ['install.ps1', 'bin.mjs'].map(name =>
     sha256(readFileSync(path.join(payload, name))) + '  ' + name + '\n').join('');
   writeFileSync(path.join(payload, 'SHA256SUMS.txt'), sums);
-  // Fixture creation uses the same .NET ZIP API as preview fixtures below. It
-  // must not spend the launcher's watchdog on cold Archive module discovery.
+  // Fixture preparation is not a launcher operation. A cold hosted Windows
+  // runner gets its own bounded assembly-load budget; launch checks stay 15s.
   const packed = run(['-Command', [
     "$ErrorActionPreference = 'Stop'; Add-Type -AssemblyName System.IO.Compression; Add-Type -AssemblyName System.IO.Compression.FileSystem",
     '$zip = [IO.Compression.ZipFile]::Open($env:AC_FIXTURE_ARCHIVE, [IO.Compression.ZipArchiveMode]::Create)',
     "try { foreach ($name in @('install.ps1','bin.mjs','SHA256SUMS.txt')) {",
     '$null = [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, [IO.Path]::Combine($pwd.Path, $name), $name)',
     '} } finally { $zip.Dispose() }',
-  ].join('; ')], payload, {AC_FIXTURE_ARCHIVE: archive});
+  ].join('; ')], payload, {AC_FIXTURE_ARCHIVE: archive}, 60000);
   assert.equal(packed.status, 0, packed.stderr);
   const digest = sha256(readFileSync(archive));
 
@@ -161,7 +161,7 @@ test('Windows hosted acceptance launcher with a local stub ZIP', {skip: process.
       '$null = [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $member.file, $member.name)',
       '} } finally { $zip.Dispose() }',
     ].join('; ')], previewFiles, {AC_FIXTURE_ARCHIVE: zipPath,
-      AC_FIXTURE_MEMBERS: JSON.stringify(members.map(([name, file]) => ({name, file})))});
+      AC_FIXTURE_MEMBERS: JSON.stringify(members.map(([name, file]) => ({name, file})))}, 60000);
     assert.equal(packedPreview.status, 0, packedPreview.stderr);
     return {zipPath, zipDigest: sha256(readFileSync(zipPath))};
   }

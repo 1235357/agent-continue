@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFile, spawn, spawnSync } from 'node:child_process';
+import childProcess from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
 import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { observeDirectChild, hasExited } from './process-observation.mjs';
@@ -15,6 +17,24 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 
 test('real pinned core initializes, lists tools, writes/reads an owned file and executes a harmless process',
   { timeout: 180000 }, async t => {
+    if (process.platform === 'win32') {
+      const original = childProcess.execFile;
+      childProcess.execFile = function(file, args, options, callback) {
+        const encoded = args.indexOf('-EncodedCommand');
+        const metadataQuery = encoded >= 0 && Buffer.from(args[encoded + 1], 'base64')
+          .toString('utf16le').includes('[AgentContinueProcessQuery]::Query(');
+        if (!metadataQuery) return Reflect.apply(original, this, arguments);
+        const began = performance.now();
+        return Reflect.apply(original, this, [file, args, options, (error, stdout, stderr) => {
+          t.diagnostic(JSON.stringify({ processMetadataQuery: true, elapsedMs: Math.round(performance.now() - began),
+            killed: error?.killed === true, failed: Boolean(error), stderrPresent: Boolean(stderr),
+            errorKind: ['ENOENT', 'EACCES', 'ETIMEDOUT'].includes(error?.code) ? error.code : (error ? 'other' : 'none') }));
+          callback(error, stdout, stderr);
+        }]);
+      };
+      syncBuiltinESMExports();
+      t.after(() => { childProcess.execFile = original; syncBuiltinESMExports(); });
+    }
     let app = here, interpreter = process.execPath;
     const extracted = process.env.AC_WINDOWS_ADMIN_BUNDLE_SMOKE_ROOT;
     if (extracted !== undefined) {
