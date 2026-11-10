@@ -1,5 +1,43 @@
 # Agent Continue Development Handoff
 
+## Independent Guided CI Budgets And Refreshed Candidate (2026-11-09)
+
+Fresh IAB readback of native42712363715/Windows129484970242 changes the next
+action: the paired guided installer passed in230006ms, with prompt observation,
+file roundtrip and settled pause. Cold CMD was interrupted by the shared8minute
+step at475231ms total; it had not returned its own failure. Both cases previously
+shared480s despite each having a330s test/270s driver budget. Do not report this
+as another first-prompt failure or an observed cold-CMD installer failure.
+
+The workflow now gives the two disjoint exact-name cases independent8minute
+steps, with unchanged per-case/child limits and no skipped original coverage.
+A red workflow contract preceded the change;30 workflow and6 preview-kit tests
+pass, YAML parses. Actual local cold-CMD test passed1/1 in98.3s, including
+portable Node provisioning/integrity, harmless shell/file roundtrip, generated
+manager reconciliation, path-drift restart and pause. Log:
+.artifacts/release-306-cold-cmd-local.log, exit0. Real hosted grants not tested.
+
+The installer-phase source8cc6fa8 produced a fresh verified combined closure:
+.artifacts/release-306-combined-phase-build.json. SetupZIP27a8f18cf649692858966ec83d97a82e82cdaf8bc9fc898753bc72650a83573c;
+administrator ZIP remains26f186ee15d3d04143d512799e94b4c9147aa454b598f732f5c007c1a16a4d34,
+reused only after current-source/inventory/pin verification and read-only Plan.
+
+Refreshed paired artifacts:dist/agent-continue-3.0.6-phase-candidate.
+GitHub885fc9075bac73c7492d5d68ffe4c110ecf4c39ec6ba3f99a0c799083de3acf6;
+Store8f197b4a74cd06771f26f9825dd3280e6382df84f4520790b0f56dba5a1cb4a9;
+source8238f66f0b84e28406e2d60e0cef0bdc243d65a8b281864a2778a5b2b6973db1,
+explicitly pinned8cc6fa8, not this later workflow/documentation change.
+Build verified the GitHub/Store byte pair; extracted StoreZIP passed21/21
+official-PM/MV3 cases including the natural hidden alarm and no total live-wait
+cutoff. Log:.artifacts/release-306-phase-store-browser.log. The previous test
+shell handle vanished across continuation; the terminal RESULT21/21 is present
+with no subsequent error, but a newly retrieved exit-code receipt is unavailable.
+
+The Store dashboard now requires Google password reauthentication, so current
+review/publication state was not freshly read. Prior pending/public values stay
+historical, not current claims. No Store writes or release tag/publication.
+Installed live-site scheduler and protected lifecycle gates remain open.
+
 ## Guided Startup Phase Diagnosis (2026-11-09)
 
 Fresh native run42710495562, Windows job129478424083, failed in6m6s.

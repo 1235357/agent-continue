@@ -1,5 +1,24 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Cold CMD And Per-Case CI Admission (2026-11-09)
+
+Native42712363715 Windows129484970242 passed paired guided installation230s,
+then the shared8minute step canceled cold CMD before its own result. New source
+splits those two exact-name cases into independent8minute steps;330s test and
+270s driver limits and original coverage are unchanged. Workflow30/30,
+preview-kit6/6 and YAML parse pass. Actual local cold CMD1/1 exit0 in98.3s:
+.artifacts/release-306-cold-cmd-local.log. Portable Node acquisition/integrity,
+shell/file roundtrip, path-drift restart and settled pause were verified only in
+the disposable loopback fixture, not a production or hosted installation.
+
+Refreshed8cc6fa8 combined-public build and paired candidates are recorded in
+DEVELOPMENT-HANDOFF. Extracted StoreZIP log has terminal RESULT21/21 including
+natural hidden alarm and delayed result channels. Its shell handle is no longer
+available after continuation; no newly retrieved exit code is claimed.
+The source archive pins8cc6fa8, not subsequent CI/docs edits. Store reauthentication
+currently prevents fresh dashboard status readback. No submission or Release;
+real installed-browser/protected Pause/Revoke/reopen gates remain open.
+
 ## Guided Startup Observation Boundary (2026-11-09)
 
 Native42710495562 Windows129478424083 failed first-prompt observation in both
