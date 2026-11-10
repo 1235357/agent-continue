@@ -26,6 +26,7 @@ export default {
   '文件不是有效的 UTF-8，已按 GB18030 解码。若出现乱码，请手动选择编码或另存为 UTF-8。': 'The file is not valid UTF-8 and was decoded as GB18030. If text is garbled, select the encoding manually or save as UTF-8.',
   '无法按所选编码读取文件。请检查编码，或另存为 UTF-8 纯文本。': 'Cannot read the file using the selected encoding. Check the encoding or save as UTF-8 plain text.',
   '此浏览器缺少本地 DOCX 解压支持，请更新 Chrome 或 Edge。': 'This browser lacks local DOCX decompression support. Update Chrome or Edge.',
+  '本地 PDF 导入需要最新 Chrome 或 Edge。请更新浏览器，或在本机导出为纯文本后导入。': 'Local PDF import requires an up-to-date Chrome or Edge. Update the browser or export the document locally as plain text before importing.',
   'DOCX 正文解压后过大，或文件的大小信息不一致。': 'The decompressed DOCX body is too large, or its size metadata is inconsistent.',
   'DOCX 压缩数据损坏，无法导入。': 'The DOCX compressed data is damaged and cannot be imported.',
   'DOCX 正文大小不一致，文件可能已损坏。': 'The DOCX body size is inconsistent. The file may be damaged.',

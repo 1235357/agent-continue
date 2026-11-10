@@ -75,6 +75,16 @@ class PackageTests(unittest.TestCase):
             package.package_release(self.root)
         self.assertFalse((self.root / "dist").exists())
 
+    def test_pdf_legacy_or_unspecified_build_is_rejected(self):
+        target = self.root / "vendor/pdfjs/SOURCE.json"
+        source = json.loads(target.read_bytes())
+        for build in (None, "legacy"):
+            invalid = dict(source, build=build)
+            target.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.subTest(build=build), self.assertRaisesRegex(package.PackageError, "modern"):
+                package.package_release(self.root)
+            self.assertFalse((self.root / "dist").exists())
+
     def test_only_reviewed_public_docs_are_read_and_packaged(self):
         # These ordinary eligible files are untracked in the temporary fixture.
         private_docs = (

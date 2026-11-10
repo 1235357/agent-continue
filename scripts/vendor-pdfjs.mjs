@@ -25,7 +25,7 @@ async function main() {
   if (dependency.name !== 'pdfjs-dist' || dependency.version !== REVIEWED_VERSION) {
     throw new Error(`PDF.js ${dependency.version || 'unknown'} has not been reviewed. Expected ${REVIEWED_VERSION}; review the upgrade and update the source manifest, assets and tests together.`);
   }
-  if (source.package !== dependency.name || source.version !== REVIEWED_VERSION || source.integrity !== REVIEWED_INTEGRITY || source.license !== 'Apache-2.0') {
+  if (source.package !== dependency.name || source.version !== REVIEWED_VERSION || source.integrity !== REVIEWED_INTEGRITY || source.license !== 'Apache-2.0' || source.build !== 'modern') {
     throw new Error('The PDF.js source manifest does not match the reviewed dependency. Review the upgrade before generating assets.');
   }
   if (!Array.isArray(source.files) || source.files.length !== REVIEWED_FILE_COUNT) {
@@ -41,7 +41,7 @@ async function main() {
     const approved = /^(?:pdf(?:\.worker)?\.mjs|LICENSE|cmaps\/(?:LICENSE|[A-Za-z0-9_-]+\.bcmap)|standard_fonts\/(?:LICENSE_(?:FOXIT|LIBERATION)|[A-Za-z0-9_-]+\.(?:pfb|ttf)))$/;
     if (!approved.test(entry.path)) throw new Error('An unapproved path appears in the PDF.js asset manifest.');
     names.add(entry.path);
-    const dependencyPath = entry.path === 'pdf.mjs' || entry.path === 'pdf.worker.mjs' ? 'legacy/build/' + entry.path : entry.path;
+    const dependencyPath = entry.path === 'pdf.mjs' || entry.path === 'pdf.worker.mjs' ? 'build/' + entry.path : entry.path;
     const from = path.join(dependencyRoot, dependencyPath);
     const stat = await fs.lstat(from);
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size !== entry.size) throw new Error(`Unexpected PDF.js asset type or size: ${entry.path}`);

@@ -184,6 +184,8 @@ def validate_release(root, cache):
 def verified_vendor_files(root, cache):
     metadata_path = "vendor/pdfjs/SOURCE.json"
     source = read_json(root, metadata_path, cache)
+    if source.get("build") != "modern":
+        raise PackageError("PDF.js must use the reviewed modern build, not legacy compatibility code.")
     if (source.get("package") != "pdfjs-dist" or source.get("version") != REVIEWED_PDF_VERSION
             or source.get("integrity") != REVIEWED_PDF_INTEGRITY or source.get("license") != "Apache-2.0"):
         raise PackageError("PDF.js SOURCE.json does not match the reviewed dependency.")

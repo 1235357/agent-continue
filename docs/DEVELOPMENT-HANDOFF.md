@@ -1,5 +1,60 @@
 # Agent Continue Development Handoff
 
+## Fresh Owner Log And Store Remediation (2026-11-10 UTC)
+
+The owner's new activity(3) file is725bytes, modified05:41:35UTC, format4,
+extensionVersion3.0.6. It contains started, busy/send-not-ready at20006ms and
+unconfirmed/adapter-result at30823ms (prepare, execute-script, three lease renewals).
+It has no prompt or raw exception. The accompanying screenshot shows a message
+and reply with count0, but neither source establishes the exact failing branch,
+that long history caused it, or that this installed version includes current main.
+
+A real-MV3 regression reproduced one relevant defect: WAIT_RUN rejects after a
+single actual submit, then the delayed receipt arrives. Old source ended unknown
+and count0 (.artifacts/receipt-wait-transport-red.log, exit1). Current source
+rechecks authorization and observes that same receipt without another submission;
+cases28/29 pass, including Pause during persistent wait-transport failure
+(.artifacts/receipt-wait-pause-green.log, exit0). No total live send/receipt wait
+deadline or application prompt cap was added. This is not yet installed-owner
+live-site proof and does not identify every possible unknown result.
+
+Google login is verified. Actual Store status is REJECTED3.0.4, not pending.
+The Nov9 22:05 personal-Gmail original specifies Code Readability/Red Titanium,
+identifying old IE ActiveX/iframe script construction in both legacy PDF.js assets.
+This supersedes the previous pending status; it is a different rejection from
+the older Yellow Argon metadata notice. No appeal or new submission occurred.
+
+Vendor remediation uses unmodified official modern pdfjs-dist6.4.299 build/ bytes,
+not edited/renamed legacy code. Main SHA256dd13af821c9c3e1778653340d6539a1ba07bc56cba40073a4c727864cf0c232a;
+worker07ceb740d746e5d9012fcf9f27d5c7dea09f7d2f5e74f5c8109e5787551a2333.
+The existing npm integrity pin and fonts/CMaps/licenses remain. Vendoring verifies
+all188files before writing; package refuses legacy/missing build metadata. A fixed
+PDF_BROWSER error covers missing modern APIs without changing text import or CSP.
+Vendor5/5, actual browser import19/19 and package35/35 pass with exit0. Google has
+not reviewed or accepted this replacement. Full npm regression is still in progress.
+
+Fresh IAB also confirms6c20b46 Native42763014432/Windows129652909238 FAILED13m33s:
+guided PowerShell and cold CMD passed, but hosted-launcher fixture setup itself
+timed out at line124 Compress-Archive under its15s child watchdog, before subtests.
+The module patch did not make the workflow green. Do not relabel it pending,
+silently increase test limits, or replay hosted operations to hide that failure.
+New browser/store packages must be rebuilt from the next committed revision;
+the d0e3e9f artifacts below retain legacy PDF and are no longer release candidates.
+
+The first full npm run failed only at the new case28 START: previous case27 left
+a real unacknowledged-Pause permit fence. Generic fixture cleanup now waits for
+that actual expiry without clearing production state. The complete29/29 MV3
+suite then passed with exit0 (.artifacts/receipt-wait-sequential-green.log;
+TEST_CASES is not a recognized filter, so this command ran all29 cases). A new
+whole npm command is running in .artifacts/release-306-modern-receipt-full-final.log;
+do not count the earlier whole command as passed.
+
+The hosted launcher fixture setup now uses the same .NET ZIP API as its existing
+preview fixtures instead of cold Compress-Archive module discovery. Its watchdog
+is unchanged. Local launcher11/11 plus one missing-kit skip passed in41850ms;
+fresh modern preview Plan is being run separately with the kit supplied. No new
+cloud result is established by this fixture-only correction.
+
 ## Hosted Launcher Cold Dependency Follow-Up (2026-11-09)
 
 Fresh IAB readback of d0e3e9f native42759420288/Windows129641342733 is terminal

@@ -190,6 +190,21 @@ try {
     assert.equal((await runImport('sample.docx', docx(xml))).code, 'DOCX_XML');
     assert.equal(externalRequests.length, 0);
   });
+  await test('Missing modern PDF APIs fail before parser loading and do not affect text imports', async () => {
+    const result = await page.evaluate(async bytes => {
+      const descriptor = Object.getOwnPropertyDescriptor(Promise, 'try');
+      Object.defineProperty(Promise, 'try', { value: undefined, configurable: true });
+      try {
+        let code;
+        try { await window.importer.importPromptFile(new File([Uint8Array.from(bytes)], 'sample.pdf')); }
+        catch (error) { code = error.code; }
+        const text = await window.importer.importPromptFile(new File(['literal text'], 'sample.txt'));
+        return { code, text: text.text };
+      } finally { Object.defineProperty(Promise, 'try', descriptor); }
+    }, [...pdf()]);
+    assert.equal(result.code, 'PDF_BROWSER');
+    assert.equal(result.text, 'literal text');
+  });
   await test('PDF extracts local text under a strict CSP with a real bundled Worker', async () => {
     const result = await runImport('sample.pdf', pdf());
     assert.equal(result.ok, true, JSON.stringify(result));

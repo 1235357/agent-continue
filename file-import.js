@@ -200,6 +200,16 @@ async function docxToText(bytes) {
 
 async function pdfToText(bytes) {
   if (new TextDecoder('ascii').decode(bytes.subarray(0, 1024)).indexOf('%PDF-') < 0) fail('PDF_INVALID', t('文件不是可识别的 PDF。'));
+  // The official modern build avoids the legacy executable-string polyfills.
+  // Feature-test before importing it; older browsers can still use text imports.
+  if (typeof globalThis.Iterator !== 'function' ||
+      typeof Promise.withResolvers !== 'function' || typeof Promise.try !== 'function' ||
+      typeof Math.sumPrecise !== 'function' || typeof Set.prototype.intersection !== 'function' ||
+      typeof Uint8Array.fromBase64 !== 'function' || typeof Uint8Array.prototype.toBase64 !== 'function' ||
+      typeof Uint8Array.prototype.toHex !== 'function' || typeof Response.prototype.bytes !== 'function' ||
+      typeof ArrayBuffer.prototype.transferToFixedLength !== 'function') {
+    fail('PDF_BROWSER', t('本地 PDF 导入需要最新 Chrome 或 Edge。请更新浏览器，或在本机导出为纯文本后导入。'));
+  }
   const pdfjs = await import('./vendor/pdfjs/pdf.mjs');
   // Supply a real same-origin Worker explicitly. PDF.js's URL-origin fallback
   // creates a blob wrapper for extension URLs, which the extension CSP rejects.

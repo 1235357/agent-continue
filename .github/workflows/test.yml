@@ -23,6 +23,7 @@ jobs:
           package-manager-cache: false
       - run: npm ci --ignore-scripts
       - run: npm run vendor
+      - run: npm run test:pdf-vendor
       - run: npx playwright install --with-deps chromium
       # A headless background tab is not sufficient evidence of hidden-page
       # behavior. The MV3 and ProseMirror suites assert visibility explicitly.

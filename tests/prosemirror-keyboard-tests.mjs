@@ -56,6 +56,7 @@ function fixture({ noSend = false, rejectSynthetic = false, recurringRestore = f
     const text=window.pm.state.doc.textBetween(0,window.pm.state.doc.content.size,'\\n');
     if(!text.trim())return;
     fixture.submits++;fixture.sentTexts.push(text);
+    document.documentElement.dataset.fixtureSubmitted='true';
     fixture.submissionStates.push({method,hidden:document.hidden,focused:document.hasFocus(),sendDisabled:button?.disabled});
     const insertReceipt=()=>{
       const row=document.createElement('article');row.className='message-row self';row.dataset.messageId='pm-account~pm-dot~new-'+fixture.submits;
@@ -177,6 +178,11 @@ async function scenario(name, callback) {
   } finally {
     clearTimeout(timeout);
     await call({ type: 'PAUSE' });
+    // An unreachable page cannot acknowledge Pause. The next independent case
+    // must wait out its real submission permit, never erase that safety fence.
+    const fence = (await call({ type: 'GET_STATE' })).job?.submissionFenceUntil;
+    if (Number.isFinite(fence) && fence > Date.now())
+      await new Promise(resolve => setTimeout(resolve, fence - Date.now() + 30));
     await page.close();
   }
 }
@@ -191,9 +197,9 @@ try {
       const index = Number(url.pathname.split('-').at(-1));
       return route.fulfill({ status: 200, contentType: 'text/html', body: fixture({
         noSend: index === 3, rejectSynthetic: [4, 6, 8, 9, 10].includes(index),
-        supported: [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 19, 22, 23, 24, 25, 26].includes(index),
+        supported: [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 19, 22, 23, 24, 25, 26, 28, 29].includes(index),
         sendActivationDelayMs: index === 25 ? 2500 : [11, 16].includes(index) ? 21000 : [17, 20, 21].includes(index) ? 200 : [6, 8, 9, 10, 12, 13, 14, 15].includes(index) ? 100 : 0,
-        receiptDelayMs: index === 18 ? 8000 : 0,
+        receiptDelayMs: index === 18 ? 8000 : index === 28 ? 800 : index === 29 ? 5000 : 0,
         manualReceiptDuringReadiness: index === 9 || index === 10, ignoreButtonSubmit: index === 9,
         recurringRestore: index === 7,
       }) });
@@ -903,6 +909,52 @@ try {
       await worker.evaluate(() => { chrome.scripting.executeScript = originalExecuteScript; delete globalThis.originalExecuteScript; });
       await sending;
     }
+  });
+  await scenario('A transient wait-message failure after dispatch still counts one delayed receipt without resubmitting', async page => {
+    await start(page, { sendMethod: 'auto' });
+    const tabId = await worker.evaluate(async url => (await chrome.tabs.query({})).find(tab => tab.url === url).id, page.url());
+    await worker.evaluate(tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => {
+      const send = chrome.runtime.sendMessage.bind(chrome.runtime);
+      let rejected = false;
+      chrome.runtime.sendMessage = message => {
+        if (message.type === 'WAIT_RUN' && document.documentElement.dataset.fixtureSubmitted && !rejected) {
+          rejected = true;
+          document.documentElement.dataset.fixtureWaitRejected = 'true';
+          return Promise.reject(new Error('Synthetic temporary wait transport failure'));
+        }
+        return send(message);
+      };
+    } }), tabId);
+    const sent = await call({ type: 'SEND_NOW' });
+    assert.equal(await page.evaluate(() => document.documentElement.dataset.fixtureWaitRejected), 'true');
+    assert.equal(sent.job.sentCount, 1, sent.job.statusText);
+    assert.equal(sent.job.unknownCount, 0);
+    const observed = await inspect(page);
+    assert.deepEqual([observed.buttonClicks, observed.submits], [1, 1]);
+    assert.deepEqual(observed.sentTexts, [prompt]);
+  });
+  await scenario('Pause still cancels receipt recovery while the wait transport remains unavailable', async page => {
+    await start(page, { sendMethod: 'auto' });
+    const tabId = await worker.evaluate(async url => (await chrome.tabs.query({})).find(tab => tab.url === url).id, page.url());
+    await worker.evaluate(tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => {
+      const send = chrome.runtime.sendMessage.bind(chrome.runtime);
+      chrome.runtime.sendMessage = message => {
+        if (message.type === 'WAIT_RUN' && document.documentElement.dataset.fixtureSubmitted) {
+          document.documentElement.dataset.fixtureWaitRejected = 'true';
+          return Promise.reject(new Error('Synthetic persistent wait transport failure'));
+        }
+        return send(message);
+      };
+    } }), tabId);
+    const sending = call({ type: 'SEND_NOW' });
+    await page.waitForFunction(() => document.documentElement.dataset.fixtureWaitRejected === 'true');
+    const paused = await call({ type: 'PAUSE' });
+    assert.equal(paused.job.enabled, false);
+    await sending;
+    const current = await call({ type: 'GET_STATE' });
+    assert.equal(current.job.enabled, false);
+    assert.equal(current.job.sentCount, 0);
+    assert.deepEqual([(await inspect(page)).buttonClicks, (await inspect(page)).submits], [1, 1]);
   });
   console.log(`RESULT ${selectedCases ? selectedCases.length : passed}/${selectedCases ? selectedCases.length : passed} official ProseMirror MV3 scenarios passed`);
 } finally {

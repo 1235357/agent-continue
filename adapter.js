@@ -483,7 +483,20 @@ export async function pageAction(args) {
         && (!lastKey || !beforeKeys.has(lastKey)) && clean(textOf(last)) === clean(prompt)) {
         return result('sent', useKeyboardOnly ? '已通过 Ctrl+Enter 提交，并在会话中确认新消息。' : '已确认发送并在会话中确认新消息。');
       }
-      await wait(180);
+      try {
+        await wait(180);
+      } catch (error) {
+        if (args.unlimitedReadiness !== true) throw error;
+        if (revoked) return result('cancelled', '已暂停，本次未提交。');
+        // Submission already happened. A temporary wait transport failure is
+        // not evidence of failure and must not strand its receipt or resend.
+        try {
+          const checked = await chrome.runtime.sendMessage({ type: 'CHECK_RUN', runId: args.runId });
+          if (checked?.ok === true && checked.allowed === false) return result('cancelled', '本次执行已取消。');
+          if (checked?.allowed === true && Number.isFinite(checked.runDeadline)) args.runDeadline = checked.runDeadline;
+        } catch { /* Keep observing this receipt; Pause revocation still wins. */ }
+        await new Promise(resolve => setTimeout(resolve, 180));
+      }
     }
     return result('unknown', useKeyboardOnly ? '已发送 Ctrl+Enter，但未确认新消息；本周期不追加点击或重复按键。' : '已点击发送，但未确认新消息；本周期不立即重试。');
   };

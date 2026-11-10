@@ -1,5 +1,31 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Receipt Recovery And Modern PDF Remediation (2026-11-10 UTC)
+
+Owner activity(3), modified05:41:35UTC,3.0.6, contains busy/send-not-ready20006ms
+and unconfirmed/adapter-result30823ms. This proves waiting beyond20s but not the
+specific exception, rendering-performance cause or installed-source hash. The
+screenshot's visible message/reply and count0 warrant confirmation-path testing,
+not automatic attribution to a slow Send button or successful model completion.
+
+Actual disposable MV3 case28 fails before the change: a WAIT_RUN rejection after
+one submit terminates receipt observation and leaves count0 despite its delayed
+receipt. Fixed source waits for the same receipt and counts once; case29 confirms
+Pause cancels persistent wait-transport recovery without resubmission. Logs:
+.artifacts/receipt-wait-transport-red.log (exit1),
+.artifacts/receipt-wait-transport-green.log (exit0,1/1),
+.artifacts/receipt-wait-pause-green.log (exit0,2/2). No owner installation changed.
+
+Authenticated Store3.0.4 is REJECTED. The Nov9 22:05 original rejection specifies
+Red Titanium/readability and the legacy PDF.js ActiveX/iframe script compatibility
+paths in both main and worker, not the earlier keyword issue. The official modern
+distribution of the same pinned6.4.299 contains neither rejected compatibility
+path. The vendor script copies exact upstream bytes and package verifies modern
+metadata plus file digests. Vendor5/5, browser import19/19, package35/35 and npm
+check have exit0 logs; Google acceptance and the new exact final ZIP are unproved.
+Full npm regression remains in progress at this checkpoint. No Release or Store
+upload/submission was made here, and no production connection was changed.
+
 ## Hosted Launcher Cold Module Regression (2026-11-09)
 
 New terminal native42759420288/Windows129641342733 FAILED16m54s at hosted

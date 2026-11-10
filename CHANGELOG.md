@@ -2,6 +2,13 @@
 
 ## [3.0.6] - Unreleased
 
+- Keep observing the same submitted message when the worker wait transport
+  rejects transiently after dispatch. Do not turn that exception into a terminal
+  unconfirmed cycle or dispatch again. Pause still cancels receipt recovery.
+- Use the unmodified modern PDF.js 6.4.299 distribution instead of its legacy
+  compatibility build. Verify exact upstream main/worker bytes when vendoring and
+  packaging; show a fixed update-browser error when required PDF APIs are absent.
+  Local text import remains available in that case.
 - Remove the fixed total send-wait deadline. A current enabled invocation stays
   pending through delayed readiness or missing result transport until a result,
   explicit cancellation or target invalidation; it is never re-dispatched merely

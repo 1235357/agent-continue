@@ -121,9 +121,15 @@ test('Windows hosted acceptance launcher with a local stub ZIP', {skip: process.
   const sums = ['install.ps1', 'bin.mjs'].map(name =>
     sha256(readFileSync(path.join(payload, name))) + '  ' + name + '\n').join('');
   writeFileSync(path.join(payload, 'SHA256SUMS.txt'), sums);
-  const packed = run(['-Command', "$ErrorActionPreference = 'Stop'; Compress-Archive -LiteralPath " +
-    "@('install.ps1','bin.mjs','SHA256SUMS.txt') -DestinationPath $env:AC_FIXTURE_ARCHIVE"],
-  payload, {AC_FIXTURE_ARCHIVE: archive});
+  // Fixture creation uses the same .NET ZIP API as preview fixtures below. It
+  // must not spend the launcher's watchdog on cold Archive module discovery.
+  const packed = run(['-Command', [
+    "$ErrorActionPreference = 'Stop'; Add-Type -AssemblyName System.IO.Compression; Add-Type -AssemblyName System.IO.Compression.FileSystem",
+    '$zip = [IO.Compression.ZipFile]::Open($env:AC_FIXTURE_ARCHIVE, [IO.Compression.ZipArchiveMode]::Create)',
+    "try { foreach ($name in @('install.ps1','bin.mjs','SHA256SUMS.txt')) {",
+    '$null = [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, [IO.Path]::Combine($pwd.Path, $name), $name)',
+    '} } finally { $zip.Dispose() }',
+  ].join('; ')], payload, {AC_FIXTURE_ARCHIVE: archive});
   assert.equal(packed.status, 0, packed.stderr);
   const digest = sha256(readFileSync(archive));
 

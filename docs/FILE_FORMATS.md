@@ -50,7 +50,9 @@ const { text, format, warnings } = await importPromptFile(file, {
 
 ## 依赖来源与维护
 
-PDF.js 固定为 **`pdfjs-dist@6.4.299`**，于 2026-10-23 从 Mozilla 指定的官方 npm 分发渠道取得。使用 legacy 构建以覆盖较旧的 Chromium JavaScript 功能；主模块与 Worker 版本一致。下载包通过 npm 元数据提供的 SHA-512 完整性值校验，详细来源、版本、文件清单和逐文件 SHA-256 见 [`vendor/pdfjs/SOURCE.json`](../vendor/pdfjs/SOURCE.json)。
+PDF.js 固定为 **`pdfjs-dist@6.4.299`**，于 2026-10-23 从 Mozilla 指定的官方 npm 分发渠道取得。主模块与 Worker 使用同版本、未经修改的官方 **modern** 构建，不再打包 legacy 的 ActiveX／iframe 可执行字符串兼容层。下载包通过 npm 元数据提供的 SHA-512 完整性值校验，详细来源、构建类型、文件清单和逐文件 SHA-256 见 [`vendor/pdfjs/SOURCE.json`](../vendor/pdfjs/SOURCE.json)。
+
+PDF 导入需要最新的 Chrome／Edge 所提供的现代 JavaScript API，加载解析器前会检查实际能力；不支持时只拒绝 PDF 导入，并提示更新浏览器或在本机导出纯文本。不会为了 PDF 导入增加远程代码、放宽 CSP 或加载兼容脚本；纯文本导入及定时发送不依赖 PDF.js。
 
 ### 从公开源码复现离线资源
 
@@ -61,7 +63,7 @@ npm ci --ignore-scripts
 node scripts/vendor-pdfjs.mjs
 ```
 
-脚本从 `node_modules/pdfjs-dist` 复制经过核验的精确 188 个文件，映射 `legacy/build/pdf.mjs` 和 `legacy/build/pdf.worker.mjs` 到扩展资源目录，并逐一验证大小与 SHA-256。它拒绝不同版本、缺失/重复/不批准的路径或校验值变化；全部源文件验证完毕后才开始复制。**Release 安装 ZIP 包含完整离线资源，安装用户无需 npm，也无需再联网下载 PDF 解析器。**
+脚本从 `node_modules/pdfjs-dist` 复制经过核验的精确 188 个文件，映射 `build/pdf.mjs` 和 `build/pdf.worker.mjs` 到扩展资源目录，并逐一验证大小与 SHA-256。它拒绝非 modern 构建、不同版本、缺失/重复/不批准的路径或校验值变化；全部源文件验证完毕后才开始复制。`npm run test:pdf-vendor` 复核主模块和 Worker 与上游原字节一致，且不含已拒审的 legacy 兼容层。**Release 安装 ZIP 包含完整离线资源，安装用户无需 npm，也无需再联网下载 PDF 解析器。**
 
 源码需跟踪这些小型来源/许可文件：
 
