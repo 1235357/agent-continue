@@ -1,5 +1,48 @@
 # Agent Continue Development Handoff
 
+## 3.0.11 Published And Submitted (2026-11-10 09:10 UTC)
+
+Release v3.0.11 is published from immutable tag/source
+f104b1a08dfb9521f0783c3c5b88bb64959ac132. Actual IAB readback of workflow
+42785713503 is SUCCESS14m35s: windows-sidecar3m42s, release10m46s. The full CI
+npm command, official-PM41/41, editor11/11, package35/35, Windows closure and
+GitHub/Store payload equality all passed. This supersedes the missing local
+whole-command receipt for release gating, not for installed live-site evidence.
+
+Actual published files were downloaded through IAB to D:/Downloads. SHA-256:
+
+- Store ZIP: cc6527a9d07d1cbe278ff241c82b0d2df79606d1f85f67b5a4c1ec03e1de6d28
+- GitHub ZIP: 3e48f7b129a46da98248fc53b674bced6208e6a10804fbfbf309d5a6d9f1f4ea
+- SHA256SUMS: 5d58003b7292ada09861894e964836be5a92972db07aa9b783426620501f36e4
+
+Local readback verified both archive inventories byte-identical (251 members),
+manifest3.0.11 and the tagged adapter/background/popup/i18n sources after checkout
+line-ending normalization. An initial raw Windows-vs-Linux source comparison
+failed only CRLF/LF; normalized tagged contents match. Do not substitute the
+earlier locally built Store ZIP hash146a15ed for the published cc6527a9 ZIP.
+
+The exact published Store ZIP replaced draft3.0.6. Package UI read back3.0.11,
+then Submit For Review returned "Your extension was submitted for review" and
+Status "Pending review". Automatic publication after approval was already
+selected. Public2.1.0 remains the last published Store version, not3.0.11 yet.
+English3460char Description, attachment/preparation scripting justification,
+3.0.11 test instructions and new English screenshot were saved before submission.
+No review cancellation, appeal, asset replacement or credential upload occurred.
+GitHub Release notes now state the full persistent-prompt policy and evidence
+boundary; immutable binary assets/tag were not changed.
+
+Proof: .artifacts/release-311-ci-success.png,
+.artifacts/release-311-published.png,
+.artifacts/release-311-store-submitted.png and
+.artifacts/release-311-store-pending.png. Local final package35/35, UI39/39,
+editor11/11 and focused exact-Store8/8 also have explicit exit0 receipts.
+
+No production VPN/MCP/IDE/research, external Chrome original scheduler, protected
+installation or native registration was changed. Current-candidate installed
+ChatGPT/Dot and protected Pause/Revoke/full-browser-reopen gates remain open.
+The full Windows-first goal stays active; Release plus Store submission does not
+erase its remaining runtime requirements or establish Google approval.
+
 ## 3.0.11 Final Compatibility Correction (2026-11-10 UTC)
 
 3.0.10 tag6a64b91 is immutable, but Release run42783901798 was canceled2m33s

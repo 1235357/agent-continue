@@ -1,5 +1,40 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## 3.0.11 Persistent Prompt Delivery Release Evidence (2026-11-10)
+
+Latest owner instruction requires configured-prompt priority over unsent text,
+pending composer attachments and same-conversation UI remounts. Attachments are
+detached using scoped site controls, not uploaded with the prompt or deleted
+from local/account storage. Preparation retries known unsubmitted blocked/error
+states with fresh same-job authorization, without a total readiness deadline.
+Pause and exact conversation identity remain; attempted/unknown submissions are
+observed under their receipt identity rather than blindly submitted again.
+
+Reproduced legacy defect: setting submitted before clickButton verified its
+connectivity could produce no click and then wait forever for a nonexistent
+receipt. Actual dispatch now owns that transition. Full-form remount recovery,
+stale disabled-Send readiness and stale-positive permit renewal have separate
+RED-before/GREEN-after fixtures. An unremovable pending attachment remains
+cancellable and pending, not a terminal skipped cycle or account-file deletion.
+
+Final local official-PM actual-MV341/41, editor11/11, focused extracted Store8/8,
+adapter27/27, UI39/39 and package35/35 have explicit exit0. The complete local npm
+handle was lost after partial progress and has no whole-command receipt. Final
+Release CI42785713503 SUCCESS14m35s supplies the full npm command success;
+Windows3m42s and release10m46s also verify runtime closure and paired packaging.
+These remain disposable synthetic/browser and build tests, not the owner's
+installed live ChatGPT/Dot or a protected runtime lifecycle test.
+
+v3.0.11/f104b1a is actually published. Downloaded Store ZIP SHA-256
+cc6527a9d07d1cbe278ff241c82b0d2df79606d1f85f67b5a4c1ec03e1de6d28 matches the
+published digest and SHA256SUMS; both archives have identical251-member payloads.
+Tagged source content matches after Windows/Linux line-ending normalization.
+Actual Store Package readback3.0.11 and submission confirmation/Pending review
+are saved in .artifacts/release-311-store-submitted.png and
+.artifacts/release-311-store-pending.png. Public Store2.1.0 is not replaced until
+Google approves/publishes this revision. No installed original task, production
+connection, credentials, native host or protected owner was mutated here.
+
 ## 3.0.9 Preparation Recovery Review (2026-11-10 UTC)
 
 Worker regression59/59 passed with exit0 in
