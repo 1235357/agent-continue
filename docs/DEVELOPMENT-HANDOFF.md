@@ -1,5 +1,55 @@
 # Agent Continue Development Handoff
 
+## 3.0.12 Final-Grant Recovery Candidate (2026-11-10)
+
+The owner's new activity export is 46,372 bytes, reports extension3.0.11 and
+198 events over35,289,558ms:180 busy/send-not-ready,2 unconfirmed,1 blocked,
+6 starts,6 pauses and3 browser-restored. There is no sent event; the last event
+is paused. Of the busy records,171 are stage dispatch and9 prepare. The120000ms
+duration value is the existing diagnostic clamp, not a total delivery deadline.
+This establishes a real repeated non-completion report, not its unique cause.
+Do not call the absent count cosmetic or blame long conversations/network alone.
+The raw owner log, prompts, chat text and credentials are not committed.
+
+Two deterministic defects were reproduced RED before their fixes using the
+real MV3/official-ProseMirror fixture:
+
+1. An isolated page accepted GRANT_RUN, but losing its acknowledgement left a
+   correctly filled, ready composer at zero clicks/submissions indefinitely.
+   The worker now accepts either the exact ordinary acknowledgement or a
+   read-only observation of that same isolated invocation's accepted deadline
+   on the pinned document. Missing, rejected and permanently pending replies
+   all recover without a second submission. A truly undelivered grant and
+   manual Pause do not permit any click.
+2. The worker set dispatch before the grant handshake, misclassifying a
+   same-URL document reload with no submission attempt as unknown. The new
+   authorization stage remains pre-dispatch; recovery retires the old run and
+   prepares the exact prompt on the fresh document once.
+
+The complete npm test command has terminated with exit0, including official
+ProseMirror/MV3 cases44/44, editor browser11/11, background60/60 and UI39/39.
+The three new cases also pass3/3 exit0 against the actual extracted candidate
+Store ZIP, not only the working tree. Unit editor/invocation91/91 and packaging
+35/35 have separate exit0 receipts. Combined Windows source/runtime/pin/Plan
+closure passes with installed=false and published=false. Stage authorization
+is a fixed metadata value in filtered exports, not a new grant.
+
+Manifest3.0.12 and CHANGELOG mark this as an unreleased candidate. The final
+paired candidate archives under dist have SHA-256:
+
+- agent-continue-3.0.12.zip:
+  a268b22a49e836bfad49075460cba277d6ae2d46b7ace28a40555da919687f5e
+- agent-continue-3.0.12-store.zip:
+  335cd11ab2337f24fe41430a7d247236abefb0dcc2ed659b928cb4553e1eff2b
+
+The archive inventories are byte-identical; the combined closure receipt is
+.artifacts/release-312-setup-build.json. No tag, new GitHub
+Release, replacement Store upload, protected install, native registration or
+external Chrome original-task mutation is implied. Prior3.0.11 remains the
+published Release and pending Store revision at the latest IAB readback.
+Real installed-site delivery remains open; these repaired transport paths fit
+the reported stage but do not prove they caused every owner's log entry.
+
 ## 3.0.11 Published And Submitted (2026-11-10 09:10 UTC)
 
 Release v3.0.11 is published from immutable tag/source

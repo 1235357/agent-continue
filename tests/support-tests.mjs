@@ -98,6 +98,10 @@ test('duration is finite numeric only and bounded without string coercion', asyn
 });
 
 test('execution progress export keeps only fixed stages, channels and bounded integer renewals', async () => {
+  const authorization = await build([{ at: now, event: 'busy', diagnostic: {
+    code: 'send-not-ready', stage: 'authorization', runId: secret, grantedDeadline: now,
+  } }]);
+  assert.deepEqual(authorization.logs[0].diagnostic, { code: 'send-not-ready', stage: 'authorization' });
   const value = await build([{ at: now, event: 'unconfirmed', diagnostic: {
     code: 'no-valid-result', stage: 'receipt', resultChannel: 'extension-message', leaseRenewals: 2,
     prompt: secret, resultToken: secret, documentId: secret,

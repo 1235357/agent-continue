@@ -288,7 +288,7 @@ try {
       const index = Number(url.pathname.split('-').at(-1));
       return route.fulfill({ status: 200, contentType: 'text/html', body: fixture({
         noSend: index === 3, rejectSynthetic: [4, 6, 8, 9, 10].includes(index),
-        supported: [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 19, 22, 23, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 41].includes(index),
+        supported: [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 19, 22, 23, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 41, 42, 43, 44].includes(index),
         sendActivationDelayMs: index === 40 ? 2000 : index === 25 ? 2500 : [11, 16].includes(index) ? 21000 : [17, 20, 21].includes(index) ? 200 : [6, 8, 9, 10, 12, 13, 14, 15].includes(index) ? 100 : 0,
         receiptDelayMs: index === 18 ? 8000 : index === 28 ? 800 : index === 29 ? 5000 : 0,
         manualReceiptDuringReadiness: index === 9 || index === 10, ignoreButtonSubmit: index === 9,
@@ -1643,6 +1643,109 @@ try {
       assert.equal(observed.updates, delivered.updates, 'No model preparation is authorized by an expired positive reply');
     } finally {
       await call({ type: 'PAUSE' });
+      await sending;
+    }
+  });
+  await scenario('An accepted final grant survives a lost, rejected, or permanently pending acknowledgement without a second dispatch', async page => {
+    await worker.evaluate(() => {
+      globalThis.originalGrantSend = chrome.tabs.sendMessage;
+      globalThis.grantTransportProbe = { mode: 'missing', accepted: 0 };
+      chrome.tabs.sendMessage = async (tabId, message, options) => {
+        const result = await originalGrantSend(tabId, message, options);
+        if (message.type !== 'GRANT_RUN') return result;
+        if (result?.granted === true) grantTransportProbe.accepted++;
+        if (grantTransportProbe.mode === 'reject') throw new Error('Synthetic lost accepted-grant reply');
+        if (grantTransportProbe.mode === 'pending') return new Promise(() => {});
+        return undefined;
+      };
+    });
+    try {
+      for (const mode of ['missing', 'reject', 'pending']) {
+        await worker.evaluate(mode => { grantTransportProbe.mode = mode; }, mode);
+        await start(page, { sendMethod: 'auto' });
+        const sending = call({ type: 'SEND_NOW' });
+        const outcome = await Promise.race([sending.then(result => ({ result })),
+          new Promise(resolve => setTimeout(() => resolve({ waiting: true }), 6000))]);
+        if (outcome.waiting) { await call({ type: 'PAUSE' }); await sending; }
+        assert.ok(outcome.result, `The ${mode} acknowledgement must not strand an already accepted final grant`);
+        assert.equal(outcome.result.job.sentCount, 1, outcome.result.job.statusText);
+        assert.equal(outcome.result.job.unknownCount, 0);
+        await call({ type: 'PAUSE' });
+      }
+      const observed = await inspect(page);
+      assert.deepEqual([observed.buttonClicks, observed.submits, observed.keyboardCommands], [3, 3, 0]);
+      assert.deepEqual(observed.sentTexts, [prompt, prompt, prompt]);
+    } finally {
+      await call({ type: 'PAUSE' });
+      await worker.evaluate(() => { chrome.tabs.sendMessage = originalGrantSend; delete globalThis.originalGrantSend; });
+    }
+  });
+  await scenario('Pause cancels a final grant whose delivery and acknowledgement are both unavailable', async page => {
+    await worker.evaluate(() => {
+      globalThis.originalGrantSend = chrome.tabs.sendMessage;
+      globalThis.undeliveredGrantCount = 0;
+      chrome.tabs.sendMessage = (tabId, message, options) => {
+        if (message.type === 'GRANT_RUN') { undeliveredGrantCount++; return new Promise(() => {}); }
+        return originalGrantSend(tabId, message, options);
+      };
+    });
+    const started = await start(page, { sendMethod: 'auto' });
+    const sending = call({ type: 'SEND_NOW' });
+    try {
+      for (let attempt = 0; attempt < 30; attempt++) {
+        if (await worker.evaluate(() => undeliveredGrantCount > 0)) break;
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      assert.ok(await worker.evaluate(() => undeliveredGrantCount > 0));
+      assert.equal((await call({ type: 'GET_STATE' })).job.id, started.job.id);
+      assert.equal((await inspect(page)).submits, 0, 'No grant readback means no submission permission');
+      assert.equal((await call({ type: 'PAUSE' })).job.enabled, false);
+      await sending;
+      await new Promise(resolve => setTimeout(resolve, 1200));
+      assert.deepEqual([(await inspect(page)).submits, (await inspect(page)).buttonClicks], [0, 0]);
+    } finally {
+      await call({ type: 'PAUSE' });
+      await worker.evaluate(() => { chrome.tabs.sendMessage = originalGrantSend; delete globalThis.originalGrantSend; });
+      await sending;
+    }
+  });
+  await scenario('A document reload while the final grant is undelivered recovers preparation, not an unknown attempted send', async page => {
+    await worker.evaluate(() => {
+      globalThis.originalGrantSend = chrome.tabs.sendMessage;
+      globalThis.reloadDuringGrant = { blocked: 0, allow: false };
+      chrome.tabs.sendMessage = (tabId, message, options) => {
+        if (message.type === 'GRANT_RUN' && !reloadDuringGrant.allow) {
+          reloadDuringGrant.blocked++;
+          return new Promise(() => {});
+        }
+        return originalGrantSend(tabId, message, options);
+      };
+    });
+    const started = await start(page, { sendMethod: 'auto' });
+    const sending = call({ type: 'SEND_NOW' });
+    try {
+      for (let attempt = 0; attempt < 30; attempt++) {
+        if (await worker.evaluate(() => reloadDuringGrant.blocked > 0)) break;
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      assert.ok(await worker.evaluate(() => reloadDuringGrant.blocked > 0));
+      assert.equal((await inspect(page)).submits, 0);
+      await page.reload();
+      await page.waitForFunction(() => window.fixtureReady);
+      await worker.evaluate(() => { reloadDuringGrant.allow = true; });
+      const outcome = await Promise.race([sending.then(result => ({ result })),
+        new Promise(resolve => setTimeout(() => resolve({ waiting: true }), 8000))]);
+      if (outcome.waiting) { await call({ type: 'PAUSE' }); await sending; }
+      assert.ok(outcome.result, 'An unattempted old document must retire and recover in a fresh run');
+      assert.equal(outcome.result.job.id, started.job.id);
+      assert.equal(outcome.result.job.sentCount, 1, outcome.result.job.statusText);
+      assert.equal(outcome.result.job.unknownCount, 0, 'A pending grant is not an attempted submission');
+      const observed = await inspect(page);
+      assert.deepEqual([observed.buttonClicks, observed.submits, observed.keyboardCommands], [1, 1, 0]);
+      assert.deepEqual(observed.sentTexts, [prompt]);
+    } finally {
+      await call({ type: 'PAUSE' });
+      await worker.evaluate(() => { chrome.tabs.sendMessage = originalGrantSend; delete globalThis.originalGrantSend; });
       await sending;
     }
   });

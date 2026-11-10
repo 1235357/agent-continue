@@ -115,7 +115,7 @@ async function logEvent(event, message, diagnostic = null) {
     ? { diagnostic: { code: diagnostic.code, ...(Number.isFinite(diagnostic.durationMs)
       ? { durationMs: Math.max(0, Math.min(120000, diagnostic.durationMs)) } : {}) } } : {};
   if (detail.diagnostic) {
-    if (['page', 'prepare', 'readiness', 'dispatch', 'receipt'].includes(diagnostic.stage)) detail.diagnostic.stage = diagnostic.stage;
+    if (['page', 'prepare', 'readiness', 'authorization', 'dispatch', 'receipt'].includes(diagnostic.stage)) detail.diagnostic.stage = diagnostic.stage;
     if (['none', 'execute-script', 'extension-message', 'page-readback'].includes(diagnostic.resultChannel)) detail.diagnostic.resultChannel = diagnostic.resultChannel;
     if (Number.isSafeInteger(diagnostic.leaseRenewals) && diagnostic.leaseRenewals >= 0) detail.diagnostic.leaseRenewals = Math.min(1000000, diagnostic.leaseRenewals);
   }
@@ -290,7 +290,7 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS) {
           if (settled || !latest?.enabled || latest.phase !== 'sending' || latest.runId !== args.runId
             || latest.tabId !== tabId || latest.url !== args.expectedUrl) return;
           if (pending.documentId && frame.documentId && pending.documentId !== frame.documentId) {
-            const beforeDispatch = ['page', 'prepare', 'readiness'].includes(pending.stage);
+            const beforeDispatch = ['page', 'prepare', 'readiness', 'authorization'].includes(pending.stage);
             pending.resolve(beforeDispatch
               ? { status: 'blocked', message: t('\u9875\u9762\u5df2\u53d8\u5316\u3002'), diagnosticCode: 'commit-not-dispatched', retryable: true }
               : { status: 'unknown', message: t('\u9875\u9762\u672a\u8fd4\u56de\u53ef\u786e\u8ba4\u7684\u7ed3\u679c\u3002') });
@@ -604,23 +604,60 @@ async function commitRun(message, sender) {
     };
     let requireButton = false;
     let absentSendObserved = false;
+    let grantRequest = null;
+    let grantReadback = null;
+    const grantAccepted = async pending => {
+      const deadline = permit.args.deadline;
+      if (!grantRequest || grantRequest.deadline !== deadline) {
+        const request = { deadline, reply: null, settled: false };
+        grantRequest = request;
+        try {
+          request.promise = Promise.resolve(chrome.tabs.sendMessage(pending.tabId,
+            { type: 'GRANT_RUN', runId: pending.runId, resultToken: pending.resultToken, runDeadline: deadline },
+            pending.documentId ? { documentId: pending.documentId } : { frameId: 0 }))
+            .then(reply => { request.reply = reply; }, () => undefined)
+            .finally(() => { request.settled = true; });
+        } catch { request.promise = Promise.resolve(); request.settled = true; }
+      }
+      const matchesReply = () => grantRequest?.deadline === deadline && grantRequest.reply?.granted === true
+        && grantRequest.reply.runId === pending.runId && grantRequest.reply.resultToken === pending.resultToken
+        && grantRequest.reply.runDeadline === deadline && Date.now() < deadline;
+      if (matchesReply()) return true;
+      if (!grantReadback) {
+        const readback = { value: null, settled: false };
+        grantReadback = readback;
+        const target = { tabId: pending.tabId,
+          ...(pending.documentId ? { documentIds: [pending.documentId] } : {}) };
+        readback.promise = Promise.resolve().then(() => chrome.scripting.executeScript({ target, world: 'ISOLATED', func: pageInvocationState,
+          args: [{ runId: pending.runId, resultToken: pending.resultToken }] }))
+          .then(frames => { readback.value = frames?.find(frame => frame.frameId === 0); }, () => undefined)
+          .finally(() => { readback.settled = true; });
+      }
+      // Message delivery and its acknowledgement are independent. Read only
+      // this exact isolated invocation; never infer permission from page DOM.
+      let timer;
+      try {
+        await Promise.race([grantRequest.promise, grantReadback.promise,
+          new Promise(resolve => { timer = setTimeout(resolve, 150); })]);
+      } finally { clearTimeout(timer); }
+      const readback = grantReadback;
+      if (readback.settled) grantReadback = null;
+      const accepted = matchesReply() || (readback.value?.result?.state === 'running'
+        && (!pending.documentId || readback.value.documentId === pending.documentId)
+        && readback.value.result.grantedDeadline === deadline && Date.now() < deadline);
+      if (!accepted && readback.settled && grantRequest.settled) grantRequest = null;
+      return accepted;
+    };
     const invoke = async phase => {
       const pending = [...pendingPageResults.values()].find(item => item.runId === message.runId);
-      if (pending) pending.stage = phase === 'observe' ? 'readiness' : phase === 'commit' ? 'dispatch' : 'prepare';
+      if (pending) pending.stage = phase === 'observe' ? 'readiness' : phase === 'commit' ? 'authorization' : 'prepare';
       const target = { tabId: permit.tabId, ...(permit.documentId ? { documentIds: [permit.documentId] } : {}) };
       while (await allowed()) {
         if (phase === 'commit' && pending) {
-          let granted = false;
-          try {
-            const reply = await chrome.tabs.sendMessage(pending.tabId,
-              { type: 'GRANT_RUN', runId: pending.runId, resultToken: pending.resultToken, runDeadline: permit.args.deadline },
-              pending.documentId ? { documentId: pending.documentId } : { frameId: 0 });
-            granted = reply?.granted === true && reply.runId === pending.runId
-              && reply.resultToken === pending.resultToken && reply.runDeadline === permit.args.deadline;
-          } catch { /* No MAIN submission was admitted; only this handshake may retry. */ }
-          if (!granted) { await new Promise(resolve => setTimeout(resolve, 150)); continue; }
+          if (!await grantAccepted(pending)) { await new Promise(resolve => setTimeout(resolve, 150)); continue; }
           if (!await allowed()) return { supported: true, dispatched: false, code: 'cancelled' };
         }
+        if (phase === 'commit' && pending) pending.stage = 'dispatch';
         let value;
         try {
           const frames = await chrome.scripting.executeScript({ target,

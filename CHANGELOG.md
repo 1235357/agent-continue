@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.0.12] - Unreleased Candidate
+
+- Recover an accepted final submission permit when its message acknowledgement
+  is missing, rejected or permanently pending. Read back only the same isolated
+  invocation and pinned document; do not substitute DOM content for authority.
+- Keep the final authorization handshake distinct from an actual dispatch.
+  Reloading the same conversation before authorization can recover preparation
+  instead of being misclassified as an uncertain attempted send.
+- Include the fixed authorization stage in privacy-filtered activity exports.
+  Preserve exact configured text, unlimited readiness waiting, manual Pause and
+  at-most-one submission. No installed live-site success is claimed by these
+  synthetic transport-recovery tests.
+
 ## [3.0.11] - 2026-11-10
 
 - Preserve the legacy adapter's same-form editor replacement recovery while

@@ -13,7 +13,8 @@ export function translatePageResult(value) {
 export function pageInvocationState({ runId, resultToken }) {
   const entry = globalThis.__agentContinuePageInvocationsV1?.get(resultToken);
   if (!entry || entry.runId !== runId) return { state: 'absent' };
-  return entry.state === 'settled' ? { state: 'settled', result: entry.result } : { state: 'running' };
+  return entry.state === 'settled' ? { state: 'settled', result: entry.result }
+    : { state: 'running', ...(Number.isFinite(entry.grantedDeadline) ? { grantedDeadline: entry.grantedDeadline } : {}) };
 }
 
 // This function is injected into one explicitly selected tab.
@@ -42,10 +43,12 @@ export async function pageAction(args) {
     if (message.type === 'GRANT_RUN') {
       if (revoked || !Number.isFinite(message.runDeadline)) return false;
       args.runDeadline = message.runDeadline;
+      if (invocation) invocation.grantedDeadline = message.runDeadline;
       sendResponse({ granted: true, runId: args.runId, resultToken: args.resultToken, runDeadline: args.runDeadline });
       return false;
     }
     revoked = true;
+    if (invocation) delete invocation.grantedDeadline;
     sendResponse({ revoked: true, runId: args.runId, resultToken: args.resultToken });
     return false;
   };

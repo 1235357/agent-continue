@@ -1,5 +1,34 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## 3.0.12 Grant-Transport Candidate (2026-11-10)
+
+New owner activity metadata reports3.0.11 with180 readiness waits and no sent
+event. This supersedes the earlier tiny log snapshot. A zero confirmed count
+is not presumed cosmetic; the export alone does not identify one unique cause.
+
+RED/GREEN actual-MV3 official-ProseMirror scenarios42-44 establish bounded
+fixes, not installed live-site acceptance. Lost/rejected/never-returning grant
+acknowledgements after actual isolated acceptance now recover through exact
+readback and produce one configured submission per run. An undelivered grant
+does not submit, and Pause still cancels. Reloading before grant delivery now
+recovers preparation rather than ending an unattempted send as unknown.
+
+The readback is extension-isolated, run/token-bound and document-pinned. It
+does not inspect user prompt text or grant from DOM equality. The authorizing
+worker still rechecks the live run before MAIN dispatch; the finite permission
+lease is not an application total readiness deadline. Attempted or uncertain
+commits retain their existing no-blind-replay rule.
+
+The complete npm test command terminated with exit0: official-ProseMirror
+actual-MV344/44, editor browser11/11, background60/60 and UI39/39 are included.
+The three new cases also pass3/3 exit0 against the extracted final Store ZIP.
+Editor/invocation units91/91, packaging35/35 and combined closure pass. The
+candidate Store archive SHA-256 is
+335cd11ab2337f24fe41430a7d247236abefb0dcc2ed659b928cb4553e1eff2b;
+the paired GitHub archive and build receipt are recorded in the handoff.
+Neither archive has been installed or published by these checks. No current-user
+Chrome task, production connection or protected installation was changed.
+
 ## 3.0.11 Persistent Prompt Delivery Release Evidence (2026-11-10)
 
 Latest owner instruction requires configured-prompt priority over unsent text,
