@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import { sanitizeDeliveryDiagnostics } from '../delivery-diagnostics.js';
 
 async function module(name) {
   const url = new URL('../' + name, import.meta.url);
@@ -32,9 +33,11 @@ test('support export contains version and bounded typed event metadata, not raw 
   const value = await build([{ at: now - 1000, event: 'unconfirmed', message: secret,
     diagnostic: { code: 'execution-exception', durationMs: 123, stack: secret }, prompt: secret, url: secret }]);
   assert.deepEqual(value, {
-    format: 'agent-continue-activity', version: 4, extensionVersion: '2.1.0',
+    format: 'agent-continue-activity', version: 5, extensionVersion: '2.1.0',
     timestampMode: 'relative-ms', excludedEntries: 0,
     logs: [{ elapsedMs: 0, event: 'unconfirmed', diagnostic: { code: 'execution-exception', durationMs: 123 } }],
+    deliveries: [], coverage: { logs: { retained: 1, omitted: 0 }, deliveries: { retained: 0, omitted: 0, activeSnapshots: 0 } },
+    diagnosticsHealth: { writeFailures: 0, persistence: 'unknown' },
   });
   assert.equal(JSON.stringify(value).includes(secret), false);
 });
@@ -87,11 +90,11 @@ test('timing diagnostics export only bounded numbers, fixed enums and actual boo
 });
 
 test('duration is finite numeric only and bounded without string coercion', async () => {
-  for (const durationMs of ['100', true, null, {}, [], NaN, Infinity, -Infinity]) {
+  for (const durationMs of ['100', true, null, {}, [], NaN, Infinity, -Infinity, Number.MAX_SAFE_INTEGER + 1]) {
     const value = await build([{ at: now, event: 'unconfirmed', diagnostic: { code: 'adapter-result', durationMs } }]);
     assert.deepEqual(value.logs[0].diagnostic, { code: 'adapter-result' });
   }
-  for (const [durationMs, expected] of [[-4, 0], [2.6, 3], [250000, 120000]]) {
+  for (const [durationMs, expected] of [[-4, 0], [0, 0], [2.6, 3], [250000, 250000], [Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER]]) {
     const value = await build([{ at: now, event: 'unconfirmed', diagnostic: { code: 'no-valid-result', durationMs } }]);
     assert.equal(value.logs[0].diagnostic.durationMs, expected);
   }
@@ -173,7 +176,7 @@ test('support page stays local until an explicit fixed external link or manual e
   }
   const js = fs.readFileSync(new URL('../support.js', import.meta.url), 'utf8');
   assert.doesNotMatch(js, /\bfetch\s*\(|XMLHttpRequest|sendBeacon|sendNativeMessage|requestKeepAwake|\.tabs\.|clipboard|runtime\.sendMessage/);
-  assert.match(js, /local\.get\(\['logs'\]\)/);
+  assert.match(js, /local\.get\(\[[^\]]*'logs'[^\]]*\]\)/);
   assert.match(js, /buildActivityExport/);
   assert.doesNotMatch(html, /<form|<iframe|https?:\/\/[^" ]+\.(?:js|css)/);
 });
@@ -194,6 +197,7 @@ test('console rendering tolerates malformed and inherited event keys without sta
   const element = () => ({
     children: [], classList: { add() {} },
     append(...children) { this.children.push(...children); },
+    querySelectorAll() { return []; },
     replaceChildren() { this.children = []; },
     set textContent(value) { this.text = String(value); },
     get textContent() { return this.text; },
@@ -205,6 +209,7 @@ test('console rendering tolerates malformed and inherited event keys without sta
     $: id => { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); },
     document: { createElement: element }, t,
     eventLabels: () => ({ sent: 'Sent' }), getLanguage: () => 'en',
+    deliveryDiagnostics: [], diagnosticHealth: { persistence: 'unknown', writeFailures: 0 }, sanitizeDeliveryDiagnostics,
   });
   vm.runInContext(renderer + '\nrenderLogs();', context);
   const titles = nodes.get('logList').children.map(row => row.children[1].textContent);
@@ -229,7 +234,8 @@ test('GitHub support discovery uses an explicit support document and web contact
 async function supportPage() {
   const nodes = new Map();
   const handlers = new Map();
-  const state = { logs: [{ at: now, event: 'sent' }], failRead: false, failWrite: false, failDownload: false,
+  const state = { logs: [{ at: now, event: 'sent' }], deliveryDiagnostics: [], diagnosticsHealth: undefined,
+    sessionHealth: undefined, failRead: false, failWrite: false, failDownload: false,
     downloads: 0, languageWrites: [], languageBarrier: null };
   const node = id => {
     if (!nodes.has(id)) nodes.set(id, {
@@ -260,9 +266,14 @@ async function supportPage() {
     },
     document: { getElementById: node, querySelectorAll: () => [], documentElement: {},
       createElement: () => node('download'), body: { append() {} } },
-    chrome: { runtime: { getManifest: () => ({ version: '2.1.0' }) }, storage: { local: {
-      get: async () => { if (state.failRead) throw new Error('Synthetic storage failure'); return { logs: state.logs }; },
-    } } },
+    chrome: { runtime: { getManifest: () => ({ version: '2.1.0' }) }, storage: {
+      local: { get: async keys => {
+        if (state.failRead) throw new Error('Synthetic storage failure');
+        const values = { logs: state.logs, deliveryDiagnostics: state.deliveryDiagnostics, diagnosticsHealth: state.diagnosticsHealth };
+        return Object.fromEntries((Array.isArray(keys) ? keys : [keys]).map(key => [key, values[key]]));
+      } },
+      session: { get: async key => ({ [key]: state.sessionHealth }) },
+    } },
     URL: { createObjectURL: () => 'blob:synthetic', revokeObjectURL() {} }, Blob,
     setTimeout: callback => callback(),
   });

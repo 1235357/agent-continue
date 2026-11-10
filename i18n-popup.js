@@ -1,5 +1,11 @@
 // Only extension-owned UI strings belong here. User content is never translated.
 export default {
+  '扩展发送：{0}；手动发送：{1}': 'Extension sends: {0}; manual sends: {1}',
+  '发送阶段诊断': 'Delivery diagnostics',
+  '尚无新版发送诊断。': 'No delivery diagnostics from this version yet.',
+  '手动提交已确认': 'Manual submission confirmed',
+  '记录保存失败；导出可能不完整。': 'Diagnostic persistence failed; the export may be incomplete.',
+  '诊断保留最近 20 轮；每轮最多 64 个阶段变化。不含提示词或聊天正文。': 'Diagnostics retain the latest 20 deliveries and up to 64 stage transitions each. Prompts and chat text are excluded.',
   "任务已开始": "Task started",
   "已继续": "Resumed",
   "已暂停": "Paused",

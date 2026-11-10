@@ -35,7 +35,7 @@ RUNTIME_FILES = (
     "manifest.json", "background.js", "browser-wake.js", "admin-browser.js", "admin-control.js", "admin-installation-pause.js", "content.js", "adapter.js", "editor-commit.js", "config.js", "preset.js",
     "file-import.js", "popup.html", "popup.css", "popup.js", "README.md", "README.zh-CN.md",
     "i18n.js", "i18n-html.js", "i18n-popup.js", "i18n-runtime.js", "static-locale.js",
-    "support.html", "support.css", "support.js", "support-info.js", "activity-export.js",
+    "support.html", "support.css", "support.js", "support-info.js", "activity-export.js", "delivery-diagnostics.js",
     "devices.html", "devices.css", "devices.js", "device-control.js",
     "setup.html", "setup.css", "setup.js", "setup-model.js", "setup-handoff.js", "setup-controller.js", "setup-client.js",
     "setup-entry.js", "setup-entry-release.js", "current-account-setup.js",

@@ -288,12 +288,12 @@ try {
       const index = Number(url.pathname.split('-').at(-1));
       return route.fulfill({ status: 200, contentType: 'text/html', body: fixture({
         noSend: index === 3, rejectSynthetic: [4, 6, 8, 9, 10].includes(index),
-        supported: [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 19, 22, 23, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 41, 42, 43, 44].includes(index),
+        supported: [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 19, 22, 23, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52].includes(index),
         sendActivationDelayMs: index === 40 ? 2000 : index === 25 ? 2500 : [11, 16].includes(index) ? 21000 : [17, 20, 21].includes(index) ? 200 : [6, 8, 9, 10, 12, 13, 14, 15].includes(index) ? 100 : 0,
-        receiptDelayMs: index === 18 ? 8000 : index === 28 ? 800 : index === 29 ? 5000 : 0,
+        receiptDelayMs: index === 18 ? 8000 : [28, 48, 49, 50, 51, 52].includes(index) ? 800 : index === 29 ? 5000 : 0,
         manualReceiptDuringReadiness: index === 9 || index === 10, ignoreButtonSubmit: index === 9,
         recurringRestore: index === 7,
-        holdSendDisabled: index === 33,
+        holdSendDisabled: [33, 48, 49, 50, 51, 52].includes(index),
         fullForm: [36, 37, 38, 39, 40, 41].includes(index),
       }) });
     }
@@ -1747,6 +1747,252 @@ try {
       await call({ type: 'PAUSE' });
       await worker.evaluate(() => { chrome.tabs.sendMessage = originalGrantSend; delete globalThis.originalGrantSend; });
       await sending;
+    }
+  });
+  await scenario('An accepted grant recovers after its first readback hangs and ignores that retired late response', async page => {
+    await worker.evaluate(() => {
+      globalThis.originalGrantSend = chrome.tabs.sendMessage;
+      globalThis.originalGrantExecute = chrome.scripting.executeScript;
+      globalThis.grantReadbackProbe = { requested: false, reads: 0, commits: 0 };
+      chrome.tabs.sendMessage = async (tabId, message, options) => {
+        if (message.type === 'GRANT_RUN') grantReadbackProbe.requested = true;
+        const reply = await originalGrantSend(tabId, message, options);
+        if (message.type !== 'GRANT_RUN') return reply;
+        return undefined;
+      };
+      chrome.scripting.executeScript = options => {
+        if (options.func?.name === 'editorCommit' && options.args?.[0]?.phase === 'commit') grantReadbackProbe.commits++;
+        const result = originalGrantExecute(options);
+        if (options.func?.name === 'pageInvocationState' && options.target.documentIds?.length && grantReadbackProbe.requested) {
+          grantReadbackProbe.reads++;
+          if (grantReadbackProbe.reads === 1) return new Promise(resolve => {
+            grantReadbackProbe.release = () => result.then(resolve);
+          });
+        }
+        return result;
+      };
+    });
+    await start(page, { sendMethod: 'auto' });
+    const sending = call({ type: 'SEND_NOW' });
+    try {
+      const outcome = await Promise.race([sending.then(result => ({ result })),
+        new Promise(resolve => setTimeout(() => resolve({ waiting: true }), 6000))]);
+      if (outcome.waiting) { await call({ type: 'PAUSE' }); await sending; }
+      assert.ok(outcome.result, 'A hung first readback must not suppress fresh observation indefinitely');
+      assert.equal(outcome.result.job.sentCount, 1);
+      assert.equal(outcome.result.job.unknownCount, 0);
+      assert.ok(await worker.evaluate(() => grantReadbackProbe.reads >= 2));
+      await worker.evaluate(() => grantReadbackProbe.release());
+      await new Promise(resolve => setTimeout(resolve, 300));
+      assert.equal(await worker.evaluate(() => grantReadbackProbe.commits), 1);
+      const observed = await inspect(page);
+      assert.deepEqual([observed.buttonClicks, observed.submits], [1, 1]);
+      assert.deepEqual(observed.sentTexts, [prompt]);
+    } finally {
+      await call({ type: 'PAUSE' });
+      await worker.evaluate(() => {
+        chrome.tabs.sendMessage = originalGrantSend;
+        chrome.scripting.executeScript = originalGrantExecute;
+        grantReadbackProbe.release?.();
+        delete globalThis.originalGrantSend; delete globalThis.originalGrantExecute;
+      });
+      await sending;
+    }
+  });
+  await scenario('A rejected undelivered grant retries independently of a hung readback', async page => {
+    await worker.evaluate(() => {
+      globalThis.originalGrantSend = chrome.tabs.sendMessage;
+      globalThis.originalGrantExecute = chrome.scripting.executeScript;
+      globalThis.grantReadbackProbe = { sends: 0, reads: 0 };
+      chrome.tabs.sendMessage = (tabId, message, options) => {
+        if (message.type === 'GRANT_RUN' && ++grantReadbackProbe.sends === 1) return Promise.reject(new Error('Synthetic undelivered grant'));
+        return originalGrantSend(tabId, message, options);
+      };
+      chrome.scripting.executeScript = options => {
+        if (options.func?.name === 'pageInvocationState' && options.target.documentIds?.length) {
+          grantReadbackProbe.reads++;
+          if (grantReadbackProbe.reads === 1) return new Promise(() => {});
+        }
+        return originalGrantExecute(options);
+      };
+    });
+    await start(page, { sendMethod: 'auto' });
+    const sending = call({ type: 'SEND_NOW' });
+    try {
+      const outcome = await Promise.race([sending.then(result => ({ result })),
+        new Promise(resolve => setTimeout(() => resolve({ waiting: true }), 3000))]);
+      if (outcome.waiting) { await call({ type: 'PAUSE' }); await sending; }
+      assert.ok(outcome.result, 'A settled failed grant must retry without waiting for a hung observation');
+      assert.equal(outcome.result.job.sentCount, 1);
+      assert.ok(await worker.evaluate(() => grantReadbackProbe.sends >= 2));
+      assert.deepEqual([(await inspect(page)).buttonClicks, (await inspect(page)).submits], [1, 1]);
+    } finally {
+      await call({ type: 'PAUSE' });
+      await worker.evaluate(() => {
+        chrome.tabs.sendMessage = originalGrantSend;
+        chrome.scripting.executeScript = originalGrantExecute;
+        delete globalThis.originalGrantSend; delete globalThis.originalGrantExecute;
+      });
+      await sending;
+    }
+  });
+  await scenario('Pause before a hung accepted-grant readback recovers prevents late dispatch', async page => {
+    await worker.evaluate(() => {
+      globalThis.originalGrantSend = chrome.tabs.sendMessage;
+      globalThis.originalGrantExecute = chrome.scripting.executeScript;
+      globalThis.grantReadbackProbe = { requested: false, reads: 0 };
+      chrome.tabs.sendMessage = async (tabId, message, options) => {
+        if (message.type === 'GRANT_RUN') grantReadbackProbe.requested = true;
+        const reply = await originalGrantSend(tabId, message, options);
+        if (message.type !== 'GRANT_RUN') return reply;
+        return undefined;
+      };
+      chrome.scripting.executeScript = options => {
+        const result = originalGrantExecute(options);
+        if (options.func?.name === 'pageInvocationState' && options.target.documentIds?.length && grantReadbackProbe.requested) {
+          grantReadbackProbe.reads++;
+          return new Promise(resolve => { grantReadbackProbe.release = () => result.then(resolve); });
+        }
+        return result;
+      };
+    });
+    await start(page, { sendMethod: 'auto' });
+    const sending = call({ type: 'SEND_NOW' });
+    try {
+      for (let attempt = 0; attempt < 30; attempt++) {
+        if (await worker.evaluate(() => grantReadbackProbe.reads > 0)) break;
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      assert.ok(await worker.evaluate(() => grantReadbackProbe.reads > 0));
+      assert.equal((await call({ type: 'PAUSE' })).job.enabled, false);
+      await worker.evaluate(() => grantReadbackProbe.release());
+      await sending;
+      await new Promise(resolve => setTimeout(resolve, 2500));
+      assert.deepEqual([(await inspect(page)).buttonClicks, (await inspect(page)).submits], [0, 0]);
+    } finally {
+      await call({ type: 'PAUSE' });
+      await worker.evaluate(() => {
+        chrome.tabs.sendMessage = originalGrantSend;
+        chrome.scripting.executeScript = originalGrantExecute;
+        grantReadbackProbe.release?.();
+        delete globalThis.originalGrantSend; delete globalThis.originalGrantExecute;
+      });
+      await sending;
+    }
+  });
+  for (const variant of ['basic', 'pause', 'remount', 'lease']) await scenario(
+    variant === 'remount' ? 'Manual takeover follows the replacement editor when the same preparation reservation is retried'
+      : variant === 'lease' ? 'An expired cached MAIN lease does not disable observation of a trusted manual takeover'
+      : variant === 'pause' ? 'Pause still wins after a real manual Send while its history receipt is delayed'
+      : 'A real manual Send of the prepared prompt stops MAIN refilling and does not become an extension send', async page => {
+      const pauseBeforeReceipt = variant === 'pause';
+      await worker.evaluate(() => {
+        globalThis.originalManualGrant = chrome.tabs.sendMessage;
+        chrome.tabs.sendMessage = (tabId, message, options) => message.type === 'GRANT_RUN'
+          ? new Promise(() => {}) : originalManualGrant(tabId, message, options);
+      });
+      if (['remount', 'lease'].includes(variant)) await worker.evaluate(variant => {
+        globalThis.originalManualExecute = chrome.scripting.executeScript;
+        globalThis.manualPreparationCalls = 0;
+        chrome.scripting.executeScript = async options => {
+          const frames = await originalManualExecute(options);
+          if (options.func?.name === 'editorCommit' && options.args[0].phase === 'prepare') {
+            manualPreparationCalls++;
+            if (variant === 'remount' && manualPreparationCalls === 1) {
+              await originalManualExecute({ target: options.target, world: 'MAIN', func: () => window.fixtureRemountComposer() });
+              return [];
+            }
+            if (variant === 'lease') await originalManualExecute({ target: options.target, world: 'MAIN',
+              func: token => { globalThis[Symbol.for('agent-continue.editor-commit.v1')].get(token).deadline = Date.now() - 1; },
+              args: [options.args[0].receiptBoundaryToken] });
+          }
+          return frames;
+        };
+      }, variant);
+      await start(page, { sendMethod: 'auto', intervalMinutes: 30 });
+      const sending = call({ type: 'SEND_NOW' });
+      try {
+        if (variant === 'remount') {
+          for (let poll = 0; poll < 300 && !await worker.evaluate(() => manualPreparationCalls >= 2); poll++)
+            await new Promise(resolve => setTimeout(resolve, 50));
+          assert.ok(await worker.evaluate(() => manualPreparationCalls >= 2), 'Replacement editor must be prepared before the manual click');
+        }
+        await page.waitForFunction(text => window.pm.state.doc.textBetween(0, window.pm.state.doc.content.size, '\n') === text, prompt);
+        await page.evaluate(() => { document.querySelector('button[aria-label="Send"]').disabled = false; });
+        await page.getByRole('button', { name: 'Send', exact: true }).click();
+        const updatesAfterHuman = (await inspect(page)).updates;
+        if (pauseBeforeReceipt) await call({ type: 'PAUSE' });
+        const outcome = await sending;
+        assert.equal(outcome.job.sentCount, 0, 'Manual submission must not be attributed to extension dispatch');
+        if (!pauseBeforeReceipt) {
+          assert.equal(outcome.job.manualSentCount, 1);
+          assert.equal(outcome.job.phase, 'idle');
+          assert.ok(outcome.job.nextAt >= Date.now() + 29 * 60000);
+        } else assert.equal(outcome.job.enabled, false);
+        await new Promise(resolve => setTimeout(resolve, 1200));
+        const actual = await inspect(page);
+        assert.equal(actual.updates, updatesAfterHuman, 'No model refill after the human Send');
+        assert.deepEqual([actual.buttonClicks, actual.submits], [1, 1]);
+        assert.equal(await page.evaluate(() => window.pm.state.doc.textContent), '');
+        const traces = await worker.evaluate(async () => (await chrome.storage.local.get('deliveryDiagnostics')).deliveryDiagnostics);
+        assert.ok(traces?.length);
+        const trace = traces.at(-1);
+        assert.equal(trace.state, pauseBeforeReceipt ? 'cancelled' : 'manual-sent');
+        assert.equal(trace.counters.modelWrites, variant === 'remount' ? 2 : 1);
+        assert.equal(trace.counters.dispatchAttempts || 0, 0);
+      } finally {
+        await call({ type: 'PAUSE' }); await sending;
+        await worker.evaluate(() => { chrome.tabs.sendMessage = originalManualGrant; delete globalThis.originalManualGrant; });
+        if (['remount', 'lease'].includes(variant)) await worker.evaluate(() => {
+          chrome.scripting.executeScript = originalManualExecute; delete globalThis.originalManualExecute;
+        });
+      }
+    });
+  await scenario('Manual Send on a remounted editor fences a queued MAIN preparation even when its notification is rejected', async page => {
+    await worker.evaluate(text => {
+      globalThis.originalGapExecute = chrome.scripting.executeScript;
+      globalThis.gapPreparationCalls = 0;
+      chrome.scripting.executeScript = async options => {
+        const prepare = options.func?.name === 'editorCommit' && options.args[0].phase === 'prepare';
+        if (prepare && ++gapPreparationCalls === 2) await new Promise(resolve => { globalThis.releaseGapRetry = resolve; });
+        const frames = await originalGapExecute(options);
+        if (prepare && gapPreparationCalls === 1) {
+          await originalGapExecute({ target: options.target, world: 'MAIN', func: text => {
+            window.fixtureRemountComposer();
+            pm.dispatch(pm.state.tr.insertText(text, 0, pm.state.doc.content.size));
+            document.querySelector('button[aria-label="Send"]').disabled = false;
+          }, args: [text] });
+          return [];
+        }
+        return frames;
+      };
+    }, prompt);
+    await start(page, { sendMethod: 'auto', intervalMinutes: 30 });
+    const sending = call({ type: 'SEND_NOW' });
+    try {
+      for (let poll = 0; poll < 300 && !await worker.evaluate(() => typeof globalThis.releaseGapRetry === 'function'); poll++)
+        await new Promise(resolve => setTimeout(resolve, 50));
+      assert.equal(await worker.evaluate(() => typeof globalThis.releaseGapRetry), 'function');
+      await worker.evaluate(async tabId => originalGapExecute({ target: { tabId }, world: 'ISOLATED', func: () => {
+        const send = chrome.runtime.sendMessage.bind(chrome.runtime);
+        chrome.runtime.sendMessage = message => message.type === 'MANUAL_SUBMISSION'
+          ? Promise.reject(new Error('Synthetic notification loss')) : send(message);
+      } }), (await call({ type: 'GET_STATE' })).job.tabId);
+      await page.getByRole('button', { name: 'Send', exact: true }).click();
+      const updatesAfterHuman = (await inspect(page)).updates;
+      await worker.evaluate(() => releaseGapRetry());
+      const outcome = await sending;
+      assert.equal(outcome.job.sentCount, 0);
+      assert.equal(outcome.job.manualSentCount, 1);
+      await new Promise(resolve => setTimeout(resolve, 1200));
+      const actual = await inspect(page);
+      assert.equal(actual.updates, updatesAfterHuman, 'Queued preparation must not refill after manual Send on replacement editor');
+      assert.equal(await page.evaluate(() => pm.state.doc.textContent), '');
+      assert.deepEqual([actual.submits, actual.buttonClicks], [1, 1]);
+    } finally {
+      await worker.evaluate(() => globalThis.releaseGapRetry?.());
+      await call({ type: 'PAUSE' }); await sending;
+      await worker.evaluate(() => { chrome.scripting.executeScript = originalGapExecute; delete globalThis.originalGapExecute; });
     }
   });
   console.log(`RESULT ${selectedCases ? selectedCases.length : passed}/${selectedCases ? selectedCases.length : passed} official ProseMirror MV3 scenarios passed`);

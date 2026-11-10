@@ -28,7 +28,8 @@ test('uncaught page setup failure settles the exact invocation without exposing 
   assert.equal(await h.invoke(h.args), first);
   assert.equal(h.listeners.size, 0);
   assert.deepEqual(Object.keys(observed).sort(), ['result', 'state']);
-  assert.deepEqual(Object.keys(first).sort(), ['message', 'status']);
+  assert.deepEqual(Object.keys(first).sort(), ['diagnosticProgress', 'message', 'status']);
+  assert.equal(first.diagnosticProgress.counters.pageAdmissions, 1);
   assert.equal(JSON.stringify(first).includes('invalid-url'), false);
 });
 

@@ -1,5 +1,8 @@
 // Runtime copy only. Never use this catalog to translate user-owned content.
 export default {
+  '已确认手动提交本轮提示词。': 'Manual submission of this prompt was confirmed.',
+  '手动提交结果未确认，本周期不重复发送。': 'The manual submission is not confirmed. This delivery will not be submitted again.',
+  '已确认手动提交本轮提示词；停止重复填写，按原间隔继续。': 'Manual submission of this prompt was confirmed. Refilling stopped; the original schedule continues.',
   '提示词必须是文本。': 'The prompt must be text.',
   '队列提示词必须是非空文本。': 'Queued prompts must be nonempty text.',
   '发送控件尚未就绪，稍后自动检查。': 'The send control is not ready yet. Checking again automatically.',

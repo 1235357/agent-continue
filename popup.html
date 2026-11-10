@@ -94,6 +94,8 @@
         <div class="log-toolbar"><span id="logCount" class="quiet-tag">0 条记录</span><div><button id="refreshLogs" class="small-button">刷新</button><button id="exportLogs" class="small-button">导出</button><button id="clearLogs" class="small-button">清空</button></div></div>
         <button id="diagnoseTiming" class="small-button">诊断发送计时（不发送）</button>
         <p id="timingDiagnostics" role="status" aria-live="polite"></p>
+        <h3>发送阶段诊断</h3><p class="helper">诊断保留最近 20 轮；每轮最多 64 个阶段变化。不含提示词或聊天正文。</p>
+        <p id="deliveryDiagnosticHealth" role="status"></p><div id="deliveryDiagnosticList"></div>
         <ol id="logList" class="log-list"></ol><div id="logsEmpty" class="empty-state">任务开始后，运行状态会显示在这里。</div>
         <p><a href="support.html" target="_blank" rel="noopener">支持与反馈</a></p>
         <details class="card help-card"><summary>运行中遇到等待怎么办？</summary><p>默认到点打断并发送；只有开启“等待 Agent 空闲”才因 Agent 忙碌等待。发送前会替换未发送文字并移除待发送附件。输入框重绘、重新挂载或发送按钮暂不可用时，任务会在原绑定会话中持续重试，不会改向其他会话发送；无法确认原会话时不发送。手动暂停优先，但无法撤回已提交的操作。无法确认发送结果时会记录“未知”，不保证服务端已接受；可先暂停并核对会话。</p><p>浏览器和电脑必须运行，并保持目标会话已登录。浏览器重启后的恢复取决于原目标页可用性，且不会覆盖手动暂停。</p><p>快捷键 <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Y</kbd> 可暂停或继续；可在浏览器扩展快捷键页面修改。</p></details>

@@ -13,8 +13,13 @@ export function translatePageResult(value) {
 export function pageInvocationState({ runId, resultToken }) {
   const entry = globalThis.__agentContinuePageInvocationsV1?.get(resultToken);
   if (!entry || entry.runId !== runId) return { state: 'absent' };
-  return entry.state === 'settled' ? { state: 'settled', result: entry.result }
-    : { state: 'running', ...(Number.isFinite(entry.grantedDeadline) ? { grantedDeadline: entry.grantedDeadline } : {}) };
+  if (entry.state === 'settled') return { state: 'settled', result: entry.result };
+  const metrics = entry.metrics;
+  return { state: 'running', ...(Number.isFinite(entry.grantedDeadline) ? { grantedDeadline: entry.grantedDeadline } : {}),
+    ...(metrics ? { diagnosticProgress: { stage: metrics.stage, reason: metrics.reason, method: metrics.method,
+      counters: { ...metrics.counters }, timings: { ...metrics.timings, elapsedMs: Math.max(0, Date.now() - entry.startedAt),
+        stageElapsedMs: Math.max(0, Date.now() - entry.stageStartedAt) },
+      observations: { ...metrics.observations } } } : {}) };
 }
 
 // This function is injected into one explicitly selected tab.
@@ -36,13 +41,41 @@ export async function pageAction(args) {
       if (key !== args.resultToken && entry.state === 'settled') invocations.delete(key);
     }
   }
+  const startedAt = Date.now();
+  let stageStartedAt = startedAt;
+  const metrics = {
+    stage: 'page', reason: 'starting', method: 'none',
+    counters: Object.fromEntries(['pageAdmissions', 'modelWrites', 'domWrites', 'fillCalls', 'readinessChecks',
+      'authorizationChecks', 'grantRequests', 'grantReadbacks', 'retiredReadbacks', 'dispatchAttempts',
+      'receiptChecks', 'manualIntents', 'attachmentsRemoved', 'transportErrors', 'leaseRenewals', 'documentChanges'].map(name => [name, name === 'pageAdmissions' ? 1 : 0])),
+    timings: { modelWriteMs: 0, domWriteMs: 0, maxModelWriteMs: 0, maxDomWriteMs: 0, elapsedMs: 0, stageElapsedMs: 0 },
+    observations: { hidden: false, sendPresent: false, sendEnabled: false, composerPresent: false, busy: false, manualPending: false },
+  };
+  if (invocation) Object.assign(invocation, { metrics, startedAt, stageStartedAt });
+  const progress = (stage, reason) => {
+    if (metrics.stage !== stage) { stageStartedAt = Date.now(); if (invocation) invocation.stageStartedAt = stageStartedAt; }
+    metrics.stage = stage; metrics.reason = reason;
+  };
+  const diagnosticProgress = () => ({ stage: metrics.stage, reason: metrics.reason, method: metrics.method,
+    counters: { ...metrics.counters }, timings: { ...metrics.timings, elapsedMs: Math.max(0, Date.now() - startedAt),
+      stageElapsedMs: Math.max(0, Date.now() - stageStartedAt) },
+    observations: { ...metrics.observations } });
+  const resultReason = status => ({ sent: 'receipt-confirmed', 'manual-sent': 'manual-receipt-confirmed', cancelled: 'cancelled',
+    busy: 'busy', ready: 'ready', done: 'ready', draft: 'attachments', blocked: 'composer-unavailable', error: 'commit-error', unknown: 'unknown' })[status];
+  const grantedDeadline = deadline => {
+    if (!Number.isFinite(deadline)) return;
+    if (deadline > args.runDeadline) metrics.counters.leaseRenewals++;
+    args.runDeadline = deadline;
+  };
   let revoked = false;
+  let removeManualListeners = () => {};
   const cancel = (message, sender, sendResponse) => {
     if (!['CANCEL_RUN', 'GRANT_RUN'].includes(message?.type) || message.runId !== args.runId || message.resultToken !== args.resultToken
       || sender.id !== chrome.runtime.id) return false;
     if (message.type === 'GRANT_RUN') {
       if (revoked || !Number.isFinite(message.runDeadline)) return false;
-      args.runDeadline = message.runDeadline;
+      metrics.counters.grantRequests++;
+      grantedDeadline(message.runDeadline);
       if (invocation) invocation.grantedDeadline = message.runDeadline;
       sendResponse({ granted: true, runId: args.runId, resultToken: args.resultToken, runDeadline: args.runDeadline });
       return false;
@@ -55,6 +88,38 @@ export async function pageAction(args) {
   if (cancellable) chrome.runtime.onMessage.addListener(cancel);
   const action = async () => {
   let submitted = false;
+  let manualPending = false;
+  let extensionBoundary = false;
+  let preparationStarted = false;
+  let pageMatched = false;
+  const manualHandoff = {};
+  let resolveManualTakeover;
+  const manualTakeover = new Promise(resolve => { resolveManualTakeover = resolve; });
+  const mutable = () => { if (manualPending) throw manualHandoff; };
+  const write = (counter, callback) => {
+    mutable();
+    const clock = () => typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const start = clock();
+    metrics.counters[counter]++;
+    try { return callback(); }
+    finally {
+      const elapsed = Math.max(0, clock() - start);
+      const model = counter === 'modelWrites';
+      metrics.timings[model ? 'modelWriteMs' : 'domWriteMs'] += elapsed;
+      const maximum = model ? 'maxModelWriteMs' : 'maxDomWriteMs';
+      metrics.timings[maximum] = Math.max(metrics.timings[maximum], elapsed);
+    }
+  };
+  let observeManual = () => {};
+  const onManualEvent = event => observeManual(event);
+  if (args.mode === 'send') {
+    removeManualListeners = () => {
+      for (const type of ['click', 'keydown', 'submit']) {
+        try { document.removeEventListener(type, onManualEvent, true); } catch { /* Setup may have failed before a document was available. */ }
+      }
+    };
+    for (const type of ['click', 'keydown', 'submit']) document.addEventListener(type, onManualEvent, true);
+  }
   const normalizeUrl = value => {
     try {
       const u = new URL(value);
@@ -125,34 +190,44 @@ export async function pageAction(args) {
   };
 
   let beforeAssistant = null;
-  const result = (status, message, diagnosticCode) => ({ status, message,
-    ...(args.persistentDelivery === true && !submitted && ['blocked', 'draft', 'busy', 'error'].includes(status)
+  const result = (status, message, diagnosticCode) => {
+    metrics.reason = resultReason(status);
+    return { status, message,
+    ...(args.persistentDelivery === true && !submitted && !manualPending && ['blocked', 'draft', 'busy', 'error'].includes(status)
       ? { retryable: true } : {}),
     ...(diagnosticCode ? { diagnosticCode } : {}), identity: identity(),
-    ...(status === 'sent' ? beforeAssistant : assistantState()) });
+    ...(['sent', 'manual-sent'].includes(status) ? beforeAssistant : assistantState()) };
+  };
   const samePage = () => {
     const curUrl = normalizeUrl(location.href);
     const expUrl = args.expectedUrl;
     const isCurDot = new URL(location.href).pathname.startsWith('/dots/');
     const isExpDot = expUrl.includes('/dots/');
     const urlMatch = curUrl === expUrl || (isExpDot && isCurDot);
-    if (!urlMatch) return false;
+    if (!urlMatch) { if (pageMatched) metrics.counters.documentChanges++; pageMatched = false; return false; }
     if (args.targetIdentity) {
       const currentId = identity();
-      if (!currentId || currentId !== args.targetIdentity) return false;
+      if (!currentId || currentId !== args.targetIdentity) { if (pageMatched) metrics.counters.documentChanges++; pageMatched = false; return false; }
     }
+    pageMatched = true;
     return true;
   };
   const withinDeadline = () => !revoked && Number.isFinite(args.runDeadline) && Date.now() < args.runDeadline;
   const forceInterrupt = args.waitForIdle !== true;
-  const busy = () => !forceInterrupt && visibleMatches(busySelector).length > 0;
+  const busy = () => {
+    metrics.observations.busy = visibleMatches(busySelector).length > 0;
+    return !forceInterrupt && metrics.observations.busy;
+  };
   const enabled = button => !!button && !button.disabled && button.getAttribute('aria-disabled') !== 'true';
   const wait = async (ms, renew = true) => {
     // Hidden-page timers can be clamped beyond the round deadline. New workers
     // own the clock; older workers retain the previous adapter contract.
     if (args.extensionClock === true) {
-      const reply = await chrome.runtime.sendMessage({ type: 'WAIT_RUN', runId: args.runId, delayMs: ms, ...(!renew ? { renew: false } : {}) });
-      if (reply?.allowed === true && Number.isFinite(reply.runDeadline)) args.runDeadline = reply.runDeadline;
+      let reply;
+      try { reply = await chrome.runtime.sendMessage({ type: 'WAIT_RUN', runId: args.runId, delayMs: ms, ...(!renew ? { renew: false } : {}) }); }
+      catch (error) { metrics.counters.transportErrors++; throw error; }
+      if (reply?.allowed === true) grantedDeadline(reply.runDeadline);
+      if (reply?.ok === true && reply.allowed === false) revoked = true;
       if (reply?.ok !== true || reply.allowed !== true || !samePage() || !withinDeadline()) {
         throw new Error('run-wait-cancelled');
       }
@@ -165,16 +240,17 @@ export async function pageAction(args) {
     while (samePage() && !revoked && (args.resultToken || withinDeadline())) {
       if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) return false;
       try {
+        metrics.counters.authorizationChecks++;
         const reply = await chrome.runtime.sendMessage({ type: 'CHECK_RUN', runId: args.runId });
-        if (reply?.allowed === true && Number.isFinite(reply.runDeadline)) args.runDeadline = reply.runDeadline;
-        if (reply?.ok === true && reply.allowed === false) return false;
+        if (reply?.allowed === true) grantedDeadline(reply.runDeadline);
+        if (reply?.ok === true && reply.allowed === false) { revoked = true; return false; }
         if (reply?.ok === true && reply.allowed === true) {
           if (!samePage() || revoked) return false;
           if (withinDeadline()) return true;
           // A delayed positive reply is not a Pause. Ask for a fresh permit;
           // never dispatch with the expired one or cancel a live pending send.
         }
-      } catch { /* A transport rejection is not an explicit Pause or revocation. */ }
+      } catch { metrics.counters.transportErrors++; /* A transport rejection is not an explicit Pause or revocation. */ }
       if (args.persistentDelivery !== true || args.unlimitedReadiness !== true) return false;
       await new Promise(resolve => setTimeout(resolve, 150));
     }
@@ -201,8 +277,11 @@ export async function pageAction(args) {
   const initial = findComposer();
   if (!initial) return result('blocked', '未识别到唯一输入框。页面可能尚未加载、已退出登录，或界面结构已变化。');
   let { editor, composer } = initial;
+  metrics.observations.composerPresent = true;
+  metrics.observations.hidden = document.visibilityState === 'hidden';
   const sameComposer = () => {
     const current = findComposer();
+    metrics.observations.composerPresent = !!current;
     return current?.editor === editor && current.composer === composer;
   };
   if (isDot && !identity()) return result('blocked', '等待 dot 会话历史加载，暂时无法核对目标身份。');
@@ -298,6 +377,7 @@ export async function pageAction(args) {
   // Reacquire a uniquely scoped editor after same-conversation framework
   // remounts. This never follows a different target or an attempted submission.
   const keepComposer = () => {
+    mutable();
     if (sameComposer()) return true;
     const next = findComposer();
     if (!next || !samePage() || submitted) return false;
@@ -305,6 +385,8 @@ export async function pageAction(args) {
     if (!next.composer || [document.body, document.documentElement, next.editor].includes(next.composer)) return false;
     editor = next.editor;
     composer = next.composer;
+    metrics.counters.documentChanges++;
+    metrics.observations.composerPresent = true;
     inserted = false;
     insertedDraftSnapshot = null;
     needsRefill = true;
@@ -312,23 +394,36 @@ export async function pageAction(args) {
   };
 
   const detachAttachments = async () => {
+    mutable();
+    progress('prepare', 'attachments');
+    const removals = new Set();
+    const countRemoved = () => {
+      for (const button of removals) {
+        if (!button.isConnected || !composer.contains(button)) { metrics.counters.attachmentsRemoved++; removals.delete(button); }
+      }
+    };
     while (hasAttachment()) {
       if (!await stillAllowed() || !keepComposer()) return false;
       // Use the site's own removal controls, never delete account files or
       // remove rendered chips behind the framework's upload state.
       for (const button of visibleMatches(removeAttachmentSelector, composer)) {
+        mutable();
         if (!samePage() || revoked || !sameComposer()) return false;
-        if (enabled(button) && button.isConnected && composer.contains(button)) button.click();
+        if (enabled(button) && button.isConnected && composer.contains(button)) { removals.add(button); button.click(); }
       }
       for (const input of composer.querySelectorAll('input[type="file"]')) {
+        mutable();
         if (!samePage() || revoked || !sameComposer()) return false;
         if (input.files?.length) {
           input.value = '';
+          metrics.counters.attachmentsRemoved++;
           input.dispatchEvent(new Event('change', { bubbles: true }));
         }
       }
+      countRemoved();
       if (!hasAttachment()) return true;
       await wait(150);
+      countRemoved();
     }
     return true;
   };
@@ -356,9 +451,53 @@ export async function pageAction(args) {
     return current !== null && normalizeRenderedPayload(current) === normalizeRenderedPayload(prompt);
   };
 
+  const latchManual = notify => {
+    if (manualPending) return;
+    manualPending = true;
+    if (invocation) invocation.manualPending = true;
+    metrics.observations.manualPending = true;
+    metrics.counters.manualIntents++;
+    progress('receipt', 'manual-submission');
+    resolveManualTakeover(manualHandoff);
+    if (notify) {
+      try {
+        Promise.resolve(chrome.runtime.sendMessage({ type: 'MANUAL_SUBMISSION', runId: args.runId, resultToken: args.resultToken }))
+          .catch(() => { metrics.counters.transportErrors++; });
+      } catch { metrics.counters.transportErrors++; }
+    }
+  };
+  observeManual = event => {
+    if (event.isTrusted !== true || revoked || manualPending || submitted || extensionBoundary || !preparationStarted) return;
+    if (!samePage() || !keepComposer()) return;
+    // A synthetic extension click can still cause a browser-trusted form submit.
+    if (event.type === 'submit' && (submitted || extensionBoundary)) return;
+    const target = event.target;
+    let submitting = false;
+    if (event.type === 'click') {
+      const button = target?.closest?.(sendSelector);
+      submitting = !!button && composer.contains(button) && !button.matches?.(stopSelector);
+    } else if (event.type === 'submit') {
+      submitting = target === composer || (composer.contains(target) && target?.matches?.('form'));
+    } else if (event.type === 'keydown') {
+      submitting = (target === editor || editor.contains(target)) && event.key === 'Enter'
+        && !event.shiftKey && !event.altKey && !event.isComposing && event.keyCode !== 229 && !event.repeat && !event.defaultPrevented
+        && (!isDot || event.ctrlKey === true || event.metaKey === true);
+    }
+    if (!submitting || !samePage() || !sameComposer() || !payloadMatches()) return;
+    // Capture before the site's trusted handler clears or remounts the composer.
+    rememberVisibleHistory();
+    beforeAssistant = assistantState();
+    latchManual(true);
+  };
+
   const fill = (value, forceReplacement = false) => {
+    mutable();
+    metrics.counters.fillCalls++;
+    progress('prepare', 'starting');
+    preparationStarted = true;
     if (!sameComposer()) return false;
     editor.focus({ preventScroll: true });
+    mutable();
     if (!sameComposer()) return false;
 
     // 1. Direct ProseMirror Runtime insertion (Available when running in world: 'MAIN')
@@ -381,14 +520,14 @@ export async function pageAction(args) {
             tr.insertText(value);
           }
         }
-        dispatch(tr);
+        write('modelWrites', () => dispatch(tr));
         try {
           editor.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
           editor.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
         } catch {}
         if (forceReplacement) return true;
         return wait(50).then(() => clean(textOf(editor)) === clean(value));
-      } catch {}
+      } catch (error) { if (error === manualHandoff) throw error; }
     }
 
     const inputType = value ? 'insertText' : 'deleteContentBackward';
@@ -404,6 +543,7 @@ export async function pageAction(args) {
       try {
         const deadline = Date.now() + 900;
         while (Date.now() < deadline) {
+          mutable();
           if (humanEdited || !sameComposer() || !samePage()) return false;
           const current = textOf(target);
           if (clean(current) === clean(value)) return true;
@@ -421,7 +561,7 @@ export async function pageAction(args) {
     const beforeInput = () => editor.dispatchEvent(new InputEvent('beforeinput', {
       bubbles: true, composed: true, cancelable: true, inputType, data: value || null
     }));
-    const mayWrite = () => sameComposer() && (!forceReplacement || (samePage() && withinDeadline() && !hasAttachment() && editable()));
+    const mayWrite = () => { mutable(); return sameComposer() && (!forceReplacement || (samePage() && withinDeadline() && !hasAttachment() && editable())); };
     const replaceAfter = replace => {
       if (beforeInput()) return replace();
       return handledInput().then(handled => handled || (forceReplacement && replace()));
@@ -433,7 +573,7 @@ export async function pageAction(args) {
       editor.setSelectionRange(0, editor.value.length);
       return replaceAfter(() => {
         if (!mayWrite()) return false;
-        setter.call(editor, value);
+        write('domWrites', () => setter.call(editor, value));
         editor.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType, data: value || null }));
         return forceReplacement || clean(textOf(editor)) === clean(value);
       });
@@ -456,14 +596,14 @@ export async function pageAction(args) {
       const observeInput = () => { inputObserved = true; };
       editor.addEventListener('input', observeInput, { capture: true });
       try {
-        if (!document.execCommand(value ? 'insertText' : 'delete', false, value)) {
+        write('domWrites', () => { if (!document.execCommand(value ? 'insertText' : 'delete', false, value)) {
           if (!value) {
             editor.innerHTML = '<p><br></p>';
           } else {
             const lines = value.split(/\r?\n/);
             editor.innerHTML = lines.map(line => `<p>${line ? line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') : '<br>'}</p>`).join('');
           }
-        }
+        } });
         if (!inputObserved) editor.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType, data: value || null }));
       } finally { editor.removeEventListener('input', observeInput, { capture: true }); }
       return forceReplacement || clean(textOf(editor)) === clean(value);
@@ -471,7 +611,7 @@ export async function pageAction(args) {
   };
 
   const clearOwnDraft = async () => {
-    if (!submitted && inserted && sameComposer() && samePage() && draftUnchanged(insertedDraftSnapshot)) {
+    if (!manualPending && !submitted && inserted && sameComposer() && samePage() && draftUnchanged(insertedDraftSnapshot)) {
       const focusAtCleanup = document.activeElement;
       try { await fill(''); } catch {}
       finally {
@@ -483,11 +623,13 @@ export async function pageAction(args) {
   };
 
   const interrupt = async () => {
+    mutable();
     if (!forceInterrupt) return null;
     const stops = [...new Set(visibleMatches(stopSelector, composer))];
     if (!stops.length) return null;
     if (interrupted || stops.length !== 1 || !enabled(stops[0])) return result('blocked', '当前停止控件不可用或不唯一，稍后重试。');
     if (!await stillAllowed()) return result('cancelled', '已暂停，未打断 Agent。');
+    mutable();
     if (!keepComposer() || !stops[0].isConnected || !composer.contains(stops[0])) return result('blocked', '页面已变化。');
     if (hasAttachment()) return protectedDraft('输入框有附件，本次不提交。');
     if (!samePage() || !withinDeadline() || !enabled(stops[0])) return result('cancelled', '打断许可已失效。');
@@ -497,6 +639,7 @@ export async function pageAction(args) {
     const stopDeadline = Math.min(Date.now() + 3500, args.runDeadline);
     while (args.unlimitedReadiness === true || Date.now() < stopDeadline) {
       if (!await stillAllowed()) return result('cancelled', '已暂停，不再继续发送。');
+      mutable();
       const next = findComposer();
       if (next) {
         ({ editor, composer } = next);
@@ -509,16 +652,20 @@ export async function pageAction(args) {
   };
 
   const confirmSubmission = async () => {
+    progress('receipt', manualPending ? 'manual-submission' : 'awaiting-receipt');
     const confirmDeadline = Math.min(Date.now() + 6500, args.runDeadline);
     while (args.unlimitedReadiness === true || Date.now() < confirmDeadline) {
+      metrics.counters.receiptChecks++;
       if (revoked) return result('cancelled', '已暂停，本次未提交。');
       if (!samePage()) return result('unknown', '提交后会话地址变化，无法确认结果；请检查后再继续。');
+      if (manualPending && !await stillAllowed()) return result('cancelled', '本次执行已取消。');
       const messages = messageNodes('user');
       const last = messages.at(-1);
       const lastKey = messageKey(last);
       const modernReceipt = !isDot && last?.getAttribute('data-chatgpt-search-unit-key')?.endsWith(':user');
       if (last && (!modernReceipt || modernMessageKey(last)) && !beforeMessages.has(last)
-        && (!lastKey || !beforeKeys.has(lastKey)) && clean(textOf(last)) === clean(prompt)) {
+        && (!lastKey || !beforeKeys.has(lastKey)) && (!manualPending || lastKey) && clean(textOf(last)) === clean(prompt)) {
+        if (manualPending) return result('manual-sent', '已确认手动提交本轮提示词。');
         return result('sent', useKeyboardOnly ? '已通过 Ctrl+Enter 提交，并在会话中确认新消息。' : '已确认发送并在会话中确认新消息。');
       }
       try {
@@ -529,14 +676,15 @@ export async function pageAction(args) {
         // Submission already happened. A temporary wait transport failure is
         // not evidence of failure and must not strand its receipt or resend.
         try {
+          metrics.counters.authorizationChecks++;
           const checked = await chrome.runtime.sendMessage({ type: 'CHECK_RUN', runId: args.runId });
           if (checked?.ok === true && checked.allowed === false) return result('cancelled', '本次执行已取消。');
-          if (checked?.allowed === true && Number.isFinite(checked.runDeadline)) args.runDeadline = checked.runDeadline;
-        } catch { /* Keep observing this receipt; Pause revocation still wins. */ }
+          if (checked?.allowed === true) grantedDeadline(checked.runDeadline);
+        } catch { metrics.counters.transportErrors++; /* Keep observing this receipt; Pause revocation still wins. */ }
         await new Promise(resolve => setTimeout(resolve, 180));
       }
     }
-    return result('unknown', useKeyboardOnly ? '已发送 Ctrl+Enter，但未确认新消息；本周期不追加点击或重复按键。' : '已点击发送，但未确认新消息；本周期不立即重试。');
+    return result('unknown', manualPending ? '手动提交结果未确认，本周期不重复发送。' : useKeyboardOnly ? '已发送 Ctrl+Enter，但未确认新消息；本周期不追加点击或重复按键。' : '已点击发送，但未确认新消息；本周期不立即重试。');
   };
 
   try {
@@ -553,17 +701,20 @@ export async function pageAction(args) {
     if (hasAttachment()) return protectedDraft('输入框有附件，本次不提交。');
 
     if (args.modelCommit === true) {
+      preparationStarted = true;
+      progress('prepare', 'starting');
       beforeAssistant = assistantState();
       rememberVisibleHistory();
       const receiptBoundaryToken = crypto.randomUUID();
       const receiptEvent = 'agent-continue-receipt-' + receiptBoundaryToken;
       let receiptBoundarySeen = false;
       const captureReceiptBoundary = event => {
-        if (!samePage() || !withinDeadline() || !keepComposer() || event.target !== editor) return;
+        if (manualPending || !samePage() || !withinDeadline() || !keepComposer() || event.target !== editor) return;
         // Union with earlier history: virtualized rows must not become new receipts.
         rememberVisibleHistory();
         beforeAssistant = assistantState();
         receiptBoundarySeen = true;
+        extensionBoundary = true;
         event.preventDefault();
       };
       document.addEventListener(receiptEvent, captureReceiptBoundary, true);
@@ -577,29 +728,45 @@ export async function pageAction(args) {
           catch {
             if (!committing || revoked || !samePage()) return;
             try {
+              metrics.counters.authorizationChecks++;
               const reply = await chrome.runtime.sendMessage({ type: 'CHECK_RUN', runId: args.runId });
               if (reply?.ok === true && reply.allowed === false) { revoked = true; return; }
-              if (reply?.allowed === true && Number.isFinite(reply.runDeadline)) args.runDeadline = reply.runDeadline;
-            } catch { /* A recoverable transport error is not a permanent run veto. */ }
+              if (reply?.allowed === true) grantedDeadline(reply.runDeadline);
+            } catch { metrics.counters.transportErrors++; /* A recoverable transport error is not a permanent run veto. */ }
             await new Promise(resolve => setTimeout(resolve, 180));
           }
         }
       };
       try {
         if (args.extensionClock === true) observeLease().catch(() => undefined);
-        commit = await chrome.runtime.sendMessage({ type: 'COMMIT_RUN', runId: args.runId, receiptBoundaryToken });
+        // A lost worker reply must not hold a trusted manual receipt hostage.
+        // The losing command remains observed by the race; never replay it.
+        commit = await Promise.race([
+          chrome.runtime.sendMessage({ type: 'COMMIT_RUN', runId: args.runId, receiptBoundaryToken }),
+          manualTakeover,
+        ]);
       } catch {
+        metrics.counters.transportErrors++;
+        if (manualPending && !extensionBoundary) return await confirmSubmission();
         submitted = true;
         return result('unknown', '页面未返回可确认的结果。');
       } finally {
         committing = false;
         document.removeEventListener(receiptEvent, captureReceiptBoundary, true);
       }
+      if (commit === manualHandoff) return await confirmSubmission();
+      if (commit?.ok === true && commit.supported === true && commit.dispatched === false && commit.manualSubmission === true) {
+        latchManual(false);
+        return await confirmSubmission();
+      }
       if (commit?.ok === true && commit.supported === true && commit.dispatched === true) {
         submitted = true;
+        metrics.counters.dispatchAttempts++;
+        if (manualPending) return await confirmSubmission();
         if (!receiptBoundarySeen) return result('unknown', '页面未返回可确认的结果。');
         return await confirmSubmission();
       }
+      mutable();
       if (!(commit?.ok === true && commit.supported === false && commit.dispatched === false)) {
         if (commit?.code === 'cancelled') return result('cancelled', '本次执行已取消。');
         if (commit?.code === 'not-dispatched' && commit.dispatched === false) {
@@ -616,6 +783,8 @@ export async function pageAction(args) {
     }
 
     const accepted = await fill(prompt);
+    mutable();
+    progress('readiness', 'prepared');
     inserted = accepted;
     if (accepted && sameComposer()) needsRefill = false;
     insertedDraftSnapshot = snapshotDraft();
@@ -623,9 +792,18 @@ export async function pageAction(args) {
     await wait(180);
 
     const findSendButton = (root = composer) => {
+      metrics.counters.readinessChecks++;
+      metrics.observations.sendPresent = false;
+      metrics.observations.sendEnabled = false;
       const scope = root;
       if (!scope) return null;
-      const usable = btn => visible(btn) && enabled(btn) && !btn.matches?.(stopSelector);
+      const usable = btn => {
+        if (!visible(btn) || btn.matches?.(stopSelector)) return false;
+        metrics.observations.sendPresent = true;
+        if (!enabled(btn)) return false;
+        metrics.observations.sendEnabled = true;
+        return true;
+      };
       const firstUsable = selector => {
         const first = scope.querySelector(selector);
         return usable(first) ? first : [...scope.querySelectorAll(selector)].find(usable);
@@ -662,10 +840,13 @@ export async function pageAction(args) {
     const buttonDeadline = Math.min(Date.now() + 3200, args.runDeadline);
     let observedSend = visibleMatches(sendSelector, composer).length > 0;
     while (args.unlimitedReadiness === true || Date.now() < buttonDeadline) {
+      mutable();
+      progress('readiness', 'waiting-send');
       if (!await stillAllowed()) {
         await clearOwnDraft();
         return result('cancelled', '已暂停，本次未提交。');
       }
+      mutable();
       if (args.persistentDelivery === true && !sameComposer()) return result('blocked', '发送控件当前不可用，稍后自动检查。', 'commit-not-dispatched');
       if (hasAttachment()) return protectedDraft('提交前检测到附件，已保留输入框内容。');
       if (busy()) {
@@ -780,6 +961,8 @@ export async function pageAction(args) {
     observedSend ||= visibleMatches(sendSelector, composer).length > 0;
     while (!useKeyboardOnly && (observedSend || sendMethod === 'button') && !sendButton
       && (args.unlimitedReadiness === true || Date.now() < buttonDeadline)) {
+      mutable();
+      progress('readiness', 'waiting-send');
       if (!await stillAllowed()) return result('cancelled', '已暂停，本次未提交。');
       if (!samePage() || !keepComposer() || !editable()) return result('blocked', '提交前页面已变化。');
       if (hasAttachment()) return protectedDraft('提交前检测到附件，已保留输入框内容。');
@@ -813,19 +996,24 @@ export async function pageAction(args) {
     if (!useKeyboardOnly && (observedSend || sendMethod === 'button') && !sendButton) return result('blocked', '发送按钮已不可用。');
 
     beforeAssistant = assistantState();
+    mutable();
     rememberVisibleHistory();
 
     const clickButton = btn => {
+      mutable();
       if (!btn) return false;
       try {
         if (!btn.isConnected || !composer.contains(btn) || !enabled(btn)) return false;
         submitted = true;
+        progress('dispatch', 'dispatched');
+        metrics.counters.dispatchAttempts++;
         btn.click();
         return true;
       } catch { return false; }
     };
 
     const dispatchKey = withCtrl => {
+      mutable();
       try {
         const keyOpts = {
           key: 'Enter', code: 'Enter', keyCode: 13, which: 13,
@@ -834,6 +1022,8 @@ export async function pageAction(args) {
         };
         const downEvent = new KeyboardEvent('keydown', keyOpts);
         submitted = true;
+        progress('dispatch', 'dispatched');
+        metrics.counters.dispatchAttempts++;
         editor.dispatchEvent(downEvent);
         editor.dispatchEvent(new KeyboardEvent('keyup', keyOpts));
         return true;
@@ -841,8 +1031,10 @@ export async function pageAction(args) {
     };
 
     if (sendButton) {
+      metrics.method = 'button';
       clickButton(sendButton);
     } else {
+      metrics.method = useKeyboardOnly || isDot ? 'ctrl-enter' : 'enter';
       dispatchKey(useKeyboardOnly || isDot);
     }
 
@@ -850,16 +1042,22 @@ export async function pageAction(args) {
 
     return await confirmSubmission();
   } catch (error) {
+    if (manualPending) {
+      if (revoked) return result('cancelled', '本次执行已取消。');
+      return await confirmSubmission();
+    }
     return result(submitted ? 'unknown' : 'error', '页面操作未完成，未记录页面内容。');
   } finally {
     await clearOwnDraft();
-    if (document.activeElement === editor && previousFocus && previousFocus !== editor && previousFocus.isConnected) {
+    if (!manualPending && document.activeElement === editor && previousFocus && previousFocus !== editor && previousFocus.isConnected) {
       try { previousFocus.focus({ preventScroll: true }); } catch {}
     }
   }
   };
   try {
-    const value = await action();
+    const actionResult = await action();
+    metrics.reason = resultReason(actionResult.status);
+    const value = { ...actionResult, diagnosticProgress: diagnosticProgress() };
     if (invocation) {
       invocation.result = value;
       invocation.state = 'settled';
@@ -869,18 +1067,20 @@ export async function pageAction(args) {
       try {
         // Do not make the injection return wait for this channel's response.
         // Either transport must be able to finish independently of the other.
-        Promise.resolve(chrome.runtime.sendMessage({ type: 'PAGE_RESULT', runId: args.runId, resultToken: args.resultToken, result: value })).catch(() => undefined);
-      } catch { /* The ordinary injection return remains an independent result channel. */ }
+        Promise.resolve(chrome.runtime.sendMessage({ type: 'PAGE_RESULT', runId: args.runId, resultToken: args.resultToken, result: value })).catch(() => { metrics.counters.transportErrors++; });
+      } catch { metrics.counters.transportErrors++; /* The ordinary injection return remains an independent result channel. */ }
     }
     return value;
   } catch (error) {
     if (!invocation) throw error;
-    const value = { status: 'unknown', message: '页面操作未完成，未记录页面内容。' };
+    metrics.reason = 'unknown';
+    const value = { status: 'unknown', message: '页面操作未完成，未记录页面内容。', diagnosticProgress: diagnosticProgress() };
     invocation.result = value;
     invocation.state = 'settled';
     completeInvocation(value);
     return value;
   } finally {
+    removeManualListeners();
     if (cancellable) chrome.runtime.onMessage.removeListener(cancel);
   }
 }

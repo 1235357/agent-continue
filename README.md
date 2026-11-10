@@ -30,6 +30,8 @@ Historical checkpoint97 records a different, r11 installation's actual full-app 
 
 ## Developer and Support
 
+The candidate's Activity panel includes per-delivery diagnostics: current phase/reason, model/DOM write counts, readiness and authorization retries, actual extension dispatch attempts, manual handoff, receipt observation, and elapsed/synchronous-write timings. It retains the latest 20 deliveries and 64 stage changes each, with truncation and persistence-health metadata. Export schema 5 includes these snapshots, not prompts, chat text, paths, keys or raw exceptions. A manual Send of the prepared prompt stops further injection while its matching receipt is checked; manual and extension deliveries have separate counters. This source-candidate behavior is not proof that an older installed release has been updated.
+
 - **Developer:** Zhentong Ye
 - **Email:** [zhentongye2028@u.northwestern.edu](mailto:zhentongye2028@u.northwestern.edu)
 - **Project:** [1235357/agent-continue](https://github.com/1235357/agent-continue)
@@ -38,9 +40,9 @@ Historical checkpoint97 records a different, r11 installation's actual full-app 
 
 Open **Developer & support** from the support link in Settings or Activity to view these contacts and the installed extension version. The page defaults to English and offers Simplified Chinese. For a bug report, manually provide the extension version, browser version, operating system, and steps to reproduce with synthetic prompts. Describe the expected and actual behavior, and select ordinary ChatGPT, Your dot, or **Not applicable / extension interface** for an interface, settings, or import problem. The separate **Suggestion** form does not require a conversation target or logs.
 
-If diagnostics would help, manually export them from Activity or the support page and review the JSON file before sharing it. Both use schema 4, include the installed extension version, and omit stored free-text messages and unknown fields. You may attach a sanitized copy in the GitHub issue's optional diagnostics field. **GitHub issues and their attachments are public.** Remove identifying data, private prompts, conversation URLs, credentials, cookies, and documents from all report text and attachments. Do not attach configuration backups, runtime keys, raw tool history, prepared commands or native state directories. Logs can reveal task timing and status; an export is not guaranteed to be anonymous. Exporting logs does not upload them or contact support automatically.
+If diagnostics would help, manually export them from Activity or the support page and review the JSON file before sharing it. Both use schema 5, include the installed extension version, and omit stored free-text messages and unknown fields. You may attach a sanitized copy in the GitHub issue's optional diagnostics field. **GitHub issues and their attachments are public.** Remove identifying data, private prompts, conversation URLs, credentials, cookies, and documents from all report text and attachments. Do not attach configuration backups, runtime keys, raw tool history, prepared commands or native state directories. Logs can reveal task timing and status; an export is not guaranteed to be anonymous. Exporting logs does not upload them or contact support automatically.
 
-Logs are timestamped locally, but diagnostic exports use relative millisecond timings by default, without exact timestamps or the export time. Only the support page offers **Include exact timestamps**, off by default; the Activity export has no exact-timestamp option. Relative timings can also identify activity patterns. A `timing-probe` diagnostic can retain `kind`, `status`, numeric `durationMs`/`firstMs` bounded to 0–120000 ms, and actual boolean `hidden`, `ok` and `allowed` values. These locally collected fields reveal page visibility and probe/authorization outcomes when present; omitting message text is not a claim of no data collection. See [diagnostic export details and privacy limits](https://github.com/1235357/agent-continue/blob/main/PRIVACY.md#diagnostic-log-export).
+Logs are timestamped locally, but diagnostic exports use relative millisecond timings by default, without exact timestamps or the export time. Only the support page offers **Include exact timestamps**, off by default; the Activity export has no exact-timestamp option. Relative timings can also identify activity patterns. A `timing-probe` diagnostic can retain `kind`, `status`, numeric `durationMs`/`firstMs` bounded to 0–Number.MAX_SAFE_INTEGER ms, and actual boolean `hidden`, `ok` and `allowed` values. These locally collected fields reveal page visibility and probe/authorization outcomes when present; omitting message text is not a claim of no data collection. See [diagnostic export details and privacy limits](https://github.com/1235357/agent-continue/blob/main/PRIVACY.md#diagnostic-log-export).
 
 ![English control console with synthetic demonstration data](https://raw.githubusercontent.com/1235357/agent-continue/main/docs/store-2.1.0-en-console.png)
 
@@ -78,7 +80,7 @@ Resume retains the original task's prompt, target, interval, and counters. To ap
 | Background operation | Does not activate the target tab or use the system clipboard |
 | Local interface | English and Simplified Chinese; system, light, and dark themes; prompt text hidden until explicitly shown |
 | Records | Up to 200 locally timestamped activity entries; diagnostic JSON exports default to relative timings and omit stored free-text messages |
-| Support | Developer contacts, installed version, and schema 4 diagnostics; exact-timestamp export requires support-page opt-in |
+| Support | Developer contacts, installed version, and schema 5 diagnostics; exact-timestamp export requires support-page opt-in |
 | Recovery | Saved task recovery when the original target is uniquely identified; no automatic opening of a missing target |
 
 ### One Submission Mechanism per Attempt

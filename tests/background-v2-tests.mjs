@@ -47,9 +47,9 @@ async function harness(seed = {}) {
     alarmCreateNoop: seed.alarmCreateNoop ?? false,
   };
   const area = name => ({
-    async get(key) { return { [key]: copy(state[name][key]) }; },
-    async set(value) { Object.assign(state[name], copy(value)); },
-    async remove(key) { delete state[name][key]; },
+    async get(key) { await h.beforeStorageGet?.(name, key); return Object.fromEntries((Array.isArray(key) ? key : [key]).map(item => [item, copy(state[name][item])])); },
+    async set(value) { await h.beforeStorageSet?.(name, value); Object.assign(state[name], copy(value)); },
+    async remove(key) { await h.beforeStorageRemove?.(name, key); for (const item of Array.isArray(key) ? key : [key]) delete state[name][item]; },
     async setAccessLevel(value) { state.accessLevels.push({ area: name, ...value }); },
   });
   const chrome = {
@@ -1105,6 +1105,151 @@ await scenario('Resume cannot discard the restoration obligation left by a faile
   assert.equal(h.state.session.job.autoDiscardableChanged, false);
 });
 
+await scenario('Delivery summaries persist typed write counters and long elapsed values without page content', async () => {
+  const h = await harness(); await h.start();
+  const privateText = 'SYNTHETIC_SECRET_PROMPT_URL_PATH';
+  h.pageResult = async args => ({ status: 'sent', diagnosticProgress: {
+    stage: 'receipt', reason: 'receipt-confirmed', counters: { fillCalls: 2, domWrites: 2, receiptChecks: 4, privateText },
+    timings: { domWriteMs: 128000, maxDomWriteMs: 64000 }, observations: { hidden: true, sendEnabled: true, prompt: privateText },
+    prompt: privateText, url: privateText, stack: privateText,
+  } });
+  const outcome = await h.message({ type: 'SEND_NOW' });
+  assert.equal(outcome.job.sentCount, 1);
+  const trace = h.state.local.deliveryDiagnostics.at(-1);
+  assert.equal(trace.state, 'sent'); assert.equal(trace.counters.domWrites, 2);
+  assert.equal(trace.counters.fillCalls, 2); assert.equal(trace.timings.domWriteMs, 128000);
+  assert.equal(JSON.stringify(trace).includes(privateText), false);
+  assert.equal(h.state.local.diagnosticsHealth.persistence, 'available');
+  await h.message({ type: 'PAUSE' });
+});
+await scenario('A diagnostic persistence failure is visible but cannot block sending or Pause', async () => {
+  const h = await harness(); await h.start();
+  h.beforeStorageSet = async (name, value) => {
+    if (name === 'local' && Object.hasOwn(value, 'deliveryDiagnostics')) throw new Error('SYNTHETIC_PRIVATE_STORAGE_ERROR');
+  };
+  assert.equal((await h.message({ type: 'SEND_NOW' })).job.sentCount, 1);
+  assert.equal(h.state.session.diagnosticsHealth.persistence, 'degraded');
+  assert.ok(h.state.session.diagnosticsHealth.writeFailures >= 1);
+  assert.equal(JSON.stringify(h.state.session.diagnosticsHealth).includes('SYNTHETIC_PRIVATE'), false);
+  assert.equal((await h.message({ type: 'PAUSE' })).job.enabled, false);
+});
+await scenario('Clear Logs fences an in-flight delivery snapshot so it cannot resurrect cleared history', async () => {
+  const h = await harness(); await h.start(); const result = deferred();
+  h.pageResult = args => args.mode === 'send' ? result.promise : { status: 'ready' };
+  const sending = h.message({ type: 'SEND_NOW' });
+  await until(() => h.sends().length === 1);
+  await h.message({ type: 'CLEAR_LOGS' });
+  result.resolve({ status: 'sent' }); await sending;
+  assert.equal(Object.hasOwn(h.state.local, 'deliveryDiagnostics'), false);
+  assert.equal((await h.message({ type: 'PAUSE' })).job.enabled, false);
+});
+await scenario('Matching manual delivery consumes one queue item and limit without claiming an extension send', async () => {
+  const h = await harness(); await h.start({ mode: 'queue-once', queue: [{ text: 'SYNTHETIC_CONTINUE' }, { text: 'SYNTHETIC_NEXT' }], maxSends: 1 });
+  h.pageResult = async () => ({ status: 'manual-sent' });
+  const { job } = await h.message({ type: 'SEND_NOW' });
+  assert.equal(job.sentCount, 0); assert.equal(job.manualSentCount, 1);
+  assert.equal(job.queueIndex, 1); assert.equal(job.enabled, false);
+  assert.equal(h.sends().length, 1);
+});
+await scenario('A permanently pending diagnostics write cannot retain send completion or Pause authority', async () => {
+  const h = await harness(); await h.start(); const writing = deferred();
+  h.beforeStorageSet = (name, value) => name === 'local' && Object.hasOwn(value, 'deliveryDiagnostics') ? writing.promise : undefined;
+  const sending = h.message({ type: 'SEND_NOW' });
+  await until(() => h.state.session.job.phase === 'idle');
+  assert.equal((await sending).job.sentCount, 1);
+  assert.equal((await h.message({ type: 'PAUSE' })).job.enabled, false);
+  const clearing = h.message({ type: 'CLEAR_LOGS' });
+  assert.equal((await h.message({ type: 'PAUSE' })).job.enabled, false);
+  await clearing; writing.resolve(); await delay(10);
+  assert.equal(Object.hasOwn(h.state.local, 'deliveryDiagnostics'), false);
+});
+await scenario('Clear during diagnostic allocation fences the old delivery without preventing its authorized send', async () => {
+  const h = await harness(); await h.start(); const reading = deferred(); let entered = false;
+  h.beforeStorageGet = (name, key) => {
+    if (name === 'local' && key === 'deliveryDiagnostics' && !entered) { entered = true; return reading.promise; }
+  };
+  const sending = h.message({ type: 'SEND_NOW' }); await until(() => entered);
+  await h.message({ type: 'CLEAR_LOGS' }); reading.resolve();
+  assert.equal((await sending).job.sentCount, 1); await delay(10);
+  assert.equal(Object.hasOwn(h.state.local, 'deliveryDiagnostics'), false);
+  await h.message({ type: 'PAUSE' });
+});
+await scenario('Exhausted diagnostic sequence degrades logging rather than stranding the live send', async () => {
+  const h = await harness({ local: { deliveryDiagnostics: [{ sequence: Number.MAX_SAFE_INTEGER }] } }); await h.start();
+  const outcome = await h.message({ type: 'SEND_NOW' });
+  assert.equal(outcome.job.sentCount, 1); assert.equal(outcome.job.phase, 'idle');
+  assert.equal(h.state.session.diagnosticsHealth.persistence, 'degraded');
+  assert.equal((await h.message({ type: 'PAUSE' })).job.enabled, false);
+});
+await scenario('A new diagnostic epoch cannot merge old history while Clear Logs removal is pending', async () => {
+  const h = await harness(); await h.start();
+  await h.message({ type: 'SEND_NOW' }); await until(() => h.state.local.deliveryDiagnostics?.at(-1)?.state === 'sent');
+  const oldSequence = h.state.local.deliveryDiagnostics.at(-1).sequence;
+  const removal = deferred(); let removing = false;
+  h.beforeStorageRemove = (name, keys) => {
+    if (name === 'local' && Array.isArray(keys) && keys.includes('deliveryDiagnostics')) { removing = true; return removal.promise; }
+  };
+  const clearing = h.message({ type: 'CLEAR_LOGS' }); await until(() => removing);
+  assert.equal((await h.message({ type: 'SEND_NOW' })).job.sentCount, 2, 'Diagnostic clear cannot block the next authorized delivery');
+  removal.resolve(); await clearing;
+  await until(() => h.state.local.deliveryDiagnostics?.at(-1)?.state === 'sent');
+  assert.deepEqual(h.state.local.deliveryDiagnostics.map(item => item.sequence), [oldSequence + 1]);
+  await h.message({ type: 'PAUSE' });
+});
+await scenario('A retired diagnostic write cannot restore cleared history or health metadata', async () => {
+  const h = await harness(); await h.start(); const writing = deferred(); let entered = false;
+  h.beforeStorageSet = (name, value) => {
+    if (name === 'local' && Object.hasOwn(value, 'deliveryDiagnostics')) { entered = true; return writing.promise; }
+  };
+  await h.message({ type: 'SEND_NOW' }); await until(() => entered);
+  await delay(2100);
+  assert.equal(h.state.session.diagnosticsHealth.persistence, 'degraded');
+  await h.message({ type: 'CLEAR_LOGS' }); writing.resolve(); await delay(15);
+  assert.equal(Object.hasOwn(h.state.local, 'deliveryDiagnostics'), false);
+  assert.equal(Object.hasOwn(h.state.local, 'diagnosticsHealth'), false);
+  assert.equal(Object.hasOwn(h.state.session, 'diagnosticsHealth'), false);
+  await h.message({ type: 'PAUSE' });
+});
+await scenario('Clear fences a pending health write without retaining the Pause queue', async () => {
+  const h = await harness(); await h.start(); const healthWrite = deferred(); let entered = false;
+  h.beforeStorageGet = (name, key) => { if (name === 'local' && key === 'deliveryDiagnostics') throw new Error('SYNTHETIC_READ_FAILURE'); };
+  h.beforeStorageSet = (name, value) => {
+    if (name === 'session' && Object.hasOwn(value, 'diagnosticsHealth')) { entered = true; return healthWrite.promise; }
+  };
+  assert.equal((await h.message({ type: 'SEND_NOW' })).job.sentCount, 1); await until(() => entered);
+  const clearing = h.message({ type: 'CLEAR_LOGS' });
+  assert.equal((await h.message({ type: 'PAUSE' })).job.enabled, false);
+  healthWrite.resolve(); await clearing;
+  assert.equal(Object.hasOwn(h.state.session, 'diagnosticsHealth'), false);
+});
+await scenario('Clear Data diagnostic removal stays outside the shared control transaction', async () => {
+  const h = await harness(); await h.start(); const removal = deferred(); let entered = false;
+  h.beforeStorageRemove = (name, keys) => {
+    if (name === 'local' && Array.isArray(keys) && keys.includes('deliveryDiagnostics')) { entered = true; return removal.promise; }
+  };
+  const clearing = h.message({ type: 'CLEAR_DATA' }); await until(() => entered);
+  let paused = false;
+  const pausing = h.message({ type: 'PAUSE' }).then(() => { paused = true; });
+  await delay(15);
+  try { assert.equal(paused, true); } finally { removal.resolve(); await clearing; await pausing; }
+});
+await scenario('A pending diagnostics GET_STATE read cannot retain the Pause queue', async () => {
+  const h = await harness(); await h.start(); const reading = deferred(); let entered = false;
+  h.beforeStorageGet = (name, keys) => {
+    if (name === 'local' && Array.isArray(keys) && keys.includes('deliveryDiagnostics')) { entered = true; return reading.promise; }
+  };
+  const observing = h.message({ type: 'GET_STATE' }); await until(() => entered);
+  assert.equal((await h.message({ type: 'PAUSE' })).job.enabled, false);
+  reading.resolve();
+  assert.equal((await observing).job.enabled, false, 'Delayed diagnostics cannot return the earlier running task after Pause');
+});
+await scenario('Back-to-back deliveries drain their final snapshots without a subsequent producer', async () => {
+  const h = await harness(); await h.start();
+  for (let index = 0; index < 5; index++) assert.equal((await h.message({ type: 'SEND_NOW' })).job.sentCount, index + 1);
+  await until(() => h.state.local.deliveryDiagnostics?.filter(item => item.state === 'sent').length === 5);
+  assert.equal(h.state.local.deliveryDiagnostics.at(-1).state, 'sent');
+  await h.message({ type: 'PAUSE' });
+});
 const failed = results.filter(result => result.status === 'FAIL');
 console.log(`RESULT ${results.length - failed.length}/${results.length} background v2 scenarios passed`);
 for (const result of failed) console.error(result.error);

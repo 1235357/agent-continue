@@ -15,6 +15,7 @@ await initializeLanguage();
 import { DEFAULT_CONFIG, normalizeUrl, readConfig } from './config.js';
 import { importPromptFile, SUPPORTED_ACCEPT } from './file-import.js';
 import { buildActivityExport } from './activity-export.js';
+import { sanitizeDeliveryDiagnostics } from './delivery-diagnostics.js';
 
 const $ = id => document.getElementById(id);
 const clone = value => structuredClone(value);
@@ -48,6 +49,8 @@ let revealed = false;
 let queueEditing = null;
 let templates = [];
 let logs = [];
+let deliveryDiagnostics = [];
+let diagnosticHealth = null;
 let targets = [];
 let activePanel = 'task';
 let targetSignature = '';
@@ -60,6 +63,7 @@ const editableButtons = ['importPrompt', 'importQueue', 'addToQueue', 'loadTempl
 const eventLabels = () => ({
   started: t('任务已开始'), start: t('任务已开始'), resumed: t('已继续'), resume: t('已继续'),
   paused: t('已暂停'), pause: t('已暂停'), sent: t('发送已确认'), busy: t('等待 Agent'),
+  'manual-sent': t('手动提交已确认'),
   draft: t('保留已有草稿'), unknown: t('本轮结果未知'), blocked: t('等待页面可用'),
   error: t('本轮未完成'), restored: t('已恢复任务'), recovered: t('已恢复任务'),
   unconfirmed: t('本轮结果未知'), 'reply-complete': t('回复已结束'), 'limit-reached': t('达到次数上限'),
@@ -254,6 +258,7 @@ function renderTemplates() {
   if (templates.some(template => template.id === previous)) $('templateSelect').value = previous;
 }
 function renderLogs() {
+  renderDeliveryDiagnostics();
   const entries = (Array.isArray(logs) ? logs : []).filter(log => log !== null && typeof log === 'object' && !Array.isArray(log)).slice(-200);
   const labels = eventLabels();
   $('logCount').textContent = t`${entries.length} 条记录`;
@@ -272,9 +277,34 @@ function renderLogs() {
     row.append(time, title, message); $('logList').append(row);
   }
 }
+function renderDeliveryDiagnostics() {
+  const list = $('deliveryDiagnosticList');
+  if (!list) return;
+  const expanded = new Set([...list.querySelectorAll('details[open]')].map(item => item.dataset.sequence));
+  $('deliveryDiagnosticHealth').textContent = diagnosticHealth?.persistence === 'degraded'
+    ? t('记录保存失败；导出可能不完整。') : '';
+  list.replaceChildren();
+  const traces = deliveryDiagnostics.map(sanitizeDeliveryDiagnostics).filter(Boolean).slice(-20).reverse();
+  if (!traces.length) { list.textContent = t('尚无新版发送诊断。'); return; }
+  for (const trace of traces) {
+    const details = document.createElement('details');
+    details.dataset.sequence = String(trace.sequence); details.open = expanded.has(String(trace.sequence));
+    const summary = document.createElement('summary');
+    summary.textContent = `#${trace.sequence} | ${trace.state} | ${trace.stage} / ${trace.reason} | ${Math.round((trace.updatedAt - trace.startedAt) / 1000)} s`;
+    const data = document.createElement('pre');
+    data.style.whiteSpace = 'pre-wrap'; data.style.overflowWrap = 'anywhere';
+    // Only the shared fixed-field codec reaches the UI or export.
+    data.textContent = JSON.stringify({ method: trace.method, resultChannel: trace.resultChannel, counters: trace.counters, timings: trace.timings,
+      observations: trace.observations, history: trace.history, droppedHistory: trace.droppedHistory }, null, 2);
+    details.append(summary, data); list.append(details);
+  }
+}
 function renderCountdown() {
   const config = displayedConfig();
   let seconds = Math.max(0, Math.ceil((latestJob?.enabled && latestJob.nextAt ? latestJob.nextAt - Date.now() : config.intervalMinutes * 60_000) / 1000));
+  if (latestJob?.phase === 'sending' && Number.isFinite(latestJob.lastRunAt)) {
+    seconds = Math.max(0, Math.floor((Date.now() - latestJob.lastRunAt) / 1000));
+  }
   if (!Number.isFinite(seconds)) seconds = 1200;
   $('countdown').textContent = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
   $('countdownLabel').textContent = latestJob?.phase === 'sending' ? t('正在检查 / 发送') : latestJob?.awaitingReply ? t('等待回复结束') : latestJob?.enabled ? t('下一次检查') : t('设定的发送间隔');
@@ -293,7 +323,10 @@ function paint(job) {
   $('target').textContent = job?.title || t('选择你希望持续推进的页面');
   $('targetState').textContent = enabled ? t('已绑定') : job ? t('已暂停') : t('尚未绑定');
   $('statusText').textContent = job?.statusText || t('先设置提示词，再绑定你的 dot 或 ChatGPT 会话。');
-  $('sentCount').textContent = String(job?.sentCount || 0);
+  const automaticSent = job?.sentCount || 0;
+  const manualSent = job?.manualSentCount || 0;
+  $('sentCount').textContent = String(automaticSent + manualSent);
+  $('sentCount').title = t`扩展发送：${automaticSent}；手动发送：${manualSent}`;
   $('nextAt').textContent = enabled && job?.nextAt ? new Date(job.nextAt).toLocaleTimeString(getLanguage() === 'zh_CN' ? 'zh-CN' : 'en-US', { hour: '2-digit', minute: '2-digit' }) : t('尚未计时');
   $('runMode').textContent = config.mode === 'queue-once' ? t('队列 · 执行一遍') : config.maxSends > 0 ? t`上限 ${config.maxSends} 次` : t('无限循环');
   $('protection').textContent = t('标签保护 · ') + (!enabled ? t('待启动') : ({ active: t('已启用'), off: t('关闭'), unavailable: t('不可用') }[job.discardProtection] || t('检查中')));
@@ -334,6 +367,8 @@ async function refresh() {
     if (!loaded) { draftConfig = normalized(state.config); loaded = true; }
     targets = Array.isArray(state.availableTargets) ? state.availableTargets : targets;
     if (Array.isArray(state.logs)) { logs = state.logs; renderLogs(); }
+    deliveryDiagnostics = Array.isArray(state.deliveryDiagnostics) ? state.deliveryDiagnostics : [];
+    diagnosticHealth = state.diagnosticsHealth; renderDeliveryDiagnostics();
     paint(state.job || null);
   } catch (error) { tell(safeFailure(error), true); }
 }
@@ -614,10 +649,13 @@ $('configFile').addEventListener('change', async event => {
 });
 $('refreshLogs').addEventListener('click', refresh);
 $('clearLogs').addEventListener('click', () => act('CLEAR_LOGS'));
-$('exportLogs').addEventListener('click', () => {
+$('exportLogs').addEventListener('click', async () => {
   try {
     const extensionVersion = chrome.runtime.getManifest?.()?.version;
-    downloadJson('agent-continue-activity.json', buildActivityExport({ logs, extensionVersion }));
+    const stored = await chrome.storage.local.get(['logs', 'deliveryDiagnostics', 'diagnosticsHealth']);
+    const health = (await chrome.storage.session.get('diagnosticsHealth')).diagnosticsHealth || stored.diagnosticsHealth;
+    downloadJson('agent-continue-activity.json', buildActivityExport({ logs: stored.logs, deliveries: stored.deliveryDiagnostics,
+      diagnosticsHealth: health, extensionVersion }));
     tell(t('已请求下载诊断日志。分享前请检查文件。'));
   } catch { tell(t('未能导出诊断日志。没有上传文件。'), true); }
 });
@@ -646,6 +684,11 @@ $('confirmClear').addEventListener('click', () => { $('clearDialog').close(); cl
 chrome.storage.onChanged.addListener((changes, area) => {
   if ((area === 'session' || area === 'local') && changes.job) paint(changes.job.newValue || null);
   if (area === 'local' && changes.logs) { logs = Array.isArray(changes.logs.newValue) ? changes.logs.newValue : []; renderLogs(); }
+  if (area === 'local' && changes.deliveryDiagnostics) {
+    deliveryDiagnostics = Array.isArray(changes.deliveryDiagnostics.newValue) ? changes.deliveryDiagnostics.newValue : [];
+    renderDeliveryDiagnostics();
+  }
+  if (changes.diagnosticsHealth) { diagnosticHealth = changes.diagnosticsHealth.newValue; renderDeliveryDiagnostics(); }
 });
 window.addEventListener('pagehide', () => {
   if (loaded && !latestJob?.enabled && !importing) {

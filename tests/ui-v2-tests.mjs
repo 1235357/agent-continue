@@ -37,7 +37,7 @@ const priorityNotices = {
 const original = { ...structuredClone(DEFAULT_CONFIG), prompt: 'SYNTHETIC-PRIVATE-PROMPT\n  Preserve these spaces.\n', intervalMinutes: 20,
   queue: [{ name: '合成队列 A', text: 'SYNTHETIC-QUEUE-A' }, { name: '合成队列 B', text: 'SYNTHETIC-QUEUE-B' }] };
 const resources = new Set(['popup.html', 'popup.css', 'popup.js', 'config.js', 'file-import.js',
-  'static-locale.js', 'i18n.js', 'i18n-html.js', 'i18n-popup.js', 'i18n-runtime.js', 'activity-export.js']);
+  'static-locale.js', 'i18n.js', 'i18n-html.js', 'i18n-popup.js', 'i18n-runtime.js', 'activity-export.js', 'delivery-diagnostics.js']);
 
 async function createPage({ full = false, enabled = false, uiLanguage, fixture = original, title = 'Your dot', statusText = '合成测试任务。', initialTarget = 41, availableTargets = null } = {}) {
   const context = await browser.newContext({ viewport: { width: full ? 1200 : 650, height: full ? 900 : 600 }, locale: 'zh-CN', colorScheme: 'light', acceptDownloads: true });
@@ -107,6 +107,7 @@ async function createPage({ full = false, enabled = false, uiLanguage, fixture =
       },
       storage: {
         onChanged: { addListener(listener) { mock.listeners.push(listener); } },
+        session: { async get() { return {}; } },
         local: {
           async get(keys) { const result = {}; for (const key of typeof keys === 'string' ? [keys] : keys || []) result[key] = structuredClone(mock[key]); return result; },
           async set(values) {
@@ -678,5 +679,59 @@ try {
     await diagnostic.context.close();
   }
 
+  {
+    const diagnostic = await createPage({ full: true }); const { page } = diagnostic;
+    await page.locator('#tab-logs').click();
+    await page.evaluate(() => {
+      const now = Date.now();
+      const trace = { sequence: 1, startedAt: now - 180000, updatedAt: now, state: 'running',
+        stage: 'readiness', reason: 'waiting-send', counters: { modelWrites: 1, readinessChecks: 88 },
+        timings: { elapsedMs: 180000, modelWriteMs: 24 }, observations: { hidden: true, sendEnabled: false },
+        history: [{ elapsedMs: 0, stage: 'prepare', reason: 'prepared' },
+          { elapsedMs: 200, stage: 'readiness', reason: 'waiting-send' }], droppedHistory: 0,
+        prompt: 'SYNTHETIC_PRIVATE_DIAGNOSTIC_INJECTION' };
+      __uiMock.deliveryDiagnostics = [trace];
+      for (const listener of __uiMock.listeners) listener({ deliveryDiagnostics: { newValue: [trace] },
+        diagnosticsHealth: { newValue: { persistence: 'degraded', writeFailures: 1 } } }, 'local');
+    });
+    await page.locator('#deliveryDiagnosticList summary').click();
+    const text = await page.locator('#deliveryDiagnosticList').innerText();
+    assert.match(text, /readiness \/ waiting-send \| 180 s/);
+    assert.match(text, /"modelWrites": 1/); assert.match(text, /"readinessChecks": 88/);
+    assert.ok(!text.includes('SYNTHETIC_PRIVATE_DIAGNOSTIC_INJECTION'));
+    assert.match(await page.locator('#deliveryDiagnosticHealth').innerText(), /persistence failed/);
+    await page.setViewportSize({ width: 390, height: 800 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    await page.evaluate(() => {
+      const trace = { ...__uiMock.deliveryDiagnostics[0], updatedAt: Date.now() };
+      __uiMock.deliveryDiagnostics = [trace];
+      for (const listener of __uiMock.listeners) listener({ deliveryDiagnostics: { newValue: [trace] } }, 'local');
+    });
+    assert.equal(await page.locator('#deliveryDiagnosticList details').evaluate(element => element.open), true,
+      'Live updates must preserve the expanded diagnostic record');
+    const download = page.waitForEvent('download'); await page.locator('#exportLogs').click(); await download;
+    const report = await page.evaluate(async () => JSON.parse(await __uiMock.exports.at(-1).text()));
+    assert.equal(report.version, 5); assert.equal(report.deliveries[0].counters.modelWrites, 1);
+    assert.equal(report.deliveries[0].startedAt, undefined);
+    assert.ok(!JSON.stringify(report).includes('SYNTHETIC_PRIVATE_DIAGNOSTIC_INJECTION'));
+    assert.equal(await page.evaluate(() => __uiMock.requests.filter(r => /^(START|RESUME|SEND)/.test(r.type)).length), 0);
+    assert.deepEqual(diagnostic.errors, []);
+    pass('Delivery diagnostics: live stage/counters, persistence warning, narrow layout and schema5 export without private fields.');
+    await diagnostic.context.close();
+  }
+  {
+    const counter = await createPage({ full: true }); const { page } = counter;
+    await page.evaluate(() => {
+      const old = structuredClone(__uiMock.job);
+      __uiMock.job.sentCount = 2; __uiMock.job.manualSentCount = 1;
+      for (const listener of __uiMock.listeners) listener({ job: { oldValue: old, newValue: __uiMock.job } }, 'session');
+    });
+    assert.equal(await page.locator('#sentCount').innerText(), '3');
+    assert.equal(await page.locator('#sentCount').getAttribute('title'), 'Extension sends: 2; manual sends: 1');
+    assert.equal(await page.evaluate(() => __uiMock.job.sentCount), 2);
+    assert.deepEqual(counter.errors, []);
+    pass('Confirmed total includes a verified manual handoff, with extension/manual attribution retained.');
+    await counter.context.close();
+  }
   console.log(`\n${checks.length}/${checks.length} UI v2 scenarios passed.`);
 } finally { await browser.close(); }

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { pageAction } from '../adapter.js';
+import { pageAction, pageInvocationState } from '../adapter.js';
 import vm from 'node:vm';
 import test from 'node:test';
 
@@ -10,7 +10,7 @@ test('send implementation has no content-change veto or refill-count abort', () 
 });
 
 // Deliberately small DOM contract: selectors are routed, not browser-parsed.
-// Coverage excludes real layout, trusted events, ProseMirror/React integration,
+// Coverage excludes real layout, browser event trust, ProseMirror/React integration,
 // contenteditable serialization, stop controls, and cross-run retries.
 // All URLs, messages, identities, authorization replies, and time are synthetic.
 function fixture(options = {}) {
@@ -21,9 +21,14 @@ function fixture(options = {}) {
   let identity = 'fixture~conversation';
   let acceptedAt = Infinity;
   let attachment = null;
+  let stops = 0;
+  let writes = 0;
   const users = [...(options.messages ?? [])];
   const timers = [];
   const sentTexts = [];
+  const messages = [];
+  const listeners = new Map();
+  const runtimeListeners = new Set();
   class Element {
     isConnected = true;
     disabled = false;
@@ -34,7 +39,9 @@ function fixture(options = {}) {
     parentElement = null;
     getAttribute() { return null; }
     getClientRects() { return [{}]; }
-    closest(selector) { return selector === 'form' ? composer : null; }
+    closest(selector) { return selector === 'form' ? composer : this === button && selector.includes('button') ? this : null; }
+    matches(selector) { return this === button && selector.includes('send-button'); }
+    contains(element) { return element === this; }
     focus() { document.activeElement = this; }
     setSelectionRange() {}
     addEventListener() {}
@@ -46,11 +53,12 @@ function fixture(options = {}) {
   }
   class Textarea extends Element {
     get value() { return this.text ?? ''; }
-    set value(value) { this.text = value; }
+    set value(value) { this.text = value; writes++; now += options.writeDelay ?? 0; }
   }
   const editor = new Textarea();
   editor.value = options.draft ?? '';
   let button = new Element();
+  button.disabled = options.disabledSend === true;
   const submit = () => {
     clicks++;
     sentTexts.push(editor.value);
@@ -60,7 +68,8 @@ function fixture(options = {}) {
   button.click = submit;
   const composer = {
     querySelector: selector => selector.includes('send-button') ? button : null,
-    querySelectorAll: selector => selector.includes('[data-file-id]') && attachment ? [attachment] : [],
+    querySelectorAll: selector => selector.includes('[data-file-id]') && attachment ? [attachment]
+      : selector.includes('stop-button') && state.working ? [stop] : [],
     contains: element => element === button || element === editor,
   };
   const row = {
@@ -71,6 +80,11 @@ function fixture(options = {}) {
     activeElement: null,
     visibilityState: 'visible',
     body: {},
+    addEventListener(type, listener) {
+      if (!listeners.has(type)) listeners.set(type, new Set());
+      listeners.get(type).add(listener);
+    },
+    removeEventListener(type, listener) { listeners.get(type)?.delete(listener); },
     querySelectorAll(selector) {
       if (selector.startsWith('article.message-row,')) return identity ? [row] : [];
       if (selector.includes('data-composer-input') || selector.startsWith('#prompt-textarea')) return [editor];
@@ -78,12 +92,32 @@ function fixture(options = {}) {
       return [];
     },
   };
+  const stop = new Element();
+  stop.click = () => { stops++; state.working = false; };
   const state = {
     editor,
     sentTexts,
+    messages,
+    working: false,
+    get writes() { return writes; },
+    get stops() { return stops; },
+    get listenerCount() { return [...listeners.values()].reduce((sum, set) => sum + set.size, 0); },
     get checks() { return checks; },
     get clicks() { return clicks; },
     get keys() { return keys; },
+    emit(type, init = {}) {
+      const event = { type, target: type === 'click' ? button : editor, isTrusted: true, ...init };
+      for (const listener of listeners.get(type) ?? []) listener(event);
+    },
+    manualSubmit(init = {}) {
+      state.emit(init.type ?? 'click', init);
+      const value = editor.value;
+      users.push({ innerText: value, getAttribute: name => name === 'data-message-id' ? 'manual-user-' + users.length : null });
+      editor.value = '';
+      state.working = true;
+    },
+    addUser(value, key) { users.push({ innerText: value, getAttribute: name => name === 'data-message-id' ? key : null }); },
+    enableSend() { button.disabled = false; },
     replaceSendButton() {
       button.isConnected = false;
       button = new Element();
@@ -111,6 +145,7 @@ function fixture(options = {}) {
   };
   const context = vm.createContext({
     URL, HTMLInputElement: Element, HTMLTextAreaElement: Textarea,
+    crypto: { randomUUID: () => '00000000-0000-0000-0000-000000000001' },
     Node: { TEXT_NODE: 3, ELEMENT_NODE: 1 },
     Event: class { constructor(type, init) { this.type = type; Object.assign(this, init); } },
     getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
@@ -124,7 +159,16 @@ function fixture(options = {}) {
   });
   vm.runInContext('globalThis.InputEvent = globalThis.PointerEvent = globalThis.MouseEvent = globalThis.KeyboardEvent = Event;', context);
   if (options.runtime !== false) {
-    context.chrome = { runtime: { async sendMessage(message) {
+    context.chrome = { runtime: {
+      id: 'fixture-extension',
+      onMessage: { addListener: listener => runtimeListeners.add(listener), removeListener: listener => runtimeListeners.delete(listener) },
+      async sendMessage(message) {
+      if (message.type === 'MANUAL_SUBMISSION' || message.type === 'PAGE_RESULT') {
+        messages.push(message);
+        if (message.type === 'MANUAL_SUBMISSION' && options.manualNoticeError) throw new Error('Synthetic notification transport failure');
+        return { ok: true };
+      }
+      if (message.type === 'COMMIT_RUN') return options.commit(state);
       if (message.type === 'WAIT_RUN') {
         assert.ok([50, 60, 150, 180].includes(message.delayMs));
         extensionWaits++;
@@ -138,9 +182,11 @@ function fixture(options = {}) {
     } } };
   }
   vm.runInContext('globalThis.run = (' + source + ');', context);
+  vm.runInContext('globalThis.observe = (' + pageInvocationState.toString() + ');', context);
   return {
     state,
     clocks: () => ({ pageTimerCalls, extensionWaits }),
+    observe: () => context.observe({ runId: 'synthetic-run', resultToken: 'synthetic-token' }),
     run: () => context.run({
       expectedUrl, targetIdentity: options.dot ? 'fixture~conversation' : null,
       runId: 'synthetic-run', runDeadline: 20000, mode: 'send',
@@ -148,6 +194,226 @@ function fixture(options = {}) {
     }),
   };
 }
+
+for (const dot of [false, true]) {
+  for (const type of ['click', 'keydown', 'submit']) {
+    test(`manual handoff suppresses legacy refill and Stop after preparation (dot=${dot}, type=${type})`, async () => {
+      const h = fixture({ dot, disabledSend: true, args: { persistentDelivery: true, unlimitedReadiness: true, resultToken: 'synthetic-token' } });
+      let writesAtManual;
+      h.state.schedule(60, () => {
+        h.state.manualSubmit({ type, key: 'Enter', ctrlKey: dot, ...(type === 'submit' ? { target: h.state.editor.closest('form') } : {}) });
+        writesAtManual = h.state.writes;
+      });
+      const outcome = await h.run();
+      assert.equal(outcome.status, 'manual-sent');
+      assert.notEqual(outcome.retryable, true);
+      assert.equal(h.state.clicks, 0);
+      assert.equal(h.state.stops, 0);
+      assert.equal(h.state.writes, writesAtManual);
+      assert.equal(h.state.editor.value, '');
+      const notices = h.state.messages.filter(message => message.type === 'MANUAL_SUBMISSION');
+      assert.equal(notices.length, 1);
+      assert.deepEqual(Object.keys(notices[0]).sort(), ['resultToken', 'runId', 'type']);
+      assert.equal(outcome.diagnosticProgress.counters.manualIntents, 1);
+      assert.equal(outcome.diagnosticProgress.counters.dispatchAttempts, 0);
+      assert.equal(h.state.listenerCount, 0);
+    });
+  }
+}
+
+test('manual handoff remains cancellable while waiting for its receipt', async () => {
+  let manual = false;
+  const h = fixture({ disabledSend: true, args: { persistentDelivery: true, resultToken: 'synthetic-token' },
+    authorize: () => ({ ok: true, allowed: !manual }) });
+  h.state.schedule(60, () => { h.state.emit('click'); h.state.editor.value = ''; manual = true; });
+  const outcome = await h.run();
+  assert.equal(outcome.status, 'cancelled');
+  assert.equal(h.state.clicks, 0);
+  assert.notEqual(outcome.retryable, true);
+  assert.equal(h.state.listenerCount, 0);
+});
+
+test('manual handoff polls a delayed receipt without filling or stopping its reply', async () => {
+  const h = fixture({ disabledSend: true, args: { persistentDelivery: true, unlimitedReadiness: true, extensionClock: true } });
+  let writesAtManual;
+  h.state.schedule(60, () => {
+    h.state.emit('click'); h.state.editor.value = ''; h.state.working = true;
+    writesAtManual = h.state.writes;
+  });
+  h.state.schedule(900, () => h.state.addUser('continue fixture', 'delayed-manual-user'));
+  const outcome = await h.run();
+  assert.equal(outcome.status, 'manual-sent');
+  assert.ok(outcome.diagnosticProgress.counters.receiptChecks >= 4);
+  assert.equal(h.state.writes, writesAtManual);
+  assert.equal(h.state.stops, 0);
+  assert.equal(h.state.clicks, 0);
+});
+
+test('manual handoff delayed receipt loses to Pause without cleanup writes', async () => {
+  const h = fixture({ disabledSend: true, args: { persistentDelivery: true, unlimitedReadiness: true, extensionClock: true },
+    authorize: state => ({ ok: true, allowed: state.paused !== true }) });
+  let writesAtManual;
+  h.state.schedule(60, () => { h.state.emit('click'); h.state.editor.value = ''; writesAtManual = h.state.writes; });
+  h.state.schedule(350, () => { h.state.paused = true; });
+  h.state.schedule(900, () => h.state.addUser('continue fixture', 'too-late-manual-user'));
+  const outcome = await h.run();
+  assert.equal(outcome.status, 'cancelled');
+  assert.equal(h.state.writes, writesAtManual);
+  assert.equal(h.state.clicks, 0);
+  assert.equal(h.state.listenerCount, 0);
+});
+
+test('manual handoff notification transport rejection never authorizes refill', async () => {
+  const h = fixture({ manualNoticeError: true, disabledSend: true, args: { persistentDelivery: true } });
+  h.state.schedule(60, () => h.state.manualSubmit());
+  const outcome = await h.run();
+  assert.equal(outcome.status, 'manual-sent');
+  assert.equal(outcome.diagnosticProgress.counters.transportErrors, 1);
+  assert.equal(outcome.diagnosticProgress.counters.fillCalls, 1);
+  assert.equal(h.state.clicks, 0);
+});
+
+test('manual handoff is not inferred from a synthetic click triggering a trusted submit event', async () => {
+  const h = fixture({ onSubmit: state => state.emit('submit', { target: state.editor.closest('form') }) });
+  const outcome = await h.run();
+  assert.equal(outcome.status, 'sent');
+  assert.equal(outcome.diagnosticProgress.counters.manualIntents, 0);
+  assert.equal(h.state.messages.filter(message => message.type === 'MANUAL_SUBMISSION').length, 0);
+});
+
+for (const kind of ['untrusted', 'unrelated-payload', 'other-control', 'shift-enter', 'composing-enter']) {
+  test(`manual handoff ignores ${kind}`, async () => {
+    const h = fixture();
+    h.state.schedule(60, () => {
+      const event = kind === 'untrusted' ? { isTrusted: false }
+        : kind === 'other-control' ? { target: { closest: () => null } }
+          : kind === 'shift-enter' ? { type: 'keydown', key: 'Enter', shiftKey: true }
+            : kind === 'composing-enter' ? { type: 'keydown', key: 'Enter', isComposing: true } : {};
+      if (kind === 'unrelated-payload') h.state.editor.value = 'unrelated manual text';
+      h.state.emit(event.type ?? 'click', event);
+    });
+    const outcome = await h.run();
+    assert.equal(outcome.status, 'sent');
+    assert.equal(h.state.clicks, 1);
+    assert.equal(h.state.messages.filter(message => message.type === 'MANUAL_SUBMISSION').length, 0);
+    assert.equal(outcome.diagnosticProgress.counters.manualIntents, 0);
+  });
+}
+
+for (const kind of ['unrelated-receipt', 'historical-receipt']) {
+  test(`manual handoff cannot confirm ${kind}`, async () => {
+    const old = { innerText: 'continue fixture', getAttribute: name => name === 'data-message-id' ? 'old-user' : null };
+    const h = fixture({ disabledSend: true, messages: kind === 'historical-receipt' ? [old] : [], args: { persistentDelivery: true } });
+    h.state.schedule(60, () => {
+      h.state.emit('click');
+      h.state.editor.value = '';
+      if (kind === 'unrelated-receipt') h.state.addUser('unrelated message', 'other-user');
+    });
+    const outcome = await h.run();
+    assert.equal(outcome.status, 'unknown');
+    assert.equal(h.state.clicks, 0);
+    assert.notEqual(outcome.retryable, true);
+  });
+}
+
+test('manual handoff accepts the MAIN no-dispatch manualSubmission protocol', async () => {
+  const h = fixture({ args: { modelCommit: true, persistentDelivery: true }, commit: state => {
+    state.addUser('continue fixture', 'main-manual-user');
+    return { ok: true, supported: true, dispatched: false, manualSubmission: true };
+  } });
+  const outcome = await h.run();
+  assert.equal(outcome.status, 'manual-sent');
+  assert.equal(h.state.clicks, 0);
+  assert.notEqual(outcome.retryable, true);
+  assert.equal(outcome.diagnosticProgress.counters.dispatchAttempts, 0);
+});
+
+test('manual handoff MAIN reply and later receipt boundary cannot absorb the manual row', async () => {
+  const h = fixture({ args: { modelCommit: true, persistentDelivery: true, resultToken: 'synthetic-token' }, commit: state => {
+    state.editor.value = 'continue fixture';
+    state.manualSubmit();
+    state.emit('agent-continue-receipt-00000000-0000-0000-0000-000000000001', { target: state.editor, preventDefault() {} });
+    return { ok: true, supported: true, dispatched: false, manualSubmission: true };
+  } });
+  const outcome = await h.run();
+  assert.equal(outcome.status, 'manual-sent');
+  assert.equal(outcome.diagnosticProgress.counters.fillCalls, 0);
+  assert.equal(outcome.diagnosticProgress.counters.dispatchAttempts, 0);
+  assert.equal(h.state.messages.filter(message => message.type === 'MANUAL_SUBMISSION').length, 1);
+  assert.equal(h.state.listenerCount, 0);
+});
+
+for (const late of ['resolve', 'reject']) {
+  test(`manual handoff confirms independently of a hanging COMMIT_RUN and ignores its late ${late}`, async () => {
+    let prepared, resolveCommit, rejectCommit;
+    const preparation = new Promise(resolve => { prepared = resolve; });
+    const pendingCommit = new Promise((resolve, reject) => { resolveCommit = resolve; rejectCommit = reject; });
+    const h = fixture({ args: { modelCommit: true, persistentDelivery: true, resultToken: 'synthetic-token' }, commit: state => {
+      state.editor.value = 'continue fixture';
+      prepared();
+      return pendingCommit;
+    } });
+    const round = h.run();
+    await preparation;
+    h.state.manualSubmit();
+    let timer;
+    const outcome = await Promise.race([round, new Promise(resolve => { timer = setTimeout(() => resolve({ status: 'fixture-timeout' }), 100); })]);
+    clearTimeout(timer);
+    if (late === 'resolve') resolveCommit({ ok: true, supported: true, dispatched: true });
+    else rejectCommit(new Error('Synthetic late transport rejection'));
+    await round;
+    assert.equal(outcome.status, 'manual-sent');
+    assert.equal(h.state.clicks, 0);
+    assert.equal(outcome.diagnosticProgress.counters.dispatchAttempts, 0);
+    assert.equal(outcome.diagnosticProgress.counters.fillCalls, 0);
+    assert.equal(h.state.messages.filter(message => message.type === 'MANUAL_SUBMISSION').length, 1);
+    assert.equal(h.state.listenerCount, 0);
+    assert.equal((await h.run()).status, 'manual-sent', 'A late worker response cannot replace the settled invocation');
+  });
+}
+
+test('manual handoff preserves unknown and no fallback after a rejected extension boundary', async () => {
+  const h = fixture({ args: { modelCommit: true, persistentDelivery: true }, commit: state => {
+    state.emit('agent-continue-receipt-00000000-0000-0000-0000-000000000001', { target: state.editor, preventDefault() {} });
+    throw new Error('Synthetic post-boundary rejection');
+  } });
+  const outcome = await h.run();
+  assert.equal(outcome.status, 'unknown');
+  assert.notEqual(outcome.retryable, true);
+  assert.equal(outcome.diagnosticProgress.counters.fillCalls, 0);
+  assert.equal(h.state.clicks, 0);
+  assert.equal(h.state.listenerCount, 0);
+});
+
+test('manual handoff listeners and receipt listener are removed after a worker exception', async () => {
+  const h = fixture({ args: { modelCommit: true, resultToken: 'synthetic-token' }, commit: state => {
+    assert.equal(state.listenerCount, 4);
+    throw new Error('Synthetic worker failure');
+  } });
+  const outcome = await h.run();
+  assert.equal(outcome.status, 'unknown');
+  assert.equal(h.state.listenerCount, 0);
+  assert.equal(outcome.diagnosticProgress.counters.transportErrors, 1);
+});
+
+test('manual handoff exposes live content-free diagnostics and records legacy write timing', async () => {
+  const h = fixture({ writeDelay: 3, args: { resultToken: 'synthetic-token', persistentDelivery: true } });
+  let running;
+  h.state.schedule(60, () => { running = h.observe(); });
+  const outcome = await h.run();
+  assert.equal(running.state, 'running');
+  assert.equal(running.diagnosticProgress.counters.pageAdmissions, 1);
+  assert.equal(running.diagnosticProgress.counters.fillCalls, 1);
+  assert.equal(running.diagnosticProgress.counters.domWrites, 1);
+  assert.ok(running.diagnosticProgress.timings.domWriteMs >= 3);
+  assert.ok(outcome.diagnosticProgress.counters.receiptChecks > 0);
+  assert.equal(outcome.diagnosticProgress.counters.dispatchAttempts, 1);
+  assert.deepEqual(Object.keys(outcome.diagnosticProgress).sort(), ['counters', 'method', 'observations', 'reason', 'stage', 'timings']);
+  assert.equal(outcome.diagnosticProgress.method, 'button');
+  assert.equal(JSON.stringify(outcome.diagnosticProgress).includes('continue fixture'), false);
+  assert.equal(JSON.stringify(outcome.diagnosticProgress).includes('fixture.invalid'), false);
+  assert.equal(h.state.listenerCount, 0);
+});
 
 test('extension clock bypasses severely clamped page timers and submits only once', async () => {
   const h = fixture({ clampedPageTimers: true, acceptDelay: 500,

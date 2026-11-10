@@ -22,9 +22,9 @@ const npmContains = name => ['package.json', 'README.md', 'LICENSE'].includes(na
   packageFiles.some(entry => entry.endsWith('/') ? name.startsWith(entry) : name === entry);
 
 for (const name of disclosureFiles) {
-  test(`${name} describes schema 4 without rewriting historical schema 3`, () => {
+  test(`${name} describes schema 5 without rewriting historical schema 3`, () => {
     const text = read(name);
-    assert.ok(/schema 4/i.test(text), `${name} must describe the current schema 4`);
+    assert.ok(/schema 5/i.test(text), `${name} must describe the current schema 5`);
     for (const line of text.split(/\r?\n/)) {
       if (/schema 3|version: 3/i.test(line)) {
         assert.match(line, /v2\.2\.[01]|historical/i, 'Schema 3 must be explicitly historical');
@@ -38,7 +38,7 @@ test('privacy disclosure names the actual default and opt-in report fields', () 
   for (const includeTimestamps of [false, true]) {
     const report = buildActivityExport({ logs: [{ at: 100, event: 'sent' }],
       extensionVersion: '3.0.0', now: 200, includeTimestamps });
-    assert.equal(report.version, 4);
+    assert.equal(report.version, 5);
     for (const key of [...Object.keys(report), ...Object.keys(report.logs[0])]) {
       assert.ok(policy.includes('`' + key + '`') || policy.includes('`logs[].' + key + '`'),
         `Undisclosed report field: ${key}`);
@@ -57,10 +57,10 @@ test('privacy and listing disclose actual timing-probe fields and enums', () => 
     for (const status of ['result', 'invalid-result', 'api-rejected', 'watchdog-expired']) {
       const report = buildActivityExport({ now: 200, extensionVersion: '3.0.0', logs: [{ at: 100,
         event: 'timing-diagnostics', diagnostic: { code: 'timing-probe', kind, status,
-          durationMs: 120001, firstMs: -1, hidden: true, ok: false, allowed: false } }] });
+          durationMs: 120001, firstMs: 1.5, hidden: true, ok: false, allowed: false } }] });
       const detail = report.logs[0].diagnostic;
-      assert.equal(detail.durationMs, 120000);
-      assert.equal(detail.firstMs, 0);
+      assert.equal(detail.durationMs, 120001);
+      assert.equal(detail.firstMs, 2);
       for (const key of Object.keys(detail)) {
         assert.ok(policy.includes('`' + key + '`'), `Undisclosed timing field: ${key}`);
         assert.ok(listing.includes(key), `Missing Store timing field: ${key}`);
@@ -74,6 +74,24 @@ test('privacy and listing disclose actual timing-probe fields and enums', () => 
     const text = read(name);
     for (const field of ['timing-probe', 'kind', 'status', 'durationMs', 'firstMs', 'hidden', 'ok', 'allowed']) {
       assert.ok(text.includes(field), `${name} omits timing metadata: ${field}`);
+    }
+  }
+});
+
+test('execution progress disclosure includes every exported stage and result channel', () => {
+  const stages = ['page', 'prepare', 'readiness', 'authorization', 'dispatch', 'receipt'];
+  const channels = ['none', 'execute-script', 'extension-message', 'page-readback'];
+  for (const name of ['PRIVACY.md', 'docs/STORE-LISTING.en.md']) {
+    const paragraph = read(name).split(/\r?\n/).find(line => /Execution diagnostics/.test(line));
+    assert.ok(paragraph, `${name} is missing execution progress disclosure`);
+    for (const [key, values] of [['stage', stages], ['resultChannel', channels]]) {
+      for (const value of values) {
+        const report = buildActivityExport({ now: 200, extensionVersion: '3.0.12', logs: [{ at: 100,
+          event: 'busy', diagnostic: { code: 'send-not-ready', [key]: value } }] });
+        assert.equal(report.logs[0].diagnostic[key], value);
+        assert.ok(new RegExp('\\b' + value + '\\b').test(paragraph),
+          `${name} omits exported ${key}: ${value}`);
+      }
     }
   }
 });

@@ -1,5 +1,74 @@
 # Agent Continue Development Handoff
 
+## Active Core Scheduler Repair and Diagnostics (2026-11-10)
+
+The newest owner screenshots report a prepared prompt left unsent, a zero
+counter, and continued injection after manually clicking Send. The unchanged
+46,372-byte owner export (modified15:26:25Z) cannot prove the new manual event
+sequence or a CPU-freeze cause. Do not say long prompts or slow buttons are the
+unique root cause, or that zero is merely cosmetic.
+
+Source review found a concrete gap: no extension dispatch was treated as no
+submission by anyone. A human Send could clear the composer and start a reply,
+then the legacy path could refill or stop that reply; the MAIN reservation also
+lacked manual takeover. The candidate now latches a trusted scoped Send of the
+prepared configured payload before the site clears it, suppresses further
+mutation, and independently confirms a new matching user receipt. It can finish
+manual confirmation even if COMMIT_RUN never returns. manual-sent is separate
+from extension sentCount; it consumes the current queued item/delivery limit
+once, then keeps the original interval/reply schedule. Pause still wins.
+
+Schema5 diagnostics now capture one bounded journal per delivery, including
+current stage/reason, transition history, actual model/DOM writes, fill calls,
+readiness/authorization/grant/readback counts, actual extension dispatch,
+manual intent, receipt checks, synchronous-write totals/maxima, and storage
+health. Current snapshots are coalesced; retain20 deliveries/64 transitions
+each, with explicit coverage/truncation. No prompts, chat bodies, credentials,
+paths, URLs or raw exceptions are included. Clear Logs fences pending snapshots
+so old diagnostics cannot resurrect after clearing. Live diagnostics are not
+a CPU profiler; old releases cannot retroactively supply missing counters.
+
+Additional independent review reproduced a remount-before-rebind race: the
+prepared editor was detached, a queued MAIN retry was held, and a trusted human
+sent from its replacement before that retry ran. Even with the isolated
+notification rejected, the old MAIN observer missed the event and refilled
+the cleared editor (RED case52: model transactions5 versus4). The observer now
+reacquires the current scoped composer/view synchronously on that trusted
+event and fences the queued write. Case52 is GREEN with no refill; a separate
+reviewer's original in-memory reproduction also changed from writes1->2 to1->1.
+
+Current receipts: full npm test exit0 includes background70/70, support/codec/docs
+59/59, official-ProseMirror/MV3 cases52/52, integration14/14 and editor browser
+11/11. The full runner loaded the prior UI40-case test module; the subsequent
+fresh UI41/41 command covers the final manual/extension total and expansion
+preservation. Final adapter72/72 and fresh support59/59 pass independently.
+The actual extracted paired Store ZIP passes grant/readback/manual cases45-52
+8/8. These are synthetic local browser fixtures, not the owner's actual Dot.
+
+Diagnostics no longer hold the shared Pause/control queue during persistence,
+readback or clear. A diagnostic-only clear barrier, epoch-guarded health writes
+and atomic drain ownership prevent old history/health from reappearing and
+terminal snapshots from getting stranded. The focused70-case suite includes
+pending storage writes, pending clear/read, sequence exhaustion and new-epoch
+merge races. A bounded metadata-observation watchdog is not a send wait limit.
+
+Paired current candidate bytes under .artifacts/diagnostics-312-paired:
+- GitHub ZIP4a4d1a7d714f8e9d52954957bb31b485cb3cf2ec45c2f3480fc5184aa1ee284e
+- Store ZIPaa327a34795e768ad58e01e1eb5f8c2bba67387b5ddb4a7503ea5fe6577d244f
+
+The current source and package have not passed installed live-site acceptance.
+Earlier 3.0.12 ZIP hashes below predate this repair and are obsolete. Do not
+tag/publish/re-submit those bytes or claim Windows lifecycle acceptance from
+these scheduler tests. No production VPN/MCP/IDE/research or external Chrome
+task has been changed. Original goal remains active and unchanged.
+
+Correction to the earlier full-test statement: CI42848637631 failed because
+the final manifest3.0.12 was paired with a listing header3.0.11. Commit103296e
+corrected that mismatch. A local earlier exit0 was not a final-source receipt.
+The hung-readback P2 also passed focused RED/GREEN45-47 and independent source
+re-review; its subsequent local full command exited0 with PM47/47. Those
+receipts predate the manual-handoff/schema5 work in this section.
+
 ## 3.0.12 Final-Grant Recovery Candidate (2026-11-10)
 
 The owner's new activity export is 46,372 bytes, reports extension3.0.11 and

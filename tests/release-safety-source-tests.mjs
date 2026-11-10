@@ -11,7 +11,7 @@ assert.doesNotMatch(source('editor-commit.js'), /chrome\.runtime|runId|__reactPr
 assert.doesNotMatch(adapter, /__reactProps\$|__reactEventHandlers\$/);
 assert.doesNotMatch(adapter, /someProp\('handleKeyDown'/);
 assert.doesNotMatch(adapter, /await wait\(100\)/);
-assert.match(adapter, /if \(!currentId \|\| currentId !== args.targetIdentity\) return false/);
+assert.match(adapter, /if \(!currentId \|\| currentId !== args.targetIdentity\) \{ if \(pageMatched\) metrics\.counters\.documentChanges\+\+; pageMatched = false; return false; \}/);
 assert.ok(adapter.indexOf('insertedTextSnapshot = textOf(editor)') < adapter.indexOf('await wait(60)'));
 assert.doesNotMatch(background, /matches = allTabs.filter\(item => item.url && item.url.includes\('\/dots\/'\)\)/);
 console.log('PASS: release source guards. These do not replace browser behavioral tests.');

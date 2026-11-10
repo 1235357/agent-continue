@@ -66,8 +66,10 @@ $('export-diagnostics').addEventListener('click', async () => {
   $('export-diagnostics').disabled = true;
   clearPreview();
   try {
-    const { logs } = await chrome.storage.local.get(['logs']);
-    const report = buildActivityExport({ logs, extensionVersion, includeTimestamps: $('include-timestamps').checked });
+    const { logs, deliveryDiagnostics, diagnosticsHealth } = await chrome.storage.local.get(['logs', 'deliveryDiagnostics', 'diagnosticsHealth']);
+    const sessionHealth = (await chrome.storage.session.get('diagnosticsHealth')).diagnosticsHealth;
+    const report = buildActivityExport({ logs, deliveries: deliveryDiagnostics, diagnosticsHealth: sessionHealth || diagnosticsHealth,
+      extensionVersion, includeTimestamps: $('include-timestamps').checked });
     const text = JSON.stringify(report, null, 2);
     $('diagnostic-preview').textContent = text;
     $('export-preview').hidden = false;

@@ -44,9 +44,9 @@ async function harness(seed={}) {
     injections:[],tabUpdates:[],
   };
   const area=name=>({
-    async get(key){return {[key]:copy(state[name][key])};},
+    async get(key){return Object.fromEntries((Array.isArray(key)?key:[key]).map(item=>[item,copy(state[name][item])]));},
     async set(value){Object.assign(state[name],copy(value));},
-    async remove(key){delete state[name][key];},
+    async remove(key){for(const item of Array.isArray(key)?key:[key])delete state[name][item];},
   });
   const chrome={
     storage:{session:area('session'),local:area('local')},
@@ -526,9 +526,9 @@ for(const [name,durationMs] of [
     }
   });
 }
-await scenario('Log writer preserves finite numeric durations and existing clamp boundaries',async()=>{
+await scenario('Log writer preserves long finite durations instead of clipping a stalled delivery to two minutes',async()=>{
   for(const code of ['adapter-result','execution-exception','execution-timeout','no-valid-result']) {
-    for(const [durationMs,expected] of [[0,0],[12.5,12.5],[-4,0],[120000,120000],[250000,120000]]) {
+    for(const [durationMs,expected] of [[0,0],[12.5,12.5],[-4,0],[120000,120000],[250000,250000]]) {
       const h=writerHarness();
       await h.write('unconfirmed','Synthetic uncertainty.',{code,durationMs,stack:'SYNTHETIC_PRIVATE_SENTINEL'});
       assert.deepEqual(h.state.logs[0].diagnostic,{code,durationMs:expected});

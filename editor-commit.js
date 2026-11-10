@@ -8,7 +8,15 @@ export function editorCommit(args) {
   let supported = false;
   let dispatched = false;
   let method = null;
-  const result = (code, extra = {}) => ({ supported, dispatched, method, code, ...extra });
+  let receiptState;
+  const observations = { hidden: document.hidden };
+  const result = (code, extra = {}) => ({ supported, dispatched, method, code, ...extra,
+    ...(receiptState ? { diagnosticProgress: {
+      method: method || receiptState.method || 'none',
+      counters: { ...receiptState.counters }, timings: { ...receiptState.timings },
+      observations: { ...observations, manualPending: receiptState.manualSubmission === true },
+    } } : {}),
+  });
 
   try {
     if (!args || typeof args.expectedUrl !== 'string' || typeof args.prompt !== 'string'
@@ -55,22 +63,27 @@ export function editorCommit(args) {
 
     // Keep non-content evidence across lost prepare/observe replies. A sealed
     // token must not refill a composer if its delayed preparation arrives later.
-    let receiptState;
     if (args.receiptBoundaryToken) {
       const key = Symbol.for('agent-continue.editor-commit.v1');
       const states = globalThis[key] ??= new Map();
       if (!(states instanceof Map)) return result('commit-state-unavailable', { supported: true });
       for (const [token, state] of states)
-        if (token !== args.receiptBoundaryToken && state.deadline <= Date.now()) states.delete(token);
+        if (token !== args.receiptBoundaryToken && state.deadline <= Date.now()) {
+          state.releaseManualObserver?.(); states.delete(token);
+        }
       receiptState = states.get(args.receiptBoundaryToken);
       if (!receiptState) {
         if (states.size >= 64) return result('commit-state-unavailable', { supported: true });
-        receiptState = { deadline: args.deadline, hasSend: false, prepared: false, dispatched: false, method: null };
+        receiptState = { deadline: args.deadline, hasSend: false, prepared: false, dispatched: false, method: null,
+          counters: { modelWrites: 0, readinessChecks: 0, dispatchAttempts: 0, manualIntents: 0 },
+          timings: { modelWriteMs: 0, maxModelWriteMs: 0 } };
         states.set(args.receiptBoundaryToken, receiptState);
       }
       receiptState.deadline = Math.max(receiptState.deadline, args.deadline);
       if (receiptState.dispatched) return result('already-dispatched',
         { supported: true, dispatched: true, method: receiptState.method });
+      if (receiptState.manualSubmission) return result('manual-submission',
+        { supported: true, manualSubmission: true });
     }
 
     const visible = element => {
@@ -98,6 +111,7 @@ export function editorCommit(args) {
       return { editor, composer };
     };
     const binding = findComposer();
+    observations.composerPresent = Boolean(binding);
     if (!binding) return result('composer-unavailable');
     const { editor, composer } = binding;
     // Tiptap's Editor.createView stores its owner at view.dom.editor. Vanilla
@@ -124,7 +138,8 @@ export function editorCommit(args) {
           || [...composer.querySelectorAll('input[type="file"]')].some(input => input.files?.length)) {
         return 'attachments';
       }
-      if ([...composer.querySelectorAll(stopSelector)].some(visible)) return 'busy';
+      observations.busy = [...composer.querySelectorAll(stopSelector)].some(visible);
+      if (observations.busy) return 'busy';
       return null;
     };
     const initialFailure = guard();
@@ -135,26 +150,77 @@ export function editorCommit(args) {
     const sendControls = () => {
       const controls = [...new Set([...composer.querySelectorAll(sendSelector)]
         .filter(button => composer.contains(button) && visible(button)))];
+      observations.sendPresent = controls.length > 0;
       if (controls.length && receiptState) receiptState.hasSend = true;
       return controls;
     };
     const enabledSend = button => !button.disabled && button.getAttribute('aria-disabled') !== 'true'
       && !button.closest('[aria-disabled="true"], [inert]');
     const readiness = () => {
+      if (receiptState) receiptState.counters.readinessChecks++;
       if (sendMethod === 'ctrl-enter') return 'ready';
       const controls = sendControls();
       const sends = controls.filter(enabledSend);
+      observations.sendEnabled = sends.length === 1;
       if (sends.length > 1) return 'send-ambiguous';
       if (sends.length === 1) return 'ready';
       if (controls.length) return 'waiting-send';
       return args.requireButton === true || initiallyHasSend ? 'waiting-send' : sendMethod === 'button' ? 'send-unavailable' : 'ready';
     };
     const initiallyHasSend = sendControls().length > 0 || receiptState?.hasSend === true;
+    const logicalText = doc => doc.textBetween(0, doc.content.size, '\n', '\n');
+    if (receiptState && receiptState.manualEditor !== editor) {
+      receiptState.releaseManualObserver?.();
+      receiptState.releaseManualObserver = null;
+    }
+    if (receiptState && !receiptState.releaseManualObserver) {
+      // A real user Send takes over this prepared delivery. Never refill the
+      // cleared composer while its new history receipt is still being observed.
+      const manualIntent = event => {
+        if (!event.isTrusted || !receiptState.prepared || receiptState.dispatched || receiptState.manualSubmission) return;
+        // A trusted click can occur between a form remount and the queued
+        // preparation's rebind. Fence that queued write from the current view.
+        const currentBinding = findComposer();
+        const currentEditor = currentBinding?.editor;
+        const currentComposer = currentBinding?.composer;
+        const currentView = currentEditor?.editor?.view;
+        if (!currentView || currentView.dom !== currentEditor || currentView.isDestroyed
+          || logicalText(currentView.state.doc) !== prompt) return;
+        const current = new URL(location.href);
+        if (current.origin !== expected.origin || (normalizeUrl(current) !== normalizeUrl(expected)
+          && !(isDot && current.pathname.startsWith('/dots/')))
+          || (isDot && identity() !== boundIdentity)) return;
+        const target = event.target instanceof Element ? event.target : event.target?.parentElement;
+        const button = target?.closest(sendSelector);
+        const click = event.type === 'click' && button && currentComposer.contains(button) && enabledSend(button);
+        const enter = event.type === 'keydown' && currentComposer.contains(target) && event.key === 'Enter'
+          && !event.shiftKey && !event.altKey && !event.isComposing && (!isDot || event.ctrlKey || event.metaKey);
+        if (!click && !enter) return;
+        receiptState.manualSubmission = true;
+        receiptState.counters.manualIntents++;
+      };
+      for (const type of ['click', 'keydown']) document.addEventListener(type, manualIntent, true);
+      receiptState.releaseManualObserver = () => {
+        for (const type of ['click', 'keydown']) document.removeEventListener(type, manualIntent, true);
+      };
+      receiptState.manualEditor = editor;
+    }
     if (phase === 'observe') {
       supported = true;
       return result(readiness(), { hasSend: initiallyHasSend });
     }
-    const logicalText = doc => doc.textBetween(0, doc.content.size, '\n', '\n');
+    const writeModel = transaction => {
+      const started = performance.now();
+      try { view.dispatch(transaction); }
+      finally {
+        if (receiptState) {
+          const duration = Math.max(0, performance.now() - started);
+          receiptState.counters.modelWrites++;
+          receiptState.timings.modelWriteMs += duration;
+          receiptState.timings.maxModelWriteMs = Math.max(receiptState.timings.maxModelWriteMs, duration);
+        }
+      }
+    };
     const prepare = state => {
       const paragraphs = prompt.split('\n').map(line =>
         state.schema.nodes.paragraph.create(null, line ? state.schema.text(line) : undefined));
@@ -174,7 +240,7 @@ export function editorCommit(args) {
       if (view.state !== state) transaction = prepare(view.state);
       failure = guard();
       if (failure) return result(failure);
-      view.dispatch(transaction);
+      writeModel(transaction);
       failure = guard();
       if (failure) return result(failure);
       if (args.phase !== 'commit') {
@@ -196,7 +262,7 @@ export function editorCommit(args) {
       const correction = prepare(view.state);
       failure = guard();
       if (failure) return result(failure);
-      view.dispatch(correction);
+      writeModel(correction);
     }
     const committedGuard = () => guard()
       || (logicalText(view.state.doc) !== prompt ? 'model-not-synchronous' : null);
@@ -225,7 +291,10 @@ export function editorCommit(args) {
     if (sends.length === 1) {
       method = 'button';
       dispatched = true;
-      if (receiptState) Object.assign(receiptState, { dispatched, method });
+      if (receiptState) {
+        Object.assign(receiptState, { dispatched, method }); receiptState.counters.dispatchAttempts++;
+        receiptState.releaseManualObserver?.();
+      }
       sends[0].click();
     } else {
       const ctrlKey = sendMethod === 'ctrl-enter' || isDot;
@@ -238,7 +307,10 @@ export function editorCommit(args) {
       if (failure) return result(failure);
       method = ctrlKey ? 'ctrl-enter' : 'enter';
       dispatched = true;
-      if (receiptState) Object.assign(receiptState, { dispatched, method });
+      if (receiptState) {
+        Object.assign(receiptState, { dispatched, method }); receiptState.counters.dispatchAttempts++;
+        receiptState.releaseManualObserver?.();
+      }
       editor.dispatchEvent(down);
       editor.dispatchEvent(up);
     }

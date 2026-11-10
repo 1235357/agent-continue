@@ -2,7 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const assets = new Set(['support.html', 'support.css', 'support.js', 'support-info.js', 'activity-export.js', 'i18n.js', 'icons/icon-48.png']);
+const assets = new Set(['support.html', 'support.css', 'support.js', 'support-info.js', 'activity-export.js', 'delivery-diagnostics.js', 'i18n.js', 'icons/icon-48.png']);
 const fixture = String.raw`
 (() => {
   const state = { uiLanguage: 'en', logs: [
@@ -30,6 +30,7 @@ const fixture = String.raw`
   globalThis.chrome = {
     runtime: { getManifest: () => ({ version: '2.1.0' }) },
     storage: {
+      session: { async get() { return {}; } },
       onChanged: { addListener: value => listeners.push(value) },
       local: {
         async get(keys) {

@@ -1,5 +1,33 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Manual Handoff and Schema5 Candidate (2026-11-10)
+
+Actual isolated MV3/official-ProseMirror tests48-52 pass: with the final grant
+deliberately undelivered, a trusted human click sends the prepared prompt once,
+then MAIN does not refill or dispatch. The separate manual counter increments;
+the extension counter stays0. Pause before a delayed receipt cancels without
+refill. Same-reservation remount, expired cached MAIN lease and the queued-retry
+before-rebind window also pass. Case52 was RED with one extra model write and
+is GREEN after the observer reads the current scoped editor on the trusted
+manual event, including deliberate rejection of its worker notification.
+These are local synthetic browser scenarios, not the owner's Dot page.
+
+Background70/70 tests cover filtered counters, long duration preservation,
+storage failure that cannot block sending/Pause, Clear Logs fencing, and
+manual queue/limit consumption, drain/clear races and late health cleanup.
+Fresh UI41/41 includes live diagnostic rendering,
+persistence warning,390px layout, privacy filtering and schema5 download.
+Support/codec/documentation59/59 pass. Full npm test exited0 with PM52/52,
+editor browser11/11, integration14/14, background70/70 and support59/59; that
+runner loaded the earlier40-case UI module. The separate final41-case command
+covers the subsequently added manual-total/expanded-record UI assertions.
+Adapter72/72 passes. Extracted paired Store ZIP cases45-52 pass8/8, with no
+new published/installed acceptance asserted.
+Current paired candidate hashes are GitHub4a4d1a7d714f8e9d52954957bb31b485cb3cf2ec45c2f3480fc5184aa1ee284e
+and Storeaa327a34795e768ad58e01e1eb5f8c2bba67387b5ddb4a7503ea5fe6577d244f.
+The old candidate package hashes elsewhere in this file are superseded by
+the pending final rebuild. Production connections and original task untouched.
+
 ## 3.0.12 Grant-Transport Candidate (2026-11-10)
 
 New owner activity metadata reports3.0.11 with180 readiness waits and no sent

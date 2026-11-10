@@ -6,6 +6,7 @@ const t = createTranslator(runtimeCatalog);
 import { DEFAULT_CONFIG, DELIVERY_BEHAVIOR_VERSION, normalizeUrl, validateTarget, readConfig, currentPrompt, inQuietHours } from './config.js';
 import { pageAction, pageInvocationState, translatePageResult } from './adapter.js';
 import { editorCommit } from './editor-commit.js';
+import { createDeliveryTrace, updateDeliveryTrace, sanitizeDeliveryDiagnostics } from './delivery-diagnostics.js';
 import { BUNDLED_PROMPT } from './preset.js';
 import { bindBrowserWake, BROWSER_DEVICE_MESSAGE } from './browser-wake.js';
 import { bindAdministratorBrowser, ADMIN_BROWSER_MESSAGE, ADMIN_BROWSER_PAUSE, ADMIN_BROWSER_PAUSE_RECONCILE,
@@ -49,11 +50,139 @@ const ALARM_NAME = 'agent-continue-heartbeat';
 const RETRY_MS = 60_000;
 // Finite MAIN-command admission permits; never a total send-wait deadline.
 const EXECUTION_MS = 20_000;
-const RESULT_STATUSES = new Set(['ready', 'sent', 'busy', 'draft', 'done', 'blocked', 'cancelled', 'unknown', 'error']);
+const RESULT_STATUSES = new Set(['ready', 'sent', 'manual-sent', 'busy', 'draft', 'done', 'blocked', 'cancelled', 'unknown', 'error']);
 const pendingPageResults = new Map();
 let stateQueue = Promise.resolve();
 let intentVersion = 0;
 let pendingActivationVersion = null;
+let diagnosticQueue = Promise.resolve();
+let diagnosticSequence = 0;
+let diagnosticWriteFailures = 0;
+let diagnosticEpoch = 0;
+let diagnosticDraining = false;
+let diagnosticClearBarrier = Promise.resolve();
+let diagnosticHealthQueue = Promise.resolve();
+const diagnosticSnapshots = new Map();
+function diagnosticFailure(epoch = diagnosticEpoch) {
+  if (epoch !== diagnosticEpoch) return;
+  diagnosticWriteFailures++;
+  const writeFailures = diagnosticWriteFailures;
+  diagnosticHealthQueue = diagnosticHealthQueue.catch(() => undefined).then(async () => {
+    if (epoch !== diagnosticEpoch) return;
+    try {
+      await chrome.storage.session.set({ diagnosticsHealth: { persistence: 'degraded', writeFailures } });
+    } catch { /* Diagnostics never delay the sender or Pause. */ }
+  });
+}
+
+function clearDeliveryDiagnostics() {
+  diagnosticEpoch++;
+  diagnosticSnapshots.clear();
+  diagnosticWriteFailures = 0;
+  for (const pending of pendingPageResults.values()) { clearTimeout(pending.traceTimer); pending.trace = null; }
+  const priorHealth = diagnosticHealthQueue;
+  diagnosticClearBarrier = Promise.all([diagnosticClearBarrier.catch(() => undefined), priorHealth.catch(() => undefined)])
+    .then(async () => {
+      await chrome.storage.local.remove(['deliveryDiagnostics', 'diagnosticsHealth']);
+      await chrome.storage.session.remove('diagnosticsHealth');
+    });
+  diagnosticHealthQueue = diagnosticClearBarrier.catch(() => undefined);
+  return diagnosticClearBarrier;
+}
+
+// Diagnostics have an independent queue and can never hold cancellation or
+// authorize a submission. Coalesce live snapshots instead of logging each poll.
+function persistDeliveryTrace(trace, epoch = diagnosticEpoch) {
+  const snapshot = sanitizeDeliveryDiagnostics(trace);
+  if (!snapshot || epoch !== diagnosticEpoch) return diagnosticQueue;
+  diagnosticSnapshots.set(snapshot.sequence, { snapshot, epoch });
+  while (diagnosticSnapshots.size > 20) diagnosticSnapshots.delete(diagnosticSnapshots.keys().next().value);
+  if (diagnosticDraining) return diagnosticQueue;
+  diagnosticDraining = true;
+  diagnosticQueue = (async () => {
+    try { while (diagnosticSnapshots.size) {
+      await diagnosticClearBarrier.catch(() => { diagnosticSnapshots.clear(); diagnosticFailure(); });
+      if (!diagnosticSnapshots.size) break;
+      const batch = [...diagnosticSnapshots.values()]; diagnosticSnapshots.clear();
+      const currentEpoch = batch.at(-1).epoch;
+      const healthTimer = setTimeout(() => diagnosticFailure(currentEpoch), 2000);
+      try {
+        const stored = await chrome.storage.local.get('deliveryDiagnostics');
+        if (currentEpoch !== diagnosticEpoch) continue;
+        const previous = Array.isArray(stored.deliveryDiagnostics) ? stored.deliveryDiagnostics : [];
+        const fresh = batch.filter(item => item.epoch === diagnosticEpoch).map(item => item.snapshot);
+        const ids = new Set(fresh.map(item => item.sequence));
+        const traces = previous.map(sanitizeDeliveryDiagnostics).filter(Boolean).filter(item => !ids.has(item.sequence));
+        await chrome.storage.local.set({ deliveryDiagnostics: [...traces, ...fresh].sort((a, b) => a.sequence - b.sequence).slice(-20),
+          diagnosticsHealth: { persistence: diagnosticWriteFailures ? 'degraded' : 'available', writeFailures: diagnosticWriteFailures } });
+        if (currentEpoch !== diagnosticEpoch) await chrome.storage.local.remove(['deliveryDiagnostics', 'diagnosticsHealth']);
+      } catch { diagnosticFailure(currentEpoch); }
+      finally { clearTimeout(healthTimer); }
+    } } finally {
+      // Release ownership in the same reaction as the final empty-map check.
+      diagnosticDraining = false;
+      if (diagnosticSnapshots.size) {
+        const next = [...diagnosticSnapshots.values()].at(-1);
+        void persistDeliveryTrace(next.snapshot, next.epoch);
+      }
+    }
+  })();
+  return diagnosticQueue;
+}
+async function newDeliveryTrace() {
+  let timer;
+  const epoch = diagnosticEpoch;
+  try {
+    const observed = await Promise.race([chrome.storage.local.get('deliveryDiagnostics'),
+      new Promise(resolve => { timer = setTimeout(() => resolve(null), 250); })]);
+    if (epoch !== diagnosticEpoch) return null;
+    if (!observed) { diagnosticFailure(epoch); return null; }
+    const stored = observed.deliveryDiagnostics;
+    for (const item of Array.isArray(stored) ? stored : []) if (Number.isSafeInteger(item?.sequence)) diagnosticSequence = Math.max(diagnosticSequence, item.sequence);
+    if (diagnosticSequence >= Number.MAX_SAFE_INTEGER) { diagnosticFailure(epoch); return null; }
+    return createDeliveryTrace(++diagnosticSequence, Date.now());
+  } catch { diagnosticFailure(epoch); return null; }
+  finally { clearTimeout(timer); }
+}
+function deliveryProgress(pending, patch = {}, flush = false) {
+  if (!pending?.trace) return;
+  const now = Date.now();
+  const before = `${pending.trace.stage}:${pending.trace.reason}`;
+  pending.trace = updateDeliveryTrace(pending.trace, { ...patch, stage: patch.stage ?? pending.stage }, now);
+  if (flush || before !== `${pending.trace.stage}:${pending.trace.reason}` || now - (pending.lastTraceWrite || 0) >= 10000) {
+    pending.lastTraceWrite = now;
+    if (!pending.traceTimer) pending.traceTimer = setTimeout(() => {
+      pending.traceTimer = null; void persistDeliveryTrace(pending.trace, pending.diagnosticEpoch);
+    }, flush ? 0 : 1000);
+  }
+}
+function deliveryCounter(pending, name, increment = 1) {
+  if (!pending?.trace) return;
+  deliveryProgress(pending, { counters: { [name]: (pending.trace.counters?.[name] || 0) + increment } });
+}
+function pageProgress(pending, progress, source) {
+  if (!pending?.trace || !progress || typeof progress !== 'object') return;
+  const seen = (pending.pageProgressTotals ??= {})[source] ??= { counters: {}, timings: {} };
+  const patch = { counters: {}, timings: {}, observations: progress.observations };
+  if (progress.method && progress.method !== 'none') patch.method = progress.method;
+  for (const group of ['counters', 'timings']) for (const name of Object.keys(pending.trace[group] || {})) {
+    const value = progress[group]?.[name];
+    if ((source === 'adapter' && ['pageAdmissions', 'authorizationChecks', 'leaseRenewals'].includes(name))) continue;
+    if (source === 'adapter' && name === 'dispatchAttempts' && pending.ownsModelStages) continue;
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > Number.MAX_SAFE_INTEGER
+      || (group === 'counters' && !Number.isSafeInteger(value)) || ['elapsedMs', 'stageElapsedMs'].includes(name)) continue;
+    const prior = seen[group][name] || 0;
+    if (value >= prior) {
+      patch[group][name] = name.startsWith('max') || name === 'manualIntents' ? Math.max(pending.trace[group][name] || 0, value)
+        : Math.min(Number.MAX_SAFE_INTEGER, (pending.trace[group][name] || 0) + (value - prior));
+      seen[group][name] = value;
+    }
+  }
+  if (source !== 'adapter' || !pending.ownsModelStages) {
+    patch.stage = progress.stage; patch.reason = progress.reason;
+  }
+  deliveryProgress(pending, patch);
+}
 
 function transact(callback) {
   const work = stateQueue.then(callback, callback);
@@ -113,7 +242,7 @@ async function logEvent(event, message, diagnostic = null) {
   const codes = ['adapter-result', 'execution-exception', 'execution-timeout', 'no-valid-result', 'existing-draft', 'composer-changed', 'timing-probe', 'send-not-ready', 'commit-not-dispatched'];
   const detail = diagnostic && codes.includes(diagnostic.code)
     ? { diagnostic: { code: diagnostic.code, ...(Number.isFinite(diagnostic.durationMs)
-      ? { durationMs: Math.max(0, Math.min(120000, diagnostic.durationMs)) } : {}) } } : {};
+      ? { durationMs: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, diagnostic.durationMs)) } : {}) } } : {};
   if (detail.diagnostic) {
     if (['page', 'prepare', 'readiness', 'authorization', 'dispatch', 'receipt'].includes(diagnostic.stage)) detail.diagnostic.stage = diagnostic.stage;
     if (['none', 'execute-script', 'extension-message', 'page-readback'].includes(diagnostic.resultChannel)) detail.diagnostic.resultChannel = diagnostic.resultChannel;
@@ -123,7 +252,7 @@ async function logEvent(event, message, diagnostic = null) {
     if (['authorization', 'page-timers'].includes(diagnostic.kind)) detail.diagnostic.kind = diagnostic.kind;
     if (['result', 'invalid-result', 'api-rejected', 'watchdog-expired'].includes(diagnostic.status)) detail.diagnostic.status = diagnostic.status;
     if (typeof diagnostic.firstMs === 'number' && Number.isFinite(diagnostic.firstMs)) {
-      detail.diagnostic.firstMs = Math.max(0, Math.min(120000, diagnostic.firstMs));
+      detail.diagnostic.firstMs = Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, diagnostic.firstMs));
     }
     for (const key of ['hidden', 'ok', 'allowed']) {
       if (typeof diagnostic[key] === 'boolean') detail.diagnostic[key] = diagnostic[key];
@@ -216,7 +345,7 @@ function assertSupportedTab(tab, expectedUrl = null) {
   if (!tab || !Number.isInteger(tab.id) || !validateTarget(tab.url)) throw fail(t('请选择 chatgpt.com 的 Your dot 页面或已有会话；首页与共享页面不支持。'));
   if (expectedUrl && normalizeUrl(tab.url) !== expectedUrl) throw fail(t('目标标签页已切换到其他会话；原任务会等待原地址重新打开。'));
 }
-async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS) {
+async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS, trace = null, traceEpoch = diagnosticEpoch) {
   let timer;
   let recoveryTimer;
   let watchdogExpired = false;
@@ -232,14 +361,17 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS) {
     args = { ...args, resultToken };
     redundantResult = new Promise(resolve => {
       pending = { runId: args.runId, resultToken, tabId, url: args.expectedUrl, stage: 'page', leaseRenewals: 0,
+        trace: traceEpoch === diagnosticEpoch ? trace : null, diagnosticEpoch: traceEpoch,
         resolve: value => { if (!settled && resultChannel === 'none') resultChannel = 'extension-message'; resolve(value); } };
       pendingPageResults.set(resultToken, pending);
+      deliveryProgress(pending, { reason: 'starting' });
     });
   }
   const executionDiagnostic = () => pending ? { stage: pending.stage, resultChannel, leaseRenewals: pending.leaseRenewals } : {};
   try {
     const executionTarget = () => ({ tabId, ...(pending?.documentId ? { documentIds: [pending.documentId] } : {}) });
     const runScript = async (world) => {
+      deliveryCounter(pending, 'pageAdmissions');
       const res = await chrome.scripting.executeScript({
         target: executionTarget(),
         world,
@@ -252,6 +384,7 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS) {
     const acceptExecutionResult = value => {
       if (resultToken && (!value || !RESULT_STATUSES.has(value.status))) {
         missingResult = true;
+        deliveryProgress(pending, { reason: 'result-missing' });
         return false;
       }
       if (resultChannel === 'none') resultChannel = 'execute-script';
@@ -264,6 +397,8 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS) {
       catch (error) {
         if (!resultToken) throw error;
         rejectedResult = true;
+        deliveryCounter(pending, 'transportErrors');
+        deliveryProgress(pending, { reason: 'transport-rejected' });
         return redundantResult;
       }
       if (!acceptExecutionResult(value)) {
@@ -290,6 +425,8 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS) {
           if (settled || !latest?.enabled || latest.phase !== 'sending' || latest.runId !== args.runId
             || latest.tabId !== tabId || latest.url !== args.expectedUrl) return;
           if (pending.documentId && frame.documentId && pending.documentId !== frame.documentId) {
+            deliveryCounter(pending, 'documentChanges');
+            deliveryProgress(pending, { reason: 'document-replaced' });
             const beforeDispatch = ['page', 'prepare', 'readiness', 'authorization'].includes(pending.stage);
             pending.resolve(beforeDispatch
               ? { status: 'blocked', message: t('\u9875\u9762\u5df2\u53d8\u5316\u3002'), diagnosticCode: 'commit-not-dispatched', retryable: true }
@@ -297,6 +434,7 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS) {
             return;
           }
           pending.documentId ??= frame.documentId;
+          if (frame.result.diagnosticProgress) pageProgress(pending, frame.result.diagnosticProgress, 'adapter');
           if (frame.result.state === 'settled' && RESULT_STATUSES.has(frame.result.result?.status)) {
             if (resultChannel === 'none') resultChannel = 'page-readback';
             pending.resolve(frame.result.result);
@@ -353,7 +491,9 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS) {
         timer = setTimeout(() => { inspectLease().catch(reject); }, Math.max(1, deadline - Date.now()));
       }),
     ]);
+    if (result?.diagnosticProgress) pageProgress(pending, result.diagnosticProgress, 'adapter');
     const value = translatePageResult(result);
+    deliveryProgress(pending, { resultChannel });
     if (!value || !RESULT_STATUSES.has(value.status)
       || (['draft', 'blocked'].includes(value.status) && (value.diagnosticCode === 'composer-changed' || retiredDraftNotice(value.message)))) {
       return { status: 'unknown', message: t('页面未返回可确认的结果。'), diagnosticCode: 'no-valid-result', executionDiagnostic: executionDiagnostic() };
@@ -367,7 +507,15 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS) {
   } catch (error) {
     if (watchdogExpired) return { status: 'unknown', message: t('页面操作超时，本周期结果未确认。'), diagnosticCode: rejectedResult ? 'execution-exception' : missingResult ? 'no-valid-result' : 'execution-timeout', executionDiagnostic: executionDiagnostic() };
     throw error;
-  } finally { settled = true; clearTimeout(timer); clearTimeout(recoveryTimer); if (resultToken) pendingPageResults.delete(resultToken); }
+  } finally {
+    settled = true; clearTimeout(timer); clearTimeout(recoveryTimer);
+    if (pending?.trace) {
+      clearTimeout(pending.traceTimer);
+      if (trace) Object.assign(trace, pending.trace);
+      void persistDeliveryTrace(pending.trace, pending.diagnosticEpoch);
+    }
+    if (resultToken) pendingPageResults.delete(resultToken);
+  }
 }
 async function receivePageResult(message, sender) {
   const pending = pendingPageResults.get(message.resultToken);
@@ -383,6 +531,21 @@ async function receivePageResult(message, sender) {
     pending.resolve(message.result);
     return { ok: true };
   });
+}
+async function receiveManualSubmission(message, sender) {
+  const pending = pendingPageResults.get(message.resultToken);
+  if (!pending || pending.runId !== message.runId || sender.id !== chrome.runtime.id
+    || sender.tab?.id !== pending.tabId || sender.frameId !== 0
+    || (pending.documentId && sender.documentId !== pending.documentId)
+    || normalizeUrl(sender.url || sender.tab?.url) !== pending.url) return { ok: false };
+  const authority = await checkRun(message.runId, sender);
+  if (!authority.allowed) return { ok: false };
+  // This removes mutation authority for the current delivery; it grants none.
+  // Receipt polling and explicit Pause continue through the existing permit.
+  pending.manualSubmission = true;
+  pending.stage = 'receipt';
+  deliveryProgress(pending, { reason: 'manual-submission', observations: { manualPending: true } });
+  return { ok: true };
 }
 async function probe(tab, config, targetIdentity = null) {
   assertSupportedTab(tab);
@@ -555,10 +718,12 @@ async function checkRun(runId, sender, renew = true) {
     if (!allowed) return { ok: true, allowed: false };
     if (pending?.documentId && sender.documentId !== pending.documentId) return { ok: true, allowed: false };
     if (pending && sender.documentId) pending.documentId ??= sender.documentId;
+    deliveryCounter(pending, 'authorizationChecks');
     if ((renew || (pending && now >= job.runDeadline)) && job.runDeadline - now <= EXECUTION_MS / 2) {
       job.runDeadline = now + EXECUTION_MS;
       await setJob(job);
       if (pending) pending.leaseRenewals++;
+      deliveryCounter(pending, 'leaseRenewals');
     }
     return { ok: true, allowed: true, runDeadline: job.runDeadline };
   });
@@ -610,6 +775,7 @@ async function commitRun(message, sender) {
       const deadline = permit.args.deadline;
       if (!grantRequest || grantRequest.deadline !== deadline) {
         const request = { deadline, reply: null, settled: false };
+        deliveryCounter(pending, 'grantRequests');
         grantRequest = request;
         try {
           request.promise = Promise.resolve(chrome.tabs.sendMessage(pending.tabId,
@@ -623,14 +789,21 @@ async function commitRun(message, sender) {
         && grantRequest.reply.runId === pending.runId && grantRequest.reply.resultToken === pending.resultToken
         && grantRequest.reply.runDeadline === deadline && Date.now() < deadline;
       if (matchesReply()) return true;
+      // Retire an individual stalled observation, not the live send. A lost
+      // read-only reply must not pin all future observations to that promise.
+      if (grantReadback && (grantReadback.deadline !== deadline
+        || Date.now() - grantReadback.startedAt >= 2000)) {
+        deliveryCounter(pending, 'retiredReadbacks'); grantReadback = null;
+      }
       if (!grantReadback) {
-        const readback = { value: null, settled: false };
+        const readback = { deadline, startedAt: Date.now(), value: null, settled: false };
+        deliveryCounter(pending, 'grantReadbacks');
         grantReadback = readback;
         const target = { tabId: pending.tabId,
           ...(pending.documentId ? { documentIds: [pending.documentId] } : {}) };
         readback.promise = Promise.resolve().then(() => chrome.scripting.executeScript({ target, world: 'ISOLATED', func: pageInvocationState,
           args: [{ runId: pending.runId, resultToken: pending.resultToken }] }))
-          .then(frames => { readback.value = frames?.find(frame => frame.frameId === 0); }, () => undefined)
+          .then(frames => { if (grantReadback === readback) readback.value = frames?.find(frame => frame.frameId === 0); }, () => undefined)
           .finally(() => { readback.settled = true; });
       }
       // Message delivery and its acknowledgement are independent. Read only
@@ -645,25 +818,36 @@ async function commitRun(message, sender) {
       const accepted = matchesReply() || (readback.value?.result?.state === 'running'
         && (!pending.documentId || readback.value.documentId === pending.documentId)
         && readback.value.result.grantedDeadline === deadline && Date.now() < deadline);
-      if (!accepted && readback.settled && grantRequest.settled) grantRequest = null;
+      if (!accepted && grantRequest.settled) grantRequest = null;
+      deliveryProgress(pending, { reason: accepted ? 'grant-accepted' : 'grant-pending' });
       return accepted;
     };
     const invoke = async phase => {
       const pending = [...pendingPageResults.values()].find(item => item.runId === message.runId);
+      if (pending) pending.ownsModelStages = true;
       if (pending) pending.stage = phase === 'observe' ? 'readiness' : phase === 'commit' ? 'authorization' : 'prepare';
+      deliveryProgress(pending, { reason: phase === 'commit' ? 'grant-pending' : phase === 'observe' ? 'waiting-send' : 'starting' });
       const target = { tabId: permit.tabId, ...(permit.documentId ? { documentIds: [permit.documentId] } : {}) };
       while (await allowed()) {
+        if (pending?.manualSubmission) return { supported: true, dispatched: false, code: 'manual-submission', manualSubmission: true };
         if (phase === 'commit' && pending) {
           if (!await grantAccepted(pending)) { await new Promise(resolve => setTimeout(resolve, 150)); continue; }
           if (!await allowed()) return { supported: true, dispatched: false, code: 'cancelled' };
         }
+        if (pending?.manualSubmission) return { supported: true, dispatched: false, code: 'manual-submission', manualSubmission: true };
         if (phase === 'commit' && pending) pending.stage = 'dispatch';
         let value;
         try {
           const frames = await chrome.scripting.executeScript({ target,
             world: 'MAIN', func: editorCommit, args: [{ ...permit.args, phase, requireButton }] });
           value = frames?.find(frame => frame.frameId === 0)?.result;
+          if (value?.diagnosticProgress) pageProgress(pending, value.diagnosticProgress, 'main');
+          deliveryProgress(pending, { reason: value?.code ?? 'result-missing',
+            observations: { ...(typeof value?.hasSend === 'boolean' ? { sendPresent: value.hasSend } : {}),
+              sendEnabled: value?.code === 'ready' } });
         } catch (error) {
+          deliveryCounter(pending, 'transportErrors');
+          deliveryProgress(pending, { reason: 'transport-rejected' });
           // Prepare/observe cannot submit. Losing their transport may retry the
           // same reservation; an uncertain commit must never be replayed.
           if (phase === 'commit') throw error;
@@ -681,16 +865,19 @@ async function commitRun(message, sender) {
       }
       return { supported: true, dispatched: false, code: 'cancelled' };
     };
-    const notDispatched = value => ({ ok: false, dispatched: false, code: 'not-dispatched',
+    const notDispatched = value => value?.manualSubmission === true || value?.code === 'manual-submission'
+      ? { ok: true, supported: true, dispatched: false, manualSubmission: true }
+      : ({ ok: false, dispatched: false, code: 'not-dispatched',
       reason: ['waiting-send', 'send-unavailable', 'send-ambiguous', 'attachments', 'busy'].includes(value?.code)
         ? value.code : 'commit-unavailable' });
     if (!await allowed()) return { ok: false, code: 'cancelled' };
     const prepared = await invoke('prepare');
     if (!await allowed()) return { ok: false, code: 'cancelled' };
+    if (prepared?.manualSubmission) return notDispatched(prepared);
     // Only an explicit, non-mutating unsupported view permits the legacy path.
     if (prepared?.supported === false && prepared.dispatched === false && prepared.code === 'unsupported-view') {
       const pending = [...pendingPageResults.values()].find(item => item.runId === message.runId);
-      if (pending) pending.stage = 'dispatch';
+      if (pending) { pending.stage = 'dispatch'; pending.ownsModelStages = false; }
       return { ok: true, supported: false, dispatched: false };
     }
     if (prepared?.dispatched !== false) return { ok: false, code: 'unknown' };
@@ -701,6 +888,7 @@ async function commitRun(message, sender) {
     while (await allowed()) {
       const observation = await invoke('observe');
       if (!await allowed()) return { ok: false, code: 'cancelled' };
+      if (observation?.manualSubmission) return notDispatched(observation);
       if (observation?.dispatched !== false) return { ok: false, code: 'unknown' };
       requireButton ||= observation.hasSend === true;
       if (observation.supported && observation.code === 'ready') {
@@ -713,9 +901,11 @@ async function commitRun(message, sender) {
           continue;
         }
         const value = await invoke('commit');
+        if (value?.manualSubmission) return notDispatched(value);
         if (value?.supported === true && value.dispatched === true) {
           const pending = [...pendingPageResults.values()].find(item => item.runId === message.runId);
           if (pending) pending.stage = 'receipt';
+          deliveryProgress(pending, { reason: 'awaiting-receipt' });
           return { ok: true, supported: true, dispatched: true };
         }
         if (value?.dispatched !== false) return { ok: false, code: 'unknown' };
@@ -766,18 +956,20 @@ async function finishRound(snapshot, result) {
     const now = Date.now();
     const job = { ...current, phase: 'idle', runKind: null, runDeadline: null, needsAttention: false };
     if (result.identity && !job.targetIdentity) job.targetIdentity = result.identity;
-    if (result.status === 'sent') {
-      job.sentCount += 1;
+    if (['sent', 'manual-sent'].includes(result.status)) {
+      if (result.status === 'sent') job.sentCount += 1;
+      else job.manualSentCount = (job.manualSentCount || 0) + 1;
       if (job.mode !== 'repeat') job.queueIndex += 1;
-      if (job.maxSends > 0 && job.sentCount >= job.maxSends) return { ok: true, job: await pauseLocked(job, t`已确认发送 ${job.sentCount} 次，达到你设置的上限。`, 'limit-reached') };
+      if (job.maxSends > 0 && job.sentCount + (job.manualSentCount || 0) >= job.maxSends) return { ok: true, job: await pauseLocked(job, t`已确认发送 ${job.sentCount + (job.manualSentCount || 0)} 次，达到你设置的上限。`, 'limit-reached') };
       if (job.mode === 'queue-once' && job.queueIndex >= job.queue.length) return { ok: true, job: await pauseLocked(job, t('队列已全部发送，按单次队列设置结束。'), 'queue-complete') };
       if (job.mode === 'queue-loop') job.queueIndex %= job.queue.length;
       job.awaitingReply = job.scheduleMode === 'after-reply';
       job.assistantToken = result.assistantToken;
       job.assistantCount = result.assistantCount;
       job.nextAt = now + (job.awaitingReply ? RETRY_MS : job.intervalMinutes * 60_000);
-      job.statusText = job.awaitingReply ? t('已确认发送，等待 Agent 回复完成后开始下一间隔。') : t`已确认发送 ${job.sentCount} 次；约 ${job.intervalMinutes} 分钟后继续。`;
-      await logEvent('sent', t('已在目标会话确认新消息。'));
+      job.statusText = result.status === 'manual-sent' ? t('已确认手动提交本轮提示词；停止重复填写，按原间隔继续。')
+        : job.awaitingReply ? t('已确认发送，等待 Agent 回复完成后开始下一间隔。') : t`已确认发送 ${job.sentCount} 次；约 ${job.intervalMinutes} 分钟后继续。`;
+      await logEvent(result.status, result.status === 'manual-sent' ? t('已确认手动提交本轮提示词；停止重复填写，按原间隔继续。') : t('已在目标会话确认新消息。'));
     } else if (result.status === 'reply-complete') {
       job.awaitingReply = false;
       job.nextAt = now + job.intervalMinutes * 60_000;
@@ -822,12 +1014,14 @@ async function runRound(force = false, expectedJobId = null) {
       const waiting = { ...job, nextAt: Date.now() + RETRY_MS, statusText: t('处于你设置的静默时段；任务保持启用，时段结束后继续。') };
       await setJob(waiting); await updateBadge(waiting); return { job: waiting, claimed: false };
     }
-    if (job.maxSends > 0 && job.sentCount >= job.maxSends) return { job: await pauseLocked(job, t('已达到你设置的发送上限。'), 'limit-reached'), claimed: false };
+    if (job.maxSends > 0 && job.sentCount + (job.manualSentCount || 0) >= job.maxSends) return { job: await pauseLocked(job, t('已达到你设置的发送上限。'), 'limit-reached'), claimed: false };
     const snapshot = { ...job, phase: 'sending', runKind: job.awaitingReply && !force ? 'reply-check' : 'send', runId: token(), runDeadline: Date.now() + EXECUTION_MS, lastRunAt: Date.now(), statusText: t('正在后台检查目标页面…') };
     await setJob(snapshot); await updateBadge(snapshot); return { job: snapshot, claimed: true };
   });
   if (!claim.claimed) return { ok: true, job: claim.job };
   let snapshot = claim.job;
+  const traceEpoch = diagnosticEpoch;
+  const trace = snapshot.runKind === 'send' ? await newDeliveryTrace() : null;
   let result;
   for (;;) {
   try {
@@ -848,7 +1042,7 @@ async function runRound(force = false, expectedJobId = null) {
       const changed = result.assistantToken ? result.assistantToken !== snapshot.assistantToken : result.assistantCount > snapshot.assistantCount;
       if (result.status === 'ready') result = changed ? { status: 'reply-complete' } : { status: 'busy', message: t('等待新的 Agent 回复完成。') };
     } else {
-      result = await executePage({ mode: 'send', expectedUrl: snapshot.url, prompt: currentPrompt(snapshot), runId: snapshot.runId, runDeadline: snapshot.runDeadline, stopMarkers: snapshot.stopMarkers ?? [], waitForIdle: snapshot.waitForIdle ?? false, extensionPriority: true, extensionClock: true, modelCommit: true, unlimitedReadiness: true, persistentDelivery: true, sendMethod: snapshot.sendMethod ?? 'auto', targetIdentity: snapshot.targetIdentity }, snapshot.tabId, snapshot.runDeadline);
+      result = await executePage({ mode: 'send', expectedUrl: snapshot.url, prompt: currentPrompt(snapshot), runId: snapshot.runId, runDeadline: snapshot.runDeadline, stopMarkers: snapshot.stopMarkers ?? [], waitForIdle: snapshot.waitForIdle ?? false, extensionPriority: true, extensionClock: true, modelCommit: true, unlimitedReadiness: true, persistentDelivery: true, sendMethod: snapshot.sendMethod ?? 'auto', targetIdentity: snapshot.targetIdentity }, snapshot.tabId, snapshot.runDeadline, trace, traceEpoch);
     }
   } catch { result = snapshot.runKind === 'reply-check' ? { status: 'error', message: t('回复检查暂不可用，继续等待新回复。') } : { status: 'unknown', message: t('后台页面操作未确认。'), diagnosticCode: 'execution-exception' }; }
   if (snapshot.runKind !== 'send' || result?.retryable !== true || !await runStillCurrent(snapshot)) break;
@@ -865,6 +1059,11 @@ async function runRound(force = false, expectedJobId = null) {
   if (!renewed) break;
   snapshot = renewed;
   }
+  if (trace) void persistDeliveryTrace(updateDeliveryTrace(trace, {
+    state: ['sent', 'manual-sent', 'cancelled', 'unknown', 'blocked', 'error'].includes(result?.status) ? result.status : 'blocked',
+    reason: result?.status === 'sent' ? 'receipt-confirmed' : result?.status === 'manual-sent' ? 'manual-receipt-confirmed'
+      : result?.status === 'cancelled' ? 'cancelled' : undefined,
+  }, Date.now()), traceEpoch);
   return finishRound(snapshot, result);
 }
 async function initializePrivatePreset() {
@@ -945,29 +1144,49 @@ async function dispatch(message, sender, version) {
   await initialized;
   if (!message || typeof message.type !== 'string') throw fail(t('无效请求。'));
   const ownExtensionPage = chrome.runtime.id && sender.id === chrome.runtime.id && typeof sender.url === 'string' && sender.url.startsWith(chrome.runtime.getURL(''));
-  if (!['CHECK_RUN', 'WAIT_RUN', 'COMMIT_RUN', 'PAGE_RESULT'].includes(message.type) && sender.tab && !ownExtensionPage) throw fail(t('此操作只能从扩展控制面板发起。'));
+  if (!['CHECK_RUN', 'WAIT_RUN', 'COMMIT_RUN', 'PAGE_RESULT', 'MANUAL_SUBMISSION'].includes(message.type) && sender.tab && !ownExtensionPage) throw fail(t('此操作只能从扩展控制面板发起。'));
   switch (message.type) {
-    case 'GET_STATE': return transact(async () => ({ ok: true, job: await getJob(), config: await getConfig(), logs: (await chrome.storage.local.get('logs')).logs || [], availableTargets: await availableTargets() }));
+    case 'GET_STATE': {
+      const stored = await chrome.storage.local.get(['logs', 'deliveryDiagnostics', 'diagnosticsHealth']);
+      const sessionHealth = (await chrome.storage.session.get('diagnosticsHealth')).diagnosticsHealth;
+      const state = await transact(async () => ({ job: await getJob(), config: await getConfig(), availableTargets: await availableTargets() }));
+      return { ok: true, ...state, logs: stored.logs || [],
+        deliveryDiagnostics: stored.deliveryDiagnostics || [],
+        diagnosticsHealth: sessionHealth || stored.diagnosticsHealth };
+    }
     case 'CHECK_PAGE': return checkPage(message.tabId);
     case 'CHECK_TIMING': return timingDiagnostics();
     case 'CHECK_RUN': return checkRun(message.runId, sender);
     case 'WAIT_RUN': return waitRun(message, sender);
     case 'COMMIT_RUN': return commitRun(message, sender);
     case 'PAGE_RESULT': return receivePageResult(message, sender);
+    case 'MANUAL_SUBMISSION': return receiveManualSubmission(message, sender);
     case 'START': return start(message.config, version, message.tabId);
     case 'PAUSE': return pause();
     case 'RESUME': return resume(version);
     case 'SEND_NOW': return runRound(true);
-    case 'CLEAR_LOGS': return transact(async () => { await chrome.storage.local.remove('logs'); return { ok: true }; });
-    case 'CLEAR_DATA': return transact(async () => {
+    case 'CLEAR_LOGS': {
+      // Queue only the epoch cutover. Diagnostic I/O never holds Pause's queue.
+      let clearing;
+      await transact(async () => { clearing = clearDeliveryDiagnostics(); });
+      await chrome.storage.local.remove('logs');
+      await clearing;
+      return { ok: true };
+    }
+    case 'CLEAR_DATA': {
+      let clearing;
+      await transact(async () => {
       await pauseLocked(await getJob(), t('已停止任务并清除本地数据。'));
       await setJob(null);
+      clearing = clearDeliveryDiagnostics();
       // Administrator operation journals survive Clear Data; uncertainty is never cleared into permission to replay.
       for (const key of ['config', 'logs', 'templates', 'uiTheme', ADMIN_BROWSER_RESTORE]) await chrome.storage.local.remove(key);
       // Do not silently reimport a personal bundle after an explicit clear.
       if (BUNDLED_PROMPT) await chrome.storage.local.set({ privatePresetImported: true });
+      });
+      await clearing;
       return { ok: true };
-    });
+    }
     default: throw fail(t('不支持的操作。'));
   }
 }

@@ -2,6 +2,22 @@
 
 ## [3.0.12] - Unreleased Candidate
 
+- Add schema 5 per-delivery diagnostics: phase/reason transitions, model/DOM
+  writes, readiness/authorization/grant/receipt counters, synchronous write
+  timings, manual handoff, transport errors, and persistence health. Activity
+  and Support share the filtered export. Retain 20 deliveries/64 transitions
+  each; omit prompts, chat text, paths, keys, raw exceptions and internal IDs.
+- Show elapsed waiting time instead of a permanently zero countdown while a
+  delivery is active. Long diagnostic durations are no longer clipped to two
+  minutes; this does not create or remove an overall send deadline.
+- Recognize a trusted manual Send of the prepared exact prompt. Stop refill,
+  attachment removal and Stop actions for that delivery while confirming its
+  new receipt, even when COMMIT_RUN's transport never returns. Keep manual
+  completion separate from extension dispatch and retain Pause precedence.
+- Retire a stalled grant readback without ending the pending delivery; retry
+  a failed undelivered grant independently of its readback. Ignore late retired
+  results and never replay an uncertain dispatched submission.
+
 - Recover an accepted final submission permit when its message acknowledgement
   is missing, rejected or permanently pending. Read back only the same isolated
   invocation and pinned document; do not substitute DOM content for authority.

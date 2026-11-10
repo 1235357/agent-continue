@@ -191,7 +191,7 @@ function fixture(options = {}) {
     preventDefault() { if (this.cancelable) this.defaultPrevented = true; }
   }
   const globals = {
-    document, location, URL, Date: { now: () => now },
+    document, location, URL, Date: { now: () => now }, performance: { now: () => now }, Element,
     Event: SyntheticEvent, KeyboardEvent: SyntheticEvent,
     HTMLInputElement: class {}, HTMLTextAreaElement: class {},
     crypto: { randomUUID },
