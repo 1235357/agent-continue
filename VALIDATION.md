@@ -4,7 +4,7 @@
 
 The complete current local `npm test` run exited successfully after the
 held/repeated-Enter manual-takeover correction. It includes editor104/104,
-background80/80, scheduler state64/64, release adapter72/72, integration14/14,
+background80/80, scheduler state60/60, release adapter72/72, integration14/14,
 UI41/41, support59/59, official ProseMirror/MV3 57/57 and separate editor browser
 11/11. The complete57-case MV3 suite also passed against a freshly extracted
 runtime-only Store ZIP. No case-selection environment variable narrowed those
