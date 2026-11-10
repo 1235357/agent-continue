@@ -1,5 +1,30 @@
 # Agent Continue Development Handoff
 
+## 3.0.11 Final Compatibility Correction (2026-11-10 UTC)
+
+3.0.10 tag6a64b91 is immutable, but Release run42783901798 was canceled2m33s
+before publication after the full local regression found a real compatibility
+regression: the new legacy readiness remount check interrupted older nonpersistent
+same-form editor recovery. It is now scoped to persistentDelivery; the original
+adapter27/27 passes again. Do not upload or rerun the known superseded10 tag.
+
+3.0.11 keeps the latest force-prompt policy. Full actual-MV3 official ProseMirror
+41/41 passed with an explicit exit0. Its exact extracted Store ZIP also passed
+the eight focused natural-hidden-alarm, reload, form-remount, attachment-removal,
+Pause, stale-button and stale-positive-authorization cases, exit0. Syntax/model/
+capacity/i18n check and combined-public runtime/pin/Plan closure passed. Final
+package35 tests and final editor browser checks require their terminal receipts.
+The local full npm log passed through MV3 integration14/14 but lost its process
+handle during the conversation continuation; no matching test process remained.
+It has no whole-command exit0 receipt. Remaining suites were run separately;
+the new release must still pass the entire CI npm command before publication.
+
+Store English Description3460chars and scripting-use disclosure were saved to
+match pending-attachment removal and persistent preparation. Test instructions
+were saved for3.0.11 without developer credentials. Package remains old draft6
+until the matching final published ZIP is downloaded, verified and uploaded.
+No current candidate installed-site or protected lifecycle proof is implied.
+
 ## 3.0.10 Persistent Prompt Priority (2026-11-10 UTC)
 
 Latest direct owner instruction supersedes the old attachment-preservation

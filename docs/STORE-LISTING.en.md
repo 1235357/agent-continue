@@ -1,6 +1,6 @@
 # Chrome Web Store Listing - English
 
-Canonical English listing source for Agent Continue **3.0.10** (unreleased candidate). This file does not change a saved Store listing, submit a package, publish a release or establish approval or installation. Actual availability and submission state require separate platform receipts. Historical v2.2.1 is a separate scheduler-only release; do not replace its assets or describe it as Windows-enabled. The repository's [Windows review notes](https://github.com/1235357/agent-continue/blob/main/docs/STORE-LISTING.windows-candidate.en.md) retain the disclosure and submission checks.
+Canonical English listing source for Agent Continue **3.0.11** (unreleased candidate). This file does not change a saved Store listing, submit a package, publish a release or establish approval or installation. Actual availability and submission state require separate platform receipts. Historical v2.2.1 is a separate scheduler-only release; do not replace its assets or describe it as Windows-enabled. The repository's [Windows review notes](https://github.com/1235357/agent-continue/blob/main/docs/STORE-LISTING.windows-candidate.en.md) retain the disclosure and submission checks.
 
 After final release and disclosure gates are closed, use the entire **Description** section, including the developer/support block, for the new listing draft. The copy uses plain-text URLs rather than relying on Markdown rendering. Do not withdraw an existing review merely to apply this source copy.
 

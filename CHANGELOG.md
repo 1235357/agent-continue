@@ -1,6 +1,14 @@
 # Changelog
 
-## [3.0.10] - 2026-11-10
+## [3.0.11] - 2026-11-10
+
+- Preserve the legacy adapter's same-form editor replacement recovery while
+  limiting fresh-run continuous preparation recovery to the persistent worker
+  contract. Retain the full prompt-priority policy described below.
+- 3.0.10 was tagged as a candidate; local full regression caught this compatibility
+  issue. Its tag is not rewritten or used for a Store upload.
+
+## [3.0.10] - Unpublished Candidate
 
 - Keep preparing and retrying a known unsubmitted prompt continuously instead
   of ending the cycle after a composer redraw, unavailable control or temporary

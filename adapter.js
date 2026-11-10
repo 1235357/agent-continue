@@ -663,7 +663,7 @@ export async function pageAction(args) {
         await clearOwnDraft();
         return result('cancelled', '已暂停，本次未提交。');
       }
-      if (!sameComposer()) return result('blocked', '发送控件当前不可用，稍后自动检查。', 'commit-not-dispatched');
+      if (args.persistentDelivery === true && !sameComposer()) return result('blocked', '发送控件当前不可用，稍后自动检查。', 'commit-not-dispatched');
       if (hasAttachment()) return protectedDraft('提交前检测到附件，已保留输入框内容。');
       if (busy()) {
         await clearOwnDraft();
