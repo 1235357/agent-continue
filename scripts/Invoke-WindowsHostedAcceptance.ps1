@@ -10,6 +10,18 @@ param(
     [string]$RuntimeKeyFile = ''
 )
 $ErrorActionPreference = 'Stop'
+if ($PSVersionTable.PSEdition -eq 'Desktop') {
+    try {
+        # A clean or PS7-inherited module path must not control OS dependencies.
+        foreach ($module in @('Microsoft.PowerShell.Management', 'Microsoft.PowerShell.Utility')) {
+            $moduleManifest = [IO.Path]::Combine($PSHOME, "Modules\$module\$module.psd1")
+            Import-Module $moduleManifest -ErrorAction Stop
+        }
+    } catch {
+        [Console]::Out.WriteLine('{"ok":false,"action":"preflight","error":"module_initialization_failed"}')
+        exit 1
+    }
+}
 $archiveStream = $zip = $null
 $runRoot = $null
 $claimed = $false

@@ -1,5 +1,21 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Hosted Launcher Cold Module Regression (2026-11-09)
+
+New terminal native42759420288/Windows129641342733 FAILED16m54s at hosted
+launcher step18, not first prompt. Paired guided installer passed164695ms and
+cold CMD passed275610ms with provisioning/shell/file/path-drift/pause; IPC8/8
+passed. Four hosted-launcher Start calls hit the fixture15s watchdog. Later steps
+did not run. Extension42759420279 test129641345005 SUCCESS10m51s on d0e3e9f.
+
+Separately reproduced cold launcher failure: disable discovery only in a temporary
+copy and give it an absent module path; old source returns no JSON, exit1. Explicit
+OS module imports now allow that Plan and preserve the caller preference. Module
+failure returns a fixed refusal without staging; no secret or exception output.
+Latest preview kit with all launcher cases12/12, no skips, exit0. Log:
+.artifacts/hosted-launcher-current-preview-green.log. No claim yet that this repairs
+the cloud watchdog failure; no new permissions or real hosted connection.
+
 ## Rebuilt Store Artifact Actual Browser Result (2026-11-09)
 
 Exact candidate StoreZIP38e1e0dc4781cd2e6afbac1ac1dfcec3886f345715814ab53c81c3825c0a10c6,
@@ -11,9 +27,9 @@ Log:.artifacts/release-306-recovery-final-store-browser.log. Exact extracted
 registry/export26/26 exit0; package builder verified paired public roots.
 This is not current installed ChatGPT/Dot acceptance or publication.
 
-Current native42759420288 Windows129641342733 and Extension42759420279 remain
-in progress at this entry; packaged IPC8/8 passed and paired guided install is
-running. Pages42759420166 success28s. Store live read redirects to Google identity
+Native42759420288 and Extension42759420279 terminal results are recorded above;
+earlier in-progress observations are superseded. Pages42759420166 success28s.
+Store live read redirects to Google identity
 verification, not a review receipt. No Release/tag/Store mutation; goal active.
 
 ## Admission Recovery Evidence Boundary (2026-11-09)

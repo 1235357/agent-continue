@@ -160,13 +160,24 @@ test('Windows hosted acceptance launcher with a local stub ZIP', {skip: process.
     return {zipPath, zipDigest: sha256(readFileSync(zipPath))};
   }
 
-  function fixture(runId, {withKey = true, pending = false, zipPath = archive, zipDigest = digest, explicitKey = false} = {}) {
+  function fixture(runId, {withKey = true, pending = false, zipPath = archive, zipDigest = digest, explicitKey = false,
+    coldModules = false, failModules = false} = {}) {
     const root = path.join(scratch, runId);
     const localAppData = path.join(root, 'Local AppData');
     const appData = path.join(root, 'AppData', 'Roaming');
     // Account for Windows PowerShell's own profile-directory initialization.
     mkdirSync(appData, {recursive: true});
     mkdirSync(path.join(localAppData, 'Microsoft', 'Windows', 'Caches'), {recursive: true});
+    let invokedLauncher = launcher;
+    if (coldModules || failModules) {
+      invokedLauncher = path.join(root, 'cold-launcher.ps1');
+      const source = readFileSync(launcher, 'utf8');
+      const anchor = "$ErrorActionPreference = 'Stop'";
+      assert.equal(source.split(anchor).length, 2);
+      const coldPrelude = coldModules ? "$PSModuleAutoLoadingPreference = 'None'\n" : '';
+      const failurePrelude = failModules ? "function Import-Module { throw 'synthetic-private-module-detail' }\n" : '';
+      writeFileSync(invokedLauncher, source.replace(anchor, coldPrelude + failurePrelude + anchor));
+    }
     const runRoot = path.join(localAppData, 'AgentContinueHostedAcceptance', 'run-' + runId);
     const keyFile = explicitKey ? path.join(root, 'existing owner key.txt') : path.join(localAppData, keyName);
     const secret = 'fixture-only-runtime-key-' + randomBytes(24).toString('hex');
@@ -175,15 +186,17 @@ test('Windows hosted acceptance launcher with a local stub ZIP', {skip: process.
     const needles = [Buffer.from(secret), Buffer.from(secret, 'utf16le')];
 
     function invoke(args = [], expectedDigest = zipDigest) {
-      const result = run(['-File', launcher, '-Archive', zipPath, '-ExpectedSha256', expectedDigest,
+      const result = run(['-File', invokedLauncher, '-Archive', zipPath, '-ExpectedSha256', expectedDigest,
         '-TunnelId', tunnelId, '-ExtensionId', extensionId, '-RunId', runId,
         ...(explicitKey ? ['-RuntimeKeyFile', keyFile] : []), ...args], root, {
         APPDATA: appData, LOCALAPPDATA: localAppData, USERPROFILE: root, TEMP: root, TMP: root,
         AC_FIXTURE_RUN_ROOT: runRoot, AC_FIXTURE_UNCONFIRMED: pending ? '1' : '0',
+        ...(coldModules ? {PSModulePath: path.join(root, 'absent-modules')} : {}),
         ...(explicitKey ? {AC_FIXTURE_KEY: keyFile} : {}),
       });
       assert.ok(!result.stdout.includes(secret) && !result.stderr.includes(secret),
         'launcher must not echo the synthetic key');
+      assert.ok(result.stdout.trim(), 'launcher must return a bounded JSON receipt even without module discovery');
       return {status: result.status, receipt: JSON.parse(result.stdout)};
     }
 
@@ -239,6 +252,26 @@ test('Windows hosted acceptance launcher with a local stub ZIP', {skip: process.
       const {status, receipt: {ok, action, ready, runRoot}} = f.invoke();
       assert.equal(status, 0);
       assert.deepEqual({ok, action, ready, runRoot}, {ok: true, action: 'plan', ready: true, runRoot: f.runRoot});
+    });
+  });
+
+  await t.test('cold Plan works without implicit module discovery or a caller module path', () => {
+    const f = fixture('cold-modules', {coldModules: true, withKey: false});
+    f.unchanged(() => {
+      const {status, receipt} = f.invoke();
+      assert.equal(status, 0);
+      assert.equal(receipt.ready, false);
+      assert.equal(receipt.reason, 'acceptance_key_missing');
+      assert.equal(receipt.hostedToolCallVerified, false);
+    });
+  });
+
+  await t.test('OS module initialization failure returns only a bounded refusal without staging a run', () => {
+    const f = fixture('module-refusal', {failModules: true, withKey: false});
+    f.unchanged(() => {
+      const {status, receipt} = f.invoke();
+      assert.equal(status, 1);
+      assert.deepEqual(receipt, {ok: false, action: 'preflight', error: 'module_initialization_failed'});
     });
   });
 

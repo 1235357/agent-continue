@@ -1,5 +1,31 @@
 # Agent Continue Development Handoff
 
+## Hosted Launcher Cold Dependency Follow-Up (2026-11-09)
+
+Fresh IAB readback of d0e3e9f native42759420288/Windows129641342733 is terminal
+FAILED16m54s, not still running. Crucially paired guided installation passed
+164695ms, cold CMD passed275610ms (portable Node, shell/file, path-drift restart
+and pause); the prior first-prompt failure did not recur in this run. Packaged
+IPC8/8 also passed. Failure moved to hosted launcher step18: four Start-bearing
+subtests exceeded the harness's15s PowerShell call watchdog. All remaining steps
+were skipped. Do not report the whole Windows workflow as passed.
+
+Extension42759420279/job129641345005 SUCCEEDED10m51s on d0e3e9f. Local current
+package34/34 and source7/7 returned exit0. Main2d59537 only added artifact records;
+it did not change scheduler or installer bytes.
+
+The hosted launcher has a separately reproduced implicit-module defect. A
+child-only copy with discovery disabled and an absent caller module path failed
+before returning any JSON (.artifacts/hosted-launcher-no-discovery-red.log, exit1).
+It now imports OS Management and Utility via .NET absolute manifest paths, without
+changing the caller preference or loading caller modules. Import failure returns
+only a fixed preflight refusal. The newly built preview kit plus all twelve
+launcher tests pass with no skips, exit0:
+.artifacts/hosted-launcher-current-preview-green.log. Includes refusal, bad ZIP,
+explicit key reference without copying, one-shot Start and preserved unknown
+child result without replay. This does not prove the cloud watchdog issue solved.
+No test deadline was raised, no actual hosted connection/grant was started.
+
 ## Current Verified Release Candidate (2026-11-09)
 
 Runtime sourcepin d0e3e9f76cc02be89b2043ddfc8af6fc20d3de30 is on unique main.
@@ -22,10 +48,8 @@ Administrator bundle26f186ee15d3d04143d512799e94b4c9147aa454b598f732f5c007c1a16a
 was reused only after full source/inventory/pin verification and read-only Plan.
 Old phase/admission candidates below are historical, not publication inputs.
 
-IAB2 exact new CI: native42759420288/Windows129641342733 and
-Extension42759420279 IN PROGRESS, Pages42759420166 success28s. Latest Windows
-observation: packaged IPC8/8 passed, guided paired installation in progress.
-Do not rerun them or treat pending as failed. Read their terminal results next.
+IAB2 exact new CI terminal results are recorded above; earlier in-progress
+observations are superseded. Pages42759420166 success28s. No manual rerun.
 Store was freshly reopened and redirects to Google Verify-it-is-you; no current
 review/publication status can be asserted beyond that gate. No password read,
 Release/tag/upload/cancel or production mutation occurred. Full goal stays active.
