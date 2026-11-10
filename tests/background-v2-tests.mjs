@@ -1250,6 +1250,243 @@ await scenario('Back-to-back deliveries drain their final snapshots without a su
   assert.equal(h.state.local.deliveryDiagnostics.at(-1).state, 'sent');
   await h.message({ type: 'PAUSE' });
 });
+await scenario('An activity-log storage rejection cannot turn a committed Start into a failed response', async () => {
+  for (const failure of ['get', 'set']) {
+    const h = await harness();
+    h.beforeStorageGet = (name, key) => {
+      if (failure === 'get' && name === 'local' && key === 'logs') throw new Error('SYNTHETIC_ACTIVITY_FAILURE');
+    };
+    h.beforeStorageSet = (name, value) => {
+      if (failure === 'set' && name === 'local' && Object.hasOwn(value, 'logs')) throw new Error('SYNTHETIC_ACTIVITY_FAILURE');
+    };
+    const response = await h.message({ type: 'START', tabId: 7, config: { prompt: 'SYNTHETIC_CONTINUE' } });
+    const delivery = response.ok ? await h.message({ type: 'SEND_NOW' }) : null;
+    const stopped = await h.message({ type: 'PAUSE' });
+    assert.equal(response.ok, true, 'Activity persistence is not task authority');
+    assert.equal(delivery.job.sentCount, 1, 'Log rejection cannot discard a confirmed delivery');
+    assert.equal(stopped.job.enabled, false);
+  }
+});
+await scenario('A permanently pending activity write cannot retain send completion or the Pause queue', async () => {
+  const h = await harness(); await h.start(); const writing = deferred(); let entered = false;
+  h.beforeStorageSet = (name, value) => {
+    if (name === 'local' && Object.hasOwn(value, 'logs')) { entered = true; return writing.promise; }
+  };
+  const sending = h.message({ type: 'SEND_NOW' }); await until(() => entered);
+  let paused = false;
+  const pausing = h.message({ type: 'PAUSE' }).then(response => { paused = response.job.enabled === false; return response; });
+  const response = await Promise.race([sending, delay(800).then(() => null)]);
+  await delay(300);
+  const pausedBeforeStorageReturned = paused;
+  writing.resolve(); await sending; await pausing;
+  assert.equal(response?.job?.sentCount, 1, 'Completed send must not depend on its log write');
+  assert.equal(pausedBeforeStorageReturned, true, 'Pause must finish while diagnostic storage is still pending');
+});
+await scenario('A pending activity read cannot block immediate Start or restore history after Clear Logs', async () => {
+  const h = await harness(); const reading = deferred(); let entered = false;
+  h.beforeStorageGet = (name, key) => {
+    if (name === 'local' && key === 'logs' && !entered) { entered = true; return reading.promise; }
+  };
+  const response = await h.message({ type: 'START', tabId: 7, config: { prompt: 'SYNTHETIC_CONTINUE', startImmediately: true } });
+  assert.equal(response.ok, true); assert.equal(response.job.sentCount, 1);
+  assert.equal(h.state.session.diagnosticsHealth.persistence, 'degraded');
+  await h.message({ type: 'CLEAR_LOGS' });
+  reading.resolve(); await delay(10);
+  assert.equal(Object.hasOwn(h.state.local, 'logs'), false);
+  assert.equal(Object.hasOwn(h.state.session, 'diagnosticsHealth'), false);
+  await h.message({ type: 'PAUSE' });
+  await until(() => h.state.local.logs?.length === 1);
+  assert.equal(h.state.local.logs[0].event, 'paused');
+});
+await scenario('A late activity write cannot resurrect a cleared event or delete the new epoch record', async () => {
+  const h = await harness(); await h.start(); const writing = deferred(); let entered = false;
+  h.beforeStorageSet = (name, value) => {
+    if (name === 'local' && Object.hasOwn(value, 'logs') && !entered) { entered = true; return writing.promise; }
+  };
+  assert.equal((await h.message({ type: 'SEND_NOW' })).job.sentCount, 1);
+  await h.message({ type: 'CLEAR_LOGS' });
+  assert.equal((await h.message({ type: 'PAUSE' })).job.enabled, false);
+  writing.resolve();
+  await until(() => h.state.local.logs?.length === 1);
+  assert.equal(h.state.local.logs[0].event, 'paused');
+});
+await scenario('An activity drain waiting on an older Clear barrier waits for the latest removal', async () => {
+  const h = await harness(); await h.start();
+  const firstRemoval = deferred(), secondRemoval = deferred();
+  let removals = 0, diagnosticRemovals = 0, writes = 0, writesBeforeSecondRemoval;
+  h.beforeStorageRemove = (name, keys) => {
+    if (name !== 'local') return;
+    if (Array.isArray(keys) && keys.includes('deliveryDiagnostics')) diagnosticRemovals++;
+    if (keys === 'logs') return ++removals === 1 ? firstRemoval.promise : secondRemoval.promise;
+  };
+  h.beforeStorageSet = (name, value) => {
+    if (name === 'local' && Object.hasOwn(value, 'logs')) writes++;
+  };
+  const clearing = [];
+  try {
+    clearing.push(h.message({ type: 'CLEAR_LOGS' }));
+    await until(() => removals === 1);
+    assert.equal((await h.message({ type: 'PAUSE' })).job.enabled, false);
+    clearing.push(h.message({ type: 'CLEAR_LOGS' }));
+    await until(() => diagnosticRemovals === 2, 'second Clear epoch cutover');
+    assert.equal((await h.message({ type: 'RESUME' })).job.enabled, true);
+    firstRemoval.resolve();
+    await until(() => removals === 2);
+    await delay(10);
+    writesBeforeSecondRemoval = writes;
+  } finally {
+    firstRemoval.resolve(); secondRemoval.resolve();
+    await Promise.all(clearing);
+  }
+  await delay(10);
+  const retained = copy(h.state.local.logs);
+  await h.message({ type: 'PAUSE' });
+  assert.equal(writesBeforeSecondRemoval, 0, 'A current-epoch append must not overtake the latest Clear removal');
+  assert.deepEqual(retained?.map(entry => entry.event), ['resumed'], 'The post-Clear event must survive both removals');
+});
+await scenario('Diagnostic health coalesces failures behind a pending session write to the latest count', async () => {
+  const h = await harness(); await h.start();
+  const writing = deferred(), writes = [];
+  h.beforeStorageGet = (name, key) => {
+    if (name === 'local' && key === 'logs') throw new Error('SYNTHETIC_ACTIVITY_FAILURE');
+  };
+  h.beforeStorageSet = (name, value) => {
+    if (name === 'session' && Object.hasOwn(value, 'diagnosticsHealth')) {
+      writes.push(copy(value.diagnosticsHealth));
+      if (writes.length === 1) return writing.promise;
+    }
+  };
+  try {
+    for (let index = 0; index < 32; index++) assert.equal((await h.message({ type: 'PAUSE' })).job.enabled, false);
+    assert.equal(writes.length, 1, 'Only one health write may be in flight');
+  } finally { writing.resolve(); }
+  await until(() => h.state.session.diagnosticsHealth?.writeFailures === 32, 'latest coalesced health count');
+  assert.deepEqual(writes.map(value => value.writeFailures), [1, 32], 'Intermediate failure snapshots must not accumulate behind stalled storage');
+  assert.equal(writes.at(-1).persistence, 'degraded');
+  h.beforeStorageGet = undefined;
+  await h.message({ type: 'CLEAR_LOGS' });
+  assert.equal(Object.hasOwn(h.state.session, 'diagnosticsHealth'), false);
+});
+await scenario('Clear retires coalesced old health while preserving failures from the new epoch', async () => {
+  const h = await harness(); await h.start();
+  const writing = deferred(), writes = [];
+  let activityRemovals = 0, healthRemovals = 0, clearCompleted = false;
+  h.beforeStorageGet = (name, key) => {
+    if (name === 'local' && key === 'logs') throw new Error('SYNTHETIC_ACTIVITY_FAILURE');
+  };
+  h.beforeStorageSet = (name, value) => {
+    if (name === 'session' && Object.hasOwn(value, 'diagnosticsHealth')) {
+      writes.push({ ...copy(value.diagnosticsHealth), healthRemovals });
+      if (writes.length === 1) return writing.promise;
+    }
+  };
+  h.beforeStorageRemove = (name, keys) => {
+    if (name === 'local' && keys === 'logs') activityRemovals++;
+    if (name === 'session' && keys === 'diagnosticsHealth') healthRemovals++;
+  };
+  let clearing;
+  try {
+    for (let index = 0; index < 5; index++) await h.message({ type: 'PAUSE' });
+    assert.equal(writes.length, 1);
+    clearing = h.message({ type: 'CLEAR_LOGS' }).then(response => { clearCompleted = true; return response; });
+    await until(() => activityRemovals === 1, 'Clear epoch cutover while health write is pending');
+    for (let index = 0; index < 3; index++) assert.equal((await h.message({ type: 'PAUSE' })).job.enabled, false);
+    assert.equal(clearCompleted, false, 'Clear must still fence the admitted old health write');
+    assert.equal(writes.length, 1, 'New health must wait for old-write cleanup');
+  } finally {
+    writing.resolve();
+    if (clearing) await clearing;
+  }
+  await until(() => h.state.session.diagnosticsHealth?.writeFailures === 3, 'new-epoch failure count');
+  assert.deepEqual(writes.map(value => value.writeFailures), [1, 3], 'Clear must discard the unsent old count and reset the new count');
+  assert.equal(writes[1].healthRemovals, 1, 'The new health write must follow old-epoch cleanup');
+  h.beforeStorageGet = undefined;
+  await h.message({ type: 'CLEAR_LOGS' });
+  assert.equal(Object.hasOwn(h.state.session, 'diagnosticsHealth'), false);
+});
+await scenario('A health drain waiting on an older Clear barrier preserves the latest epoch health', async () => {
+  const h = await harness(); await h.start();
+  const firstRemoval = deferred(), secondRemoval = deferred(), writes = [];
+  let diagnosticRemovals = 0, activityRemovals = 0, writesBeforeSecondRemoval;
+  h.beforeStorageGet = (name, key) => {
+    if (name === 'local' && key === 'logs') throw new Error('SYNTHETIC_ACTIVITY_FAILURE');
+  };
+  h.beforeStorageSet = (name, value) => {
+    if (name === 'session' && Object.hasOwn(value, 'diagnosticsHealth')) writes.push(copy(value.diagnosticsHealth));
+  };
+  h.beforeStorageRemove = (name, keys) => {
+    if (name !== 'local') return;
+    if (keys === 'logs') activityRemovals++;
+    if (Array.isArray(keys) && keys.includes('deliveryDiagnostics')) {
+      return ++diagnosticRemovals === 1 ? firstRemoval.promise : secondRemoval.promise;
+    }
+  };
+  const clearing = [];
+  try {
+    clearing.push(h.message({ type: 'CLEAR_LOGS' }));
+    await until(() => diagnosticRemovals === 1);
+    await h.message({ type: 'PAUSE' });
+    clearing.push(h.message({ type: 'CLEAR_LOGS' }));
+    await until(() => activityRemovals === 2, 'second health epoch cutover');
+    for (let index = 0; index < 3; index++) await h.message({ type: 'PAUSE' });
+    firstRemoval.resolve();
+    await until(() => diagnosticRemovals === 2);
+    await delay(10);
+    writesBeforeSecondRemoval = writes.length;
+  } finally {
+    firstRemoval.resolve(); secondRemoval.resolve();
+    await Promise.all(clearing);
+  }
+  await until(() => h.state.session.diagnosticsHealth?.writeFailures === 3, 'health after both Clear barriers');
+  assert.equal(writesBeforeSecondRemoval, 0, 'Health must not overtake the latest Clear removal');
+  assert.deepEqual(writes.map(value => value.writeFailures), [3]);
+  h.beforeStorageGet = undefined;
+  await h.message({ type: 'CLEAR_LOGS' });
+});
+for (const rejectFirst of [false, true]) {
+  await scenario(`A delivery drain rechecks the latest Clear barrier after an older removal ${rejectFirst ? 'rejects' : 'resolves'}`, async () => {
+    const h = await harness(); await h.start();
+    assert.equal((await h.message({ type: 'SEND_NOW' })).job.sentCount, 1);
+    await until(() => h.state.local.deliveryDiagnostics?.at(-1)?.state === 'sent');
+    const oldSequence = h.state.local.deliveryDiagnostics.at(-1).sequence;
+    const firstRemoval = deferred(), secondRemoval = deferred();
+    let diagnosticRemovals = 0, activityRemovals = 0, writes = 0, writesBeforeSecondRemoval;
+    h.beforeStorageRemove = (name, keys) => {
+      if (name !== 'local') return;
+      if (keys === 'logs') activityRemovals++;
+      if (Array.isArray(keys) && keys.includes('deliveryDiagnostics')) {
+        return ++diagnosticRemovals === 1 ? firstRemoval.promise : secondRemoval.promise;
+      }
+    };
+    h.beforeStorageSet = (name, value) => {
+      if (name === 'local' && Object.hasOwn(value, 'deliveryDiagnostics')) writes++;
+    };
+    const clearing = [];
+    try {
+      clearing.push(h.message({ type: 'CLEAR_LOGS' }));
+      await until(() => diagnosticRemovals === 1);
+      assert.equal((await h.message({ type: 'SEND_NOW' })).job.sentCount, 2);
+      clearing.push(h.message({ type: 'CLEAR_LOGS' }));
+      await until(() => activityRemovals === 2, 'second delivery epoch cutover');
+      assert.equal((await h.message({ type: 'SEND_NOW' })).job.sentCount, 3);
+      if (rejectFirst) firstRemoval.reject(new Error('SYNTHETIC_CLEAR_FAILURE'));
+      else firstRemoval.resolve();
+      await until(() => diagnosticRemovals === 2);
+      await delay(10);
+      writesBeforeSecondRemoval = writes;
+    } finally {
+      firstRemoval.resolve(); secondRemoval.resolve();
+      await Promise.all(clearing);
+    }
+    await delay(10);
+    const retained = copy(h.state.local.deliveryDiagnostics);
+    await h.message({ type: 'PAUSE' });
+    assert.equal(writesBeforeSecondRemoval, 0, 'A current-epoch delivery snapshot must not overtake the latest Clear removal');
+    assert.deepEqual(retained?.map(trace => ({ sequence: trace.sequence, state: trace.state })),
+      [{ sequence: oldSequence + 2, state: 'sent' }], 'The latest epoch trace must survive without another producer');
+    assert.equal(h.sends().length, 3, 'Clear barriers must not block or repeat authorized deliveries');
+  });
+}
 const failed = results.filter(result => result.status === 'FAIL');
 console.log(`RESULT ${results.length - failed.length}/${results.length} background v2 scenarios passed`);
 for (const result of failed) console.error(result.error);

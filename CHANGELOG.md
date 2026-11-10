@@ -2,6 +2,15 @@
 
 ## [3.0.12] - Unreleased Candidate
 
+- Observe trusted held/repeated Enter submission in both MAIN and legacy
+  composer paths. Once it submits the prepared prompt, stop refilling and keep
+  manual delivery separate from extension dispatch. Repeated Shift+Enter, IME
+  composition, untrusted keys and unrelated controls remain non-send events.
+
+- Keep legacy activity-log persistence off the shared sending/control queue.
+  A rejected or stalled log read/write cannot fail a committed Start, retain a
+  completed send response, or block Pause. Bound and serialize pending activity
+  records, report degraded persistence, and fence late writes after clearing.
 - Add schema 5 per-delivery diagnostics: phase/reason transitions, model/DOM
   writes, readiness/authorization/grant/receipt counters, synchronous write
   timings, manual handoff, transport errors, and persistence health. Activity

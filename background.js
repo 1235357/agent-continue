@@ -61,32 +61,57 @@ let diagnosticWriteFailures = 0;
 let diagnosticEpoch = 0;
 let diagnosticDraining = false;
 let diagnosticClearBarrier = Promise.resolve();
-let diagnosticHealthQueue = Promise.resolve();
+let diagnosticHealthWrite = Promise.resolve();
+let diagnosticHealthDraining = false;
+let diagnosticHealthPending = null;
 const diagnosticSnapshots = new Map();
+let activityEpoch = 0;
+let activityDraining = false;
+let activityClearBarrier = Promise.resolve();
+const activityEvents = [];
 function diagnosticFailure(epoch = diagnosticEpoch) {
   if (epoch !== diagnosticEpoch) return;
   diagnosticWriteFailures++;
-  const writeFailures = diagnosticWriteFailures;
-  diagnosticHealthQueue = diagnosticHealthQueue.catch(() => undefined).then(async () => {
-    if (epoch !== diagnosticEpoch) return;
-    try {
-      await chrome.storage.session.set({ diagnosticsHealth: { persistence: 'degraded', writeFailures } });
-    } catch { /* Diagnostics never delay the sender or Pause. */ }
-  });
+  diagnosticHealthPending = { epoch, writeFailures: diagnosticWriteFailures };
+  if (!diagnosticHealthDraining) void drainDiagnosticHealth();
+}
+async function drainDiagnosticHealth() {
+  if (diagnosticHealthDraining) return;
+  diagnosticHealthDraining = true;
+  try {
+    while (diagnosticHealthPending) {
+      const barrier = diagnosticClearBarrier;
+      await barrier.catch(() => undefined);
+      if (barrier !== diagnosticClearBarrier) continue;
+      const pending = diagnosticHealthPending;
+      diagnosticHealthPending = null;
+      if (!pending || pending.epoch !== diagnosticEpoch) continue;
+      diagnosticHealthWrite = (async () => {
+        try {
+          await chrome.storage.session.set({ diagnosticsHealth: { persistence: 'degraded', writeFailures: pending.writeFailures } });
+        } catch { /* Diagnostics never delay the sender or Pause. */ }
+      })();
+      await diagnosticHealthWrite;
+    }
+  } finally {
+    diagnosticHealthDraining = false;
+    if (diagnosticHealthPending) void drainDiagnosticHealth();
+  }
 }
 
 function clearDeliveryDiagnostics() {
   diagnosticEpoch++;
   diagnosticSnapshots.clear();
   diagnosticWriteFailures = 0;
+  diagnosticHealthPending = null;
   for (const pending of pendingPageResults.values()) { clearTimeout(pending.traceTimer); pending.trace = null; }
-  const priorHealth = diagnosticHealthQueue;
+  // Wait only for an admitted write, not a drain that may itself await Clear.
+  const priorHealth = diagnosticHealthWrite;
   diagnosticClearBarrier = Promise.all([diagnosticClearBarrier.catch(() => undefined), priorHealth.catch(() => undefined)])
     .then(async () => {
       await chrome.storage.local.remove(['deliveryDiagnostics', 'diagnosticsHealth']);
       await chrome.storage.session.remove('diagnosticsHealth');
     });
-  diagnosticHealthQueue = diagnosticClearBarrier.catch(() => undefined);
   return diagnosticClearBarrier;
 }
 
@@ -101,7 +126,11 @@ function persistDeliveryTrace(trace, epoch = diagnosticEpoch) {
   diagnosticDraining = true;
   diagnosticQueue = (async () => {
     try { while (diagnosticSnapshots.size) {
-      await diagnosticClearBarrier.catch(() => { diagnosticSnapshots.clear(); diagnosticFailure(); });
+      const barrier = diagnosticClearBarrier;
+      await barrier.catch(() => {
+        if (barrier === diagnosticClearBarrier) { diagnosticSnapshots.clear(); diagnosticFailure(); }
+      });
+      if (barrier !== diagnosticClearBarrier) continue;
       if (!diagnosticSnapshots.size) break;
       const batch = [...diagnosticSnapshots.values()]; diagnosticSnapshots.clear();
       const currentEpoch = batch.at(-1).epoch;
@@ -235,8 +264,9 @@ async function setJob(job) {
     await chrome.storage.local.remove('resumeJob');
   }
 }
-async function logEvent(event, message, diagnostic = null) {
+async function logEvent(event, message, diagnostic = null, epoch = activityEpoch, at = Date.now()) {
   const stored = (await chrome.storage.local.get('logs')).logs;
+  if (epoch !== activityEpoch) return;
   const logs = Array.isArray(stored) ? stored.filter(entry => entry && typeof entry === 'object' && !Array.isArray(entry)
     && Number.isFinite(entry.at) && typeof entry.event === 'string' && entry.event.length > 0 && typeof entry.message === 'string') : [];
   const codes = ['adapter-result', 'execution-exception', 'execution-timeout', 'no-valid-result', 'existing-draft', 'composer-changed', 'timing-probe', 'send-not-ready', 'commit-not-dispatched'];
@@ -258,7 +288,49 @@ async function logEvent(event, message, diagnostic = null) {
       if (typeof diagnostic[key] === 'boolean') detail.diagnostic[key] = diagnostic[key];
     }
   }
-  await chrome.storage.local.set({ logs: [...logs.slice(-199), { at: Date.now(), event, message, ...detail }] });
+  await chrome.storage.local.set({ logs: [...logs.slice(-199), { at, event, message, ...detail }] });
+  if (epoch !== activityEpoch) await chrome.storage.local.remove('logs');
+}
+async function drainActivityEvents() {
+  if (activityDraining) return;
+  activityDraining = true;
+  try {
+    while (activityEvents.length) {
+      const barrier = activityClearBarrier;
+      await barrier.catch(() => undefined);
+      if (barrier !== activityClearBarrier) continue;
+      const entry = activityEvents.shift();
+      if (!entry) break;
+      try {
+        if (entry.epoch === activityEpoch) await logEvent(entry.event, entry.message, entry.diagnostic, entry.epoch, entry.at);
+      } catch { diagnosticFailure(entry.diagnosticEpoch); }
+      finally { entry.resolve(); }
+    }
+  } finally {
+    activityDraining = false;
+    if (activityEvents.length) void drainActivityEvents();
+  }
+}
+async function recordActivityEvent(event, message, diagnostic = null) {
+  const epoch = diagnosticEpoch;
+  const work = new Promise(resolve => {
+    activityEvents.push({ event, message, diagnostic, at: Date.now(), epoch: activityEpoch, diagnosticEpoch: epoch, resolve });
+    while (activityEvents.length > 200) { activityEvents.shift().resolve(); diagnosticFailure(epoch); }
+  });
+  void drainActivityEvents();
+  let timer;
+  try {
+    // This bounds only diagnostic observation, never preparation or sending.
+    await Promise.race([work, new Promise(resolve => {
+      timer = setTimeout(() => { diagnosticFailure(epoch); resolve(); }, 250);
+    })]);
+  } finally { clearTimeout(timer); }
+}
+function clearActivityLog() {
+  activityEpoch++;
+  for (const entry of activityEvents.splice(0)) entry.resolve();
+  activityClearBarrier = activityClearBarrier.catch(() => undefined).then(() => chrome.storage.local.remove('logs'));
+  return activityClearBarrier;
 }
 async function updateBadge(job) {
   try {
@@ -333,7 +405,7 @@ async function pauseLocked(job, message, event = 'paused') {
     paused.autoDiscardableChanged = false;
     await setJob(paused);
   }
-  try { await logEvent(event, message); } catch { /* Diagnostics cannot prevent Pause. */ }
+  await recordActivityEvent(event, message);
   await updateBadge(paused);
   return paused;
 }
@@ -469,7 +541,7 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS, tr
               const renewed = { ...current, runDeadline: Date.now() + EXECUTION_MS };
               if (!waitingReported) {
                 renewed.statusText = t('仍在等待目标页面或发送回执；无固定等待时限，可随时暂停。');
-                await logEvent('busy', t('仍在等待目标页面或发送回执；无固定等待时限，可随时暂停。'),
+                await recordActivityEvent('busy', t('仍在等待目标页面或发送回执；无固定等待时限，可随时暂停。'),
                   { code: rejectedResult ? 'execution-exception' : missingResult ? 'no-valid-result' : 'send-not-ready',
                     durationMs: Date.now() - current.lastRunAt, ...executionDiagnostic() });
                 waitingReported = true;
@@ -618,7 +690,7 @@ async function timingDiagnostics() {
   }
   await transact(async () => {
     for (const item of observations) {
-      await logEvent('timing-diagnostics', t('只读发送计时诊断已完成。'), {
+      await recordActivityEvent('timing-diagnostics', t('只读发送计时诊断已完成。'), {
         code: 'timing-probe', kind: item.kind, status: item.status,
         durationMs: item.elapsedMs, firstMs: item.firstMs,
         hidden: item.hidden, ok: item.ok, allowed: item.allowed,
@@ -660,7 +732,7 @@ async function start(configInput, version, tabId) {
     await chrome.storage.local.set({ config });
     await setJob(job);
     try { await syncAlarm(job); } catch { await pauseLocked(job, t('后台计时器不可用，未启动任务。'), 'scheduler-error'); throw fail(t('无法创建后台计时器。')); }
-    await logEvent('started', t`开始任务，间隔 ${config.intervalMinutes} 分钟，${config.maxSends ? t`上限 ${config.maxSends} 次` : t('不限次数')}。`);
+    await recordActivityEvent('started', t`开始任务，间隔 ${config.intervalMinutes} 分钟，${config.maxSends ? t`上限 ${config.maxSends} 次` : t('不限次数')}。`);
     await updateBadge(job);
     return { ok: true, job };
   });
@@ -702,7 +774,7 @@ async function resume(version) {
       await pauseLocked(job, t('后台计时器不可用，未启动任务。'), 'scheduler-error');
       throw fail(t('无法创建后台计时器。'));
     }
-    await logEvent('resumed', t('已使用原提示词与原设置继续任务。'));
+    await recordActivityEvent('resumed', t('已使用原提示词与原设置继续任务。'));
     await updateBadge(job);
     return { ok: true, job };
   });
@@ -969,18 +1041,18 @@ async function finishRound(snapshot, result) {
       job.nextAt = now + (job.awaitingReply ? RETRY_MS : job.intervalMinutes * 60_000);
       job.statusText = result.status === 'manual-sent' ? t('已确认手动提交本轮提示词；停止重复填写，按原间隔继续。')
         : job.awaitingReply ? t('已确认发送，等待 Agent 回复完成后开始下一间隔。') : t`已确认发送 ${job.sentCount} 次；约 ${job.intervalMinutes} 分钟后继续。`;
-      await logEvent(result.status, result.status === 'manual-sent' ? t('已确认手动提交本轮提示词；停止重复填写，按原间隔继续。') : t('已在目标会话确认新消息。'));
+      await recordActivityEvent(result.status, result.status === 'manual-sent' ? t('已确认手动提交本轮提示词；停止重复填写，按原间隔继续。') : t('已在目标会话确认新消息。'));
     } else if (result.status === 'reply-complete') {
       job.awaitingReply = false;
       job.nextAt = now + job.intervalMinutes * 60_000;
       job.statusText = t`检测到新的回复已结束；约 ${job.intervalMinutes} 分钟后发送下一条。`;
-      await logEvent('reply-complete', t('新的回复已结束，开始下一发送间隔。'));
+      await recordActivityEvent('reply-complete', t('新的回复已结束，开始下一发送间隔。'));
     } else if (['busy', 'draft', 'blocked', 'error'].includes(result.status)) {
       job.nextAt = now + RETRY_MS;
       job.needsAttention = ['blocked', 'error'].includes(result.status);
       job.statusText = (result.message || t('页面暂不可用。')) + t(' 一分钟后再检查，任务仍保持启用。');
       if (current.lastResult !== result.status || (current.lastDiagnosticCode ?? null) !== (result.diagnosticCode ?? null)) {
-        await logEvent(result.status, result.status === 'draft' ? t('保留附件，等待附件移除后再检查。') : result.status === 'busy' ? t('目标暂忙或未就绪，延后检查。') : t('页面暂不可用，保持启用并等待恢复。'),
+        await recordActivityEvent(result.status, result.status === 'draft' ? t('保留附件，等待附件移除后再检查。') : result.status === 'busy' ? t('目标暂忙或未就绪，延后检查。') : t('页面暂不可用，保持启用并等待恢复。'),
           result.diagnosticCode ? { code: result.diagnosticCode, durationMs: now - snapshot.lastRunAt, ...result.executionDiagnostic } : null);
       }
     } else if (result.status === 'done') {
@@ -993,7 +1065,7 @@ async function finishRound(snapshot, result) {
       job.awaitingReply = false;
       job.needsAttention = true;
       job.statusText = t('本周期提交结果未确认；本周期不重试，完整间隔后继续。请检查页面记录。');
-      await logEvent('unconfirmed', t('本周期结果未知；未立即重试，将在下一正常周期继续。'), { code: result.diagnosticCode || 'adapter-result', durationMs: now - snapshot.lastRunAt, ...result.executionDiagnostic });
+      await recordActivityEvent('unconfirmed', t('本周期结果未知；未立即重试，将在下一正常周期继续。'), { code: result.diagnosticCode || 'adapter-result', durationMs: now - snapshot.lastRunAt, ...result.executionDiagnostic });
     }
     job.lastResult = result.status;
     job.lastDiagnosticCode = result.diagnosticCode ?? null;
@@ -1114,13 +1186,13 @@ async function initialize() {
           job.nextAt = Date.now() + 3000;
           job.statusText = t('已从重启中恢复；正在连接目标页面并继续推进…');
         }
-        await logEvent('browser-restored', t('已恢复任务设置；等待唯一匹配的原目标页面。'));
+        await recordActivityEvent('browser-restored', t('已恢复任务设置；等待唯一匹配的原目标页面。'));
       }
     }
     if (job?.phase === 'sending') {
       const readOnly = job.runKind === 'reply-check';
       job = { ...job, phase: 'idle', runKind: null, runId: token(), runDeadline: null, awaitingReply: readOnly ? job.awaitingReply : false, unknownCount: (job.unknownCount || 0) + (readOnly ? 0 : 1), nextAt: Date.now() + (readOnly ? RETRY_MS : job.intervalMinutes * 60_000), statusText: readOnly ? t('回复检查被中断；恢复后继续等待新回复。') : t('上周期执行被中断；完整间隔后继续，未立即重发。'), needsAttention: !readOnly };
-      await logEvent('interrupted', readOnly ? t('只读回复检查被中断；仍等待新回复。') : t('后台执行被中断；延后到下一完整周期。'));
+      await recordActivityEvent('interrupted', readOnly ? t('只读回复检查被中断；仍等待新回复。') : t('后台执行被中断；延后到下一完整周期。'));
     }
     if (job) { job.systemAwake = await syncPower(job); await setJob(job); }
     else await syncPower(null);
@@ -1167,24 +1239,26 @@ async function dispatch(message, sender, version) {
     case 'SEND_NOW': return runRound(true);
     case 'CLEAR_LOGS': {
       // Queue only the epoch cutover. Diagnostic I/O never holds Pause's queue.
-      let clearing;
-      await transact(async () => { clearing = clearDeliveryDiagnostics(); });
-      await chrome.storage.local.remove('logs');
+      let clearing, activityClearing;
+      await transact(async () => { clearing = clearDeliveryDiagnostics(); activityClearing = clearActivityLog(); });
+      await activityClearing;
       await clearing;
       return { ok: true };
     }
     case 'CLEAR_DATA': {
-      let clearing;
+      let clearing, activityClearing;
       await transact(async () => {
       await pauseLocked(await getJob(), t('已停止任务并清除本地数据。'));
       await setJob(null);
       clearing = clearDeliveryDiagnostics();
+      activityClearing = clearActivityLog();
       // Administrator operation journals survive Clear Data; uncertainty is never cleared into permission to replay.
-      for (const key of ['config', 'logs', 'templates', 'uiTheme', ADMIN_BROWSER_RESTORE]) await chrome.storage.local.remove(key);
+      for (const key of ['config', 'templates', 'uiTheme', ADMIN_BROWSER_RESTORE]) await chrome.storage.local.remove(key);
       // Do not silently reimport a personal bundle after an explicit clear.
       if (BUNDLED_PROMPT) await chrome.storage.local.set({ privatePresetImported: true });
       });
       await clearing;
+      await activityClearing;
       return { ok: true };
     }
     default: throw fail(t('不支持的操作。'));
@@ -1208,7 +1282,7 @@ chrome.tabs.onRemoved.addListener(tabId => {
     if (job?.tabId !== tabId) return;
     const interrupted = job.phase === 'sending' && job.runKind !== 'reply-check';
     const waiting = { ...job, tabId: null, runId: token(), runDeadline: null, phase: 'idle', runKind: null, awaitingReply: interrupted ? false : job.awaitingReply, unknownCount: (job.unknownCount || 0) + (interrupted ? 1 : 0), nextAt: job.enabled ? Math.max(job.nextAt || 0, Date.now() + (interrupted ? job.intervalMinutes * 60_000 : RETRY_MS)) : null, autoDiscardableChanged: false, discardProtection: 'pending', statusText: interrupted ? t('发送期间目标关闭，结果未确认；完整间隔后检查原页面。') : t('目标标签已关闭；任务保持原启用状态，等待原页面重新打开。') };
-    if (interrupted) await logEvent('interrupted', t('发送期间目标关闭，等待下一完整周期。'));
+    if (interrupted) await recordActivityEvent('interrupted', t('发送期间目标关闭，等待下一完整周期。'));
     await setJob(waiting); await updateBadge(waiting);
   })).catch(() => undefined);
 });
@@ -1229,7 +1303,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
     await restoreDiscard(job);
     const interrupted = job.phase === 'sending' && job.runKind !== 'reply-check';
     const waiting = { ...job, tabId: null, runId: token(), runDeadline: null, phase: 'idle', runKind: null, awaitingReply: interrupted ? false : job.awaitingReply, unknownCount: (job.unknownCount || 0) + (interrupted ? 1 : 0), nextAt: Math.max(job.nextAt || 0, Date.now() + (interrupted ? job.intervalMinutes * 60_000 : RETRY_MS)), autoDiscardableChanged: false, discardProtection: 'pending', statusText: interrupted ? t('发送期间页面改变，结果未确认；完整间隔后检查原地址。') : t('原目标页面已离开；等待原地址重新打开，不会给其他会话发送。') };
-    if (interrupted) await logEvent('interrupted', t('发送期间目标改变，等待下一完整周期。'));
+    if (interrupted) await recordActivityEvent('interrupted', t('发送期间目标改变，等待下一完整周期。'));
     await setJob(waiting); await updateBadge(waiting);
   })).catch(() => undefined);
 });

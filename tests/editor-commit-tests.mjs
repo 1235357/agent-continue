@@ -34,6 +34,7 @@ function fixture(options = {}) {
     attributes = {};
     getAttribute(name) { return this.attributes[name] ?? null; }
     getClientRects() { return [{}]; }
+    contains(element) { return element === this; }
     closest(selector) {
       if (selector.includes('[inert]') || selector.includes('[hidden]')) return this.inert ? this : null;
       if (selector === '[data-composer-body]') return composer;
@@ -60,7 +61,7 @@ function fixture(options = {}) {
       options.onFocus?.(state);
     }
   }
-  const editor = new Element();
+  let editor = new Element();
   editor.isContentEditable = true;
   editor.attributes.contenteditable = 'true';
   for (const property of ['innerHTML', 'innerText', 'textContent']) {
@@ -133,7 +134,7 @@ function fixture(options = {}) {
       },
     };
   }
-  const view = {
+  let view = {
     dom: editor, editable: true, isDestroyed: false,
     state: editorState(model((options.draft ?? 'old unsent text').split('\n'))),
     dispatch(transaction) {
@@ -172,6 +173,9 @@ function fixture(options = {}) {
       return node;
     },
     listenerCount() { return [...documentListeners.values()].reduce((count, listeners) => count + listeners.size, 0); },
+    emit(type, init = {}) {
+      for (const listener of documentListeners.get(type) || []) listener({ type, isTrusted: true, ...init });
+    },
     setIdentity(value) { identity = value; },
     replaceButton() {
       for (const send of buttons) send.isConnected = false;
@@ -185,6 +189,21 @@ function fixture(options = {}) {
     setText(text) { view.state = editorState(model(text.split('\n'))); },
     removeView() { delete editor.editor; },
     replaceEditor() { editor.isConnected = false; editors = [new Element()]; },
+    remountPreparedEditor(viewOnly = false) {
+      view.isDestroyed = true;
+      if (!viewOnly) {
+        editor.isConnected = false;
+        editor = new Element();
+        editor.isContentEditable = true;
+        editor.parentElement = composer;
+        editors = [editor];
+        state.editor = editor;
+      }
+      view = { ...view, dom: editor, isDestroyed: false };
+      editor.editor = { view };
+      state.view = view;
+      for (const send of buttons) send.disabled = true;
+    },
   };
   class SyntheticEvent {
     constructor(type, init = {}) { this.type = type; Object.assign(this, init); }
@@ -498,6 +517,94 @@ test('model preparation and read-only readiness wait for delayed Send before one
   assert.deepEqual(h.state.metrics.sent, [h.args.prompt]);
   assert.deepEqual(h.state.metrics.events, before.events, 'Final model correction cannot repeat the input/restore cycle');
 });
+
+for (const dot of [false, true]) {
+  for (const kind of ['composer-tool', 'prevented-enter', 'ime-enter', 'repeated-shift-enter', 'untrusted-enter']) {
+    test(`non-send Enter does not seal a prepared manual reservation (${kind}, dot=${dot})`, () => {
+      const h = fixture({ dot });
+      const token = randomUUID();
+      const args = { receiptBoundaryToken: token };
+      assert.equal(h.run({ ...args, phase: 'prepare' }).code, 'prepared');
+      let target = h.state.editor;
+      if (kind === 'composer-tool') {
+        h.state.addButton('Attach files');
+        target = h.state.buttons.at(-1);
+      }
+      h.state.emit('keydown', { target, key: 'Enter', ctrlKey: dot,
+        ...(kind === 'prevented-enter' ? { defaultPrevented: true } : {}),
+        ...(kind === 'ime-enter' ? { keyCode: 229, isComposing: false } : {}),
+        ...(kind === 'repeated-shift-enter' ? { repeat: true, shiftKey: true } : {}),
+        ...(kind === 'untrusted-enter' ? { isTrusted: false } : {}),
+      });
+      assert.equal(h.run({ ...args, phase: 'observe' }).code, 'ready');
+      h.state.document.addEventListener('agent-continue-receipt-' + token, event => event.preventDefault());
+      assert.equal(h.run({ ...args, phase: 'commit' }).code, 'dispatched');
+      assert.equal(h.run({ ...args, phase: 'commit' }).code, 'already-dispatched');
+      assert.equal(h.state.metrics.clicks, 1);
+      assert.deepEqual(h.state.metrics.sent, [h.args.prompt]);
+    });
+  }
+  test(`trusted editor Send still fences every phase before a remount retry (dot=${dot})`, () => {
+    const h = fixture({ dot });
+    const args = { receiptBoundaryToken: randomUUID() };
+    assert.equal(h.run({ ...args, phase: 'prepare' }).code, 'prepared');
+    h.state.emit('keydown', { target: h.state.editor, key: 'Enter', ctrlKey: dot });
+    h.state.setText('');
+    h.state.remountPreparedEditor();
+    for (const phase of ['observe', 'prepare', 'commit']) {
+      assert.equal(h.run({ ...args, phase }).code, 'manual-submission');
+    }
+    assert.equal(h.state.metrics.transactions, 1);
+    noDispatch(h);
+  });
+}
+
+for (const dot of [false, true]) {
+  test(`trusted repeated Enter fences prepared model writes after a manual send (dot=${dot})`, () => {
+    const h = fixture({ dot });
+    const args = { receiptBoundaryToken: randomUUID() };
+    assert.equal(h.run({ ...args, phase: 'prepare' }).code, 'prepared');
+    h.state.emit('keydown', { target: h.state.editor, key: 'Enter', ctrlKey: dot, repeat: true });
+    h.state.setText('');
+    h.state.remountPreparedEditor();
+    for (const phase of ['observe', 'prepare', 'commit'])
+      assert.equal(h.run({ ...args, phase }).code, 'manual-submission');
+    assert.equal(h.state.metrics.transactions, 1, '人工按键发送后不得重新填入');
+    noDispatch(h);
+  });
+}
+
+for (const viewOnly of [false, true]) {
+  test(`a restored prepared model is activated once for its replacement binding (viewOnly=${viewOnly})`, () => {
+    const h = fixture({ disabled: true, onEvent(type, state) {
+      if (type === 'input') state.buttons[0].disabled = false;
+    } });
+    const token = randomUUID();
+    const args = { receiptBoundaryToken: token };
+    assert.equal(h.run({ ...args, phase: 'prepare' }).code, 'prepared');
+    h.state.remountPreparedEditor(viewOnly);
+    const before = structuredClone(h.state.metrics);
+    const observation = h.run({ ...args, phase: 'observe' });
+    assert.equal(observation.code, 'composer-changed');
+    assert.equal(observation.supported, true);
+    assert.equal(observation.dispatched, false);
+    assert.deepEqual(h.state.metrics, before, 'Remount observation must remain read-only.');
+    assert.equal(h.run({ ...args, phase: 'prepare' }).code, 'prepared');
+    assert.equal(h.state.metrics.transactions, 2);
+    assert.equal(h.state.buttons[0].disabled, false);
+    const prepared = structuredClone(h.state.metrics);
+    assert.equal(h.run({ ...args, phase: 'prepare' }).code, 'prepared');
+    assert.equal(h.run({ ...args, phase: 'observe' }).code, 'ready');
+    assert.deepEqual(h.state.metrics, prepared, 'Same-binding retries must not restart activation.');
+    h.state.document.addEventListener('agent-continue-receipt-' + token, event => event.preventDefault());
+    assert.equal(h.run({ ...args, phase: 'commit' }).code, 'dispatched');
+    h.state.remountPreparedEditor();
+    assert.equal(h.run({ ...args, phase: 'prepare' }).code, 'already-dispatched');
+    assert.equal(h.state.metrics.transactions, 2);
+    assert.equal(h.state.metrics.clicks, 1);
+    assert.deepEqual(h.state.metrics.sent, [h.args.prompt]);
+  });
+}
 
 test('observation preserves explicit keyboard choice without changing a disabled model', () => {
   const h = fixture({ disabled: true });

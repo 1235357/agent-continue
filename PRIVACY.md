@@ -1,6 +1,6 @@
 # Privacy and Data Handling
 
-Scope: Agent Continue 3.0.12 source candidate, including Windows-enabled behavior. Updated: 2026-11-10. This policy is not a publication, Chrome Web Store submission/approval, or installed-version receipt. Those states require separate platform evidence. The separately released v2.2.1 scheduler does not include Windows device control or request `nativeMessaging`; the Windows sections below do not retroactively describe that historical release.
+Scope: Agent Continue 3.0.12 source candidate, including Windows-enabled behavior. Updated: 2026-11-11. This policy is not a publication, Chrome Web Store submission/approval, or installed-version receipt. Those states require separate platform evidence. The separately released v2.2.1 scheduler does not include Windows device control or request `nativeMessaging`; the Windows sections below do not retroactively describe that historical release.
 
 Agent Continue processes scheduler configuration and imported documents locally, without a developer-operated collection backend, cloud synchronization, or online document conversion. Prompt scheduling and file import require no separate extension account or API key. Sending a prompt submits it to your selected ChatGPT or Your dot conversation on `chatgpt.com`; that service then processes it under its own policies. Optional hosted Windows tools additionally require a separately installed local runtime, an OpenAI workspace/app and tunnel configuration, a local runtime-key file, and the relevant approvals. Authorized device requests and results also pass through OpenAI. Local processing does not mean that submitted prompts or device results stay on your computer.
 
@@ -24,7 +24,7 @@ While a task remains running, a page redraw, composer remount or temporarily una
 
 There is no optional Extension Priority checkbox: the legacy `extensionPriority` key is still boolean-validated, but defaults and normalizes to `true`, including for old saved or imported `false`. Start and Resume are explicit user actions, not new modals, permissions or runtime access grants. Resume retains the original task's prompt, target, interval and counts, not the retired draft-protection policy. This policy does not send drafts to the developer or change Windows/device access grants.
 
-If you manually submit the prepared configured prompt, the current delivery stops writing while observing its matching new history receipt. A confirmed manual delivery is recorded separately as `manual-sent`, not an extension dispatch. It consumes that queue item and the configured delivery limit once, then retains the original interval/reply scheduling. A click, an empty editor, unrelated text or a historical identical message alone does not establish delivery.
+If you manually submit the prepared configured prompt, including a held/repeated Enter submission from the intended editor, the current delivery stops writing while observing its matching new history receipt. A confirmed manual delivery is recorded separately as `manual-sent`, not an extension dispatch. It consumes that queue item and the configured delivery limit once, then retains the original interval/reply scheduling. A click, an empty editor, unrelated text or a historical identical message alone does not establish delivery.
 
 ## Stored Data
 

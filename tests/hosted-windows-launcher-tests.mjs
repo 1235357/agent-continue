@@ -39,6 +39,10 @@ param(
     [string]$InstallDir
 )
 $ErrorActionPreference = 'Stop'
+$PSModuleAutoLoadingPreference = 'None'
+foreach ($module in @('Microsoft.PowerShell.Management', 'Microsoft.PowerShell.Utility')) {
+    Import-Module ([IO.Path]::Combine($PSHOME, 'Modules', $module, "$module.psd1")) -ErrorAction Stop
+}
 $call = @{
     package = $PSScriptRoot; installLocal = [bool]$InstallLocal; consent = $Consent
     setupRequest = $SetupRequest; extensionId = $ExtensionId; tunnelId = $TunnelId
@@ -121,6 +125,7 @@ test('Windows hosted acceptance launcher with a local stub ZIP', {skip: process.
   const sums = ['install.ps1', 'bin.mjs'].map(name =>
     sha256(readFileSync(path.join(payload, name))) + '  ' + name + '\n').join('');
   writeFileSync(path.join(payload, 'SHA256SUMS.txt'), sums);
+  const expectedSetup = snapshot(payload);
   // Fixture preparation is not a launcher operation. A cold hosted Windows
   // runner gets its own bounded assembly-load budget; launch checks stay 15s.
   const packed = run(['-Command', [
@@ -142,7 +147,10 @@ test('Windows hosted acceptance launcher with a local stub ZIP', {skip: process.
   writeFileSync(path.join(previewFiles, 'setup.html'), '<title>Not extracted</title>\n');
   writeFileSync(path.join(previewFiles, 'install.cmd'), '@exit /b 99\n');
   writeFileSync(path.join(previewFiles, 'runtime.mjs'), '// Nested payload must stay nested.\n');
-  const setupFiles = readdirSync(payload).map(name => [name, path.join(payload, name)]);
+  // Windows/PowerShell can initialize profile caches in a disposable working
+  // tree. They are not members of the synthetic installer payload.
+  mkdirSync(path.join(payload, 'Microsoft'), {recursive: true});
+  const setupFiles = expectedSetup.map(([name]) => [name, path.join(payload, name)]);
   const previewMembers = [
     ...setupFiles.map(([name, file]) => ['WindowsSetup/' + name, file]),
     ['WindowsSetup/install.cmd', path.join(previewFiles, 'install.cmd')],
@@ -212,7 +220,7 @@ test('Windows hosted acceptance launcher with a local stub ZIP', {skip: process.
       assert.deepEqual(snapshot(root), before, 'launcher must not change the fixture tree');
     }
 
-    function assertOneStart(expectedPackage = snapshot(payload)) {
+    function assertOneStart(expectedPackage = expectedSetup) {
       const calls = readFileSync(path.join(localAppData, 'fixture-installer-calls.jsonl'), 'utf8')
         .trim().split(/\r?\n/).map(line => JSON.parse(line));
       assert.deepEqual(calls, [{
@@ -343,7 +351,7 @@ test('Windows hosted acceptance launcher with a local stub ZIP', {skip: process.
     assert.equal(receipt.archiveLayout, 'windows-preview-kit');
     assert.equal(receipt.hostedToolCallVerified, false);
     const expected = [
-      ...snapshot(payload),
+      ...expectedSetup,
       ['install.cmd', sha256(readFileSync(path.join(previewFiles, 'install.cmd')))],
       ['payload', 'directory'],
     ].sort(([left], [right]) => left.localeCompare(right));

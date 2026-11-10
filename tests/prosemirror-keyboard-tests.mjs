@@ -107,7 +107,7 @@ function fixture({ noSend = false, rejectSynthetic = false, recurringRestore = f
     fixture.restores = (fixture.restores || 0) + 1;
   }));
   for(const type of ['keydown','keypress','keyup'])window.pm.dom.addEventListener(type,event=>{
-    fixture.events.push({type,key:event.key,code:event.code,keyCode:event.keyCode,ctrlKey:event.ctrlKey,trusted:event.isTrusted});
+    fixture.events.push({type,key:event.key,code:event.code,keyCode:event.keyCode,ctrlKey:event.ctrlKey,trusted:event.isTrusted,repeat:event.repeat});
   });
   if(button)button.addEventListener('click',clickSend);
   };
@@ -116,18 +116,22 @@ function fixture({ noSend = false, rejectSynthetic = false, recurringRestore = f
     const replacement=button.cloneNode(true);button.replaceWith(replacement);button=replacement;
     button.addEventListener('click',clickSend);fixture.sendReplacements=(fixture.sendReplacements||0)+1;
   });
-  window.fixtureRemountComposer=()=>{
+  window.fixtureRemountComposer=(restorePrepared=false)=>{
     const previous=window.pm;
     const oldForm=previous.dom.closest('[data-composer-body]');
     const replacement=document.createElement('form');replacement.dataset.composerBody='';
     replacement.innerHTML='<div data-composer-input id="editorMount"></div><button type="button" aria-label="Send" disabled>Send</button>';
-    const props={...previous.props,state:EditorState.create({schema,plugins:previous.state.plugins})};
+    const props={...previous.props,state:restorePrepared?previous.state:EditorState.create({schema,plugins:previous.state.plugins})};
     clearTimeout(sendActivationTimer);previous.destroy();oldForm.replaceWith(replacement);
     button=replacement.querySelector('button[aria-label="Send"]');
     window.pm=new EditorView(replacement.querySelector('#editorMount'),props);bindControls();
     window.fixtureDetachedForms??=[];window.fixtureDetachedForms.push(oldForm);
     fixture.remounts=(fixture.remounts||0)+1;
-    window.pm.dispatch(window.pm.state.tr.insertText('PM_SYNTHETIC_CHANGED_DRAFT_AFTER_FULL_FORM_REMOUNT'));
+    if(restorePrepared)window.pm.dom.addEventListener('input',()=>{
+      fixture.remountActivationInputs=(fixture.remountActivationInputs||0)+1;
+      button.disabled=!window.pm.state.doc.textContent.trim();
+    });
+    else window.pm.dispatch(window.pm.state.tr.insertText('PM_SYNTHETIC_CHANGED_DRAFT_AFTER_FULL_FORM_REMOUNT'));
     fixture.remountedDraft=window.pm.state.doc.textContent;
   };
   window.fixtureAddAttachment=removable=>{
@@ -288,12 +292,12 @@ try {
       const index = Number(url.pathname.split('-').at(-1));
       return route.fulfill({ status: 200, contentType: 'text/html', body: fixture({
         noSend: index === 3, rejectSynthetic: [4, 6, 8, 9, 10].includes(index),
-        supported: [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 19, 22, 23, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52].includes(index),
+        supported: [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 19, 22, 23, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56].includes(index),
         sendActivationDelayMs: index === 40 ? 2000 : index === 25 ? 2500 : [11, 16].includes(index) ? 21000 : [17, 20, 21].includes(index) ? 200 : [6, 8, 9, 10, 12, 13, 14, 15].includes(index) ? 100 : 0,
-        receiptDelayMs: index === 18 ? 8000 : [28, 48, 49, 50, 51, 52].includes(index) ? 800 : index === 29 ? 5000 : 0,
+        receiptDelayMs: index === 18 ? 8000 : [28, 48, 49, 50, 51, 52, 56, 57].includes(index) ? 800 : index === 29 ? 5000 : 0,
         manualReceiptDuringReadiness: index === 9 || index === 10, ignoreButtonSubmit: index === 9,
         recurringRestore: index === 7,
-        holdSendDisabled: [33, 48, 49, 50, 51, 52].includes(index),
+        holdSendDisabled: [33, 48, 49, 50, 51, 52, 56, 57].includes(index),
         fullForm: [36, 37, 38, 39, 40, 41].includes(index),
       }) });
     }
@@ -1995,6 +1999,144 @@ try {
       await worker.evaluate(() => { chrome.scripting.executeScript = originalGapExecute; delete globalThis.originalGapExecute; });
     }
   });
+  await scenario('Trusted Enter on a composer tool cannot seal a prepared delivery as a manual Send', async page => {
+    await page.evaluate(() => {
+      const tool = document.createElement('button');
+      tool.type = 'button'; tool.textContent = 'Attach files';
+      document.querySelector('[data-composer-body]').append(tool);
+      tool.addEventListener('keydown', event => {
+        if (event.key === 'Enter' && event.isTrusted) fixture.trustedToolEnters = (fixture.trustedToolEnters || 0) + 1;
+      });
+    });
+    await worker.evaluate(() => {
+      globalThis.originalToolGrant = chrome.tabs.sendMessage;
+      chrome.tabs.sendMessage = async (tabId, message, options) => {
+        if (message.type === 'GRANT_RUN') await new Promise(resolve => { globalThis.releaseToolGrant = resolve; });
+        return originalToolGrant(tabId, message, options);
+      };
+    });
+    await start(page, { sendMethod: 'auto' });
+    const sending = call({ type: 'SEND_NOW' });
+    try {
+      for (let poll = 0; poll < 200 && !await worker.evaluate(() => typeof globalThis.releaseToolGrant === 'function'); poll++)
+        await new Promise(resolve => setTimeout(resolve, 25));
+      assert.equal(await worker.evaluate(() => typeof globalThis.releaseToolGrant), 'function');
+      await page.getByRole('button', { name: 'Attach files', exact: true }).press('Control+Enter');
+      const manual = await page.evaluate(() => ({
+        trusted: fixture.trustedToolEnters,
+        sealed: [...globalThis[Symbol.for('agent-continue.editor-commit.v1')].values()].some(state => state.manualSubmission),
+      }));
+      assert.equal(manual.trusted, 1);
+      assert.equal(manual.sealed, false, 'A composer tool key must not seal the prepared MAIN reservation.');
+      await worker.evaluate(() => releaseToolGrant());
+      const outcome = await sending;
+      assert.equal(outcome.job.sentCount, 1, outcome.job.statusText);
+      assert.equal(outcome.job.manualSentCount || 0, 0);
+      assert.equal(outcome.job.unknownCount, 0);
+      const actual = await inspect(page);
+      assert.deepEqual([actual.buttonClicks, actual.submits], [1, 1]);
+      assert.deepEqual(actual.sentTexts, [prompt]);
+    } finally {
+      await worker.evaluate(() => globalThis.releaseToolGrant?.());
+      await call({ type: 'PAUSE' }); await sending;
+      await worker.evaluate(() => {
+        chrome.tabs.sendMessage = originalToolGrant;
+        delete globalThis.originalToolGrant; delete globalThis.releaseToolGrant;
+      });
+    }
+  });
+  for (const lostPrepare of [false, true]) await scenario(
+    lostPrepare ? 'A lost prepare reply reactivates a restored model once on the replacement editor in the same reservation'
+      : 'Read-only readiness detects a restored-model remount and retries preparation without a total send deadline', async page => {
+      await worker.evaluate(lostPrepare => {
+        globalThis.originalRestoredExecute = chrome.scripting.executeScript;
+        globalThis.restoredProbe = { preparations: 0, observations: 0, remounted: false, tokens: [], commits: 0 };
+        chrome.scripting.executeScript = async options => {
+          if (options.func?.name !== 'editorCommit') return originalRestoredExecute(options);
+          const { phase, receiptBoundaryToken } = options.args[0];
+          restoredProbe.tokens.push(receiptBoundaryToken);
+          if (phase === 'prepare') restoredProbe.preparations++;
+          if (phase === 'observe') restoredProbe.observations++;
+          if (phase === 'commit') restoredProbe.commits++;
+          if (!lostPrepare && phase === 'observe' && !restoredProbe.remounted) {
+            await originalRestoredExecute({ target: options.target, world: 'MAIN', func: () => window.fixtureRemountComposer(true) });
+            restoredProbe.remounted = true;
+          }
+          const frames = await originalRestoredExecute(options);
+          if (lostPrepare && phase === 'prepare' && !restoredProbe.remounted) {
+            await originalRestoredExecute({ target: options.target, world: 'MAIN', func: () => window.fixtureRemountComposer(true) });
+            restoredProbe.remounted = true;
+            return [];
+          }
+          return frames;
+        };
+      }, lostPrepare);
+      await start(page, { sendMethod: 'auto' });
+      const sending = call({ type: 'SEND_NOW' });
+      try {
+        for (let poll = 0; poll < 200 && !await page.evaluate(() => fixture.remountActivationInputs > 0); poll++)
+          await new Promise(resolve => setTimeout(resolve, 25));
+        assert.equal(await page.evaluate(() => fixture.remountActivationInputs || 0), 1,
+          'The restored replacement model must receive one preparation input notification.');
+        const outcome = await sending;
+        assert.equal(outcome.job.sentCount, 1, outcome.job.statusText);
+        assert.equal(outcome.job.manualSentCount || 0, 0);
+        assert.equal(outcome.job.unknownCount, 0);
+        const probe = await worker.evaluate(() => restoredProbe);
+        assert.equal(probe.preparations, 2);
+        assert.equal(probe.commits, 1);
+        assert.equal(new Set(probe.tokens).size, lostPrepare ? 1 : 2);
+        const actual = await inspect(page);
+        assert.equal(actual.remounts, 1);
+        assert.equal(actual.updates, 3, 'Only the two preparations and successful Send may write the model.');
+        assert.deepEqual([actual.buttonClicks, actual.keyboardCommands, actual.submits], [1, 0, 1]);
+        assert.deepEqual(actual.sentTexts, [prompt]);
+      } finally {
+        await call({ type: 'PAUSE' }); await sending;
+        await worker.evaluate(() => {
+          chrome.scripting.executeScript = originalRestoredExecute;
+          delete globalThis.originalRestoredExecute; delete globalThis.restoredProbe;
+        });
+      }
+    });
+  for (const legacy of [false, true]) await scenario(
+    `A held trusted Ctrl+Enter sends a prepared prompt once without refill (${legacy ? 'legacy' : 'MAIN'})`, async page => {
+      const grantKey = legacy ? 'legacy' : 'main';
+      assert.equal(await page.evaluate(() => !!pm.dom.editor?.view), !legacy, '明确覆盖 MAIN 与 legacy 两条路径');
+      await page.locator('[contenteditable="true"]').focus();
+      await page.keyboard.down('Control');
+      await page.keyboard.down('Enter');
+      assert.equal((await inspect(page)).submits, 0, '按住键的首次事件发生在空输入框');
+      await worker.evaluate(() => {
+        globalThis.originalRepeatGrant = chrome.tabs.sendMessage;
+        chrome.tabs.sendMessage = (tabId, message, options) => message.type === 'GRANT_RUN'
+          ? new Promise(() => {}) : originalRepeatGrant(tabId, message, options);
+      });
+      await start(page, { sendMethod: 'auto', intervalMinutes: 30 });
+      const sending = call({ type: 'SEND_NOW' });
+      try {
+        await page.waitForFunction(text => pm.state.doc.textBetween(0, pm.state.doc.content.size, '\n') === text, prompt);
+        await page.keyboard.down('Enter');
+        const human = await inspect(page);
+        assert.equal(human.events.filter(event => event.type === 'keydown' && event.repeat && event.trusted).length, 1);
+        assert.equal(human.submits, 1, `${grantKey} 重复按键已实际触发站点提交`);
+        const updatesAfterHuman = human.updates;
+        await page.keyboard.up('Enter'); await page.keyboard.up('Control');
+        const outcome = await sending;
+        assert.equal(outcome.job.sentCount, 0, '人工提交不能计入扩展发送');
+        assert.equal(outcome.job.manualSentCount, 1);
+        await new Promise(resolve => setTimeout(resolve, 1200));
+        const actual = await inspect(page);
+        assert.equal(actual.updates, updatesAfterHuman, '人工重复按键发送后不得重新填入');
+        assert.deepEqual([actual.submits, actual.buttonClicks], [1, 0]);
+        assert.deepEqual(actual.sentTexts, [prompt]);
+        assert.equal(await page.evaluate(() => pm.state.doc.textContent), '');
+      } finally {
+        await page.keyboard.up('Enter'); await page.keyboard.up('Control');
+        await call({ type: 'PAUSE' }); await sending;
+        await worker.evaluate(() => { chrome.tabs.sendMessage = originalRepeatGrant; delete globalThis.originalRepeatGrant; });
+      }
+    });
   console.log(`RESULT ${selectedCases ? selectedCases.length : passed}/${selectedCases ? selectedCases.length : passed} official ProseMirror MV3 scenarios passed`);
 } finally {
   await closeBrowser();

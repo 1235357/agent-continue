@@ -1,6 +1,33 @@
 # Validation and Evidence Boundaries
 
-## Version 2.2.1
+## Version 3.0.12 — Unreleased Candidate, November 11, 2026
+
+The complete current local `npm test` run exited successfully after the
+held/repeated-Enter manual-takeover correction. It includes editor104/104,
+background80/80, scheduler state64/64, release adapter72/72, integration14/14,
+UI41/41, support59/59, official ProseMirror/MV3 57/57 and separate editor browser
+11/11. The complete57-case MV3 suite also passed against a freshly extracted
+runtime-only Store ZIP. No case-selection environment variable narrowed those
+runs. Local page fixtures are not signed-in ChatGPT or Dot acceptance.
+
+Additional current local runs: native285total/281pass/0fail/4platform skips;
+bootstrap297total/281pass/0fail/16security/platform/cache skips; Python packaging
+and release tests206total/161pass/0fail/45platform/runtime skips. The standalone
+combined setup release tests passed17/17. Skipped checks are unverified, not
+passed. The hosted Windows launcher passed12/12 with a freshly built preview
+kit's read-only Plan; that is neither real installation nor a replacement for
+fresh GitHub Actions evidence about the earlier cloud timeouts.
+
+Fresh candidate administrator, combined setup and extension package bytes have
+been assembled and checked locally without installing or activating them. Final
+setup-linked packaged-browser checks are tracked separately in the
+[Runtime Acceptance record](https://github.com/1235357/agent-continue/blob/main/docs/RUNTIME-ACCEPTANCE.md).
+Current-candidate signed-in sending, administrator file/shell/process tools,
+Pause/Revoke, full browser-reopen recovery, GitHub publication and Chrome Web
+Store submission all still require their own actual receipts. Historical r11 or
+3.0.4 deployment evidence cannot establish those requirements for this candidate.
+
+## Version 2.2.1 — Historical Scheduler-only Release
 
 The scheduler patch has a fresh successful local `npm test` run covering ordinary
 ChatGPT, Dot, document import, bilingual UI, real isolated MV3 loading, browser

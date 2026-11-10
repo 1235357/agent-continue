@@ -18,7 +18,7 @@ function writerHarness(logs=[]) {
     async get(){return {logs:copy(state.logs)};},
     async set(value){state.logs=copy(value.logs);},
   }}};
-  return {state,write:runInNewContext(`${writerSource}\nlogEvent`,{chrome})};
+  return {state,write:runInNewContext(`${writerSource}\nlogEvent`,{chrome,activityEpoch:0})};
 }
 let importId=0;
 const results=[];

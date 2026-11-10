@@ -480,7 +480,7 @@ export async function pageAction(args) {
       submitting = target === composer || (composer.contains(target) && target?.matches?.('form'));
     } else if (event.type === 'keydown') {
       submitting = (target === editor || editor.contains(target)) && event.key === 'Enter'
-        && !event.shiftKey && !event.altKey && !event.isComposing && event.keyCode !== 229 && !event.repeat && !event.defaultPrevented
+        && !event.shiftKey && !event.altKey && !event.isComposing && event.keyCode !== 229 && !event.defaultPrevented
         && (!isDot || event.ctrlKey === true || event.metaKey === true);
     }
     if (!submitting || !samePage() || !sameComposer() || !payloadMatches()) return;

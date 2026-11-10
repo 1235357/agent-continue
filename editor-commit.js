@@ -193,8 +193,9 @@ export function editorCommit(args) {
         const target = event.target instanceof Element ? event.target : event.target?.parentElement;
         const button = target?.closest(sendSelector);
         const click = event.type === 'click' && button && currentComposer.contains(button) && enabledSend(button);
-        const enter = event.type === 'keydown' && currentComposer.contains(target) && event.key === 'Enter'
-          && !event.shiftKey && !event.altKey && !event.isComposing && (!isDot || event.ctrlKey || event.metaKey);
+        const enter = event.type === 'keydown' && (target === currentEditor || currentEditor.contains(target)) && event.key === 'Enter'
+          && !event.shiftKey && !event.altKey && !event.isComposing && event.keyCode !== 229 && !event.defaultPrevented
+          && (!isDot || event.ctrlKey || event.metaKey);
         if (!click && !enter) return;
         receiptState.manualSubmission = true;
         receiptState.counters.manualIntents++;
@@ -205,8 +206,13 @@ export function editorCommit(args) {
       };
       receiptState.manualEditor = editor;
     }
+    const samePreparedBinding = receiptState?.prepared === true && receiptState.preparedEditor === editor
+      && receiptState.preparedComposer === composer && receiptState.preparedView === view;
     if (phase === 'observe') {
       supported = true;
+      // Observation cannot activate a replacement view. Let the caller retry
+      // known-unsubmitted preparation instead of waiting on its stale binding.
+      if (receiptState?.prepared && !samePreparedBinding) return result('composer-changed', { hasSend: initiallyHasSend });
       return result(readiness(), { hasSend: initiallyHasSend });
     }
     const writeModel = transaction => {
@@ -232,7 +238,7 @@ export function editorCommit(args) {
     let failure;
     // After preparation, don't restart the framework's delayed activation by
     // redundantly dispatching the same model. Changed text is still replaced.
-    const repeatsPreparedModel = phase === 'prepare' && receiptState?.prepared === true;
+    const repeatsPreparedModel = phase === 'prepare' && samePreparedBinding;
     if ((!repeatsPreparedModel && args.phase !== 'commit') || logicalText(view.state.doc) !== prompt) {
       const state = view.state;
       let transaction = prepare(state);
@@ -269,7 +275,9 @@ export function editorCommit(args) {
     failure = committedGuard();
     if (failure) return result(failure);
     if (phase === 'prepare') {
-      if (receiptState) receiptState.prepared = true;
+      if (receiptState) Object.assign(receiptState, {
+        prepared: true, preparedEditor: editor, preparedComposer: composer, preparedView: view,
+      });
       return result('prepared', { hasSend: initiallyHasSend || sendControls().length > 0 });
     }
 
