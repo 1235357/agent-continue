@@ -2,13 +2,17 @@
 
 ## Admission Recovery Evidence Boundary (2026-11-09)
 
+Fresh IAB on scheduler commit f587a4f: Extension42757423769 test129634927641
+SUCCEEDED11m58s with the full npm command and package/source/pin steps. Local
+tail13/13 and editor11/11 have exit0; the interrupted local full-chain log does
+not. Neither CI nor fixtures establish current installed live-site acceptance.
+
 New red actual-MV3 fixture: rejection before page execution left the current
 run waiting forever. Corrected same-token synchronous page reservation and
 read-only settled-result recovery passed six browser cases, registry/export26/26,
 combined safety121/121 and existing worker57/57. First full npm run stopped at
 fixture START because a real Pause fence from the previous case had not expired.
-The fixture now waits for that actual fence, never clears it. Final npm log:
-.artifacts/send-admission-full-regression-final.log, result pending at this entry.
+The fixture now waits for that actual fence, never clears it.
 Packaging/source/pin tests passed34+7+13.
 Late original and concurrent admissions do not repeat a click; Pause wins.
 This is not current installed ChatGPT/Dot acceptance. The owner activity(3)
@@ -19,6 +23,22 @@ startupPhase=utility,150bytes,0cursor replies, no acquisition. Packaged loopback
 8/8 passed; independent cold CMD did not run. Previous extension CI42754116733
 passed7m36s on6ee8e3f, not the new runtime. No Release or Store submission and
 no production VPN/MCP/IDE/research or installed external-task changes.
+
+## Cold OS Module Dependency (2026-11-09)
+
+Native42757423618/Windows129634924698 repeated the first-prompt failure at
+startupPhase=utility. This is not evidence of a scheduler regression. Removing
+Management preloading from the initializer test reproduced a missing Join-Path;
+correcting only path construction then exposed Get-FileHash's missing Resolve-Path.
+The initializer now explicitly imports OS Management/Utility/Archive using .NET
+paths, without discovery/preference mutation. Refusal still precedes imports.
+Cold/refusal2/2, complete setup-release46/46, protocol15/15, integrity166/166 pass.
+Actual paired ConPTY connect/file/pause passed35.2s; cold CMD passed96.5s,
+including portable Node, shell/file roundtrip, path-drift restart and pause.
+.artifacts/explicit-os-modules-guided.log has terminal3/3, exit0 with the
+closed diagnostic case; installer pin tests13/13 pass. This does not yet
+prove the intermittent hosted-runner symptom eliminated. No installed extension,
+Windows control grant, production connection, Release or Store state changed.
 
 ## Cold CMD And Per-Case CI Admission (2026-11-09)
 

@@ -768,7 +768,6 @@ class SetupReleaseTests(unittest.TestCase):
             code = """
 $ErrorActionPreference = 'Stop'
 $PSModuleAutoLoadingPreference = 'None'
-Import-Module ([IO.Path]::Combine($PSHOME,'Modules/Microsoft.PowerShell.Management/Microsoft.PowerShell.Management.psd1')) -ErrorAction Stop
 $tokens=$null; $errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseFile($env:AC_MODULE_INSTALLER,[ref]$tokens,[ref]$errors)
 if ($errors.Count) { throw 'parse_failed' }
@@ -776,6 +775,7 @@ $definition=$ast.FindAll({param($n) $n -is [Management.Automation.Language.Funct
 if ($definition.Count -ne 1) { throw 'initializer_missing' }
 . ([scriptblock]::Create($definition[0].Extent.Text))
 if (Get-Command Get-FileHash -ErrorAction SilentlyContinue) { throw 'utility_already_loaded' }
+if (Get-Module Microsoft.PowerShell.Management) { throw 'management_already_loaded' }
 Initialize-InstallerModules
 $hash=Get-FileHash -LiteralPath $env:AC_MODULE_FIXTURE -Algorithm SHA256
 $json=ConvertFrom-Json -InputObject '{"ok":true}'
@@ -797,7 +797,7 @@ if ($hash.Hash -cne $env:AC_MODULE_EXPECTED -or -not $json.ok -or
                     "\nInitialize-InstallerModules -ReportGuidedStartup\nInitialize-InstallerModules -ReportGuidedStartup\n")],
                 cwd=root, env=env, capture_output=True, text=True, timeout=20)
             self.assertEqual(reported.returncode, 0, reported.stdout + reported.stderr)
-            self.assertEqual(reported.stdout.splitlines(), ["Preparing Windows utility module.",
+            self.assertEqual(reported.stdout.splitlines(), ["Preparing Windows management module.", "Preparing Windows utility module.",
                 "Preparing Windows archive module.", "Windows setup modules ready.", "exact-os-modules-ready"])
             self.assertEqual(reported.stderr, "")
 

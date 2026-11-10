@@ -2,6 +2,15 @@
 
 ## Same-Invocation Admission Recovery (2026-11-09)
 
+Scheduler fix f587a4f5cb20c24f574c919b1e626ea3d919854f is pushed to unique main.
+Fresh IAB readback: Extension42757423769/job129634927641 SUCCEEDED in11m58s,
+including the complete npm test command and packaging/source/pin steps. This is
+the authoritative complete CI result, not an inference from a vanished local
+shell. Local split tail13/13 and editor11/11 also have explicit exit0 receipts
+in .artifacts/send-admission-regression-tail.log and
+.artifacts/send-admission-editor-browser.log. The interrupted local final chain
+has no whole-command exit0 receipt and is not reported as one.
+
 The owner-provided activity(3) export was reread:3.0.5, five records, one
 no-valid-result at18748ms and one execution-timeout at20003ms, with Pause/Start
 between them. It does not identify whether page admission or result transport
@@ -20,19 +29,42 @@ Targeted browser cases6/6, registry/export26/26, combined safety addendum121/121
 and the existing worker57/57 passed. The first full npm run correctly refused
 the next fixture's START while the previous pre-admission Pause permit fence
 was still live. The fixture now waits for actual fence expiry, without clearing
-or weakening the product guard. The complete final npm run is in
-.artifacts/send-admission-full-regression-final.log; read its terminal result and
-exit before claiming all groups passed. Packaging/source/pin tests34+7+13 pass.
+or weakening the product guard. Packaging/source/pin tests34+7+13 pass.
 Independent reviewer
 could not run because of workspace credits; no fresh independent approval.
 
-Fresh IAB native42754116735/Windows129624371397 FAILED5m19s. Packaged loopback
+Earlier IAB native42754116735/Windows129624371397 FAILED5m19s. Packaged loopback
 8/8 passed; paired guided PowerShell stopped at first prompt in20.7s with150
 bytes,0cursor replies, acquisition not observed, startupPhase=utility. This is
 before the new independent cold-CMD step, which did not run. It is not another
 shared-budget cancellation, and module preparation is localized but not repaired.
-Extension42754116733 SUCCESS7m36s applies to prior main6ee8e3f, not this uncommitted
-runtime change. No rerun, tag, Release, Store upload or production mutation.
+The same first-prompt symptom recurred on f587a4f native42757423618,
+Windows129634924698, FAILED6m4s, startupPhase=utility. Packaged IPC passed;
+cold CMD did not run. The new explicit-module investigation below fixes a
+reproduced dependency defect, but does not yet prove this intermittent CI
+symptom eliminated. No rerun, tag, Release, Store upload or production mutation.
+
+## Explicit OS Module Bootstrap (2026-11-09)
+
+The previous cold initializer test imported Management itself. Removing that
+test-only preload produced a real PS5.1 failure before Utility import:
+Join-Path was unavailable with discovery disabled. A path-only correction then
+exposed Get-FileHash's Resolve-Path dependency on that same module. Production
+now constructs manifest paths with System.IO.Path and explicitly imports OS
+Management, Utility and Archive in that order. No caller module path or
+discovery preference is changed, no permission/check is weakened, and refusal
+still occurs before imports. Closed diagnostics add only the fixed management
+phase; no terminal transcript, paths, commands or credentials are retained.
+
+Red/green targeted cold/refusal2/2, complete setup-release46/46, protocol15/15
+and integrity166/166 passed. Actual paired ConPTY guided install connected,
+read/wrote its fixture file and paused in35.2s. Cold CMD passed96.5s, including
+portable Node provisioning, shell/file roundtrip, path-drift restart and pause.
+.artifacts/explicit-os-modules-guided.log has terminal3/3, exit0, counting the
+two guided cases and closed diagnostic test. Installer pin tests13/13 pass.
+These are disposable loopback tests, not
+new live-site grants or production installation. Existing3.0.6 candidate's setup
+closure predates this bootstrap correction and must be rebuilt before release.
 
 ## Independent Guided CI Budgets And Refreshed Candidate (2026-11-09)
 

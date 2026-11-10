@@ -76,12 +76,15 @@ function Initialize-InstallerModules {
     # PS7 parents can pass their PSModulePath to PS5.1. Load OS modules only
     # after cheap refusal checks, before the first hashing/archive/JSON use.
     if ($PSVersionTable.PSEdition -eq 'Desktop') {
-        foreach ($module in @('Microsoft.PowerShell.Utility', 'Microsoft.PowerShell.Archive')) {
+        foreach ($module in @('Microsoft.PowerShell.Management', 'Microsoft.PowerShell.Utility', 'Microsoft.PowerShell.Archive')) {
             if ($ReportGuidedStartup) {
-                if ($module -eq 'Microsoft.PowerShell.Utility') { [Console]::WriteLine('Preparing Windows utility module.') }
+                if ($module -eq 'Microsoft.PowerShell.Management') { [Console]::WriteLine('Preparing Windows management module.') }
+                elseif ($module -eq 'Microsoft.PowerShell.Utility') { [Console]::WriteLine('Preparing Windows utility module.') }
                 else { [Console]::WriteLine('Preparing Windows archive module.') }
             }
-            Import-Module (Join-Path $PSHOME ("Modules\$module\$module.psd1")) -ErrorAction Stop
+            # Path construction must not autoload Management before OS imports.
+            $moduleManifest = [IO.Path]::Combine($PSHOME, "Modules\$module\$module.psd1")
+            Import-Module $moduleManifest -ErrorAction Stop
         }
     }
     $script:acModulesInitialized = $true

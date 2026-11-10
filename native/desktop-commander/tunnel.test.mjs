@@ -54,7 +54,7 @@ function terminalDiagnostic(root) {
     if (!report || typeof report !== 'object' || Array.isArray(report)
       || Object.keys(report).sort().join(',') !== 'controls,cursorReplies,receivedBytes,startupPhase,state'
       || !['no_bytes', 'control_only', 'prompt_present', 'other_output'].includes(report.state)
-      || !['not-observed', 'utility', 'archive', 'ready'].includes(report.startupPhase)
+      || !['not-observed', 'management', 'utility', 'archive', 'ready'].includes(report.startupPhase)
       || !Number.isInteger(report.receivedBytes) || report.receivedBytes < 0 || report.receivedBytes > 65536
       || !Number.isInteger(report.cursorReplies) || report.cursorReplies < 0 || report.cursorReplies > 8
       || !Array.isArray(report.controls) || report.controls.length > 6
@@ -92,6 +92,10 @@ test('terminal failure diagnostics disclose closed protocol facts only', t => {
     controls: ['cursor-hide', 'cursor-query', 'sgr'], startupPhase: 'not-observed' };
   fs.writeFileSync(file, JSON.stringify(valid));
   assert.deepEqual(terminalDiagnostic(root), { observed: true, ...valid });
+  for (const startupPhase of ['management', 'utility', 'archive', 'ready']) {
+    fs.writeFileSync(file, JSON.stringify({ ...valid, startupPhase }));
+    assert.deepEqual(terminalDiagnostic(root), { observed: true, ...valid, startupPhase });
+  }
   for (const value of [
     { ...valid, command: 'PRIVATE_COMMAND' }, { ...valid, controls: ['PRIVATE_TEXT'] },
     { ...valid, controls: ['sgr', 'sgr'] }, { ...valid, cursorReplies: 9 },

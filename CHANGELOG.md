@@ -32,6 +32,10 @@
 - Recheck late text and attachments after the final legacy readiness wait. A
   corrected unsupported rich editor must settle its model before reobservation
   and dispatch; repainting its DOM alone does not establish the submitted text.
+- Initialize the Windows installer from explicit OS module manifests, including
+  Management for file-hash path resolution. Preparing the first module no longer
+  depends on implicit discovery of Join-Path. The cold-start regression no longer
+  preloads Management on the installer's behalf.
 
 ## [3.0.5] - 2026-11-09
 

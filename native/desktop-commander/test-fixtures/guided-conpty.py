@@ -195,6 +195,7 @@ def read_stage(terminal, deadline, stage, *, prompt=None, line_count=None, echo=
             "controls": [name for name, pattern in controls if re.search(pattern, raw)],
             "startupPhase": max((
                 (observed.rfind(marker), phase) for marker, phase in (
+                    (b"Preparing Windows management module.", "management"),
                     (b"Preparing Windows utility module.", "utility"),
                     (b"Preparing Windows archive module.", "archive"),
                     (b"Windows setup modules ready.", "ready")) if marker in observed

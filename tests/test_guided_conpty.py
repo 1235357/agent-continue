@@ -165,6 +165,7 @@ class GuidedTerminalTests(unittest.TestCase):
 
     def test_startup_failure_retains_only_the_last_fixed_preparation_phase(self):
         for markers, expected in (
+                ([b"Preparing Windows management module."], "management"),
                 ([b"Preparing Windows utility module."], "utility"),
                 ([b"Preparing Windows utility module.", b"Preparing Windows archive module."], "archive"),
                 ([b"Windows setup modules ready."], "ready")):
