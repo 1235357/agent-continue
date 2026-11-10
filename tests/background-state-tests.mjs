@@ -235,7 +235,7 @@ await scenario('Pause rejects a pending redundant result without waiting for an 
   assert.equal(h.state.session.job.sentCount,0);
 });
 
-await scenario('A replacement document ends pre-dispatch observation and the next round binds afresh without replaying the old run',async()=>{
+await scenario('A replacement document ends pre-dispatch observation and continuous recovery binds afresh without replaying the old run',async()=>{
   const h=await harness();await h.start();const gate=deferred();
   let replacement=false;
   h.chrome.scripting.executeScript=async request=>{
@@ -245,7 +245,7 @@ await scenario('A replacement document ends pre-dispatch observation and the nex
       return [{frameId:0,documentId:replacement?'replacement-document':'synthetic-bound-document',result:{state:'absent'}}];
     }
     return [{frameId:0,documentId:replacement?'replacement-document':'synthetic-bound-document',
-      result:request.args[0].mode==='send'?await gate.promise:{status:'ready'}}];
+      result:request.args[0].mode==='send'?(replacement?{status:'sent'}:await gate.promise):{status:'ready'}}];
   };
   const round=h.message({type:'SEND_NOW'});
   await until(()=>h.state.injections.some(item=>item.args[0].mode==='send'));
@@ -254,29 +254,46 @@ await scenario('A replacement document ends pre-dispatch observation and the nex
   replacement=true;
   let completed=false;
   round.then(()=>{completed=true;});
-  for(let i=0;i<150 && !completed;i++) await delay(20);
+  for(let i=0;i<250 && !completed;i++) await delay(20);
   const recovered=completed;
   if(!completed) await h.message({type:'PAUSE'});
   await round;
   assert.equal(recovered,true,'A read-only top-frame probe must detect replacement instead of renewing an unreachable document forever');
   assert.equal(h.state.session.job.enabled,true);
   assert.equal(h.state.session.job.phase,'idle');
-  assert.equal(h.state.session.job.sentCount,0);
+  assert.equal(h.state.session.job.sentCount,1);
   assert.equal(h.state.session.job.unknownCount,0,'Pre-dispatch document loss is a retryable no-send observation, not an ambiguous submit');
-  assert.ok(h.state.session.job.nextAt<Date.now()+65000,'The normal readiness retry, not the full configured interval, schedules a fresh round');
-  assert.equal(h.state.injections.filter(item=>item.args[0].mode==='send').length,1);
+  assert.ok(h.state.session.job.nextAt>Date.now()+29*60000,'The normal interval begins only after the recovered confirmed send');
+  const sends=h.state.injections.filter(item=>item.args[0].mode==='send');
+  assert.equal(sends.length,2);
+  assert.notEqual(sends[0].args[0].runId,sends[1].args[0].runId,'Known no-submit replacement receives fresh authorization');
   for(const request of h.state.injections.filter(item=>item.func.name==='pageInvocationState'))
     assert.equal(request.target.documentIds,undefined,'Replacement diagnosis must not address the destroyed document');
   assert.equal((await h.message({type:'CHECK_RUN',runId:args.runId},h.sender())).allowed,false);
   gate.resolve({status:'sent'});
   await delay(5);
-  assert.equal(h.state.session.job.sentCount,0,'A stale late return cannot count as a current send');
+  assert.equal(h.state.session.job.sentCount,1,'A stale late return cannot count as a current send');
   h.chrome.scripting.executeScript=async request=>{
     h.state.injections.push(request);
     return [{frameId:0,documentId:'replacement-document',result:{status:request.args[0].mode==='check'?'ready':'sent'}}];
   };
-  assert.equal((await h.message({type:'SEND_NOW'})).job.sentCount,1);
+  assert.equal((await h.message({type:'SEND_NOW'})).job.sentCount,2);
   await h.message({type:'PAUSE'});
+});
+
+await scenario('Known pre-submission failures keep retrying without waiting an interval and Pause prevents later admissions',async()=>{
+  const h=await harness();await h.start();let sends=0;
+  h.pageResult=async args=>args.mode==='send'?(++sends,{status:'blocked',retryable:true,message:'Synthetic remount'}):{status:'ready'};
+  const round=h.message({type:'SEND_NOW'});
+  for(let i=0;i<100 && sends<2;i++) await delay(20);
+  assert.ok(sends>=2,'A blocked pre-submit composer must retry without a one-minute or full-interval delay');
+  assert.equal(h.state.session.job.phase,'sending');
+  assert.equal(h.state.session.job.sentCount,0);
+  await h.message({type:'PAUSE'});
+  await round;
+  const stopped=sends;await delay(1100);
+  assert.equal(sends,stopped);
+  assert.equal(h.state.session.job.enabled,false);
 });
 
 await scenario('Document replacement after a submission attempt remains unknown and never authorizes a replacement send',async()=>{

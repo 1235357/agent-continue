@@ -51,6 +51,7 @@ export async function pageAction(args) {
   };
   if (cancellable) chrome.runtime.onMessage.addListener(cancel);
   const action = async () => {
+  let submitted = false;
   const normalizeUrl = value => {
     try {
       const u = new URL(value);
@@ -122,6 +123,8 @@ export async function pageAction(args) {
 
   let beforeAssistant = null;
   const result = (status, message, diagnosticCode) => ({ status, message,
+    ...(args.persistentDelivery === true && !submitted && ['blocked', 'draft', 'busy', 'error'].includes(status)
+      ? { retryable: true } : {}),
     ...(diagnosticCode ? { diagnosticCode } : {}), identity: identity(),
     ...(status === 'sent' ? beforeAssistant : assistantState()) });
   const samePage = () => {
@@ -156,15 +159,21 @@ export async function pageAction(args) {
   };
 
   const stillAllowed = async () => {
-    if (!samePage() || revoked || (!args.resultToken && !withinDeadline())) return false;
-    if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+    while (samePage() && !revoked && (args.resultToken || withinDeadline())) {
+      if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) return false;
       try {
         const reply = await chrome.runtime.sendMessage({ type: 'CHECK_RUN', runId: args.runId });
         if (reply?.allowed === true && Number.isFinite(reply.runDeadline)) args.runDeadline = reply.runDeadline;
-        return reply?.ok === true && reply.allowed === true && samePage() && withinDeadline();
-      } catch {
-        return false;
-      }
+        if (reply?.ok === true && reply.allowed === false) return false;
+        if (reply?.ok === true && reply.allowed === true) {
+          if (!samePage() || revoked) return false;
+          if (withinDeadline()) return true;
+          // A delayed positive reply is not a Pause. Ask for a fresh permit;
+          // never dispatch with the expired one or cancel a live pending send.
+        }
+      } catch { /* A transport rejection is not an explicit Pause or revocation. */ }
+      if (args.persistentDelivery !== true || args.unlimitedReadiness !== true) return false;
+      await new Promise(resolve => setTimeout(resolve, 150));
     }
     return false;
   };
@@ -196,7 +205,9 @@ export async function pageAction(args) {
   if (isDot && !identity()) return result('blocked', '等待 dot 会话历史加载，暂时无法核对目标身份。');
 
   // Guard drafts containing attachments/chips as well as plain text.
-  const hasAttachment = () => !!composer && [...composer.querySelectorAll('[data-testid*="attachment"], [data-file-id], button[aria-label^="Remove file"], button[aria-label^="Remove attachment"], button[aria-label^="移除文件"], button[aria-label^="删除附件"]')].some(visible);
+  const removeAttachmentSelector = 'button[aria-label^="Remove file"], button[aria-label^="Remove attachment"], button[aria-label^="移除文件"], button[aria-label^="删除附件"], button[data-testid*="remove-file"], button[data-testid*="remove-attachment"], [data-file-id] button[aria-label="Remove"], [data-testid*="attachment"] button[aria-label="Remove"]';
+  const hasAttachment = () => !!composer && ([...composer.querySelectorAll('[data-testid*="attachment"], [data-file-id], ' + removeAttachmentSelector)].some(visible)
+    || [...composer.querySelectorAll('input[type="file"]')].some(input => input.files?.length));
   const prompt = String(args.prompt ?? '');
   const normalizeLineEndings = value => value.replace(/\r\n?/g, '\n');
 
@@ -248,7 +259,7 @@ export async function pageAction(args) {
   if (!editable() && !(forceInterrupt && visibleMatches(stopSelector, composer).length === 1)) {
     return result('blocked', '输入框当前不可编辑。');
   }
-  if (hasAttachment()) return protectedDraft('输入框有附件，本次不提交。');
+  if (hasAttachment() && (args.persistentDelivery !== true || args.mode !== 'send')) return protectedDraft('输入框有附件，本次不提交。');
 
   const lastAssistant = [...document.querySelectorAll(assistantSelector)].at(-1);
   if (lastAssistant && args.stopMarkers?.length) {
@@ -278,20 +289,44 @@ export async function pageAction(args) {
   const previousFocus = document.activeElement;
   let inserted = false;
   let insertedDraftSnapshot = null;
-  let submitted = false;
   let interrupted = false;
   let needsRefill = false;
 
-  // React can remount the editor while preserving the same composer. Never
-  // follow an editor into another form or switch to a different composer.
+  // Reacquire a uniquely scoped editor after same-conversation framework
+  // remounts. This never follows a different target or an attempted submission.
   const keepComposer = () => {
     if (sameComposer()) return true;
     const next = findComposer();
-    if (editor.isConnected || !next || next.composer !== composer) return false;
+    if (!next || !samePage() || submitted) return false;
+    if (args.persistentDelivery !== true && (editor.isConnected || next.composer !== composer)) return false;
+    if (!next.composer || [document.body, document.documentElement, next.editor].includes(next.composer)) return false;
     editor = next.editor;
+    composer = next.composer;
     inserted = false;
     insertedDraftSnapshot = null;
     needsRefill = true;
+    return true;
+  };
+
+  const detachAttachments = async () => {
+    while (hasAttachment()) {
+      if (!await stillAllowed() || !keepComposer()) return false;
+      // Use the site's own removal controls, never delete account files or
+      // remove rendered chips behind the framework's upload state.
+      for (const button of visibleMatches(removeAttachmentSelector, composer)) {
+        if (!samePage() || revoked || !sameComposer()) return false;
+        if (enabled(button) && button.isConnected && composer.contains(button)) button.click();
+      }
+      for (const input of composer.querySelectorAll('input[type="file"]')) {
+        if (!samePage() || revoked || !sameComposer()) return false;
+        if (input.files?.length) {
+          input.value = '';
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }
+      if (!hasAttachment()) return true;
+      await wait(150);
+    }
     return true;
   };
 
@@ -502,8 +537,10 @@ export async function pageAction(args) {
   };
 
   try {
-    if (!samePage() || !sameComposer()) return result('blocked', '页面已变化。');
+    if (!samePage() || !keepComposer()) return result('blocked', '页面已变化。');
     if (busy()) return result('busy', 'Agent 仍在运行。');
+    if (hasAttachment() && args.persistentDelivery === true && !await detachAttachments())
+      return result('blocked', '发送控件当前不可用，稍后自动检查。', 'commit-not-dispatched');
     if (hasAttachment()) return protectedDraft('输入框有附件，本次不提交。');
 
     const interruptedResult = await interrupt();
@@ -626,6 +663,7 @@ export async function pageAction(args) {
         await clearOwnDraft();
         return result('cancelled', '已暂停，本次未提交。');
       }
+      if (!sameComposer()) return result('blocked', '发送控件当前不可用，稍后自动检查。', 'commit-not-dispatched');
       if (hasAttachment()) return protectedDraft('提交前检测到附件，已保留输入框内容。');
       if (busy()) {
         await clearOwnDraft();
@@ -773,12 +811,12 @@ export async function pageAction(args) {
 
     beforeAssistant = assistantState();
     rememberVisibleHistory();
-    submitted = true;
 
     const clickButton = btn => {
       if (!btn) return false;
       try {
         if (!btn.isConnected || !composer.contains(btn) || !enabled(btn)) return false;
+        submitted = true;
         btn.click();
         return true;
       } catch { return false; }
@@ -792,6 +830,7 @@ export async function pageAction(args) {
           bubbles: true, cancelable: true, composed: true, view: window
         };
         const downEvent = new KeyboardEvent('keydown', keyOpts);
+        submitted = true;
         editor.dispatchEvent(downEvent);
         editor.dispatchEvent(new KeyboardEvent('keyup', keyOpts));
         return true;
@@ -803,6 +842,8 @@ export async function pageAction(args) {
     } else {
       dispatchKey(useKeyboardOnly || isDot);
     }
+
+    if (!submitted) return result('blocked', '发送控件当前不可用，稍后自动检查。', 'commit-not-dispatched');
 
     return await confirmSubmission();
   } catch (error) {

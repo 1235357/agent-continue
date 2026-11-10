@@ -1,6 +1,26 @@
 # Changelog
 
-## [3.0.9] - Unreleased
+## [3.0.10] - 2026-11-10
+
+- Keep preparing and retrying a known unsubmitted prompt continuously instead
+  of ending the cycle after a composer redraw, unavailable control or temporary
+  pre-submission failure. There is no total preparation/readiness wait deadline.
+- Reacquire a unique composer after same-conversation form/editor replacement,
+  overwrite its unsent text, and remove pending attachments through the site's
+  scoped removal controls before sending the configured pure-text prompt.
+  Account files are not deleted. Manual Pause and exact target binding remain.
+- Mark a legacy submission attempt only immediately before the actual click or
+  key dispatch. A disconnected button that was never clicked must not strand the
+  run waiting for a receipt. Attempted/uncertain submissions are not blindly sent
+  again; confirmed counts still require a new corresponding message receipt.
+- Preserve all 3.0.9 transport, receipt, document-replacement and Windows/PDF
+  corrections. Update English/Chinese notices and privacy/listing disclosures to
+  match pending-attachment removal and persistent same-target preparation.
+- Refresh an expired positive authorization reply instead of cancelling a live
+  pending send; detect a detached legacy composer during readiness rather than
+  continuing to query its obsolete Send control indefinitely.
+
+## [3.0.9] - 2026-11-10
 
 - Recover preparation/readiness transport and delayed message receipts inside
   the same authorized background invocation, without a total live-send wait

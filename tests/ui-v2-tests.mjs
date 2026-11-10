@@ -31,8 +31,8 @@ const checks = [];
 const pass = name => { checks.push(name); console.log('PASS ' + name); };
 pass('Config: mandatory priority defaults to true, normalizes legacy false without mutating input, preserves other settings, and rejects non-booleans.');
 const priorityNotices = {
-  en: 'Scheduled sends replace unsent text in the bound conversation. Attachments are not submitted.',
-  zh_CN: '定时发送会替换绑定会话中的未发送文字，不会提交附件。',
+  en: 'Scheduled sends replace unsent text and remove pending attachments before sending the configured prompt.',
+  zh_CN: '定时发送会替换未发送文字，并在发送配置的提示词前移除待发送附件。',
 };
 const original = { ...structuredClone(DEFAULT_CONFIG), prompt: 'SYNTHETIC-PRIVATE-PROMPT\n  Preserve these spaces.\n', intervalMinutes: 20,
   queue: [{ name: '合成队列 A', text: 'SYNTHETIC-QUEUE-A' }, { name: '合成队列 B', text: 'SYNTHETIC-QUEUE-B' }] };

@@ -292,7 +292,7 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS) {
           if (pending.documentId && frame.documentId && pending.documentId !== frame.documentId) {
             const beforeDispatch = ['page', 'prepare', 'readiness'].includes(pending.stage);
             pending.resolve(beforeDispatch
-              ? { status: 'blocked', message: t('\u9875\u9762\u5df2\u53d8\u5316\u3002'), diagnosticCode: 'commit-not-dispatched' }
+              ? { status: 'blocked', message: t('\u9875\u9762\u5df2\u53d8\u5316\u3002'), diagnosticCode: 'commit-not-dispatched', retryable: true }
               : { status: 'unknown', message: t('\u9875\u9762\u672a\u8fd4\u56de\u53ef\u786e\u8ba4\u7684\u7ed3\u679c\u3002') });
             return;
           }
@@ -362,7 +362,8 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS) {
     const diagnosticCode = (value.status === 'draft' && value.diagnosticCode === 'existing-draft')
       || (value.status === 'busy' && value.diagnosticCode === 'send-not-ready')
       || (value.status === 'blocked' && value.diagnosticCode === 'commit-not-dispatched') ? value.diagnosticCode : null;
-    return { status: value.status, message: String(value.message || '').slice(0, 300), identity: typeof value.identity === 'string' ? value.identity.slice(0, 500) : null, assistantToken: typeof value.assistantToken === 'string' ? value.assistantToken.slice(0, 500) : null, assistantCount: Number(value.assistantCount) || 0, diagnosticCode, executionDiagnostic: executionDiagnostic() };
+    return { status: value.status, message: String(value.message || '').slice(0, 300), identity: typeof value.identity === 'string' ? value.identity.slice(0, 500) : null, assistantToken: typeof value.assistantToken === 'string' ? value.assistantToken.slice(0, 500) : null, assistantCount: Number(value.assistantCount) || 0, diagnosticCode, executionDiagnostic: executionDiagnostic(),
+      retryable: value.retryable === true && ['blocked', 'draft', 'busy', 'error'].includes(value.status) };
   } catch (error) {
     if (watchdogExpired) return { status: 'unknown', message: t('页面操作超时，本周期结果未确认。'), diagnosticCode: rejectedResult ? 'execution-exception' : missingResult ? 'no-valid-result' : 'execution-timeout', executionDiagnostic: executionDiagnostic() };
     throw error;
@@ -789,8 +790,9 @@ async function runRound(force = false, expectedJobId = null) {
     await setJob(snapshot); await updateBadge(snapshot); return { job: snapshot, claimed: true };
   });
   if (!claim.claimed) return { ok: true, job: claim.job };
-  const snapshot = claim.job;
+  let snapshot = claim.job;
   let result;
+  for (;;) {
   try {
     const resolved = await resolveTarget(snapshot);
     if (!resolved.tab) result = resolved;
@@ -809,9 +811,23 @@ async function runRound(force = false, expectedJobId = null) {
       const changed = result.assistantToken ? result.assistantToken !== snapshot.assistantToken : result.assistantCount > snapshot.assistantCount;
       if (result.status === 'ready') result = changed ? { status: 'reply-complete' } : { status: 'busy', message: t('等待新的 Agent 回复完成。') };
     } else {
-      result = await executePage({ mode: 'send', expectedUrl: snapshot.url, prompt: currentPrompt(snapshot), runId: snapshot.runId, runDeadline: snapshot.runDeadline, stopMarkers: snapshot.stopMarkers ?? [], waitForIdle: snapshot.waitForIdle ?? false, extensionPriority: true, extensionClock: true, modelCommit: true, unlimitedReadiness: true, sendMethod: snapshot.sendMethod ?? 'auto', targetIdentity: snapshot.targetIdentity }, snapshot.tabId, snapshot.runDeadline);
+      result = await executePage({ mode: 'send', expectedUrl: snapshot.url, prompt: currentPrompt(snapshot), runId: snapshot.runId, runDeadline: snapshot.runDeadline, stopMarkers: snapshot.stopMarkers ?? [], waitForIdle: snapshot.waitForIdle ?? false, extensionPriority: true, extensionClock: true, modelCommit: true, unlimitedReadiness: true, persistentDelivery: true, sendMethod: snapshot.sendMethod ?? 'auto', targetIdentity: snapshot.targetIdentity }, snapshot.tabId, snapshot.runDeadline);
     }
   } catch { result = snapshot.runKind === 'reply-check' ? { status: 'error', message: t('回复检查暂不可用，继续等待新回复。') } : { status: 'unknown', message: t('后台页面操作未确认。'), diagnosticCode: 'execution-exception' }; }
+  if (snapshot.runKind !== 'send' || result?.retryable !== true || !await runStillCurrent(snapshot)) break;
+  // Only an explicit pre-submission result can start a fresh admission. Retire
+  // the old run/commit reservation; uncertain or attempted sends never enter here.
+  await new Promise(resolve => setTimeout(resolve, 1000));
+  const renewed = await transact(async () => {
+    const current = await getJob();
+    if (!current?.enabled || current.phase !== 'sending' || current.id !== snapshot.id || current.runId !== snapshot.runId) return null;
+    const next = { ...current, runId: token(), editorCommitRunId: null, runDeadline: Date.now() + EXECUTION_MS,
+      statusText: t('仍在等待目标页面或发送回执；无固定等待时限，可随时暂停。') };
+    await setJob(next);await updateBadge(next);return next;
+  });
+  if (!renewed) break;
+  snapshot = renewed;
+  }
   return finishRound(snapshot, result);
 }
 async function initializePrivatePreset() {

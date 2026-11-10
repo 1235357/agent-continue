@@ -38,24 +38,27 @@ let control;
 let passed = 0;
 
 function fixture({ noSend = false, rejectSynthetic = false, recurringRestore = false, supported = false, sendActivationDelayMs = 0, receiptDelayMs = 0,
-  manualReceiptDuringReadiness = false, ignoreButtonSubmit = false, holdSendDisabled = false } = {}) {
+  manualReceiptDuringReadiness = false, ignoreButtonSubmit = false, holdSendDisabled = false, fullForm = false } = {}) {
   return `<!doctype html><meta charset="utf-8"><title>Official ProseMirror fixture</title>
   <style>${editorCss}body{font:16px sans-serif;padding:20px}.ProseMirror{min-height:90px;border:1px solid;padding:12px}.message-body{white-space:pre-wrap}</style>
   <main id="history"><article class="message-row" data-message-id="pm-account~pm-dot~old"><div class="message-body">Earlier synthetic response.</div></article></main>
-  <div data-composer-body><div data-composer-input id="editorMount"></div>${noSend ? '' : '<button type="button" aria-label="Send" disabled>Send</button>'}</div>
+  <${fullForm ? 'form' : 'div'} data-composer-body><div data-composer-input id="editorMount"></div>${noSend ? '' : '<button type="button" aria-label="Send" disabled>Send</button>'}</${fullForm ? 'form' : 'div'}>
   <script type="importmap">${JSON.stringify({ imports })}</script>
   <script type="module">
   import {EditorView} from 'prosemirror-view';import {EditorState} from 'prosemirror-state';
   import {schema} from 'prosemirror-schema-basic';import {keymap} from 'prosemirror-keymap';
   window.fixture={updates:0,buttonClicks:0,keyboardCommands:0,submits:0,events:[],sentTexts:[],lastKeyTrusted:null,
-    modelUpdates:[],sendActivations:[],submissionStates:[],sendActivationDelayMs:${JSON.stringify(sendActivationDelayMs)}};
-  const button=document.querySelector('button[aria-label="Send"]');
+    modelUpdates:[],sendActivations:[],submissionStates:[],submissionPayloads:[],sendActivationDelayMs:${JSON.stringify(sendActivationDelayMs)}};
+  let button=document.querySelector('button[aria-label="Send"]');
   let sendActivationTimer;
   const submit=method=>{
     if(method==='button' && ${JSON.stringify(ignoreButtonSubmit)})return;
     const text=window.pm.state.doc.textBetween(0,window.pm.state.doc.content.size,'\\n');
     if(!text.trim())return;
     fixture.submits++;fixture.sentTexts.push(text);
+    const composer=window.pm.dom.closest('[data-composer-body]');
+    fixture.submissionPayloads.push({text,attachments:composer.querySelectorAll('[data-testid="attachment"]').length,
+      files:[...composer.querySelectorAll('input[type="file"]')].reduce((count,input)=>count+input.files.length,0)});
     document.documentElement.dataset.fixtureSubmitted='true';
     fixture.submissionStates.push({method,hidden:document.hidden,focused:document.hasFocus(),sendDisabled:button?.disabled});
     const insertReceipt=()=>{
@@ -90,6 +93,11 @@ function fixture({ noSend = false, rejectSynthetic = false, recurringRestore = f
       }else if(button)button.disabled=!next.doc.textContent.trim();
     }
   });
+  const clickSend=event=>{
+    if(!event.currentTarget.isConnected)fixture.staleButtonClicks=(fixture.staleButtonClicks||0)+1;
+    fixture.buttonClicks++;submit('button');
+  };
+  const bindControls=()=>{
   window.pm.dom.addEventListener('keydown',event=>{fixture.lastKeyTrusted=event.isTrusted},true);
   // Only this explicit Tiptap-compatible fixture exposes a documented DOM owner.
   // The vanilla PM cases above exercise the unsupported-view event fallback.
@@ -101,7 +109,44 @@ function fixture({ noSend = false, rejectSynthetic = false, recurringRestore = f
   for(const type of ['keydown','keypress','keyup'])window.pm.dom.addEventListener(type,event=>{
     fixture.events.push({type,key:event.key,code:event.code,keyCode:event.keyCode,ctrlKey:event.ctrlKey,trusted:event.isTrusted});
   });
-  if(button)button.addEventListener('click',()=>{fixture.buttonClicks++;submit('button')});
+  if(button)button.addEventListener('click',clickSend);
+  };
+  bindControls();
+  document.addEventListener('fixture-final-button-disconnect',()=>{
+    const replacement=button.cloneNode(true);button.replaceWith(replacement);button=replacement;
+    button.addEventListener('click',clickSend);fixture.sendReplacements=(fixture.sendReplacements||0)+1;
+  });
+  window.fixtureRemountComposer=()=>{
+    const previous=window.pm;
+    const oldForm=previous.dom.closest('[data-composer-body]');
+    const replacement=document.createElement('form');replacement.dataset.composerBody='';
+    replacement.innerHTML='<div data-composer-input id="editorMount"></div><button type="button" aria-label="Send" disabled>Send</button>';
+    const props={...previous.props,state:EditorState.create({schema,plugins:previous.state.plugins})};
+    clearTimeout(sendActivationTimer);previous.destroy();oldForm.replaceWith(replacement);
+    button=replacement.querySelector('button[aria-label="Send"]');
+    window.pm=new EditorView(replacement.querySelector('#editorMount'),props);bindControls();
+    window.fixtureDetachedForms??=[];window.fixtureDetachedForms.push(oldForm);
+    fixture.remounts=(fixture.remounts||0)+1;
+    window.pm.dispatch(window.pm.state.tr.insertText('PM_SYNTHETIC_CHANGED_DRAFT_AFTER_FULL_FORM_REMOUNT'));
+    fixture.remountedDraft=window.pm.state.doc.textContent;
+  };
+  window.fixtureAddAttachment=removable=>{
+    const composer=window.pm.dom.closest('[data-composer-body]');
+    const chip=document.createElement('span');chip.dataset.testid='attachment';chip.textContent='Synthetic pending upload';
+    if(removable){
+      const remove=document.createElement('button');remove.type='button';remove.setAttribute('aria-label','Remove attachment synthetic.txt');
+      remove.textContent='Remove';remove.addEventListener('click',()=>{fixture.attachmentRemovals=(fixture.attachmentRemovals||0)+1;chip.remove()});chip.append(remove);
+    }
+    const input=document.createElement('input');input.type='file';input.dataset.pendingUpload='';
+    const pending=new DataTransfer();pending.items.add(new File(['SYNTHETIC_PENDING_UPLOAD'],'synthetic.txt',{type:'text/plain'}));input.files=pending.files;
+    input.addEventListener('change',()=>{fixture.fileClearEvents=(fixture.fileClearEvents||0)+1});composer.append(chip,input);
+    const account=document.createElement('aside');account.dataset.accountFiles='';account.dataset.fileId='account-file-sentinel';
+    const remove=document.createElement('button');remove.type='button';remove.setAttribute('aria-label','Remove attachment account-file-sentinel');
+    remove.textContent='Account file';remove.addEventListener('click',()=>{fixture.accountRemoveClicks=(fixture.accountRemoveClicks||0)+1;account.remove()});
+    const saved=document.createElement('input');saved.type='file';const files=new DataTransfer();
+    files.items.add(new File(['SYNTHETIC_ACCOUNT_FILE'],'account-file.txt',{type:'text/plain'}));saved.files=files.files;
+    account.append(remove,saved);document.body.append(account);fixture.attachmentAdded=true;
+  };
     window.fixtureReady=true;
   </script>`;
 }
@@ -189,6 +234,51 @@ async function scenario(name, callback) {
 }
 const inspect = page => page.evaluate(() => ({ ...fixture, editorEmpty: !pm.dom.innerText.trim(), visibility: document.visibilityState }));
 
+async function mutateBeforeFinalAuthorization(mutation) {
+  await worker.evaluate(mutation => {
+    globalThis.originalExecuteScript = chrome.scripting.executeScript;
+    globalThis.originalTabsSendMessage = chrome.tabs.sendMessage;
+    globalThis.finalAuthorizationProbe = { admissions: [], commits: [], grants: 0, mutated: false };
+    chrome.scripting.executeScript = async request => {
+      const sending = request.func.name === 'pageAction' && request.args[0].mode === 'send';
+      let admission;
+      if (sending) {
+        admission = { runId: request.args[0].runId, persistentDelivery: request.args[0].persistentDelivery };
+        finalAuthorizationProbe.admissions.push(admission);
+      }
+      const frames = await originalExecuteScript(request);
+      if (admission) admission.result = frames.find(frame => frame.frameId === 0)?.result;
+      if (request.func.name === 'editorCommit' && request.args[0].phase === 'commit')
+        finalAuthorizationProbe.commits.push(frames.find(frame => frame.frameId === 0)?.result);
+      return frames;
+    };
+    chrome.tabs.sendMessage = async (tabId, message, options) => {
+      if (message.type === 'GRANT_RUN') {
+        finalAuthorizationProbe.grants++;
+        if (!finalAuthorizationProbe.mutated) {
+          await originalExecuteScript({ target: { tabId, ...(options?.documentId ? { documentIds: [options.documentId] } : {}) },
+            world: 'MAIN', func: mutation => {
+              if (mutation === 'remount') window.fixtureRemountComposer();
+              else window.fixtureAddAttachment(mutation === 'removable-attachment');
+            }, args: [mutation] });
+          finalAuthorizationProbe.mutated = true;
+        }
+      }
+      return originalTabsSendMessage(tabId, message, options);
+    };
+  }, mutation);
+}
+
+async function restoreFinalAuthorizationMutation() {
+  await worker.evaluate(() => {
+    chrome.scripting.executeScript = originalExecuteScript;
+    chrome.tabs.sendMessage = originalTabsSendMessage;
+    delete globalThis.originalExecuteScript;
+    delete globalThis.originalTabsSendMessage;
+    delete globalThis.finalAuthorizationProbe;
+  });
+}
+
 try {
   context = await launchBrowser();
   await context.route('https://**/*', route => {
@@ -198,12 +288,13 @@ try {
       const index = Number(url.pathname.split('-').at(-1));
       return route.fulfill({ status: 200, contentType: 'text/html', body: fixture({
         noSend: index === 3, rejectSynthetic: [4, 6, 8, 9, 10].includes(index),
-        supported: [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 19, 22, 23, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35].includes(index),
-        sendActivationDelayMs: index === 25 ? 2500 : [11, 16].includes(index) ? 21000 : [17, 20, 21].includes(index) ? 200 : [6, 8, 9, 10, 12, 13, 14, 15].includes(index) ? 100 : 0,
+        supported: [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 19, 22, 23, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 41].includes(index),
+        sendActivationDelayMs: index === 40 ? 2000 : index === 25 ? 2500 : [11, 16].includes(index) ? 21000 : [17, 20, 21].includes(index) ? 200 : [6, 8, 9, 10, 12, 13, 14, 15].includes(index) ? 100 : 0,
         receiptDelayMs: index === 18 ? 8000 : index === 28 ? 800 : index === 29 ? 5000 : 0,
         manualReceiptDuringReadiness: index === 9 || index === 10, ignoreButtonSubmit: index === 9,
         recurringRestore: index === 7,
         holdSendDisabled: index === 33,
+        fullForm: [36, 37, 38, 39, 40, 41].includes(index),
       }) });
     }
     if (url.hostname === 'pm-foreground.invalid') return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><textarea id="work">Unrelated synthetic document</textarea>' });
@@ -718,12 +809,31 @@ try {
           return reply;
         };
       } }), tabId);
-      const sent = await call({ type: 'SEND_NOW' });
-      const observed = await inspect(page);
-      assert.equal(observed.finalMutation, mutation, 'The intended last-wait mutation actually occurred');
-      assert.equal(sent.job.sentCount, mutation === 'text' ? 1 : 0, sent.job.statusText);
-      assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, mutation === 'text' ? 1 : 0, mutation === 'text' ? 1 : 0]);
-      assert.deepEqual(observed.sentTexts, mutation === 'text' ? [prompt] : []);
+      const sending = call({ type: 'SEND_NOW' });
+      try {
+        if (mutation === 'attachment') {
+          await page.waitForFunction(() => fixture.finalMutation === 'attachment');
+          const state = await Promise.race([sending.then(() => 'settled'), new Promise(resolve => setTimeout(() => resolve('waiting'), 2300))]);
+          assert.equal(state, 'waiting', 'An unremovable chip must keep this send waiting for Pause');
+          const waiting = await call({ type: 'GET_STATE' });
+          assert.equal(waiting.job.enabled, true);
+          assert.equal(waiting.job.sentCount, 0);
+          assert.equal(waiting.job.unknownCount, 0);
+          const paused = await call({ type: 'PAUSE' });
+          assert.equal(paused.job.enabled, false);
+        }
+        const sent = await sending;
+        const observed = await inspect(page);
+        assert.equal(observed.finalMutation, mutation, 'The intended last-wait mutation actually occurred');
+        assert.equal(sent.job.sentCount, mutation === 'text' ? 1 : 0, sent.job.statusText);
+        assert.equal(sent.job.unknownCount, 0);
+        assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, mutation === 'text' ? 1 : 0, mutation === 'text' ? 1 : 0]);
+        assert.deepEqual(observed.sentTexts, mutation === 'text' ? [prompt] : []);
+        if (mutation === 'attachment') assert.equal(await page.locator('[data-testid="attachment"]').count(), 1);
+      } finally {
+        await call({ type: 'PAUSE' });
+        await sending;
+      }
     });
   }
   await scenario('A rejection before page admission recovers the same hidden run and submits once', async page => {
@@ -1176,8 +1286,8 @@ try {
       });
     }
   });
-  await scenario('A same-URL reload during prepare blocks the old document without dispatch and lets the next round bind the fresh document once', async page => {
-    await start(page, { sendMethod: 'auto' });
+  await scenario('A same-URL reload during prepare automatically retries the same job on the fresh document once', async page => {
+    const started = await start(page, { sendMethod: 'auto' });
     const expectedUrl = page.url();
     await worker.evaluate(() => {
       globalThis.originalExecuteScript = chrome.scripting.executeScript;
@@ -1215,23 +1325,18 @@ try {
       await page.reload();
       await page.waitForFunction(() => window.fixtureReady);
       assert.equal(page.url(), expectedUrl, 'Only the document, not the bound URL, must change');
-      await worker.evaluate(() => { rejectReloadedPrepare(); delete globalThis.rejectReloadedPrepare; });
-      const stopped = await Promise.race([sending, new Promise((_, reject) => {
-        completionTimer = setTimeout(() => reject(new Error('Old pre-dispatch run stayed stuck after same-URL document replacement')), 7000);
-      })]);
-      clearTimeout(completionTimer);
-      assert.equal(stopped.job.enabled, true);
-      assert.equal(stopped.job.phase, 'idle');
-      assert.equal(stopped.job.lastResult, 'blocked');
-      assert.equal(stopped.job.sentCount, 0);
-      assert.equal(stopped.job.unknownCount, 0, 'Pre-dispatch replacement is not an uncertain submission');
       const fresh = await inspect(page);
-      assert.equal(fresh.editorEmpty, true, 'Readonly replacement diagnosis must leave the new composer empty');
-      assert.equal(fresh.updates, 0, 'Readonly replacement diagnosis must not mutate the new model');
+      assert.equal(fresh.editorEmpty, true, 'The old pinned preparation must leave the new composer empty');
+      assert.equal(fresh.updates, 0, 'The old pinned preparation must not mutate the new model');
       assert.deepEqual([fresh.keyboardCommands, fresh.buttonClicks, fresh.submits], [0, 0, 0]);
       assert.ok((await worker.evaluate(() => reloadRecovery.phases)).every(entry => entry.phase !== 'commit'),
         'The old pre-dispatch run must never enter commit');
-      const sent = await call({ type: 'SEND_NOW' });
+      await worker.evaluate(() => { rejectReloadedPrepare(); delete globalThis.rejectReloadedPrepare; });
+      const sent = await Promise.race([sending, new Promise((_, reject) => {
+        completionTimer = setTimeout(() => reject(new Error('The same Send now did not recover automatically after same-URL replacement')), 10000);
+      })]);
+      clearTimeout(completionTimer);
+      assert.equal(sent.job.id, started.job.id, 'Recovery must retain the existing job');
       assert.notEqual(sent.job.runId, originalRunId, 'The fresh document must be handled by a new round');
       assert.equal(sent.job.sentCount, 1, sent.job.statusText);
       assert.equal(sent.job.unknownCount, 0);
@@ -1243,6 +1348,7 @@ try {
       assert.equal(newPrepare.resultDocumentId, newPrepare.targetDocumentId);
       const commits = phases.filter(entry => entry.phase === 'commit');
       assert.equal(commits.length, 1, 'Only the new round may dispatch, exactly once');
+      assert.notEqual(commits[0].token, original.token, 'No old-document reservation may commit');
       assert.equal(commits[0].token, newPrepare.token);
       assert.equal(commits[0].targetDocumentId, newPrepare.targetDocumentId);
       const observed = await inspect(page);
@@ -1259,6 +1365,284 @@ try {
         delete globalThis.rejectReloadedPrepare;
         delete globalThis.reloadRecovery;
       });
+      await sending;
+    }
+  });
+  await scenario('A full composer form remount immediately before final authorization replaces its changed draft and sends once', async page => {
+    const expectedUrl = page.url();
+    const started = await start(page, { sendMethod: 'auto' });
+    await mutateBeforeFinalAuthorization('remount');
+    const sending = call({ type: 'SEND_NOW' });
+    try {
+      const sent = await sending;
+      assert.equal(sent.job.id, started.job.id);
+      assert.equal(sent.job.sentCount, 1, sent.job.statusText);
+      assert.equal(sent.job.unknownCount, 0);
+      assert.equal(sent.job.targetIdentity, 'pm-account~pm-dot');
+      assert.equal(page.url(), expectedUrl);
+      const probe = await worker.evaluate(() => finalAuthorizationProbe);
+      assert.equal(probe.mutated, true, 'The whole form must actually be replaced before GRANT_RUN');
+      assert.ok(probe.grants >= 1);
+      const observed = await inspect(page);
+      assert.equal(observed.remounts, 1);
+      assert.equal(observed.remountedDraft, 'PM_SYNTHETIC_CHANGED_DRAFT_AFTER_FULL_FORM_REMOUNT');
+      assert.equal(await page.evaluate(() => fixtureDetachedForms.every(form => !form.isConnected)), true);
+      assert.equal(observed.staleButtonClicks || 0, 0, 'No detached Send control may be clicked');
+      assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, 1, 1]);
+      assert.deepEqual(observed.sentTexts, [prompt]);
+      assert.deepEqual(observed.submissionPayloads, [{ text: prompt, attachments: 0, files: 0 }]);
+      assert.equal(observed.editorEmpty, true);
+    } finally {
+      await call({ type: 'PAUSE' });
+      await restoreFinalAuthorizationMutation();
+      await sending;
+    }
+  });
+  await scenario('A late composer attachment is detached through its scoped Remove control and only the pure prompt is sent once', async page => {
+    const expectedUrl = page.url();
+    const started = await start(page, { sendMethod: 'auto' });
+    await mutateBeforeFinalAuthorization('removable-attachment');
+    const sending = call({ type: 'SEND_NOW' });
+    try {
+      const sent = await sending;
+      assert.equal(sent.job.id, started.job.id);
+      assert.equal(sent.job.sentCount, 1, sent.job.statusText);
+      assert.equal(sent.job.unknownCount, 0);
+      assert.equal(sent.job.targetIdentity, 'pm-account~pm-dot');
+      assert.equal(page.url(), expectedUrl);
+      const probe = await worker.evaluate(() => finalAuthorizationProbe);
+      assert.equal(probe.mutated, true);
+      assert.ok(probe.admissions.every(entry => entry.persistentDelivery === true));
+      const runIds = [...new Set(probe.admissions.map(entry => entry.runId))];
+      assert.ok(runIds.length >= 2, 'A known no-dispatch attachment result must obtain a fresh run without another Send now');
+      assert.ok(probe.admissions.some(entry => entry.result?.retryable === true));
+      assert.ok(probe.commits.some(result => result.dispatched === false && result.code === 'attachments'));
+      const observed = await inspect(page);
+      assert.equal(observed.attachmentRemovals, 1, 'The site removal control, not DOM deletion, must detach the chip');
+      assert.equal(observed.fileClearEvents, 1);
+      assert.equal(observed.accountRemoveClicks || 0, 0, 'A matching Remove outside this composer must remain untouched');
+      assert.equal(await page.locator('[data-composer-body] [data-testid="attachment"]').count(), 0);
+      assert.equal(await page.locator('[data-composer-body] input[type="file"]').evaluate(input => input.files.length), 0);
+      assert.equal(await page.locator('[data-account-files] input[type="file"]').evaluate(input => input.files[0]?.name), 'account-file.txt');
+      assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, 1, 1]);
+      assert.deepEqual(observed.sentTexts, [prompt]);
+      assert.deepEqual(observed.submissionPayloads, [{ text: prompt, attachments: 0, files: 0 }]);
+    } finally {
+      await call({ type: 'PAUSE' });
+      await restoreFinalAuthorizationMutation();
+      await sending;
+    }
+  });
+  await scenario('An unremovable late attachment keeps the same delivery pending until Pause with no submission or account-file removal', async page => {
+    const started = await start(page, { sendMethod: 'auto' });
+    await mutateBeforeFinalAuthorization('unremovable-attachment');
+    const sending = call({ type: 'SEND_NOW' });
+    try {
+      await page.waitForFunction(() => fixture.attachmentAdded === true);
+      const state = await Promise.race([sending.then(() => 'settled'), new Promise(resolve => setTimeout(() => resolve('waiting'), 2500))]);
+      assert.equal(state, 'waiting', 'Known no-send must stay pending, not finish at a blocked result or total wait cutoff');
+      const waiting = await call({ type: 'GET_STATE' });
+      assert.equal(waiting.job.id, started.job.id);
+      assert.equal(waiting.job.enabled, true);
+      assert.equal(waiting.job.sentCount, 0);
+      assert.equal(waiting.job.unknownCount, 0);
+      const probe = await worker.evaluate(() => finalAuthorizationProbe);
+      assert.equal(probe.mutated, true);
+      assert.ok(new Set(probe.admissions.map(entry => entry.runId)).size >= 2);
+      assert.ok(probe.admissions.some(entry => entry.result?.retryable === true));
+      assert.ok(probe.commits.every(result => result.dispatched === false));
+      const paused = await call({ type: 'PAUSE' });
+      assert.equal(paused.job.enabled, false);
+      const stopped = await sending;
+      assert.equal(stopped.job.sentCount, 0);
+      assert.equal(stopped.job.unknownCount, 0);
+      const admissionsAfterPause = await worker.evaluate(() => finalAuthorizationProbe.admissions.length);
+      await new Promise(resolve => setTimeout(resolve, 1300));
+      assert.equal(await worker.evaluate(() => finalAuthorizationProbe.admissions.length), admissionsAfterPause,
+        'Pause must suppress the next scheduled fresh admission');
+      const observed = await inspect(page);
+      assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, 0, 0]);
+      assert.deepEqual(observed.sentTexts, []);
+      assert.deepEqual(observed.submissionPayloads, []);
+      assert.equal(observed.attachmentRemovals || 0, 0);
+      assert.equal(observed.accountRemoveClicks || 0, 0);
+      assert.equal(await page.locator('[data-composer-body] [data-testid="attachment"]').count(), 1);
+      assert.equal(await page.locator('[data-account-files] input[type="file"]').evaluate(input => input.files[0]?.name), 'account-file.txt');
+    } finally {
+      await call({ type: 'PAUSE' });
+      await restoreFinalAuthorizationMutation();
+      await sending;
+    }
+  });
+  await scenario('A legacy Send disconnecting synchronously after final selection retries a fresh run instead of waiting for a nonexistent receipt', async page => {
+    const started = await start(page, { sendMethod: 'auto' });
+    await mutateBeforeFinalAuthorization('legacy-disconnect');
+    await worker.evaluate(async tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => {
+      const contains = Node.prototype.contains;
+      let replaced = false;
+      // Return the real final scope check, then replace Send in that same stack.
+      // The next connectivity check must prove no click occurred and retry.
+      Node.prototype.contains = function(node) {
+        const contained = contains.call(this, node);
+        if (!replaced && contained && this.matches?.('[data-composer-body]') && node.matches?.('button[aria-label="Send"]')) {
+          replaced = true;
+          document.dispatchEvent(new Event('fixture-final-button-disconnect'));
+        }
+        return contained;
+      };
+    } }), started.job.tabId);
+    const sending = call({ type: 'SEND_NOW' });
+    let completionTimer;
+    try {
+      const completion = await Promise.race([sending.then(result => ({ result })), new Promise(resolve => {
+        completionTimer = setTimeout(() => resolve({ waiting: true }), 7000);
+      })]);
+      clearTimeout(completionTimer);
+      assert.ok(completion.result, 'A detached, never-clicked Send must not leave a false pending receipt');
+      const sent = completion.result;
+      assert.equal(sent.job.id, started.job.id);
+      assert.equal(sent.job.sentCount, 1, sent.job.statusText);
+      assert.equal(sent.job.unknownCount, 0);
+      const probe = await worker.evaluate(() => finalAuthorizationProbe);
+      assert.equal(probe.grants, 0, 'This case must exercise the unsupported-view legacy path');
+      assert.ok(new Set(probe.admissions.map(entry => entry.runId)).size >= 2);
+      assert.ok(probe.admissions.some(entry => entry.result?.status === 'blocked' && entry.result.retryable === true));
+      const observed = await inspect(page);
+      assert.equal(observed.sendReplacements, 1, 'The control must actually disconnect synchronously');
+      assert.equal(observed.staleButtonClicks || 0, 0);
+      assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, 1, 1]);
+      assert.deepEqual(observed.sentTexts, [prompt]);
+      assert.deepEqual(observed.submissionPayloads, [{ text: prompt, attachments: 0, files: 0 }]);
+    } finally {
+      clearTimeout(completionTimer);
+      await call({ type: 'PAUSE' });
+      await restoreFinalAuthorizationMutation();
+      await sending;
+    }
+  });
+  await scenario('Legacy sticky disabled Send recovers a whole form remount during readiness through a fresh run and sends once', async page => {
+    const expectedUrl = page.url();
+    await page.evaluate(() => {
+      document.addEventListener('fixture-readiness-remount', () => {
+        fixture.readinessRemount = { sendDisabled: document.querySelector('button[aria-label="Send"]').disabled,
+          text: pm.state.doc.textBetween(0, pm.state.doc.content.size, '\n'), submits: fixture.submits };
+        window.fixtureRemountComposer();
+      }, { once: true });
+    });
+    const started = await start(page, { sendMethod: 'auto' });
+    await mutateBeforeFinalAuthorization('legacy-disconnect');
+    await worker.evaluate(async tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => {
+      const send = chrome.runtime.sendMessage.bind(chrome.runtime);
+      let replaced = false;
+      chrome.runtime.sendMessage = async message => {
+        const reply = await send(message);
+        if (!replaced && message.type === 'WAIT_RUN' && message.delayMs === 150
+          && document.querySelector('button[aria-label="Send"]')?.disabled
+          && document.querySelector('[contenteditable]')?.textContent.includes('PM_SYNTHETIC_FIRST_PARAGRAPH')) {
+          replaced = true;
+          document.dispatchEvent(new Event('fixture-readiness-remount'));
+        }
+        return reply;
+      };
+    } }), started.job.tabId);
+    const sending = call({ type: 'SEND_NOW' });
+    let completionTimer;
+    try {
+      const completion = await Promise.race([sending.then(result => ({ result })), new Promise(resolve => {
+        completionTimer = setTimeout(() => resolve({ waiting: true }), 10000);
+      })]);
+      clearTimeout(completionTimer);
+      assert.ok(completion.result, 'A replaced legacy form must not leave readiness polling the detached disabled Send');
+      const sent = completion.result;
+      assert.equal(sent.job.id, started.job.id);
+      assert.equal(sent.job.sentCount, 1, sent.job.statusText);
+      assert.equal(sent.job.unknownCount, 0);
+      assert.equal(sent.job.targetIdentity, 'pm-account~pm-dot');
+      assert.equal(page.url(), expectedUrl);
+      const probe = await worker.evaluate(() => finalAuthorizationProbe);
+      assert.equal(probe.grants, 0, 'The replacement must occur in legacy readiness, not the MAIN authorization path');
+      assert.ok(new Set(probe.admissions.map(entry => entry.runId)).size >= 2);
+      assert.ok(probe.admissions.some(entry => entry.result?.status === 'blocked' && entry.result.retryable === true));
+      const observed = await inspect(page);
+      assert.deepEqual(observed.readinessRemount, { sendDisabled: true, text: prompt, submits: 0 });
+      assert.equal(observed.remounts, 1);
+      assert.equal(await page.evaluate(() => fixtureDetachedForms.every(form => !form.isConnected)), true);
+      assert.equal(observed.staleButtonClicks || 0, 0);
+      assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, 1, 1]);
+      assert.deepEqual(observed.sentTexts, [prompt]);
+      assert.deepEqual(observed.submissionPayloads, [{ text: prompt, attachments: 0, files: 0 }]);
+      assert.equal(observed.editorEmpty, true);
+    } finally {
+      clearTimeout(completionTimer);
+      await call({ type: 'PAUSE' });
+      await restoreFinalAuthorizationMutation();
+      await sending;
+    }
+  });
+  await scenario('An expired first positive CHECK_RUN renews before one send, and Pause cancels repeated stale positives without dispatch', async page => {
+    const started = await start(page, { sendMethod: 'auto' });
+    await worker.evaluate(async tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => {
+      const send = chrome.runtime.sendMessage.bind(chrome.runtime);
+      globalThis.authorizationProbe = { checks: 0, stalePositives: 0, freshPositives: 0, positiveRunIds: [], holdStale: false };
+      chrome.runtime.sendMessage = async message => {
+        const reply = await send(message);
+        if (message.type !== 'CHECK_RUN') return reply;
+        authorizationProbe.checks++;
+        if (reply?.ok !== true || reply.allowed !== true) return reply;
+        authorizationProbe.positiveRunIds.push(message.runId);
+        if (!authorizationProbe.stalePositives || authorizationProbe.holdStale) {
+          authorizationProbe.stalePositives++;
+          return { ...reply, runDeadline: Date.now() - 1 };
+        }
+        if (Number.isFinite(reply.runDeadline) && reply.runDeadline > Date.now()) authorizationProbe.freshPositives++;
+        return reply;
+      };
+    } }), started.job.tabId);
+    const readAuthorization = () => worker.evaluate(async tabId => {
+      const frames = await chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED',
+        func: () => ({ ...authorizationProbe }) });
+      return frames.find(frame => frame.frameId === 0)?.result;
+    }, started.job.tabId);
+    const sent = await call({ type: 'SEND_NOW' });
+    assert.equal(sent.job.id, started.job.id);
+    assert.equal(sent.job.sentCount, 1, sent.job.statusText);
+    assert.equal(sent.job.unknownCount, 0);
+    const authorization = await readAuthorization();
+    assert.equal(authorization.stalePositives, 1, 'The first actual positive authorization must be delivered expired');
+    assert.ok(authorization.freshPositives >= 1, 'A new positive permit must be obtained before dispatch');
+    assert.equal(new Set(authorization.positiveRunIds).size, 1, 'Authorization renewal must stay inside the same run');
+    const delivered = await inspect(page);
+    assert.deepEqual([delivered.keyboardCommands, delivered.buttonClicks, delivered.submits], [0, 1, 1]);
+    assert.deepEqual(delivered.sentTexts, [prompt]);
+    assert.deepEqual(delivered.submissionPayloads, [{ text: prompt, attachments: 0, files: 0 }]);
+    await call({ type: 'PAUSE' });
+    await worker.evaluate(async tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED',
+      func: () => { authorizationProbe.holdStale = true; } }), started.job.tabId);
+    await start(page, { sendMethod: 'auto' });
+    const sending = call({ type: 'SEND_NOW' });
+    try {
+      const state = await Promise.race([sending.then(() => 'settled'), new Promise(resolve => setTimeout(() => resolve('waiting'), 800))]);
+      assert.equal(state, 'waiting', 'Repeated expired positives must reauthorize, neither dispatch nor cancel the live job');
+      const pending = await readAuthorization();
+      assert.ok(pending.stalePositives >= 3, 'The test must actually exercise repeated stale-positive renewal');
+      const waiting = await call({ type: 'GET_STATE' });
+      assert.equal(waiting.job.enabled, true);
+      assert.equal(waiting.job.sentCount, 0);
+      assert.equal(waiting.job.unknownCount, 0);
+      assert.equal((await call({ type: 'PAUSE' })).job.enabled, false);
+      const stopped = await sending;
+      assert.equal(stopped.job.sentCount, 0);
+      assert.equal(stopped.job.unknownCount, 0);
+      await new Promise(resolve => setTimeout(resolve, 200));
+      const checksAfterPause = (await readAuthorization()).checks;
+      await new Promise(resolve => setTimeout(resolve, 350));
+      assert.equal((await readAuthorization()).checks, checksAfterPause, 'Pause must terminate the stale-positive reauthorization loop');
+      const observed = await inspect(page);
+      assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, 1, 1]);
+      assert.deepEqual(observed.sentTexts, [prompt], 'The stale-positive phase must not add a submission');
+      assert.equal(observed.updates, delivered.updates, 'No model preparation is authorized by an expired positive reply');
+    } finally {
+      await call({ type: 'PAUSE' });
       await sending;
     }
   });

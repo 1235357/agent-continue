@@ -1,5 +1,48 @@
 # Agent Continue Development Handoff
 
+## 3.0.10 Persistent Prompt Priority (2026-11-10 UTC)
+
+Latest direct owner instruction supersedes the old attachment-preservation
+policy: same-target composer/form changes and pending attachments must not end
+scheduled prompt delivery. The prompt remains the configured exact text, not the
+current draft. Attachments are detached using scoped site controls/file-input
+reset, not uploaded alongside the prompt or deleted from account storage. If the
+framework cannot yet remove a chip, preparation waits and remains cancellable.
+
+pageAction now explicitly marks known pre-submission blocked/draft/busy/error
+outcomes retryable. The worker continues after one second with a fresh run/commit
+reservation for the same job/target. It never replays an uncertain submission or
+converts a button attempt into confirmed delivery. Pause invalidates the run and
+prevents later admissions. No total wait or application prompt cap is added.
+
+Also found an actual legacy gap: submitted was set before clickButton checked
+connectivity. A disconnected button could produce no click but enter receipt
+wait forever. The flag is now set immediately before click/key dispatch; a
+proven no-attempt returns a retryable result. Same-target unique full-form
+replacement can be reacquired, not just an editor in the original composer.
+
+Fresh owner activity(3) reread is1617bytes, modified08:06:42UTC, version3.0.8.
+It includes blocked at8706510ms and later prepare wait, not a new sent receipt.
+This supersedes the older725byte log snapshot but still does not expose the exact
+guard or establish that all installed bytes match a tagged candidate. Do not
+call zero count merely cosmetic or attribute all cases to long conversations.
+
+Worker60/60, adapter27/27, Dot56/56, syntax/model/capacity and protocol checks have
+explicit exit0. Actual-MV3 cases36-39 each failed the frozen old adapter and passed
+the fix; the full39 suite passed. Review then found a detached legacy readiness
+loop and an expired positive authorization reply being treated as cancellation.
+Both are fixed; new cases40/41 separately RED before and GREEN after, including
+Pause during repeated stale positive replies. Final exact-Store41-case/natural
+alarm and full npm regression are running; require terminal receipts. Package
+unit35/35 and combined-public source/runtime/pin/Plan closure passed locally.
+The first full run stopped on an old UI-copy assertion; its exact English and
+Chinese expectations now match the new notice, not a weakened sending assertion.
+3.0.9 Release is actually published from b7f47b6 (run42780087647 success15m52s,
+Windows6m28s). Its immutable assets are the previous policy checkpoint; this new
+3.0.10 policy must be released separately. Store remains saved draft3.0.6, not
+submitted3.0.10. Do not claim synthetic tests establish installed-site success or
+the still-open protected current-candidate Pause/Revoke/full-reopen gates.
+
 ## 3.0.9 Review Corrections And Delivery (2026-11-10 UTC)
 
 Independent review of 6596514 found two recovery regressions: polling a destroyed

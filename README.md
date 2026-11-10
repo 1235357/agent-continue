@@ -4,7 +4,7 @@ English | [简体中文](https://github.com/1235357/agent-continue/blob/main/REA
 
 Schedule your own prompts in one existing ChatGPT or Your dot conversation. The Windows-enabled version also offers separately installed, explicitly authorized file, shell and process tools.
 
-**3.0.9 Windows-enabled source candidate. Manifest V3. Free and MIT-licensed.**
+**3.0.10 Windows-enabled source candidate. Manifest V3. Free and MIT-licensed.**
 
 [Chrome Web Store](https://chromewebstore.google.com/detail/jpioilmpbolfokedaefmbfbjeaahfdkl) · [GitHub Releases](https://github.com/1235357/agent-continue/releases) · [Source](https://github.com/1235357/agent-continue) · [Changelog](https://github.com/1235357/agent-continue/blob/main/CHANGELOG.md) · [Privacy](https://github.com/1235357/agent-continue/blob/main/PRIVACY.md)
 
@@ -74,7 +74,7 @@ Resume retains the original task's prompt, target, interval, and counters. To ap
 | Prompts | Repeat one prompt, loop a queue, or run a queue once; local templates |
 | Timing | 1–10080 minutes; interval or reply-aware timing; optional local-time quiet hours |
 | Controls | Start, pause, resume, send once, read-only checks, optional confirmed-send limit and stop markers |
-| Page handling | Exact target identity checks, mandatory replacement of unsent text, detected-attachment guards, optional wait-for-idle behavior |
+| Page handling | Exact target identity checks, mandatory replacement of unsent text, pending-attachment removal, continuous pre-submission recovery |
 | Background operation | Does not activate the target tab or use the system clipboard |
 | Local interface | English and Simplified Chinese; system, light, and dark themes; prompt text hidden until explicitly shown |
 | Records | Up to 200 locally timestamped activity entries; diagnostic JSON exports default to relative timings and omit stored free-text messages |
@@ -85,7 +85,7 @@ Resume retains the original task's prompt, target, interval, and counters. To ap
 
 Each attempt requires a current background permit and uses one submission mechanism. Automatic mode first uses an available Send button in the bound target composer; otherwise it uses Ctrl+Enter in Your dot or Enter in ordinary ChatGPT. Explicit button-only and Ctrl+Enter-only modes are also available. There is no subsequent switch to another mechanism within that attempt.
 
-**Scheduled sends replace unsent text in the bound conversation. Attachments are not submitted.** Every SEND, including **Send once now**, uses the configured prompt instead of existing composer text. Text changed after filling, including while authorization is pending, must not abort the send; the configured prompt is reasserted before submission. This policy is mandatory, not a Settings toggle. The legacy boolean `extensionPriority` remains accepted but normalizes to `true`, even when an old saved or imported configuration says `false`. **Resume** keeps the original prompt, target, interval and counts, not the retired draft-protection policy. Start/Resume add no modal, permission or runtime access grant. Detected attachments still block sending; Pause, current authorization and exact-target guards remain. See [Mandatory Composer Priority](https://github.com/1235357/agent-continue/blob/main/docs/COMPOSER-PRIORITY.md).
+**Scheduled sends replace unsent text and remove pending attachments in the bound conversation before sending the configured prompt.** Every SEND, including **Send once now**, uses the configured prompt instead of existing composer text. Text changes, a replaced composer or a temporarily unavailable Send control do not end the pending round: preparation is retried continuously, with no fixed total readiness deadline. Pending attachments are detached using the website's removal controls, not deleted from account storage or original local files. This policy is mandatory, not a Settings toggle. The legacy boolean `extensionPriority` remains accepted but normalizes to `true`, even when an old saved or imported configuration says `false`. **Resume** keeps the original prompt, target, interval and counts, not the retired draft-protection policy. Start/Resume add no modal, permission or runtime access grant. Manual Pause, current authorization and exact-target guards remain. A submission already attempted but not confirmed is never blindly replayed. See [Mandatory Composer Priority](https://github.com/1235357/agent-continue/blob/main/docs/COMPOSER-PRIORITY.md).
 
 A current enabled send has no fixed total readiness or receipt-wait cutoff. Delayed rendering and a missing injection return do not authorize another click: the same invocation keeps waiting, with an independent validated result-message channel, until a result, Pause or target invalidation. Finite individual command permits are renewed only for that live invocation; they are not a total waiting-time limit. This does not guarantee progress from a frozen page or an unavailable service.
 

@@ -6,10 +6,12 @@ Existing text is replaced, not preserved or appended. Text changed after
 filling, including while authorization is pending, must never abort the send:
 the configured prompt is reasserted and sending proceeds subject to the
 unchanged guards below. Composer text changes are not a reason to defer a cycle.
-If the page replaces the text editor inside the same composer, the extension
-refills it before dispatch. It does not follow an editor to another composer.
-There is no indefinite refill-and-wait cycle. The event adapter uses bounded
-settling opportunities, rechecks legacy-clock authorization afterward, and
+If the page replaces the editor or the entire composer, the extension reacquires
+the unique composer inside the same verified conversation and refills it before
+dispatch. A detached document can be replaced through a fresh, background-owned
+admission only when no submission was attempted. Readiness preparation continues
+without a fixed total waiting deadline while the job remains authorized. The
+event adapter uses bounded per-pass settling, rechecks authorization afterward, and
 delivers a final replacement through input events, not a silent DOM repaint.
 For a selected editor exposing Tiptap's documented `dom.editor.view` owner,
 a separate fixed MAIN-world helper applies a ProseMirror model transaction and
@@ -27,9 +29,9 @@ not a delivery receipt. The isolated adapter must still see a new user message.
 
 The task controls display this notice in English or Simplified Chinese:
 
-> Scheduled sends replace unsent text in the bound conversation. Attachments are not submitted.
+> Scheduled sends replace unsent text and remove pending attachments before sending the configured prompt.
 
-> 定时发送会替换绑定会话中的未发送文字，不会提交附件。
+> 定时发送会替换未发送文字、移除待发送附件，再发送配置的提示词。
 
 There is no optional Extension Priority checkbox. **Start** and **Resume** are
 explicit user actions; no new modal, permission request or runtime access grant
@@ -50,16 +52,22 @@ compatibility field.
 
 ## Unchanged Guards and Delivery Limits
 
-Detected attachments still block sending; they are not submitted. Manual
-Pause, current run permission/authorization, and exact bound-target identity
-checks remain in force. Mandatory text replacement does not authorize sending
+Pending attachments do not end a round. Their website-scoped removal controls
+are activated and pending file inputs are cleared before sending pure prompt
+text. Original local files and account-stored files are not deleted. If a pending
+attachment cannot yet be detached, readiness waits until it can be removed or
+the user pauses; it must not accidentally upload that attachment. Manual Pause,
+current run permission/authorization, and exact bound-target identity checks
+remain in force. Mandatory text replacement does not authorize sending
 to another conversation, bypassing a pause, or obtaining Windows/device access.
 
 Automatic mode first uses an available Send button in the target composer;
 otherwise it uses one Ctrl+Enter sequence in Dot or Enter in ordinary ChatGPT.
 The button-only and Ctrl+Enter-only strategies remain explicit choices. There
-is one submission attempt per cycle; a missing receipt does not trigger
-another method in that cycle. Reasserting the configured text is not permission
+is one actual submission mechanism per attempt; a missing receipt does not trigger
+another method in that attempt. A control disappearing before dispatch is not an
+attempt and can be recovered without waiting for the full scheduled interval.
+Reasserting the configured text is not permission
 to replay an already dispatched submission. An unconfirmed result remains
 unknown, and a later attempt waits for the full normal interval.
 
