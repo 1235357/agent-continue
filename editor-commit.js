@@ -53,6 +53,26 @@ export function editorCommit(args) {
     const initialPageFailure = pageGuard();
     if (initialPageFailure) return result(initialPageFailure);
 
+    // Keep non-content evidence across lost prepare/observe replies. A sealed
+    // token must not refill a composer if its delayed preparation arrives later.
+    let receiptState;
+    if (args.receiptBoundaryToken) {
+      const key = Symbol.for('agent-continue.editor-commit.v1');
+      const states = globalThis[key] ??= new Map();
+      if (!(states instanceof Map)) return result('commit-state-unavailable', { supported: true });
+      for (const [token, state] of states)
+        if (token !== args.receiptBoundaryToken && state.deadline <= Date.now()) states.delete(token);
+      receiptState = states.get(args.receiptBoundaryToken);
+      if (!receiptState) {
+        if (states.size >= 64) return result('commit-state-unavailable', { supported: true });
+        receiptState = { deadline: args.deadline, hasSend: false, prepared: false, dispatched: false, method: null };
+        states.set(args.receiptBoundaryToken, receiptState);
+      }
+      receiptState.deadline = Math.max(receiptState.deadline, args.deadline);
+      if (receiptState.dispatched) return result('already-dispatched',
+        { supported: true, dispatched: true, method: receiptState.method });
+    }
+
     const visible = element => {
       if (!element?.isConnected || element.closest('[hidden], [inert]')) return false;
       for (let node = element; node; node = node.parentElement) {
@@ -112,8 +132,12 @@ export function editorCommit(args) {
     // A present but disabled Send is not permission to fall back to a keyboard
     // event. Controlled frameworks may enable it in their next render.
     const sendSelector = 'button[data-testid="send-button"], button[data-testid="composer-submit-button"], button[data-testid="fruitjuice-send-button"], button[aria-label="Send prompt"], button[aria-label="Send message"], button[aria-label="Send"], button[aria-label="\u53d1\u9001\u63d0\u793a"], button[aria-label="\u53d1\u9001\u6d88\u606f"], button[aria-label="\u53d1\u9001"]';
-    const sendControls = () => [...new Set([...composer.querySelectorAll(sendSelector)]
-      .filter(button => composer.contains(button) && visible(button)))];
+    const sendControls = () => {
+      const controls = [...new Set([...composer.querySelectorAll(sendSelector)]
+        .filter(button => composer.contains(button) && visible(button)))];
+      if (controls.length && receiptState) receiptState.hasSend = true;
+      return controls;
+    };
     const enabledSend = button => !button.disabled && button.getAttribute('aria-disabled') !== 'true'
       && !button.closest('[aria-disabled="true"], [inert]');
     const readiness = () => {
@@ -125,7 +149,7 @@ export function editorCommit(args) {
       if (controls.length) return 'waiting-send';
       return args.requireButton === true || initiallyHasSend ? 'waiting-send' : sendMethod === 'button' ? 'send-unavailable' : 'ready';
     };
-    const initiallyHasSend = sendControls().length > 0;
+    const initiallyHasSend = sendControls().length > 0 || receiptState?.hasSend === true;
     if (phase === 'observe') {
       supported = true;
       return result(readiness(), { hasSend: initiallyHasSend });
@@ -142,7 +166,8 @@ export function editorCommit(args) {
     let failure;
     // After preparation, don't restart the framework's delayed activation by
     // redundantly dispatching the same model. Changed text is still replaced.
-    if (args.phase !== 'commit' || logicalText(view.state.doc) !== prompt) {
+    const repeatsPreparedModel = phase === 'prepare' && receiptState?.prepared === true;
+    if ((!repeatsPreparedModel && args.phase !== 'commit') || logicalText(view.state.doc) !== prompt) {
       const state = view.state;
       let transaction = prepare(state);
       supported = true;
@@ -177,7 +202,10 @@ export function editorCommit(args) {
       || (logicalText(view.state.doc) !== prompt ? 'model-not-synchronous' : null);
     failure = committedGuard();
     if (failure) return result(failure);
-    if (phase === 'prepare') return result('prepared', { hasSend: initiallyHasSend || sendControls().length > 0 });
+    if (phase === 'prepare') {
+      if (receiptState) receiptState.prepared = true;
+      return result('prepared', { hasSend: initiallyHasSend || sendControls().length > 0 });
+    }
 
     // Exact known Send identifiers only, never a page-wide or generic control.
     const ready = readiness();
@@ -197,6 +225,7 @@ export function editorCommit(args) {
     if (sends.length === 1) {
       method = 'button';
       dispatched = true;
+      if (receiptState) Object.assign(receiptState, { dispatched, method });
       sends[0].click();
     } else {
       const ctrlKey = sendMethod === 'ctrl-enter' || isDot;
@@ -209,6 +238,7 @@ export function editorCommit(args) {
       if (failure) return result(failure);
       method = ctrlKey ? 'ctrl-enter' : 'enter';
       dispatched = true;
+      if (receiptState) Object.assign(receiptState, { dispatched, method });
       editor.dispatchEvent(down);
       editor.dispatchEvent(up);
     }

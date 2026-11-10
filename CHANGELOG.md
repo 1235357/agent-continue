@@ -1,6 +1,24 @@
 # Changelog
 
-## [3.0.8] - Unreleased
+## [3.0.9] - Unreleased
+
+- Recover preparation/readiness transport and delayed message receipts inside
+  the same authorized background invocation, without a total live-send wait
+  deadline or an application-set prompt cap. Changed composer text is replaced
+  by the configured prompt; Pause and attachment protection remain effective.
+- Preserve known Send-button presence across lost replies and temporary button
+  removal. Seal an attempted submission so a late preparation cannot refill the
+  composer, replace a new draft or authorize another submission.
+- Diagnose document replacement read-only. A new round can bind a refreshed
+  exact target after proven pre-dispatch loss; an attempted submission with an
+  unknown result is never replayed onto a replacement document.
+- Include the unmodified modern PDF.js distribution and strict vendor digest
+  checks, replacing legacy compatibility code flagged in the Store review.
+- Include the Windows ordinary-account compiler temporary-directory correction.
+  The v3.0.8 Windows build and standard-token smoke passed; its publication was
+  canceled after independent scheduler review, not published as a release.
+
+## [3.0.8] - Unpublished Candidate
 
 - Retry lost preparation/readiness transport and missing results within the same
   authorized background invocation, instead of abandoning a filled composer for

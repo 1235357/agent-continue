@@ -4,7 +4,7 @@
 
 向一个已有的 ChatGPT 或 Your dot 会话定时发送自定义提示词。Windows 版本还提供需单独安装、明确授权的文件、Shell 与进程工具。
 
-**3.0.8 Windows 版候选源码 · Manifest V3 · 免费 · MIT 开源**
+**3.0.9 Windows 版候选源码 · Manifest V3 · 免费 · MIT 开源**
 
 [Chrome 应用商店](https://chromewebstore.google.com/detail/jpioilmpbolfokedaefmbfbjeaahfdkl) · [GitHub Releases](https://github.com/1235357/agent-continue/releases) · [源码](https://github.com/1235357/agent-continue) · [更新记录](CHANGELOG.md) · [隐私说明（英文）](PRIVACY.md)
 

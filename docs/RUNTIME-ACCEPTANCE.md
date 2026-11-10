@@ -1,5 +1,36 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## 3.0.9 Preparation Recovery Review (2026-11-10 UTC)
+
+Worker regression59/59 passed with exit0 in
+.artifacts/reviewed-recovery-worker.log. It includes outer invocation recovery
+after a same-URL document replacement before submission, stale receipt rejection,
+and conservative unknown handling after an attempted submission. Earlier RED
+57/58 failed on destroyed-document polling; initial GREEN58/58 then passed.
+
+Disposable official-ProseMirror/MV3 cases33-35 passed exit0 against this source:
+lost prepare reply plus disabled Send unmount/reappearance (no keyboard fallback
+or repeated model update), late sealed preparation (no composer refill or new
+draft replacement), and actual same-URL reload (no mutation on the replacement
+document until a new round binds it, then one click/count1). These are synthetic
+browser regressions, not a new owner's installed Dot acceptance. Full candidate
+npm regression is running and must have a terminal receipt before tagging.
+
+Later readback: full log reached all final suites, including35/35 official-PM MV3
+and11/11 editor-browser, with no failing test output. The execution handle was
+missing, not still running; an explicit full-command exit0 receipt is absent.
+Use the new release CI terminal outcome for that requirement. Support36/36 has
+an explicit exit0 after synchronizing the listing source version. Independent
+bounded static review found no further confirmed regression; no production
+browser, protected runtime, VPN or research task was changed.
+
+Actual IAB verified Release42775838004 canceled. Windows-sidecar129694011025
+succeeded5m40s, including fresh standard-token runtime build/smoke, combined
+installer closure and sidecar upload. No3.0.8 Release or Store submission is
+claimed. Proof:.artifacts/release-308-canceled-windows-passed.png. The preceding
+whole local npm run exited0 with32/32 MV3 and11/11 editor cases, before these
+review fixes. Neither result is the final3.0.9 whole-suite receipt.
+
 ## Receipt Recovery And Modern PDF Remediation (2026-11-10 UTC)
 
 Owner activity(3), modified05:41:35UTC,3.0.6, contains busy/send-not-ready20006ms

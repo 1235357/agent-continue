@@ -38,7 +38,7 @@ let control;
 let passed = 0;
 
 function fixture({ noSend = false, rejectSynthetic = false, recurringRestore = false, supported = false, sendActivationDelayMs = 0, receiptDelayMs = 0,
-  manualReceiptDuringReadiness = false, ignoreButtonSubmit = false } = {}) {
+  manualReceiptDuringReadiness = false, ignoreButtonSubmit = false, holdSendDisabled = false } = {}) {
   return `<!doctype html><meta charset="utf-8"><title>Official ProseMirror fixture</title>
   <style>${editorCss}body{font:16px sans-serif;padding:20px}.ProseMirror{min-height:90px;border:1px solid;padding:12px}.message-body{white-space:pre-wrap}</style>
   <main id="history"><article class="message-row" data-message-id="pm-account~pm-dot~old"><div class="message-body">Earlier synthetic response.</div></article></main>
@@ -74,7 +74,8 @@ function fixture({ noSend = false, rejectSynthetic = false, recurringRestore = f
     attributes:{role:'textbox','aria-label':'Message','data-composer-markdown':''},
     dispatchTransaction(transaction){
       const next=window.pm.state.apply(transaction);window.pm.updateState(next);fixture.updates++;
-      if(${JSON.stringify(sendActivationDelayMs)} && button){
+      if(${JSON.stringify(holdSendDisabled)} && button){button.disabled=true;}
+      else if(${JSON.stringify(sendActivationDelayMs)} && button){
         const update={text:next.doc.textBetween(0,next.doc.content.size,'\\n'),docChanged:transaction.docChanged,at:performance.now(),hidden:document.hidden,focused:document.hasFocus()};
         fixture.modelUpdates.push(update);button.disabled=true;clearTimeout(sendActivationTimer);
         if(next.doc.textContent.trim())sendActivationTimer=setTimeout(()=>{
@@ -197,11 +198,12 @@ try {
       const index = Number(url.pathname.split('-').at(-1));
       return route.fulfill({ status: 200, contentType: 'text/html', body: fixture({
         noSend: index === 3, rejectSynthetic: [4, 6, 8, 9, 10].includes(index),
-        supported: [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 19, 22, 23, 24, 25, 26, 28, 29, 30, 31, 32].includes(index),
+        supported: [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 19, 22, 23, 24, 25, 26, 28, 29, 30, 31, 32, 33, 34, 35].includes(index),
         sendActivationDelayMs: index === 25 ? 2500 : [11, 16].includes(index) ? 21000 : [17, 20, 21].includes(index) ? 200 : [6, 8, 9, 10, 12, 13, 14, 15].includes(index) ? 100 : 0,
         receiptDelayMs: index === 18 ? 8000 : index === 28 ? 800 : index === 29 ? 5000 : 0,
         manualReceiptDuringReadiness: index === 9 || index === 10, ignoreButtonSubmit: index === 9,
         recurringRestore: index === 7,
+        holdSendDisabled: index === 33,
       }) });
     }
     if (url.hostname === 'pm-foreground.invalid') return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><textarea id="work">Unrelated synthetic document</textarea>' });
@@ -1038,6 +1040,226 @@ try {
       assert.deepEqual(observed.sentTexts, [prompt]);
     } finally {
       await worker.evaluate(() => { chrome.scripting.executeScript = originalExecuteScript; delete globalThis.originalExecuteScript; });
+    }
+  });
+  await scenario('A lost prepare response preserves disabled Send through unmount and reappearance without Auto keyboard fallback', async page => {
+    await start(page, { sendMethod: 'auto' });
+    await worker.evaluate(() => {
+      globalThis.originalExecuteScript = chrome.scripting.executeScript;
+      globalThis.stickyRecovery = { lost: false, sawDisabled: false, preparedHasSend: false, preparedUpdates: null,
+        observations: 0, commits: 0, tokens: [] };
+      chrome.scripting.executeScript = async request => {
+        const frames = await originalExecuteScript(request);
+        if (request.func.name !== 'editorCommit') return frames;
+        const { phase, receiptBoundaryToken } = request.args[0];
+        stickyRecovery.tokens.push(receiptBoundaryToken);
+        if (phase === 'prepare' && !stickyRecovery.lost) {
+          stickyRecovery.preparedHasSend = frames.find(frame => frame.frameId === 0)?.result?.hasSend === true;
+          const detached = await originalExecuteScript({ target: request.target, world: 'MAIN', func: () => {
+            const button = document.querySelector('button[aria-label="Send"]');
+            const disabled = button?.disabled === true;
+            window.fixtureDetachedSend = button;
+            button.remove();
+            fixture.sendUnmounted = true;
+            return { disabled, updates: fixture.updates };
+          } });
+          const preparation = detached.find(frame => frame.frameId === 0)?.result;
+          stickyRecovery.sawDisabled = preparation?.disabled === true;
+          stickyRecovery.preparedUpdates = preparation?.updates;
+          stickyRecovery.lost = true;
+          throw new Error('Synthetic lost prepare response after disabled Send unmount');
+        }
+        if (phase === 'observe') stickyRecovery.observations++;
+        if (phase === 'commit') stickyRecovery.commits++;
+        return frames;
+      };
+    });
+    const sending = call({ type: 'SEND_NOW' });
+    try {
+      const observationDeadline = Date.now() + 5000;
+      let recovery;
+      do {
+        recovery = await worker.evaluate(() => ({ ...stickyRecovery }));
+        if (recovery.observations >= 3 || recovery.commits > 0) break;
+        await new Promise(resolve => setTimeout(resolve, 25));
+      } while (Date.now() < observationDeadline);
+      assert.equal(recovery.lost, true);
+      assert.equal(recovery.preparedHasSend, true, 'The discarded prepare result must have seen Send');
+      assert.equal(recovery.sawDisabled, true, 'Send must still be disabled when unmounted');
+      assert.ok(recovery.observations >= 3, 'Recovery must keep observing while the known Send is absent');
+      assert.equal(recovery.commits, 0, 'No commit is allowed before Send reappears');
+      const waiting = await inspect(page);
+      assert.ok(Number.isInteger(recovery.preparedUpdates));
+      assert.equal(waiting.updates, recovery.preparedUpdates,
+        'Matching lost-prepare retries must not redispatch the model or reset delayed Send activation');
+      assert.deepEqual([waiting.keyboardCommands, waiting.buttonClicks, waiting.submits], [0, 0, 0]);
+      await page.evaluate(() => {
+        document.querySelector('[data-composer-body]').append(window.fixtureDetachedSend);
+        window.fixtureDetachedSend.disabled = false;
+        fixture.sendReappeared = true;
+      });
+      const sent = await sending;
+      assert.equal(sent.job.sentCount, 1, sent.job.statusText);
+      assert.equal(sent.job.unknownCount, 0);
+      const observed = await inspect(page);
+      assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, 1, 1]);
+      assert.deepEqual(observed.sentTexts, [prompt]);
+      assert.equal(observed.editorEmpty, true);
+      const tokens = await worker.evaluate(() => stickyRecovery.tokens);
+      assert.equal(typeof tokens[0], 'string');
+      assert.ok(tokens.every(token => token === tokens[0]), 'Every recovery phase must use the same receipt token');
+    } finally {
+      await call({ type: 'PAUSE' });
+      await worker.evaluate(() => {
+        chrome.scripting.executeScript = originalExecuteScript;
+        delete globalThis.originalExecuteScript;
+        delete globalThis.stickyRecovery;
+      });
+      await sending;
+    }
+  });
+  await scenario('A late prepare for an already committed receipt token neither refills the composer nor replaces a new draft or resubmits', async page => {
+    await start(page, { sendMethod: 'auto' });
+    await worker.evaluate(() => {
+      globalThis.originalExecuteScript = chrome.scripting.executeScript;
+      globalThis.latePrepareRequest = null;
+      chrome.scripting.executeScript = async request => {
+        if (request.func.name === 'editorCommit' && request.args[0].phase === 'prepare' && !latePrepareRequest)
+          latePrepareRequest = request;
+        return originalExecuteScript(request);
+      };
+    });
+    try {
+      const sent = await call({ type: 'SEND_NOW' });
+      assert.equal(sent.job.sentCount, 1, sent.job.statusText);
+      assert.equal(sent.job.unknownCount, 0);
+      const before = await inspect(page);
+      assert.equal(before.editorEmpty, true);
+      assert.deepEqual([before.keyboardCommands, before.buttonClicks, before.submits], [0, 1, 1]);
+      const releaseLatePrepare = () => worker.evaluate(async () => {
+        if (!latePrepareRequest) throw new Error('Synthetic late prepare was not captured');
+        const { receiptBoundaryToken, deadline } = latePrepareRequest.args[0];
+        const remainingMs = deadline - Date.now();
+        const frames = await originalExecuteScript(latePrepareRequest);
+        return { receiptBoundaryToken, remainingMs, result: frames.find(frame => frame.frameId === 0)?.result };
+      });
+      const late = await releaseLatePrepare();
+      assert.equal(typeof late.receiptBoundaryToken, 'string');
+      assert.ok(late.remainingMs > 0, 'The seal, not an expired permit, must reject the late prepare');
+      assert.notEqual(late.result?.code, 'expired');
+      const after = await inspect(page);
+      assert.equal(after.editorEmpty, true, 'A late prepare must not refill the confirmed empty composer');
+      assert.equal(after.updates, before.updates, 'A sealed prepare must not dispatch a model transaction');
+      const draft = 'PM_SYNTHETIC_NEW_DRAFT_AFTER_CONFIRMED_SEND';
+      const draftUpdates = await page.evaluate(text => {
+        pm.dispatch(pm.state.tr.insertText(text, 0, pm.state.doc.content.size));
+        return fixture.updates;
+      }, draft);
+      const repeated = await releaseLatePrepare();
+      assert.equal(repeated.receiptBoundaryToken, late.receiptBoundaryToken);
+      assert.ok(repeated.remainingMs > 0);
+      assert.notEqual(repeated.result?.code, 'expired');
+      assert.equal(await page.evaluate(() => pm.state.doc.textBetween(0, pm.state.doc.content.size, '\n')), draft,
+        'A sealed prepare must leave a new intervening draft untouched');
+      const observed = await inspect(page);
+      assert.equal(observed.updates, draftUpdates);
+      assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, 1, 1]);
+      assert.deepEqual(observed.sentTexts, [prompt]);
+      const current = await call({ type: 'GET_STATE' });
+      assert.equal(current.job.sentCount, 1);
+      assert.equal(current.job.unknownCount, 0);
+    } finally {
+      await worker.evaluate(() => {
+        chrome.scripting.executeScript = originalExecuteScript;
+        delete globalThis.originalExecuteScript;
+        delete globalThis.latePrepareRequest;
+      });
+    }
+  });
+  await scenario('A same-URL reload during prepare blocks the old document without dispatch and lets the next round bind the fresh document once', async page => {
+    await start(page, { sendMethod: 'auto' });
+    const expectedUrl = page.url();
+    await worker.evaluate(() => {
+      globalThis.originalExecuteScript = chrome.scripting.executeScript;
+      globalThis.reloadRecovery = { prepared: false, phases: [] };
+      chrome.scripting.executeScript = async request => {
+        if (request.func.name !== 'editorCommit') return originalExecuteScript(request);
+        const entry = { phase: request.args[0].phase, token: request.args[0].receiptBoundaryToken,
+          targetDocumentId: request.target.documentIds?.[0] };
+        reloadRecovery.phases.push(entry);
+        const frames = await originalExecuteScript(request);
+        entry.resultDocumentId = frames.find(frame => frame.frameId === 0)?.documentId;
+        if (entry.phase === 'prepare' && !reloadRecovery.prepared) {
+          reloadRecovery.prepared = true;
+          return new Promise((_, reject) => {
+            globalThis.rejectReloadedPrepare = () => reject(new Error('Synthetic prepare response lost during same-URL reload'));
+          });
+        }
+        return frames;
+      };
+    });
+    const sending = call({ type: 'SEND_NOW' });
+    let completionTimer;
+    try {
+      const prepareDeadline = Date.now() + 5000;
+      while (!await worker.evaluate(() => reloadRecovery.prepared) && Date.now() < prepareDeadline)
+        await new Promise(resolve => setTimeout(resolve, 25));
+      assert.equal(await worker.evaluate(() => reloadRecovery.prepared), true);
+      const originalRunId = (await call({ type: 'GET_STATE' })).job.runId;
+      const original = await worker.evaluate(() => reloadRecovery.phases[0]);
+      assert.equal(typeof original.targetDocumentId, 'string');
+      assert.equal(original.resultDocumentId, original.targetDocumentId);
+      const beforeReload = await inspect(page);
+      assert.equal(beforeReload.editorEmpty, false);
+      assert.deepEqual([beforeReload.keyboardCommands, beforeReload.buttonClicks, beforeReload.submits], [0, 0, 0]);
+      await page.reload();
+      await page.waitForFunction(() => window.fixtureReady);
+      assert.equal(page.url(), expectedUrl, 'Only the document, not the bound URL, must change');
+      await worker.evaluate(() => { rejectReloadedPrepare(); delete globalThis.rejectReloadedPrepare; });
+      const stopped = await Promise.race([sending, new Promise((_, reject) => {
+        completionTimer = setTimeout(() => reject(new Error('Old pre-dispatch run stayed stuck after same-URL document replacement')), 7000);
+      })]);
+      clearTimeout(completionTimer);
+      assert.equal(stopped.job.enabled, true);
+      assert.equal(stopped.job.phase, 'idle');
+      assert.equal(stopped.job.lastResult, 'blocked');
+      assert.equal(stopped.job.sentCount, 0);
+      assert.equal(stopped.job.unknownCount, 0, 'Pre-dispatch replacement is not an uncertain submission');
+      const fresh = await inspect(page);
+      assert.equal(fresh.editorEmpty, true, 'Readonly replacement diagnosis must leave the new composer empty');
+      assert.equal(fresh.updates, 0, 'Readonly replacement diagnosis must not mutate the new model');
+      assert.deepEqual([fresh.keyboardCommands, fresh.buttonClicks, fresh.submits], [0, 0, 0]);
+      assert.ok((await worker.evaluate(() => reloadRecovery.phases)).every(entry => entry.phase !== 'commit'),
+        'The old pre-dispatch run must never enter commit');
+      const sent = await call({ type: 'SEND_NOW' });
+      assert.notEqual(sent.job.runId, originalRunId, 'The fresh document must be handled by a new round');
+      assert.equal(sent.job.sentCount, 1, sent.job.statusText);
+      assert.equal(sent.job.unknownCount, 0);
+      const phases = await worker.evaluate(() => reloadRecovery.phases);
+      const newPrepare = phases.find(entry => entry.phase === 'prepare' && entry.token !== original.token);
+      assert.ok(newPrepare, 'A fresh round must obtain a new receipt token');
+      assert.equal(typeof newPrepare.targetDocumentId, 'string');
+      assert.notEqual(newPrepare.targetDocumentId, original.targetDocumentId);
+      assert.equal(newPrepare.resultDocumentId, newPrepare.targetDocumentId);
+      const commits = phases.filter(entry => entry.phase === 'commit');
+      assert.equal(commits.length, 1, 'Only the new round may dispatch, exactly once');
+      assert.equal(commits[0].token, newPrepare.token);
+      assert.equal(commits[0].targetDocumentId, newPrepare.targetDocumentId);
+      const observed = await inspect(page);
+      assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, 1, 1]);
+      assert.deepEqual(observed.sentTexts, [prompt]);
+      assert.equal(observed.editorEmpty, true);
+    } finally {
+      clearTimeout(completionTimer);
+      await call({ type: 'PAUSE' });
+      await worker.evaluate(() => {
+        if (globalThis.rejectReloadedPrepare) rejectReloadedPrepare();
+        chrome.scripting.executeScript = originalExecuteScript;
+        delete globalThis.originalExecuteScript;
+        delete globalThis.rejectReloadedPrepare;
+        delete globalThis.reloadRecovery;
+      });
+      await sending;
     }
   });
   console.log(`RESULT ${selectedCases ? selectedCases.length : passed}/${selectedCases ? selectedCases.length : passed} official ProseMirror MV3 scenarios passed`);

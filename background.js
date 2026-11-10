@@ -280,15 +280,23 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS) {
           const current = await transact(getJob);
           if (settled || !current?.enabled || current.phase !== 'sending' || current.runId !== args.runId
             || current.tabId !== tabId || current.url !== args.expectedUrl) return;
-          const frames = await chrome.scripting.executeScript({ target: executionTarget(), world: 'ISOLATED',
+          // Diagnose replacement using the current top frame, read-only. Every
+          // actual page admission and MAIN mutation stays on its pinned document.
+          const frames = await chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED',
             func: pageInvocationState, args: [{ runId: args.runId, resultToken }] });
           const frame = frames?.find(item => item.frameId === 0);
           if (settled || !frame || !['absent', 'running', 'settled'].includes(frame.result?.state)) return;
-          if (pending.documentId && frame.documentId && pending.documentId !== frame.documentId) return;
-          pending.documentId ??= frame.documentId;
           const latest = await transact(getJob);
           if (settled || !latest?.enabled || latest.phase !== 'sending' || latest.runId !== args.runId
             || latest.tabId !== tabId || latest.url !== args.expectedUrl) return;
+          if (pending.documentId && frame.documentId && pending.documentId !== frame.documentId) {
+            const beforeDispatch = ['page', 'prepare', 'readiness'].includes(pending.stage);
+            pending.resolve(beforeDispatch
+              ? { status: 'blocked', message: t('\u9875\u9762\u5df2\u53d8\u5316\u3002'), diagnosticCode: 'commit-not-dispatched' }
+              : { status: 'unknown', message: t('\u9875\u9762\u672a\u8fd4\u56de\u53ef\u786e\u8ba4\u7684\u7ed3\u679c\u3002') });
+            return;
+          }
+          pending.documentId ??= frame.documentId;
           if (frame.result.state === 'settled' && RESULT_STATUSES.has(frame.result.result?.status)) {
             if (resultChannel === 'none') resultChannel = 'page-readback';
             pending.resolve(frame.result.result);
@@ -643,6 +651,8 @@ async function commitRun(message, sender) {
     if (!await allowed()) return { ok: false, code: 'cancelled' };
     // Only an explicit, non-mutating unsupported view permits the legacy path.
     if (prepared?.supported === false && prepared.dispatched === false && prepared.code === 'unsupported-view') {
+      const pending = [...pendingPageResults.values()].find(item => item.runId === message.runId);
+      if (pending) pending.stage = 'dispatch';
       return { ok: true, supported: false, dispatched: false };
     }
     if (prepared?.dispatched !== false) return { ok: false, code: 'unknown' };

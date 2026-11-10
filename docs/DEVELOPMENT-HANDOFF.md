@@ -1,5 +1,45 @@
 # Agent Continue Development Handoff
 
+## 3.0.9 Review Corrections And Delivery (2026-11-10 UTC)
+
+Independent review of 6596514 found two recovery regressions: polling a destroyed
+document forever, and losing a previously seen disabled Send when its prepare
+reply was lost. Further regression also covers late preparation refilling a
+composer after a confirmed submission. The parent now uses a read-only current
+top-frame probe solely to diagnose replacement; actual mutation remains pinned
+to the original document. Proven pre-dispatch replacement returns a retryable
+blocked result; dispatch/receipt ambiguity remains unknown and is never replayed.
+The legacy fallback is conservatively marked dispatch-capable before admission.
+
+MAIN keeps bounded non-content per-receipt preparation, sticky Send and dispatch
+seal facts. A matching prepared model is not redundantly dispatched on transport
+retry, so delayed activation is not restarted. A late sealed preparation neither
+refills the empty composer nor replaces a newer draft. No prompt, URL, history or
+exception content is stored there. No total live-send wait cap was introduced.
+
+Actual outer-worker replacement RED failed57/58 before the fix; GREEN passed58/58.
+The post-dispatch ambiguity case is added to the final regression. Final whole
+regression and real MV3 cases33-35 must be read before making a new release claim.
+
+Release42775838004/v3.0.8 is canceled, verified in IAB. Its windows-sidecar job
+129694011025 succeeded5m40s, including fresh ordinary-account build/smoke and
+combined setup closure. This supersedes earlier uncertainty about that cold
+environment correction, but is not protected installation, live hosted admin
+acceptance or a published release. v3.0.8 remains immutable; next identity3.0.9.
+The earlier full3.0.8 local npm run exited0 with32/32 MV3 and11/11 editor cases;
+it predates these review corrections and is not their final full regression.
+Store still has saved draft3.0.6/public2.1.0, not a new submitted revision.
+
+Final3.0.9 full npm log reaches its last suite with no failed tests:59/59 worker,
+57/57 background-v2,27/27 adapter,56/56 Dot adapter,12/12 Dot keyboard,19/19 import,
+39/39 UI,14/14 MV3 integration,35/35 official-PM MV3 and11/11 editor-browser.
+Log:.artifacts/release-309-full-regression-final.log. Its execution handle was
+missing at terminal lookup, so no separate process exit0 receipt is claimed;
+release CI must supply that authoritative exit result. An earlier3.0.9 run stopped
+at a stale listing-source version assertion; the source was synchronized to3.0.9
+and support36/36 rerun passed exit0. Independent bounded review found no confirmed
+regression after the fixes; it did not independently run the whole suite.
+
 ## 3.0.8 Preparation Transport Recovery (2026-11-10 UTC)
 
 The fresh owner log's prepare-stage unknown led to a further reproducible defect:
