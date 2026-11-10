@@ -1,5 +1,35 @@
 # Agent Continue Development Handoff
 
+## Current Verified Release Candidate (2026-11-09)
+
+Runtime sourcepin d0e3e9f76cc02be89b2043ddfc8af6fc20d3de30 is on unique main.
+Paired public candidates were rebuilt, not uploaded:
+dist/agent-continue-3.0.6-recovery-candidate.
+GitHubZIP0f0f7461478e2751cd3b997ea147f45d92a3cbbc6ec3359e0935b182055dbc2d;
+StoreZIP38e1e0dc4781cd2e6afbac1ac1dfcec3886f345715814ab53c81c3825c0a10c6;
+sourceZIP18ed597c8736d4bd42e60f84b9d0bf0db6a76f148f3744a8e237f0800f495841.
+The builder checked normalized GitHub/Store file equality and source revision.
+The extracted exact StoreZIP passed27/27 real-MV3/official-ProseMirror scenarios,
+including the natural hidden alarm, >100k prompt, long readiness and six admission
+recovery cases. .artifacts/release-306-recovery-final-store-browser.log exit0.
+Extracted registry/export26/26 also exit0. These do not establish installed
+live-site acceptance. The external Chrome task was not changed.
+
+Combined setup receipt:.artifacts/release-306-combined-explicit-modules-build.json;
+setupZIP46ddb6e614c9736d21c410a59abb59d3fb5b71423218c40add50af377ecd4976;
+install.ps1 c1fca25f9f91097a86fe7c0a48bbab26f61b7bcf0050369b2c7d3a3e96fd8e28.
+Administrator bundle26f186ee15d3d04143d512799e94b4c9147aa454b598f732f5c007c1a16a4d34
+was reused only after full source/inventory/pin verification and read-only Plan.
+Old phase/admission candidates below are historical, not publication inputs.
+
+IAB2 exact new CI: native42759420288/Windows129641342733 and
+Extension42759420279 IN PROGRESS, Pages42759420166 success28s. Latest Windows
+observation: packaged IPC8/8 passed, guided paired installation in progress.
+Do not rerun them or treat pending as failed. Read their terminal results next.
+Store was freshly reopened and redirects to Google Verify-it-is-you; no current
+review/publication status can be asserted beyond that gate. No password read,
+Release/tag/upload/cancel or production mutation occurred. Full goal stays active.
+
 ## Same-Invocation Admission Recovery (2026-11-09)
 
 Scheduler fix f587a4f5cb20c24f574c919b1e626ea3d919854f is pushed to unique main.
