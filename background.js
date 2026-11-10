@@ -4,7 +4,7 @@ import runtimeCatalog from './i18n-runtime.js';
 const t = createTranslator(runtimeCatalog);
 
 import { DEFAULT_CONFIG, DELIVERY_BEHAVIOR_VERSION, normalizeUrl, validateTarget, readConfig, currentPrompt, inQuietHours } from './config.js';
-import { pageAction, translatePageResult } from './adapter.js';
+import { pageAction, pageInvocationState, translatePageResult } from './adapter.js';
 import { editorCommit } from './editor-commit.js';
 import { BUNDLED_PROMPT } from './preset.js';
 import { bindBrowserWake, BROWSER_DEVICE_MESSAGE } from './browser-wake.js';
@@ -116,7 +116,7 @@ async function logEvent(event, message, diagnostic = null) {
       ? { durationMs: Math.max(0, Math.min(120000, diagnostic.durationMs)) } : {}) } } : {};
   if (detail.diagnostic) {
     if (['page', 'prepare', 'readiness', 'dispatch', 'receipt'].includes(diagnostic.stage)) detail.diagnostic.stage = diagnostic.stage;
-    if (['none', 'execute-script', 'extension-message'].includes(diagnostic.resultChannel)) detail.diagnostic.resultChannel = diagnostic.resultChannel;
+    if (['none', 'execute-script', 'extension-message', 'page-readback'].includes(diagnostic.resultChannel)) detail.diagnostic.resultChannel = diagnostic.resultChannel;
     if (Number.isSafeInteger(diagnostic.leaseRenewals) && diagnostic.leaseRenewals >= 0) detail.diagnostic.leaseRenewals = Math.min(1000000, diagnostic.leaseRenewals);
   }
   if (detail.diagnostic?.code === 'timing-probe') {
@@ -218,6 +218,7 @@ function assertSupportedTab(tab, expectedUrl = null) {
 }
 async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS) {
   let timer;
+  let recoveryTimer;
   let watchdogExpired = false;
   let missingResult = false;
   let rejectedResult = false;
@@ -237,9 +238,10 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS) {
   }
   const executionDiagnostic = () => pending ? { stage: pending.stage, resultChannel, leaseRenewals: pending.leaseRenewals } : {};
   try {
+    const executionTarget = () => ({ tabId, ...(pending?.documentId ? { documentIds: [pending.documentId] } : {}) });
     const runScript = async (world) => {
       const res = await chrome.scripting.executeScript({
-        target: { tabId },
+        target: executionTarget(),
         world,
         func: pageAction,
         args: [args]
@@ -247,6 +249,14 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS) {
       return res?.find(frame => frame.frameId === 0)?.result ?? res?.[0]?.result;
     };
 
+    const acceptExecutionResult = value => {
+      if (resultToken && (!value || !RESULT_STATUSES.has(value.status))) {
+        missingResult = true;
+        return false;
+      }
+      if (resultChannel === 'none') resultChannel = 'execute-script';
+      return true;
+    };
     const runner = async () => {
       // Keep run authorization in the extension context; never replay a send in another world.
       let value;
@@ -256,14 +266,47 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS) {
         rejectedResult = true;
         return redundantResult;
       }
-      if (resultToken && (!value || !RESULT_STATUSES.has(value.status))) {
-        missingResult = true;
+      if (!acceptExecutionResult(value)) {
         // A lost injection return must not discard the same invocation's receipt.
         return redundantResult;
       }
-      if (resultChannel === 'none') resultChannel = 'execute-script';
       return value;
     };
+
+    if (pending) {
+      let admissionOutstanding = false;
+      const recoverAdmission = async () => {
+        try {
+          const current = await transact(getJob);
+          if (settled || !current?.enabled || current.phase !== 'sending' || current.runId !== args.runId
+            || current.tabId !== tabId || current.url !== args.expectedUrl) return;
+          const frames = await chrome.scripting.executeScript({ target: executionTarget(), world: 'ISOLATED',
+            func: pageInvocationState, args: [{ runId: args.runId, resultToken }] });
+          const frame = frames?.find(item => item.frameId === 0);
+          if (settled || !frame || !['absent', 'running', 'settled'].includes(frame.result?.state)) return;
+          if (pending.documentId && frame.documentId && pending.documentId !== frame.documentId) return;
+          pending.documentId ??= frame.documentId;
+          const latest = await transact(getJob);
+          if (settled || !latest?.enabled || latest.phase !== 'sending' || latest.runId !== args.runId
+            || latest.tabId !== tabId || latest.url !== args.expectedUrl) return;
+          if (frame.result.state === 'settled' && RESULT_STATUSES.has(frame.result.result?.status)) {
+            if (resultChannel === 'none') resultChannel = 'page-readback';
+            pending.resolve(frame.result.result);
+          } else if (frame.result.state === 'absent' && !admissionOutstanding) {
+            // The same token is atomically deduplicated inside pageAction. Even
+            // an original queued request arriving later can only join it.
+            admissionOutstanding = true;
+            runScript('ISOLATED').then(value => {
+              if (!settled && acceptExecutionResult(value)) pending.resolve(value);
+            }, () => { rejectedResult = true; }).finally(() => { admissionOutstanding = false; });
+          }
+        } catch { /* Reobserve the same invocation when the renderer is reachable. */ }
+        finally {
+          if (!settled) recoveryTimer = setTimeout(recoverAdmission, 2000);
+        }
+      };
+      recoveryTimer = setTimeout(recoverAdmission, 2000);
+    }
 
     const result = await Promise.race([
       runner(),
@@ -315,7 +358,7 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS) {
   } catch (error) {
     if (watchdogExpired) return { status: 'unknown', message: t('页面操作超时，本周期结果未确认。'), diagnosticCode: rejectedResult ? 'execution-exception' : missingResult ? 'no-valid-result' : 'execution-timeout', executionDiagnostic: executionDiagnostic() };
     throw error;
-  } finally { settled = true; clearTimeout(timer); if (resultToken) pendingPageResults.delete(resultToken); }
+  } finally { settled = true; clearTimeout(timer); clearTimeout(recoveryTimer); if (resultToken) pendingPageResults.delete(resultToken); }
 }
 async function receivePageResult(message, sender) {
   const pending = pendingPageResults.get(message.resultToken);

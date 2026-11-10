@@ -1,5 +1,25 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Admission Recovery Evidence Boundary (2026-11-09)
+
+New red actual-MV3 fixture: rejection before page execution left the current
+run waiting forever. Corrected same-token synchronous page reservation and
+read-only settled-result recovery passed six browser cases, registry/export26/26,
+combined safety121/121 and existing worker57/57. First full npm run stopped at
+fixture START because a real Pause fence from the previous case had not expired.
+The fixture now waits for that actual fence, never clears it. Final npm log:
+.artifacts/send-admission-full-regression-final.log, result pending at this entry.
+Packaging/source/pin tests passed34+7+13.
+Late original and concurrent admissions do not repeat a click; Pause wins.
+This is not current installed ChatGPT/Dot acceptance. The owner activity(3)
+export contains insufficient detail to establish this as its exact cause.
+
+Fresh native42754116735 Windows129624371397 failed at first prompt after20.7s:
+startupPhase=utility,150bytes,0cursor replies, no acquisition. Packaged loopback
+8/8 passed; independent cold CMD did not run. Previous extension CI42754116733
+passed7m36s on6ee8e3f, not the new runtime. No Release or Store submission and
+no production VPN/MCP/IDE/research or installed external-task changes.
+
 ## Cold CMD And Per-Case CI Admission (2026-11-09)
 
 Native42712363715 Windows129484970242 passed paired guided installation230s,

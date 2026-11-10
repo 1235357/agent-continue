@@ -37,7 +37,7 @@ xvfb-run -a env TEST_HEADED=1 npm test
 | `file-import-tests.mjs` | 16 | 真实 Chromium + 合成 TXT / HTML / DOCX / PDF；本地 Worker 与 CSP |
 | `ui-v2-tests.mjs` | 13 | 真实 Chromium + 扩展 API mock；界面隐私、文件导入、配置、布局与清空竞态 |
 | `mv3-integration-tests.mjs` | 9 | 实际 MV3 扩展 + 完整 Chromium + 独立临时 profile + 合成站点 |
-| `prosemirror-keyboard-tests.mjs` | 5 | 官方编辑器 + 实际 MV3；合成按键、按钮对照、自然隐藏标签 |
+| `prosemirror-keyboard-tests.mjs` | 27 | 官方编辑器 + 实际 MV3；自然隐藏标签、长等待、注入丢失恢复、去重与暂停 |
 
 无头与有窗口模式均执行 **151** 个行为场景；隐藏标签场景不跳过。`npm run check` 是额外语法检查，不计入场景总数。旧原型界面测试已由 `ui-v2-tests.mjs` 替代，现行隐私、状态与布局回归由该套件覆盖。
 

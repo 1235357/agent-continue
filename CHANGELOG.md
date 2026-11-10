@@ -10,6 +10,12 @@
 - Preserve a same-invocation final result through an independently validated
   extension message if the injection API returns no value or rejects. Neither
   transport failure permits another click or counts dispatch as delivery.
+- Recover a page injection rejected before it starts. Register one execution per
+  document/run/token and reattach only that same execution; a late original
+  injection joins it instead of sending twice. Read back its settled result if
+  both result transports lose the response. Recovery has no total time limit and
+  retains at most one additional unresolved admission, rather than accumulating
+  requests while a renderer is unavailable. Pause still cancels authorization.
 - Acknowledge cancellation in the isolated page before completing Pause. A
   queued model submission cannot obtain its receipt-boundary handshake after
   that acknowledgement. Unconfirmed revocation is shown explicitly and the old

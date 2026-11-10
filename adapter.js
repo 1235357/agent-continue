@@ -9,9 +9,32 @@ export function translatePageResult(value) {
   return { ...value, message: typeof value.message === 'string' && Object.hasOwn(runtimeCatalog, value.message) ? t(value.message) : value.message };
 }
 
+// Read only the extension's isolated-world invocation, never the page composer.
+export function pageInvocationState({ runId, resultToken }) {
+  const entry = globalThis.__agentContinuePageInvocationsV1?.get(resultToken);
+  if (!entry || entry.runId !== runId) return { state: 'absent' };
+  return entry.state === 'settled' ? { state: 'settled', result: entry.result } : { state: 'running' };
+}
+
 // This function is injected into one explicitly selected tab.
 // Executed in ISOLATED world with authoritative background permission checks.
 export async function pageAction(args) {
+  const cancellable = args.mode === 'send' && typeof args.resultToken === 'string';
+  let invocation, completeInvocation;
+  if (cancellable) {
+    const invocations = globalThis.__agentContinuePageInvocationsV1 ??= new Map();
+    const previous = invocations.get(args.resultToken);
+    if (previous) return previous.runId === args.runId ? previous.promise : { status: 'cancelled' };
+    // Reserve synchronously before the first await: concurrent or late injection
+    // requests must join this exact execution, never run another submission.
+    const promise = new Promise(resolve => { completeInvocation = resolve; });
+    invocation = { runId: args.runId, state: 'running', promise };
+    invocations.set(args.resultToken, invocation);
+    for (const [key, entry] of invocations) {
+      if (invocations.size <= 8) break;
+      if (key !== args.resultToken && entry.state === 'settled') invocations.delete(key);
+    }
+  }
   let revoked = false;
   const cancel = (message, sender, sendResponse) => {
     if (!['CANCEL_RUN', 'GRANT_RUN'].includes(message?.type) || message.runId !== args.runId || message.resultToken !== args.resultToken
@@ -26,7 +49,6 @@ export async function pageAction(args) {
     sendResponse({ revoked: true, runId: args.runId, resultToken: args.resultToken });
     return false;
   };
-  const cancellable = args.mode === 'send' && typeof args.resultToken === 'string';
   if (cancellable) chrome.runtime.onMessage.addListener(cancel);
   const action = async () => {
   const normalizeUrl = value => {
@@ -781,6 +803,11 @@ export async function pageAction(args) {
   };
   try {
     const value = await action();
+    if (invocation) {
+      invocation.result = value;
+      invocation.state = 'settled';
+      completeInvocation(value);
+    }
     if (cancellable) {
       try {
         // Do not make the injection return wait for this channel's response.
@@ -788,6 +815,13 @@ export async function pageAction(args) {
         Promise.resolve(chrome.runtime.sendMessage({ type: 'PAGE_RESULT', runId: args.runId, resultToken: args.resultToken, result: value })).catch(() => undefined);
       } catch { /* The ordinary injection return remains an independent result channel. */ }
     }
+    return value;
+  } catch (error) {
+    if (!invocation) throw error;
+    const value = { status: 'unknown', message: '页面操作未完成，未记录页面内容。' };
+    invocation.result = value;
+    invocation.state = 'settled';
+    completeInvocation(value);
     return value;
   } finally {
     if (cancellable) chrome.runtime.onMessage.removeListener(cancel);

@@ -103,6 +103,10 @@ test('execution progress export keeps only fixed stages, channels and bounded in
     prompt: secret, resultToken: secret, documentId: secret,
   } }]);
   assert.deepEqual(value.logs[0].diagnostic, { code: 'no-valid-result', stage: 'receipt', resultChannel: 'extension-message', leaseRenewals: 2 });
+  const readback = await build([{ at: now, event: 'sent', diagnostic: {
+    code: 'adapter-result', resultChannel: 'page-readback', resultToken: secret,
+  } }]);
+  assert.deepEqual(readback.logs[0].diagnostic, { code: 'adapter-result', resultChannel: 'page-readback' });
   for (const invalid of [secret, null, true, {}, [], -1, 1.5, NaN, Infinity]) {
     const report = await build([{ at: now, event: 'unconfirmed', diagnostic: {
       code: 'adapter-result', stage: invalid, resultChannel: invalid, leaseRenewals: invalid,

@@ -1,5 +1,39 @@
 # Agent Continue Development Handoff
 
+## Same-Invocation Admission Recovery (2026-11-09)
+
+The owner-provided activity(3) export was reread:3.0.5, five records, one
+no-valid-result at18748ms and one execution-timeout at20003ms, with Pause/Start
+between them. It does not identify whether page admission or result transport
+failed. Do not call the new fixture diagnosis the proven real-site cause.
+
+A new actual-MV3 test first rejected executeScript before invoking pageAction.
+It failed before the implementation, exit1: no recovery. Earlier rejection
+coverage had invoked the real page before rejecting the API. The corrected page
+now synchronously reserves one per-document run/token promise; recovery can
+reattach or observe its settled result without admitting another submission.
+Only one additional unresolved admission is retained. Pause/current-task and
+bound-document checks remain mandatory; no total live wait cap or prompt cap.
+Fixed page-readback diagnostics contain no prompt, tokens, URL or exceptions.
+
+Targeted browser cases6/6, registry/export26/26, combined safety addendum121/121,
+and the existing worker57/57 passed. The first full npm run correctly refused
+the next fixture's START while the previous pre-admission Pause permit fence
+was still live. The fixture now waits for actual fence expiry, without clearing
+or weakening the product guard. The complete final npm run is in
+.artifacts/send-admission-full-regression-final.log; read its terminal result and
+exit before claiming all groups passed. Packaging/source/pin tests34+7+13 pass.
+Independent reviewer
+could not run because of workspace credits; no fresh independent approval.
+
+Fresh IAB native42754116735/Windows129624371397 FAILED5m19s. Packaged loopback
+8/8 passed; paired guided PowerShell stopped at first prompt in20.7s with150
+bytes,0cursor replies, acquisition not observed, startupPhase=utility. This is
+before the new independent cold-CMD step, which did not run. It is not another
+shared-budget cancellation, and module preparation is localized but not repaired.
+Extension42754116733 SUCCESS7m36s applies to prior main6ee8e3f, not this uncommitted
+runtime change. No rerun, tag, Release, Store upload or production mutation.
+
 ## Independent Guided CI Budgets And Refreshed Candidate (2026-11-09)
 
 Fresh IAB readback of native42712363715/Windows129484970242 changes the next

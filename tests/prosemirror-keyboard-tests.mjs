@@ -191,8 +191,8 @@ try {
       const index = Number(url.pathname.split('-').at(-1));
       return route.fulfill({ status: 200, contentType: 'text/html', body: fixture({
         noSend: index === 3, rejectSynthetic: [4, 6, 8, 9, 10].includes(index),
-        supported: [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 19].includes(index),
-        sendActivationDelayMs: [11, 16].includes(index) ? 21000 : [17, 20, 21].includes(index) ? 200 : [6, 8, 9, 10, 12, 13, 14, 15].includes(index) ? 100 : 0,
+        supported: [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 19, 22, 23, 24, 25, 26].includes(index),
+        sendActivationDelayMs: index === 25 ? 2500 : [11, 16].includes(index) ? 21000 : [17, 20, 21].includes(index) ? 200 : [6, 8, 9, 10, 12, 13, 14, 15].includes(index) ? 100 : 0,
         receiptDelayMs: index === 18 ? 8000 : 0,
         manualReceiptDuringReadiness: index === 9 || index === 10, ignoreButtonSubmit: index === 9,
         recurringRestore: index === 7,
@@ -718,6 +718,192 @@ try {
       assert.deepEqual(observed.sentTexts, mutation === 'text' ? [prompt] : []);
     });
   }
+  await scenario('A rejection before page admission recovers the same hidden run and submits once', async page => {
+    const foreground = await newPage('https://pm-foreground.invalid/admission-recovery');
+    await foreground.bringToFront();
+    await foreground.locator('#work').focus();
+    await page.waitForFunction(() => document.hidden && !document.hasFocus());
+    await start(page, { sendMethod: 'auto' });
+    await worker.evaluate(() => {
+      globalThis.originalExecuteScript = chrome.scripting.executeScript;
+      globalThis.admissionAttempts = 0;
+      globalThis.admissionTokens = [];
+      chrome.scripting.executeScript = request => {
+        if (request.func.name === 'pageAction' && request.args[0].mode === 'send') {
+          admissionTokens.push(request.args[0].resultToken);
+          if (++admissionAttempts === 1) return Promise.reject(new Error('Synthetic rejection before any page execution'));
+        }
+        return originalExecuteScript(request);
+      };
+    });
+    const sending = call({ type: 'SEND_NOW' });
+    try {
+      const sent = await Promise.race([sending, new Promise(resolve => setTimeout(() => resolve(null), 6000))]);
+      assert.ok(sent, 'An absent page invocation must recover without starting another round');
+      assert.equal(sent.job.sentCount, 1, sent.job.statusText);
+      assert.equal(await worker.evaluate(() => admissionAttempts), 2);
+      assert.equal(await worker.evaluate(() => new Set(admissionTokens).size), 1);
+      const observed = await inspect(page);
+      assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, 1, 1]);
+      assert.deepEqual(observed.sentTexts, [prompt]);
+      assert.equal(observed.visibility, 'hidden');
+      assert.equal(await foreground.evaluate(() => document.hasFocus()), true);
+    } finally {
+      await call({ type: 'PAUSE' });
+      await sending;
+      await worker.evaluate(() => { chrome.scripting.executeScript = originalExecuteScript; delete globalThis.originalExecuteScript; });
+      await foreground.close();
+    }
+  });
+  await scenario('A late first injection joins the recovered completed invocation without submitting again', async page => {
+    await start(page, { sendMethod: 'auto' });
+    await worker.evaluate(() => {
+      globalThis.originalExecuteScript = chrome.scripting.executeScript;
+      globalThis.releaseFirstAdmission = null;
+      globalThis.admissionAttempts = 0;
+      chrome.scripting.executeScript = request => {
+        if (request.func.name === 'pageAction' && request.args[0].mode === 'send' && ++admissionAttempts === 1) {
+          return new Promise((resolve, reject) => {
+            releaseFirstAdmission = () => originalExecuteScript(request).then(frames => { resolve(frames); return frames; }, reject);
+          });
+        }
+        return originalExecuteScript(request);
+      };
+    });
+    const sending = call({ type: 'SEND_NOW' });
+    try {
+      const sent = await Promise.race([sending, new Promise(resolve => setTimeout(() => resolve(null), 6000))]);
+      assert.ok(sent, 'A queued initial injection must not strand an unadmitted run');
+      assert.equal(sent.job.sentCount, 1, sent.job.statusText);
+      const frames = await worker.evaluate(() => releaseFirstAdmission());
+      assert.equal(frames[0].result.status, 'sent', 'The late request reads the same settled result');
+      assert.equal(await worker.evaluate(() => admissionAttempts), 2);
+      assert.equal((await inspect(page)).submits, 1);
+    } finally {
+      await call({ type: 'PAUSE' });
+      await worker.evaluate(() => { chrome.scripting.executeScript = originalExecuteScript; delete globalThis.originalExecuteScript; });
+      await sending;
+    }
+  });
+  await scenario('Losing both result transports reads back the settled page invocation instead of resubmitting', async page => {
+    await start(page, { sendMethod: 'auto' });
+    const tabId = await worker.evaluate(async url => (await chrome.tabs.query({})).find(tab => tab.url === url).id, page.url());
+    await worker.evaluate(tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => {
+      const send = chrome.runtime.sendMessage.bind(chrome.runtime);
+      chrome.runtime.sendMessage = message => message.type === 'PAGE_RESULT' ? new Promise(() => {}) : send(message);
+    } }), tabId);
+    await worker.evaluate(() => {
+      globalThis.originalExecuteScript = chrome.scripting.executeScript;
+      globalThis.admissionAttempts = 0;
+      chrome.scripting.executeScript = async request => {
+        const frames = await originalExecuteScript(request);
+        if (request.func.name === 'pageAction' && request.args[0].mode === 'send') {
+          admissionAttempts++;
+          return frames.map(frame => ({ frameId: frame.frameId, documentId: frame.documentId }));
+        }
+        return frames;
+      };
+    });
+    const sending = call({ type: 'SEND_NOW' });
+    try {
+      const sent = await Promise.race([sending, new Promise(resolve => setTimeout(() => resolve(null), 6000))]);
+      assert.ok(sent, 'A durable page result must remain observable when both return transports lose it');
+      assert.equal(sent.job.sentCount, 1, sent.job.statusText);
+      assert.equal(await worker.evaluate(() => admissionAttempts), 1);
+      assert.equal((await inspect(page)).submits, 1);
+    } finally {
+      await call({ type: 'PAUSE' });
+      await sending;
+      await worker.evaluate(() => { chrome.scripting.executeScript = originalExecuteScript; delete globalThis.originalExecuteScript; });
+    }
+  });
+  await scenario('Concurrent duplicate page admissions share one active execution and one submission', async page => {
+    await start(page, { sendMethod: 'auto' });
+    await worker.evaluate(() => {
+      globalThis.originalExecuteScript = chrome.scripting.executeScript;
+      globalThis.currentAdmission = null;
+      chrome.scripting.executeScript = request => {
+        if (request.func.name === 'pageAction' && request.args[0].mode === 'send') currentAdmission = request;
+        return originalExecuteScript(request);
+      };
+    });
+    const sending = call({ type: 'SEND_NOW' });
+    try {
+      await page.waitForFunction(() => fixture.modelUpdates.some(update => update.docChanged));
+      const duplicates = worker.evaluate(() => Promise.all([
+        originalExecuteScript(currentAdmission), originalExecuteScript(currentAdmission),
+      ]));
+      const sent = await sending;
+      assert.equal(sent.job.sentCount, 1, sent.job.statusText);
+      const frames = await duplicates;
+      assert.deepEqual(frames.map(result => result[0].result.status), ['sent', 'sent']);
+      assert.deepEqual((await inspect(page)).sentTexts, [prompt]);
+    } finally {
+      await call({ type: 'PAUSE' });
+      await sending;
+      await worker.evaluate(() => { chrome.scripting.executeScript = originalExecuteScript; delete globalThis.originalExecuteScript; });
+    }
+  });
+  await scenario('Pause before page admission cancels all later recovery attempts', async page => {
+    await start(page, { sendMethod: 'auto' });
+    await worker.evaluate(() => {
+      globalThis.originalExecuteScript = chrome.scripting.executeScript;
+      globalThis.admissionAttempts = 0;
+      chrome.scripting.executeScript = request => {
+        if (request.func.name === 'pageAction' && request.args[0].mode === 'send') {
+          admissionAttempts++;
+          return Promise.reject(new Error('Synthetic renderer temporarily unavailable'));
+        }
+        return originalExecuteScript(request);
+      };
+    });
+    const sending = call({ type: 'SEND_NOW' });
+    try {
+      for (let i = 0; i < 100 && !await worker.evaluate(() => admissionAttempts); i++) await new Promise(resolve => setTimeout(resolve, 20));
+      const paused = await call({ type: 'PAUSE' });
+      assert.equal(paused.job.enabled, false);
+      const attemptsAfterPause = await worker.evaluate(() => admissionAttempts);
+      await sending;
+      await new Promise(resolve => setTimeout(resolve, 2200));
+      assert.equal(await worker.evaluate(() => admissionAttempts), attemptsAfterPause);
+      assert.equal((await inspect(page)).submits, 0);
+      // No page listener acknowledged this pre-admission cancellation. Preserve
+      // the real finite permit fence instead of letting the next case clear it.
+      const fence = (await call({ type: 'GET_STATE' })).job.submissionFenceUntil;
+      if (Number.isFinite(fence) && fence > Date.now()) await new Promise(resolve => setTimeout(resolve, fence - Date.now() + 30));
+    } finally { await worker.evaluate(() => { chrome.scripting.executeScript = originalExecuteScript; delete globalThis.originalExecuteScript; }); }
+  });
+  await scenario('An unreachable renderer keeps at most one recovery admission outstanding and Pause fences late arrivals', async page => {
+    await start(page, { sendMethod: 'auto' });
+    await worker.evaluate(() => {
+      globalThis.originalExecuteScript = chrome.scripting.executeScript;
+      globalThis.heldAdmissions = [];
+      chrome.scripting.executeScript = request => {
+        if (request.func.name === 'pageAction' && request.args[0].mode === 'send') {
+          return new Promise((resolve, reject) => {
+            heldAdmissions.push(() => originalExecuteScript(request).then(frames => { resolve(frames); return frames; }, reject));
+          });
+        }
+        return originalExecuteScript(request);
+      };
+    });
+    const sending = call({ type: 'SEND_NOW' });
+    try {
+      await new Promise(resolve => setTimeout(resolve, 6500));
+      assert.equal(await worker.evaluate(() => heldAdmissions.length), 2,
+        'The initial request and a single recovery request must not grow every probe');
+      assert.equal((await call({ type: 'GET_STATE' })).job.phase, 'sending');
+      await call({ type: 'PAUSE' });
+      const frames = await worker.evaluate(() => Promise.all(heldAdmissions.map(release => release())));
+      assert.deepEqual(frames.map(result => result[0].result.status), ['cancelled', 'cancelled']);
+      assert.equal((await sending).job.sentCount, 0);
+      assert.equal((await inspect(page)).submits, 0);
+    } finally {
+      await call({ type: 'PAUSE' });
+      await worker.evaluate(() => { chrome.scripting.executeScript = originalExecuteScript; delete globalThis.originalExecuteScript; });
+      await sending;
+    }
+  });
   console.log(`RESULT ${selectedCases ? selectedCases.length : passed}/${selectedCases ? selectedCases.length : passed} official ProseMirror MV3 scenarios passed`);
 } finally {
   await closeBrowser();
