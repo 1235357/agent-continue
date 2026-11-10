@@ -26,7 +26,7 @@ real MV3/official-ProseMirror fixture:
    authorization stage remains pre-dispatch; recovery retires the old run and
    prepares the exact prompt on the fresh document once.
 
-The complete npm test command has terminated with exit0, including official
+The earlier local complete npm test command terminated with exit0, including official
 ProseMirror/MV3 cases44/44, editor browser11/11, background60/60 and UI39/39.
 The three new cases also pass3/3 exit0 against the actual extracted candidate
 Store ZIP, not only the working tree. Unit editor/invocation91/91 and packaging
@@ -34,13 +34,23 @@ Store ZIP, not only the working tree. Unit editor/invocation91/91 and packaging
 closure passes with installed=false and published=false. Stage authorization
 is a fixed metadata value in filtered exports, not a new grant.
 
+Final-source CI42848637631 on57ef7a9 failed before browser suites because
+STORE-LISTING.en.md still named3.0.11 after the manifest bump to3.0.12.
+That contradicts a final-source whole-suite pass; the earlier local command
+loaded the support-version assertion before the last version switch. The
+listing header is corrected without relaxing the assertion or changing the
+actual saved Store revision. A new full current-source run is required.
+
 Manifest3.0.12 and CHANGELOG mark this as an unreleased candidate. The final
 paired candidate archives under dist have SHA-256:
 
 - agent-continue-3.0.12.zip:
-  a268b22a49e836bfad49075460cba277d6ae2d46b7ace28a40555da919687f5e
+  7c909ff9060c24f692b4c3b58e4a177e4f5df1585e8ce602e7d3049fe1ddefb3
 - agent-continue-3.0.12-store.zip:
-  335cd11ab2337f24fe41430a7d247236abefb0dcc2ed659b928cb4553e1eff2b
+  05103a7ff87329c8bef0230e661e5b121e9283f5de0e23dabeae43f319b5c983
+
+These supersede the earlier a268b22a/335cd11a local candidate digests after
+the listing-header correction; no published asset has been overwritten.
 
 The archive inventories are byte-identical; the combined closure receipt is
 .artifacts/release-312-setup-build.json. No tag, new GitHub

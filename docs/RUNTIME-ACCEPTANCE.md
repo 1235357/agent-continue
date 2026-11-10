@@ -19,15 +19,23 @@ worker still rechecks the live run before MAIN dispatch; the finite permission
 lease is not an application total readiness deadline. Attempted or uncertain
 commits retain their existing no-blind-replay rule.
 
-The complete npm test command terminated with exit0: official-ProseMirror
+The earlier local complete npm test command terminated with exit0: official-ProseMirror
 actual-MV344/44, editor browser11/11, background60/60 and UI39/39 are included.
 The three new cases also pass3/3 exit0 against the extracted final Store ZIP.
 Editor/invocation units91/91, packaging35/35 and combined closure pass. The
 candidate Store archive SHA-256 is
-335cd11ab2337f24fe41430a7d247236abefb0dcc2ed659b928cb4553e1eff2b;
+05103a7ff87329c8bef0230e661e5b121e9283f5de0e23dabeae43f319b5c983;
 the paired GitHub archive and build receipt are recorded in the handoff.
 Neither archive has been installed or published by these checks. No current-user
 Chrome task, production connection or protected installation was changed.
+
+Correction after fresh CI readback:57ef7a9/42848637631 FAILED its support
+assertion because the final manifest3.0.12 no longer matched the listing header
+3.0.11. The earlier local whole-command result predates that final switch;
+do not promote it to the final-source pass. The listing header is corrected,
+with support36/36 exit0 and new full current-source verification pending.
+The final archive digest above supersedes335cd11a after the listing-header
+correction. No saved Store mutation occurred.
 
 ## 3.0.11 Persistent Prompt Delivery Release Evidence (2026-11-10)
 
