@@ -468,6 +468,31 @@ try {
     assert.equal(state.inputs, 1);
     assert.deepEqual(state.texts.map(value => value.replace(/\u00a0/g, ' ')), [configured]);
   });
+  await scenario('FONT wrapping of unchanged text does not trigger repeated DOM writes', async ({ page, args }) => {
+    await page.evaluate(() => {
+      const input = document.querySelector('[data-composer-markdown]');
+      fixture.fontWraps = 0;
+      input.addEventListener('input', () => {
+        const font = document.createElement('font');
+        font.textContent = input.textContent;
+        input.replaceChildren(font);
+        fixture.fontWraps++;
+      });
+    });
+    const configured = 'Same synthetic FONT text';
+    const outcome = await page.evaluate(pageAction, { ...args, prompt: configured });
+    const state = await page.evaluate(() => ({ inputs: fixture.inputs, fontWraps: fixture.fontWraps, sends: fixture.sends, texts: fixture.sentTexts }));
+    const { domWrites, fillCalls, dispatchAttempts } = outcome.diagnosticProgress.counters;
+    console.log('FONT counts ' + JSON.stringify({ domWrites, fillCalls, dispatchAttempts, ...state }));
+    assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
+    assert.equal(state.sends, 1);
+    assert.deepEqual(state.texts, [configured]);
+    assert.equal(domWrites, 1, 'unchanged FONT-wrapped text must not be rewritten');
+    assert.equal(fillCalls, 1);
+    assert.equal(state.inputs, 1);
+    assert.equal(state.fontWraps, 1);
+    assert.equal(dispatchAttempts, 1);
+  });
   await scenario('A cancelled beforeinput may commit asynchronously before the one allowed send', async ({ page, args }) => {
     await page.evaluate(() => {
       fixture.requiresBeforeInput = true;
