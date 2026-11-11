@@ -64,6 +64,44 @@ class GuidedTerminalTests(unittest.TestCase):
         self.assertEqual(FIXTURE.read_stage(terminal, time.monotonic() + 1, "skip_pair"),
                          "UNEXPECTED_POST_PAIR\r\n")
 
+    def test_registration_reads_delayed_result_tail_after_foreground_exit(self):
+        terminal = Terminal(b"", "unused")
+        terminal.pty = terminal
+        terminal.isalive = lambda: False
+        chunks = iter((b'REGISTER\r\n{"configured":', TimeoutError(), b'true}\r\n', b""))
+
+        def read(size):
+            chunk = next(chunks)
+            if isinstance(chunk, Exception):
+                raise chunk
+            return chunk
+
+        terminal.recv = read
+        self.assertEqual(FIXTURE.read_stage(terminal, time.monotonic() + 1, "register"),
+                         'REGISTER\r\n{"configured":true}\r\n')
+
+    def test_registration_exit_without_result_tail_keeps_the_original_deadline(self):
+        terminal = Terminal(b'REGISTER\r\n{"private":"UNREPORTED', "unused")
+        terminal.pty = terminal
+        terminal.isalive = lambda: False
+
+        def read(size):
+            if terminal.chunks:
+                return terminal.chunks.pop(0)
+            raise TimeoutError()
+
+        terminal.recv = read
+        with self.assertRaisesRegex(FIXTURE.FixtureError, "^terminal_timeout_register_other_output$"):
+            FIXTURE.read_stage(terminal, time.monotonic() + 0.03, "register")
+
+    def test_registration_result_still_obeys_the_output_limit(self):
+        terminal = Terminal(b"", "unused")
+        terminal.pty = terminal
+        terminal.isalive = lambda: False
+        terminal.recv = lambda size: b"X" * 4096
+        with self.assertRaisesRegex(FIXTURE.FixtureError, "^terminal_output_limit$"):
+            FIXTURE.read_stage(terminal, time.monotonic() + 1, "register")
+
     def test_initial_cursor_query_is_answered_before_waiting_for_the_prompt(self):
         for query, response in ((b"\x1b[6n", "\x1b[1;1R"), (b"\x1b[?6n", "\x1b[?1;1R")):
             with self.subTest(query=query):

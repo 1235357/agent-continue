@@ -131,9 +131,10 @@ def read_stage(terminal, deadline, stage, *, prompt=None, line_count=None, echo=
             chunk = terminal.fileobj.recv(4096)
         except TimeoutError:
             if closing:
-                # Detached descendants can retain the console stream after the
-                # foreground installer exits. The caller still checks its code.
-                if not terminal.pty.isalive():
+                # Registration must drain its receipt to EOF; process exit can
+                # precede the reader's final bytes. Other close stages may have
+                # detached descendants retaining the stream without more output.
+                if stage != "register" and not terminal.pty.isalive():
                     return VT_SEQUENCE.sub(b"", raw).decode("utf-8")
                 continue
             break

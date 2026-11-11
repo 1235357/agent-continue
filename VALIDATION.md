@@ -12,11 +12,20 @@ runs. Local page fixtures are not signed-in ChatGPT or Dot acceptance.
 
 Additional current local runs: native285total/281pass/0fail/4platform skips;
 bootstrap297total/281pass/0fail/16security/platform/cache skips; Python packaging
-and release tests206total/161pass/0fail/45platform/runtime skips. The standalone
+and release tests209total/164pass/0fail/45platform/runtime skips. The standalone
 combined setup release tests passed17/17. Skipped checks are unverified, not
 passed. The hosted Windows launcher passed12/12 with a freshly built preview
 kit's read-only Plan; that is neither real installation nor a replacement for
 fresh GitHub Actions evidence about the earlier cloud timeouts.
+
+A targeted local Windows preview-kit run passes both isolated Chromium control
+and browser-managed registration cases. Registration previously returned a
+truncated receipt because the terminal driver treated foreground exit as stream
+completion. It now drains registration to EOF within the unchanged deadline and
+output limit. The terminal protocol tests pass18/18, including delayed-tail,
+missing-tail and output-limit checks. This local correction does not prove the
+cause or outcome of the failed native Actions run42925907434 on4698bc6, whose
+Windows step19 failed after step18 passed; a fresh cloud run is still required.
 
 Fresh candidate administrator, combined setup and extension package bytes have
 been assembled and checked locally without installing or activating them. Final
