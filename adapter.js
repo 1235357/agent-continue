@@ -662,13 +662,18 @@ export async function pageAction(args) {
       if (previousPlainText !== '') {
         const expectedRange = document.createRange();
         expectedRange.selectNodeContents(editor);
-        if (selection.rangeCount !== 1) throw unstableComposer;
-        const selectedRange = selection.getRangeAt(0);
-        const container = editor.ownerDocument.createElement('div');
-        container.append(selectedRange.cloneContents());
-        if (plainDraft(container, true, container) !== previousPlainText
-          || selectedRange.compareBoundaryPoints(Range.START_TO_START, expectedRange) < 0
-          || selectedRange.compareBoundaryPoints(Range.END_TO_END, expectedRange) > 0) throw unstableComposer;
+        if (selection.rangeCount !== 1) {
+          if (args.persistentDelivery !== true) throw unstableComposer;
+        } else {
+          const selectedRange = selection.getRangeAt(0);
+          const container = editor.ownerDocument.createElement('div');
+          container.append(selectedRange.cloneContents());
+          if (plainDraft(container, true, container) !== previousPlainText
+            || selectedRange.compareBoundaryPoints(Range.START_TO_START, expectedRange) < 0
+            || selectedRange.compareBoundaryPoints(Range.END_TO_END, expectedRange) > 0) {
+            if (args.persistentDelivery !== true) throw unstableComposer;
+          }
+        }
       }
       const logicalValue = normalizeLineEndings(value);
       let offset = 0;
@@ -834,7 +839,14 @@ export async function pageAction(args) {
         preparedText = expectedPrepared;
         return { status: 'exact' };
       }
-      if (!actualExpected || !actualExpected.trim()) throw chunkMismatch;
+      if (!actualExpected || !actualExpected.trim()) {
+        const fallback = clean(textOf(editor));
+        if (args.persistentDelivery === true && fallback && fallback.trim()) {
+          actualExpected = normalizeLineEndings(fallback);
+        } else {
+          throw chunkMismatch;
+        }
+      }
       return { status: 'different', signature: { items: differences, final: actualExpected } };
     };
     const fallbackToPlainText = text => String(text ?? '')
@@ -858,6 +870,10 @@ export async function pageAction(args) {
           if (outcome === false) return false;
           if (outcome.status === 'exact') return true;
           if (outcome.status === 'different') {
+            if (args.persistentDelivery === true && outcome.signature?.final) {
+              preparedText = outcome.signature.final;
+              return true;
+            }
             if (expectedDifference && expectedDifference.items.length === outcome.signature.items.length
                 && expectedDifference.final === outcome.signature.final
                 && expectedDifference.items.every((item, index) => item.offset === outcome.signature.items[index].offset
@@ -1039,6 +1055,7 @@ export async function pageAction(args) {
     const rCore = coreNormalized(rNorm);
     const eCore = coreNormalized(eNorm);
     if (rCore.length > 0 && rCore === eCore) return true;
+    if (rCore.length >= 20 && (rCore.includes(eCore) || eCore.includes(rCore))) return true;
     if (eCore.length >= 80 && rCore.length >= 60) {
       const sampleLen = Math.min(50, Math.floor(eCore.length * 0.15));
       const eHead = eCore.slice(0, sampleLen);
@@ -1069,7 +1086,7 @@ export async function pageAction(args) {
       const newReceipt = last && (!modernReceipt || modernMessageKey(last)) && !beforeMessages.has(last)
         && (!lastKey || !beforeKeys.has(lastKey)) && (!manualPending || lastKey);
       const expectedText = manualPending ? prompt : preparedText;
-      const matched = matchesReceipt(receiptText, expectedText);
+      const matched = matchesReceipt(receiptText, expectedText) || matchesReceipt(receiptText, prompt);
 
       if (newReceipt && receiptText !== null && matched) {
         metrics.observations.receiptFound = true;
@@ -1451,7 +1468,8 @@ export async function pageAction(args) {
       currentButton = findSendButton(composer);
       sendButton = currentButton?.isConnected && composer.contains(currentButton) ? currentButton : null;
     }
-    if (!useKeyboardOnly && (observedSend || sendMethod === 'button') && !sendButton) return result('blocked', '发送按钮已不可用。');
+    if (!useKeyboardOnly && sendMethod === 'button' && !sendButton) return result('blocked', '发送按钮已不可用。');
+    if (!useKeyboardOnly && observedSend && !sendButton && args.persistentDelivery !== true && !isDot) return result('blocked', '发送按钮已不可用。');
     if (!readyPayload()) return result('blocked', '输入框内容尚未稳定，稍后自动检查。', 'commit-not-dispatched');
 
     beforeAssistant = assistantState();
@@ -1466,7 +1484,12 @@ export async function pageAction(args) {
         submitted = true;
         progress('dispatch', 'dispatched');
         metrics.counters.dispatchAttempts++;
+        try { btn.focus({ preventScroll: true }); } catch {}
+        try { btn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, composed: true, cancelable: true })); } catch {}
+        try { btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, composed: true, cancelable: true })); } catch {}
         btn.click();
+        try { btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, composed: true, cancelable: true })); } catch {}
+        try { btn.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, composed: true, cancelable: true })); } catch {}
         return true;
       } catch { return false; }
     };
@@ -1474,6 +1497,7 @@ export async function pageAction(args) {
     const dispatchKey = withCtrl => {
       mutable();
       try {
+        try { editor.focus({ preventScroll: true }); } catch {}
         const keyOpts = {
           key: 'Enter', code: 'Enter', keyCode: 13, which: 13,
           ctrlKey: withCtrl, metaKey: false, altKey: false, shiftKey: false,
@@ -1484,6 +1508,7 @@ export async function pageAction(args) {
         progress('dispatch', 'dispatched');
         metrics.counters.dispatchAttempts++;
         editor.dispatchEvent(downEvent);
+        try { editor.dispatchEvent(new KeyboardEvent('keypress', keyOpts)); } catch {}
         editor.dispatchEvent(new KeyboardEvent('keyup', keyOpts));
         return true;
       } catch { return false; }

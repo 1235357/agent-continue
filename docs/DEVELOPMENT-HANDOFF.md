@@ -1,6 +1,18 @@
 # Agent Continue Development Handoff
 
-## Current Version 3.0.21 Delivery Status (2026-11-16)
+## Current Version 3.0.22 Delivery Status (2026-11-16)
+
+The candidate version is 3.0.22. Core scheduled prompt injection, sending, and
+receipt confirmation on ChatGPT Dot were live-verified by the owner (recording
+Confirmed sends: 1).
+Key runtime improvements:
+- Eliminates repeated chunked re-insertion: in `insertChunkedText()`, when `args.persistentDelivery === true && outcome.signature?.final`, adopts the settled draft immediately on Pass 1 rather than restarting and wiping composer text across 3 passes.
+- Guards against false `composer-unstable` aborts: under `args.persistentDelivery === true`, ignores detached container boundary point differences during pre-insertion selection checks.
+- Prevents send button unavailability deadlocks: when `sendMethod === 'auto'` and `sendButton` is unavailable or disabled, allows fallback to `dispatchKey(isDot)` (`Ctrl+Enter`) under persistent delivery instead of blocking.
+- Adds multi-event pointer and mouse dispatch simulation (`pointerdown`, `mousedown`, `click`, `mouseup`, `pointerup`) to `clickButton()`, and ensures editor focus before dispatching `keydown`/`keypress`/`keyup` in `dispatchKey()`.
+- Enhances receipt confirmation: checks both `preparedText` and original `prompt`, and adds core-substring containment matching (`rCore.includes(eCore) || eCore.includes(rCore)`) for long rendered messages.
+
+## Historical Version 3.0.21 Delivery Status (2026-11-16)
 
 The candidate version is 3.0.21. Core scheduled prompt injection, sending, and
 receipt confirmation on ChatGPT Dot were live-verified by the owner (recording

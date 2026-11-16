@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.0.22] - 2026-11-16
+
+- Prevent repeated chunked re-insertion: in `insertChunkedText()`, when `args.persistentDelivery === true && outcome.signature?.final`, adopt the settled draft immediately on Pass 1 rather than restarting and wiping composer text across 3 passes.
+- Guard against false `composer-unstable` aborts: under `args.persistentDelivery === true`, ignore detached container boundary point differences during pre-insertion selection checks.
+- Prevent send button unavailability deadlocks: when `sendMethod === 'auto'` and `sendButton` is unavailable or disabled, allow fallback to `dispatchKey(isDot)` (`Ctrl+Enter`) under persistent delivery instead of blocking.
+- Add multi-event pointer and mouse dispatch simulation (`pointerdown`, `mousedown`, `click`, `mouseup`, `pointerup`) to `clickButton()`, and ensure editor focus before dispatching `keydown`/`keypress`/`keyup` in `dispatchKey()`.
+- Enhance receipt confirmation: check both `preparedText` and original `prompt`, and add core-substring containment matching (`rCore.includes(eCore) || eCore.includes(rCore)`) for long rendered messages.
+
 ## [3.0.21] - 2026-11-16
 
 - Strengthen autonomous self-recovery for persistent background delivery:
