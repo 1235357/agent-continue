@@ -1495,7 +1495,8 @@ async function finishRoundLocked(snapshot, result) {
       job.nextAt = now + (job.awaitingReply ? RETRY_MS : job.intervalMinutes * 60_000);
       job.statusText = result.status === 'manual-sent' ? t('已确认手动提交本轮提示词；停止重复填写，按原间隔继续。')
         : job.awaitingReply ? t('已确认发送，等待 Agent 回复完成后开始下一间隔。') : t`已确认发送 ${job.sentCount} 次；约 ${job.intervalMinutes} 分钟后继续。`;
-      await recordActivityEvent(result.status, result.status === 'manual-sent' ? t('已确认手动提交本轮提示词；停止重复填写，按原间隔继续。') : t('已在目标会话确认新消息。'));
+      await recordActivityEvent(result.status, result.status === 'manual-sent' ? t('已确认手动提交本轮提示词；停止重复填写，按原间隔继续。') : t('已在目标会话确认新消息。'),
+        { sentCount: result.status === 'sent' ? job.sentCount : job.manualSentCount, durationMs: now - snapshot.lastRunAt, ...result.executionDiagnostic });
     } else if (result.status === 'reply-complete') {
       job.awaitingReply = false;
       job.nextAt = now + job.intervalMinutes * 60_000;

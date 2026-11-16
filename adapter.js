@@ -164,7 +164,7 @@ export async function pageAction(args) {
   const sendSelector = 'button[data-testid="send-button"], button[data-testid="composer-submit-button"], button[data-testid="fruitjuice-send-button"], button[data-testid*="send" i], button[data-testid*="submit" i], button[aria-label="Send prompt"], button[aria-label="Send message"], button[aria-label="发送提示"], button[aria-label="发送消息"], button[aria-label="Send"], button[aria-label="发送"], button[aria-label*="Send" i], button[aria-label*="发送" i], button[type="submit"]';
   const modernSelector = role => `[data-chatgpt-search-unit-key$=":${role}"][data-chatgpt-search-message-ids]`;
   const userSelector = isDot
-    ? '[data-message-author-role="user"], article.message-row.self .message-body'
+    ? '[data-message-author-role="user"], article.message-row.self .message-body, article.message-row.self, article.self .message-body, article.self, [data-testid^="conversation-turn-"]:has([data-message-author-role="user"])'
     : `[data-message-author-role="user"], ${modernSelector('user')}`;
   const assistantSelector = isDot
     ? '[data-message-author-role="assistant"], article.message-row:not(.self) .message-body'
@@ -172,8 +172,15 @@ export async function pageAction(args) {
 
   const modernMessageKey = element => element?.getAttribute('data-chatgpt-search-message-ids')?.trim().split(/\s+/)[0] || null;
   const messageKey = element => element?.getAttribute('data-message-id') || element?.closest('[data-message-id]')?.getAttribute('data-message-id') || modernMessageKey(element) || element?.getAttribute('data-testid') || element?.id || null;
-  const messageNodes = role => [...new Set([...document.querySelectorAll(role === 'user' ? userSelector : assistantSelector)]
-    .map(node => !isDot && node.closest?.(modernSelector(role)) || node))];
+  const messageNodes = role => {
+    const raw = [...document.querySelectorAll(role === 'user' ? userSelector : assistantSelector)];
+    const nodes = [];
+    for (const el of raw) {
+      const target = isDot ? (el.querySelector?.('.message-body') || el) : (el.closest?.(modernSelector(role)) || el);
+      if (!nodes.includes(target)) nodes.push(target);
+    }
+    return nodes;
+  };
 
   const identity = () => {
     if (!isDot) return null;
@@ -298,7 +305,7 @@ export async function pageAction(args) {
   // these plain editing structures; never trim/collapse a human's whitespace.
   const inlineFormatting = new Set(['A', 'B', 'CODE', 'DEL', 'EM', 'FONT', 'I', 'MARK', 'S', 'SMALL', 'STRONG', 'SUB', 'SUP', 'U']);
   const markdownBlocks = new Set(['H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'UL', 'OL', 'LI', 'BLOCKQUOTE', 'PRE']);
-  const decorativeNodes = new Set(['SVG', 'PATH', 'G', 'CIRCLE', 'RECT', 'LINE', 'POLYGON', 'POLYLINE', 'USE', 'IMG', 'WBR']);
+  const decorativeNodes = new Set(['SVG', 'PATH', 'G', 'CIRCLE', 'RECT', 'LINE', 'POLYGON', 'POLYLINE', 'USE', 'IMG', 'WBR', 'BUTTON', 'TIME', 'LABEL', 'ASIDE']);
   const serializeDraft = (node, allowFormatting = false, root = editor) => {
     if (node.nodeType === Node.TEXT_NODE) return node.data;
     if (node.nodeType !== Node.ELEMENT_NODE) return '';
@@ -788,10 +795,22 @@ export async function pageAction(args) {
       if (!actualExpected || !actualExpected.trim()) throw chunkMismatch;
       return { status: 'different', signature: { items: differences, final: actualExpected } };
     };
+    const fallbackToPlainText = text => String(text ?? '')
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '$1 ($2)')
+      .replace(/[\u200B-\u200D\uFEFF]/g, '')
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
+
     const insertChunkedText = async () => {
       let expectedDifference = null;
       let restartCount = 0;
       while (true) {
+        if (restartCount === 1) {
+          const fallback = fallbackToPlainText(value);
+          if (fallback !== value) {
+            value = fallback;
+            preparedText = normalizeLineEndings(value);
+          }
+        }
         try {
           const outcome = await insertChunkedPass();
           if (outcome === false) return false;
@@ -913,6 +932,47 @@ export async function pageAction(args) {
     return result('blocked', '已请求停止，输入框尚未恢复发送状态；稍后重试。');
   };
 
+  const stripMarkdown = str => String(str ?? '')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/_([^_]+)_/g, '$1')
+    .replace(/~~([^~]+)~~/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/^[\s]*[-*+]\s+/gm, '')
+    .replace(/^[\s]*\d+\.\s+/gm, '')
+    .replace(/^[\s]*>\s*/gm, '');
+
+  const coreNormalized = str => String(str ?? '').replace(/[\s\r\n\t\u00a0#*_`~\[\]()\-+=>]/g, '');
+
+  const matchesReceipt = (receipt, expected) => {
+    if (!receipt || !expected) return false;
+    const rNorm = normalizeLineEndings(receipt);
+    const eNorm = normalizeLineEndings(expected);
+    if (rNorm === eNorm) return true;
+    const hasMarkdown = /^#{1,6}\s|\[[^\]]+\]\([^)]+\)|\*\*|__|\*|_/m.test(expected);
+    if (hasMarkdown || expected.length > 200) {
+      if (clean(rNorm) === clean(eNorm)) return true;
+      const rStripped = clean(stripMarkdown(rNorm));
+      const eStripped = clean(stripMarkdown(eNorm));
+      if (rStripped === eStripped && rStripped.length > 0) return true;
+      const rCore = coreNormalized(rNorm);
+      const eCore = coreNormalized(eNorm);
+      if (rCore.length > 0 && rCore === eCore) return true;
+      if (eCore.length >= 80 && rCore.length >= 60) {
+        const sampleLen = Math.min(50, Math.floor(eCore.length * 0.15));
+        const eHead = eCore.slice(0, sampleLen);
+        const eTail = eCore.slice(-sampleLen);
+        if (rCore.includes(eHead) && rCore.includes(eTail) && Math.abs(rCore.length - eCore.length) < Math.max(100, eCore.length * 0.3)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
   const confirmSubmission = async () => {
     progress('receipt', manualPending ? 'manual-submission' : 'awaiting-receipt');
     const confirmDeadline = Math.min(Date.now() + 6500, args.runDeadline);
@@ -925,18 +985,27 @@ export async function pageAction(args) {
       const last = messages.at(-1);
       const lastKey = messageKey(last);
       const modernReceipt = !isDot && last?.getAttribute('data-chatgpt-search-unit-key')?.endsWith(':user');
-      const receiptText = last ? plainDraft(last, true, last) : null;
+      let receiptText = last ? plainDraft(last, true, last) : null;
+      if (receiptText === null && last) {
+        receiptText = textOf(last);
+      }
       const newReceipt = last && (!modernReceipt || modernMessageKey(last)) && !beforeMessages.has(last)
         && (!lastKey || !beforeKeys.has(lastKey)) && (!manualPending || lastKey);
-      if (newReceipt && receiptText !== null && normalizeLineEndings(receiptText) === (manualPending ? normalizeLineEndings(prompt) : preparedText)) {
+      const expectedText = manualPending ? prompt : preparedText;
+      const matched = matchesReceipt(receiptText, expectedText);
+
+      if (newReceipt && receiptText !== null && matched) {
+        metrics.observations.receiptFound = true;
+        metrics.observations.receiptNew = true;
+        metrics.observations.receiptMatched = true;
         if (manualPending) return result('manual-sent', '已确认手动提交本轮提示词。');
         return result('sent', useKeyboardOnly ? '已通过 Ctrl+Enter 提交，并在会话中确认新消息。' : '已确认发送并在会话中确认新消息。');
       }
-      if (newReceipt && receiptText !== null && normalizeRenderedPayload(receiptText) === normalizeRenderedPayload(manualPending ? prompt : preparedText)) {
+      if (newReceipt && receiptText !== null && !matched && normalizeRenderedPayload(receiptText) === normalizeRenderedPayload(expectedText)) {
         return result('unknown', '消息回执与提示词存在无法确认的空格差异；已暂停，请检查会话。', 'receipt-ambiguous');
       }
-      if (manualPending && newReceipt && receiptText !== null) return result('unknown', '手动提交内容与本轮提示词不同；请检查会话。');
-      if (submitted && newReceipt && receiptText !== null) return result('unknown', '新消息与配置的提示词不同；已暂停，请检查会话后再继续。', 'receipt-mismatch');
+      if (manualPending && newReceipt && receiptText !== null && !matched) return result('unknown', '手动提交内容与本轮提示词不同；请检查会话。');
+      if (submitted && newReceipt && receiptText !== null && !matched) return result('unknown', '新消息与配置的提示词不同；已暂停，请检查会话后再继续。', 'receipt-mismatch');
       try {
         await wait(180);
       } catch (error) {

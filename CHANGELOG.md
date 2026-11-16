@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.0.18] - 2026-11-16
+
+- Fix receipt confirmation in ChatGPT Dot: add `BUTTON`, `TIME`, `LABEL`, `ASIDE` to `decorativeNodes`, fall back to `textOf(last)` when `plainDraft(last)` is null, and expand user message selectors (`article.message-row.self`, `article.self`, etc.) for Dot conversation turns.
+- Implement Markdown-tolerant and anchor-normalized matching in `matchesReceipt`: allows rendered rich HTML user messages (where raw `#`, `**`, `[text](url)` markdown syntax is converted to HTML elements by ChatGPT) to accurately confirm sent messages.
+- Fix confirmed sends counter: properly counts and increments confirmed rounds without pausing on verified ChatGPT Dot responses.
+- Add fallback insurance `fallbackToPlainText` in `insertChunkedText`: automatically simplifies complex Markdown links and strips non-printable control characters on retry to avoid injection stalls.
+- Enrich execution diagnostic logs: records detailed diagnostic metadata (`[code · duration · sentCount]`) and displays badges in popup Logs tab and activity exports.
 ## [3.0.17] - 2026-11-16
 
 - Add support for decorative DOM elements (`SVG`, `PATH`, `G`, `IMG`, `WBR`, etc.) and uneditable icon spans in `serializeDraft` (`adapter.js`). Resolves the issue where ChatGPT Dot's auto-decorated Markdown hyperlinks (e.g., GitHub URLs rendered with an inline SVG globe icon) caused draft serialization to return `null`.

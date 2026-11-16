@@ -312,7 +312,23 @@ function renderLogs() {
     const title = document.createElement('strong');
     title.textContent = typeof log.event === 'string' && Object.hasOwn(labels, log.event) ? labels[log.event] : t('运行状态');
     const message = document.createElement('p'); message.textContent = typeof log.message === 'string' ? log.message : '';
-    row.append(time, title, message); $('logList').append(row);
+    row.append(time, title, message);
+    if (log.diagnostic && typeof log.diagnostic === 'object') {
+      const diag = document.createElement('span');
+      diag.className = 'log-diagnostic';
+      diag.style.fontSize = '11px';
+      diag.style.opacity = '0.75';
+      diag.style.display = 'block';
+      const parts = [];
+      if (log.diagnostic.code) parts.push(log.diagnostic.code);
+      if (Number.isFinite(log.diagnostic.durationMs)) parts.push(`${Math.round(log.diagnostic.durationMs / 100) / 10}s`);
+      if (log.diagnostic.sentCount) parts.push(t`第 ${log.diagnostic.sentCount} 次`);
+      if (parts.length > 0) {
+        diag.textContent = `[${parts.join(' · ')}]`;
+        row.append(diag);
+      }
+    }
+    $('logList').append(row);
   }
 }
 function renderDeliveryDiagnostics() {
