@@ -1,6 +1,6 @@
 # Runtime Acceptance Pre-Check (read-only)
 
-## Candidate 3.0.14 (2026-11-15)
+## Candidate 3.0.19 (2026-11-16)
 
 The current source candidate has not been installed, released, submitted to the
 Store or accepted on a live ChatGPT or Dot conversation. This version-only update

@@ -1,6 +1,6 @@
 # Validation and Evidence Boundaries
 
-## Version 3.0.14 — Unreleased Candidate, November 15, 2026
+## Version 3.0.19 — Release Candidate, November 16, 2026
 
 This candidate starts long text in segments of at most 1,000 UTF-16 units. It
 has not been installed, released or validated on a real ChatGPT or Dot
