@@ -1,5 +1,11 @@
 # Changelog
 
+## [3.0.19] - 2026-11-16
+
+- Fix Dot target identity verification during message submission: reverse-scan conversation turns to resolve `targetIdentity` when the newly appended turn is unhydrated, preventing premature `documentChanges` and false `samePage() === false` aborts.
+- Enhance `matchesReceipt` for all prompt lengths: remove arbitrary $>200$ character barrier so trimmed, clean, Markdown-stripped, and core-normalized checks apply across short and long prompts, resolving the issue where normal text prompts failed receipt confirmation and fell back to single-send behavior.
+- Guard against false-positive receipt mismatches on unpopulated optimistic DOM elements by ensuring `clean(receiptText)` is present before evaluating mismatches.
+
 ## [3.0.18] - 2026-11-16
 
 - Fix receipt confirmation in ChatGPT Dot: add `BUTTON`, `TIME`, `LABEL`, `ASIDE` to `decorativeNodes`, fall back to `textOf(last)` when `plainDraft(last)` is null, and expand user message selectors (`article.message-row.self`, `article.self`, etc.) for Dot conversation turns.

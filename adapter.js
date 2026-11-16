@@ -184,11 +184,24 @@ export async function pageAction(args) {
 
   const identity = () => {
     if (!isDot) return null;
-    const row = [...document.querySelectorAll('article.message-row, [data-message-author-role], article[data-testid^="conversation-turn-"]')].at(-1);
-    const key = messageKey(row?.querySelector('.message-body') || row);
-    if (!key) return null;
-    const parts = key.split('~');
-    return parts.length >= 3 ? parts.slice(0, 2).join('~') : key;
+    const rows = [...document.querySelectorAll('article.message-row, [data-message-author-role], article[data-testid^="conversation-turn-"]')];
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const row = rows[i];
+      const key = messageKey(row?.querySelector('.message-body') || row);
+      if (!key) continue;
+      const parts = key.split('~');
+      const id = parts.length >= 3 ? parts.slice(0, 2).join('~') : key;
+      if (args.targetIdentity && id === args.targetIdentity) return id;
+      if (!args.targetIdentity) return id;
+    }
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const row = rows[i];
+      const key = messageKey(row?.querySelector('.message-body') || row);
+      if (!key) continue;
+      const parts = key.split('~');
+      return parts.length >= 3 ? parts.slice(0, 2).join('~') : key;
+    }
+    return null;
   };
 
   const assistantState = () => {
@@ -945,29 +958,34 @@ export async function pageAction(args) {
     .replace(/^[\s]*\d+\.\s+/gm, '')
     .replace(/^[\s]*>\s*/gm, '');
 
-  const coreNormalized = str => String(str ?? '').replace(/[\s\r\n\t\u00a0#*_`~\[\]()\-+=>]/g, '');
+  const coreNormalized = str => String(str ?? '').replace(/[\s\r\n\t\u00a0#*_`~\[\]()\-+=>【】]/g, '');
+
+  const hasBlankLineDiff = (a, b) => {
+    const aSingle = a.replace(/\n{2,}/g, '\n');
+    const bSingle = b.replace(/\n{2,}/g, '\n');
+    return aSingle === bSingle && a !== b;
+  };
 
   const matchesReceipt = (receipt, expected) => {
     if (!receipt || !expected) return false;
     const rNorm = normalizeLineEndings(receipt);
     const eNorm = normalizeLineEndings(expected);
     if (rNorm === eNorm) return true;
-    const hasMarkdown = /^#{1,6}\s|\[[^\]]+\]\([^)]+\)|\*\*|__|\*|_/m.test(expected);
-    if (hasMarkdown || expected.length > 200) {
-      if (clean(rNorm) === clean(eNorm)) return true;
-      const rStripped = clean(stripMarkdown(rNorm));
-      const eStripped = clean(stripMarkdown(eNorm));
-      if (rStripped === eStripped && rStripped.length > 0) return true;
-      const rCore = coreNormalized(rNorm);
-      const eCore = coreNormalized(eNorm);
-      if (rCore.length > 0 && rCore === eCore) return true;
-      if (eCore.length >= 80 && rCore.length >= 60) {
-        const sampleLen = Math.min(50, Math.floor(eCore.length * 0.15));
-        const eHead = eCore.slice(0, sampleLen);
-        const eTail = eCore.slice(-sampleLen);
-        if (rCore.includes(eHead) && rCore.includes(eTail) && Math.abs(rCore.length - eCore.length) < Math.max(100, eCore.length * 0.3)) {
-          return true;
-        }
+    if (rNorm.trim() === eNorm.trim()) return true;
+    if (expected.length < 50 && hasBlankLineDiff(rNorm, eNorm)) return false;
+    if (clean(rNorm) === clean(eNorm)) return true;
+    const rStripped = clean(stripMarkdown(rNorm));
+    const eStripped = clean(stripMarkdown(eNorm));
+    if (rStripped === eStripped && rStripped.length > 0) return true;
+    const rCore = coreNormalized(rNorm);
+    const eCore = coreNormalized(eNorm);
+    if (rCore.length > 0 && rCore === eCore) return true;
+    if (eCore.length >= 80 && rCore.length >= 60) {
+      const sampleLen = Math.min(50, Math.floor(eCore.length * 0.15));
+      const eHead = eCore.slice(0, sampleLen);
+      const eTail = eCore.slice(-sampleLen);
+      if (rCore.includes(eHead) && rCore.includes(eTail) && Math.abs(rCore.length - eCore.length) < Math.max(100, eCore.length * 0.3)) {
+        return true;
       }
     }
     return false;
@@ -1001,11 +1019,11 @@ export async function pageAction(args) {
         if (manualPending) return result('manual-sent', '已确认手动提交本轮提示词。');
         return result('sent', useKeyboardOnly ? '已通过 Ctrl+Enter 提交，并在会话中确认新消息。' : '已确认发送并在会话中确认新消息。');
       }
-      if (newReceipt && receiptText !== null && !matched && normalizeRenderedPayload(receiptText) === normalizeRenderedPayload(expectedText)) {
+      if (newReceipt && receiptText !== null && clean(receiptText) && !matched && normalizeRenderedPayload(receiptText) === normalizeRenderedPayload(expectedText)) {
         return result('unknown', '消息回执与提示词存在无法确认的空格差异；已暂停，请检查会话。', 'receipt-ambiguous');
       }
-      if (manualPending && newReceipt && receiptText !== null && !matched) return result('unknown', '手动提交内容与本轮提示词不同；请检查会话。');
-      if (submitted && newReceipt && receiptText !== null && !matched) return result('unknown', '新消息与配置的提示词不同；已暂停，请检查会话后再继续。', 'receipt-mismatch');
+      if (manualPending && newReceipt && receiptText !== null && clean(receiptText) && !matched) return result('unknown', '手动提交内容与本轮提示词不同；请检查会话。');
+      if (submitted && newReceipt && receiptText !== null && clean(receiptText) && !matched) return result('unknown', '新消息与配置的提示词不同；已暂停，请检查会话后再继续。', 'receipt-mismatch');
       try {
         await wait(180);
       } catch (error) {
