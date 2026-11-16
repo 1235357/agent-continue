@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.0.21] - 2026-11-16
+
+- Strengthen autonomous self-recovery for persistent background delivery:
+  - Eliminate settlement-restart exceptions when `args.persistentDelivery === true`: adopt the settled text (`actualExpected = normalizeLineEndings(settled)`) and continue chunk writing rather than throwing `chunkMismatch` on minor ProseMirror DOM formatting.
+  - Automatically adopt composer text upon reaching maximum retries in `insertChunkedText()` and before throwing `chunkMismatch`, setting `preparedText = normalizeLineEndings(currentDraft)` and proceeding directly to dispatch.
+  - Eliminate the composer refill loop: in `payloadMatches()` and before every `fill(prompt, true)` refill check, under `args.persistentDelivery === true && inserted`, adopt the existing draft if present in the composer and prevent unnecessary select-all/clear/re-insert cycles.
+  - Mark pre-commit blocked/draft/busy/error results as retryable under persistent delivery, allowing the background scheduler to autonomously retry and self-heal without pausing the scheduled continuation.
+
 ## [3.0.20] - 2026-11-16
 
 - Fix chunk-mismatch pause on repeated stable ProseMirror normalization: when `args.persistentDelivery === true`, accept repeated stable text normalization (`expectedDifference` matches `outcome.signature`), update `preparedText = outcome.signature.final`, and proceed to submit rather than pausing the scheduler. Resolves the issue where scheduled execution stopped after one round due to persistent segment mismatch.

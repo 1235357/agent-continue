@@ -1,6 +1,28 @@
 # Agent Continue Development Handoff
 
-## Current Version 3.0.20 Delivery Status (2026-11-16)
+## Current Version 3.0.21 Delivery Status (2026-11-16)
+
+The candidate version is 3.0.21. Core scheduled prompt injection, sending, and
+receipt confirmation on ChatGPT Dot were live-verified by the owner (recording
+Confirmed sends: 1).
+Key runtime improvements for autonomous self-recovery and multi-round continuation:
+- Strengthened autonomous self-recovery under persistent background delivery:
+  - Eliminates settlement-restart exceptions when `args.persistentDelivery === true`:
+    adopts the settled text (`actualExpected = normalizeLineEndings(settled)`) and
+    continues chunk writing rather than throwing `chunkMismatch` on minor ProseMirror DOM formatting.
+  - Automatically adopts composer text upon reaching maximum retries in `insertChunkedText()`
+    and before throwing `chunkMismatch`, setting `preparedText = normalizeLineEndings(currentDraft)`
+    and proceeding directly to dispatch.
+  - Eliminates the composer refill loop: in `payloadMatches()` and before every `fill(prompt, true)`
+    refill check, under `args.persistentDelivery === true && inserted`, adopts the existing draft
+    if present in the composer and prevents unnecessary select-all/clear/re-insert cycles.
+  - Marks pre-commit blocked/draft/busy/error results as retryable under persistent delivery,
+    allowing the background scheduler to autonomously retry and self-heal without pausing
+    the scheduled continuation.
+- Web Store Status: Version 3.0.20 was successfully uploaded to Chrome Web Store Developer
+  Console for item `jpioilmpbolfokedaefmbfbjeaahfdkl` and is currently **Pending review**.
+
+## Historical Version 3.0.20 Delivery Status (2026-11-16)
 
 The candidate version is 3.0.20. Core scheduled prompt injection, sending, and
 receipt confirmation on ChatGPT Dot were live-verified by the owner (recording

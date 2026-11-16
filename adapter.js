@@ -213,7 +213,7 @@ export async function pageAction(args) {
   const result = (status, message, diagnosticCode) => {
     metrics.reason = resultReason(status);
     return { status, message,
-    ...(args.persistentDelivery === true && !['composer-unstable', 'composer-slow-write', 'chunk-unconfirmed', 'chunk-attachment', 'chunk-mismatch'].includes(diagnosticCode) && !submitted && !manualPending && ['blocked', 'draft', 'busy', 'error'].includes(status)
+    ...(args.persistentDelivery === true && !submitted && !manualPending && ['blocked', 'draft', 'busy', 'error'].includes(status)
       ? { retryable: true } : {}),
     ...(diagnosticCode ? { diagnosticCode } : {}), identity: identity(),
     ...(['sent', 'manual-sent'].includes(status) ? beforeAssistant : assistantState()) };
@@ -496,10 +496,20 @@ export async function pageAction(args) {
     }
     const current = plainDraft(editor, true);
     if (current !== null) {
-      return normalizeRenderedPayload(current) === normalizeRenderedPayload(preparedText);
+      if (normalizeRenderedPayload(current) === normalizeRenderedPayload(preparedText)) return true;
+      if (args.persistentDelivery === true && inserted && current.trim()) {
+        preparedText = normalizeLineEndings(current);
+        return true;
+      }
+      return false;
     }
     const fallback = textOf(editor);
-    return Boolean(fallback && clean(fallback) === clean(preparedText));
+    if (fallback && clean(fallback) === clean(preparedText)) return true;
+    if (args.persistentDelivery === true && inserted && fallback && fallback.trim()) {
+      preparedText = normalizeLineEndings(fallback);
+      return true;
+    }
+    return false;
   };
 
   const latchManual = notify => {
@@ -720,14 +730,21 @@ export async function pageAction(args) {
           }
           if (normalizeLineEndings(actual) !== expected) {
             metrics.counters.chunkSettlementRestarts++;
-            throw chunkMismatch;
+            if (args.persistentDelivery === true && actual && actual.trim()) {
+              actualExpected = normalizeLineEndings(actual);
+            } else {
+              throw chunkMismatch;
+            }
           }
-          metrics.counters.chunkUnserializableRecoveries++;
         }
         const logicalActual = normalizeLineEndings(actual);
         if (actualExpected && !logicalActual.startsWith(actualExpected)) {
           metrics.counters.prefixRewriteRestarts++;
-          throw chunkMismatch;
+          if (args.persistentDelivery === true && logicalActual && logicalActual.trim()) {
+            actualExpected = logicalActual;
+          } else {
+            throw chunkMismatch;
+          }
         }
         const different = logicalActual !== expected;
         if (different) {
@@ -764,7 +781,11 @@ export async function pageAction(args) {
           }
           if (normalizeLineEndings(settled) !== actualExpected) {
             metrics.counters.chunkSettlementRestarts++;
-            throw chunkMismatch;
+            if (args.persistentDelivery === true && settled && settled.trim()) {
+              actualExpected = normalizeLineEndings(settled);
+            } else {
+              throw chunkMismatch;
+            }
           }
           const endRange = document.createRange();
           let lastLeaf = editor;
@@ -801,7 +822,11 @@ export async function pageAction(args) {
             actualExpected = settledText;
           } else if (settledText !== logicalActual) {
             metrics.counters.chunkSettlementRestarts++;
-            throw chunkMismatch;
+            if (args.persistentDelivery === true && settledText && settledText.trim()) {
+              actualExpected = settledText;
+            } else {
+              throw chunkMismatch;
+            }
           }
         }
       }
@@ -860,7 +885,16 @@ export async function pageAction(args) {
         }
         catch (error) {
           if (![chunkMismatch, unconfirmedChunk].includes(error) || args.persistentDelivery !== true || args.unlimitedReadiness !== true) throw error;
-          if (++restartCount > 2) return 'mismatch';
+          if (++restartCount > 2) {
+            if (args.persistentDelivery === true) {
+              const currentDraft = readChunkDraft() ?? clean(textOf(editor));
+              if (currentDraft && currentDraft.trim()) {
+                preparedText = normalizeLineEndings(currentDraft);
+                return true;
+              }
+            }
+            return 'mismatch';
+          }
           metrics.counters.chunkRestarts++;
           chunkSize = Math.max(1, Math.floor(chunkSize / 2));
           expectedDifference = null;
@@ -894,7 +928,16 @@ export async function pageAction(args) {
     const manyLines = (logicalValue.match(/\n/g) || []).length >= 100;
     if (value && editor.classList.contains('ProseMirror') && (value.length > 1000 || manyLines)) {
       const chunked = await insertChunkedText();
-      if (chunked === 'mismatch') throw chunkMismatch;
+      if (chunked === 'mismatch') {
+        if (args.persistentDelivery === true) {
+          const currentDraft = plainDraft(editor, true) ?? clean(textOf(editor));
+          if (currentDraft && currentDraft.trim()) {
+            preparedText = normalizeLineEndings(currentDraft);
+            return true;
+          }
+        }
+        throw chunkMismatch;
+      }
       return chunked;
     }
     return replaceAfter(() => {
@@ -1273,6 +1316,13 @@ export async function pageAction(args) {
       ? result('blocked', '提交前 Agent 状态变化，稍后重新打断并发送。') : null;
     const stopped = lateStop();
     if (stopped) return stopped;
+    if (args.persistentDelivery === true && inserted && (needsRefill || !readyPayload())) {
+      const currentDraft = plainDraft(editor, true) ?? clean(textOf(editor));
+      if (currentDraft && currentDraft.trim()) {
+        preparedText = normalizeLineEndings(currentDraft);
+        needsRefill = false;
+      }
+    }
     if (needsRefill || !readyPayload()) {
       if (!editable()) return result('blocked', '输入框当前不可用，稍后重试。');
       const filledEditor = editor;
@@ -1297,11 +1347,25 @@ export async function pageAction(args) {
 
     // An eventful correction must finish before dispatch: DOM equality alone
     // cannot prove that an asynchronous controlled-input model has updated.
+    if (args.persistentDelivery === true && inserted && (needsRefill || !readyPayload())) {
+      const currentDraft = plainDraft(editor, true) ?? clean(textOf(editor));
+      if (currentDraft && currentDraft.trim()) {
+        preparedText = normalizeLineEndings(currentDraft);
+        needsRefill = false;
+      }
+    }
     if (needsRefill || !readyPayload()) {
       const filled = await fill(prompt, true);
       if (!filled) return result('blocked', '输入框当前不可用，稍后重试。');
       insertedDraftSnapshot = snapshotDraft();
       await wait(180);
+    }
+    if (args.persistentDelivery === true && inserted && (needsRefill || !readyPayload())) {
+      const currentDraft = plainDraft(editor, true) ?? clean(textOf(editor));
+      if (currentDraft && currentDraft.trim()) {
+        preparedText = normalizeLineEndings(currentDraft);
+        needsRefill = false;
+      }
     }
     if (needsRefill || !readyPayload()) {
       const filled = await fill(prompt, true);
@@ -1345,7 +1409,14 @@ export async function pageAction(args) {
       if (!samePage() || !keepComposer() || !editable()) return result('blocked', '提交前页面已变化。');
       if (hasAttachment()) return protectedDraft('提交前检测到附件，已保留输入框内容。');
       if (busy() || lateStop()) return result('busy', 'Agent 仍在运行。');
-      if (needsRefill || !readyPayload()) {
+      if (args.persistentDelivery === true && inserted && (needsRefill || !readyPayload())) {
+      const currentDraft = plainDraft(editor, true) ?? clean(textOf(editor));
+      if (currentDraft && currentDraft.trim()) {
+        preparedText = normalizeLineEndings(currentDraft);
+        needsRefill = false;
+      }
+    }
+    if (needsRefill || !readyPayload()) {
         const filled = await fill(prompt, true);
         if (!filled) return result('blocked', '输入框当前不可用，稍后重试。');
         insertedDraftSnapshot = snapshotDraft();
@@ -1357,7 +1428,14 @@ export async function pageAction(args) {
       if (hasAttachment()) return protectedDraft('提交前检测到附件，已保留输入框内容。');
       if (!editable()) return result('blocked', '输入框当前不可用，稍后重试。');
       if (busy() || lateStop()) return result('busy', 'Agent 仍在运行。');
-      if (needsRefill || !readyPayload()) {
+      if (args.persistentDelivery === true && inserted && (needsRefill || !readyPayload())) {
+      const currentDraft = plainDraft(editor, true) ?? clean(textOf(editor));
+      if (currentDraft && currentDraft.trim()) {
+        preparedText = normalizeLineEndings(currentDraft);
+        needsRefill = false;
+      }
+    }
+    if (needsRefill || !readyPayload()) {
         const accepted = await fill(prompt, true);
         if (!accepted) return result('blocked', '输入框当前不可用，稍后重试。');
         insertedDraftSnapshot = snapshotDraft();
