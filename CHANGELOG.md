@@ -1,5 +1,10 @@
 # Changelog
 
+## [3.0.20] - 2026-11-16
+
+- Fix chunk-mismatch pause on repeated stable ProseMirror normalization: when `args.persistentDelivery === true`, accept repeated stable text normalization (`expectedDifference` matches `outcome.signature`), update `preparedText = outcome.signature.final`, and proceed to submit rather than pausing the scheduler. Resolves the issue where scheduled execution stopped after one round due to persistent segment mismatch.
+- Add fallback to `clean(textOf(editor))` in `payloadMatches()` when decorative DOM elements cause `plainDraft()` to return `null`, preventing false-positive payload drift and unnecessary refills.
+
 ## [3.0.19] - 2026-11-16
 
 - Fix Dot target identity verification during message submission: reverse-scan conversation turns to resolve `targetIdentity` when the newly appended turn is unhydrated, preventing premature `documentChanges` and false `samePage() === false` aborts.

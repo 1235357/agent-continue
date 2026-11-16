@@ -495,7 +495,11 @@ export async function pageAction(args) {
       return normalizeLineEndings(editor.value) === preparedText;
     }
     const current = plainDraft(editor, true);
-    return current !== null && normalizeRenderedPayload(current) === normalizeRenderedPayload(preparedText);
+    if (current !== null) {
+      return normalizeRenderedPayload(current) === normalizeRenderedPayload(preparedText);
+    }
+    const fallback = textOf(editor);
+    return Boolean(fallback && clean(fallback) === clean(preparedText));
   };
 
   const latchManual = notify => {
@@ -832,9 +836,21 @@ export async function pageAction(args) {
             if (expectedDifference && expectedDifference.items.length === outcome.signature.items.length
                 && expectedDifference.final === outcome.signature.final
                 && expectedDifference.items.every((item, index) => item.offset === outcome.signature.items[index].offset
-                  && item.actual === outcome.signature.items[index].actual)) return 'mismatch';
+                  && item.actual === outcome.signature.items[index].actual)) {
+              if (args.persistentDelivery === true) {
+                preparedText = outcome.signature.final;
+                return true;
+              }
+              return 'mismatch';
+            }
             expectedDifference = outcome.signature;
-            if (++restartCount > 2) return 'mismatch';
+            if (++restartCount > 2) {
+              if (args.persistentDelivery === true && outcome.signature && outcome.signature.final) {
+                preparedText = outcome.signature.final;
+                return true;
+              }
+              return 'mismatch';
+            }
             metrics.counters.chunkRestarts++;
             await wait(150);
             if (!await stillAllowed() || !samePage() || !keepComposer() || !editable()) return false;

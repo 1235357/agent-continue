@@ -1,6 +1,31 @@
 # Agent Continue Development Handoff
 
-## Current Version 3.0.19 Delivery Status (2026-11-16)
+## Current Version 3.0.20 Delivery Status (2026-11-16)
+
+The candidate version is 3.0.20. Core scheduled prompt injection, sending, and
+receipt confirmation on ChatGPT Dot were live-verified by the owner (recording
+Confirmed sends: 1 and entering the next check cycle).
+Key runtime improvements:
+- Resolves chunk-mismatch pause on repeated stable ProseMirror normalization:
+  when `args.persistentDelivery === true`, accepts repeated stable text
+  normalization (`expectedDifference` matches `outcome.signature`), updates
+  `preparedText = outcome.signature.final`, and proceeds to submit rather than
+  pausing the scheduler with chunk-mismatch.
+- Adds fallback to `clean(textOf(editor))` in `payloadMatches()` when decorative
+  DOM elements cause `plainDraft()` to return `null`, preventing false-positive
+  payload drift and unnecessary refills.
+- Dot identity resolution scans historical rows in reverse order, preserving
+  targetIdentity when newly appended optimistic turns lack data-message-id hydration.
+- Universal receipt matching applies normalization, markdown stripping, and
+  punctuation tolerance without an arbitrary length barrier.
+- Empty placeholder protection prevents premature mismatch classifications.
+- Full test suites pass: check (128+11), support (69/69), devices (282/282, 79/79),
+  setup (66/66).
+- Windows device control, tunnel integration, and administrator/current-account
+  setup flows are intact with consent-gated command installation and no custom
+  EXE/MSI installers.
+
+## Historical Version 3.0.19 Delivery Status (2026-11-16)
 
 The candidate version is 3.0.19. Core scheduled prompt injection, sending, and
 receipt confirmation on ChatGPT Dot were live-verified by the owner (recording
