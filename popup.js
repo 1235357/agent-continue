@@ -39,18 +39,36 @@ let explicitTargetSelection = selectedTabId !== null;
 let selectSavedTarget = fullView && selectedTabId === null;
 let latestJob = null;
 let draftConfig = normalized();
+let persistedDraft = null;
+let draftGeneration = null;
+let draftRevision = null;
+let draftSaveQueue = Promise.resolve();
 let loaded = false;
 let pendingAction = null;
 let actionSequence = 0;
+let startPreparation = null;
 let importing = false;
 let contentEpoch = 0;
 let saveTimer;
 let revealed = false;
 let queueEditing = null;
 let templates = [];
+let templateRevision = 0;
 let logs = [];
 let deliveryDiagnostics = [];
 let diagnosticHealth = null;
+let localDiagnosticHealth = null;
+let sessionDiagnosticHealth = null;
+let localDiagnosticHealthRevision = 0;
+let sessionDiagnosticHealthRevision = 0;
+let diagnosticHealthRequest = 0;
+let diagnosticListRevision = 0;
+let logRevision = 0;
+let jobRevision = 0;
+let stateRequest = 0;
+let appliedStateRequest = 0;
+let degradedDiagnosticHealth = null;
+let diagnosticsReadUnconfirmed = false;
 let targets = [];
 let activePanel = 'task';
 let targetSignature = '';
@@ -58,7 +76,7 @@ let queueSignature = '';
 let currentSourceIdentity = null;
 const configFields = ['interval', 'maxSends', 'stopMarkers', 'preventDiscard', 'mode',
   'scheduleMode', 'startImmediately', 'waitForIdle', 'sendMethod', 'quietEnabled', 'quietStart', 'quietEnd'];
-const editableButtons = ['importPrompt', 'importQueue', 'addToQueue', 'loadTemplate', 'deleteTemplate',
+const editableButtons = ['importPrompt', 'importQueue', 'addToQueue', 'loadTemplate', 'deleteTemplate', 'exportPromptTxt',
   'saveTemplate', 'importConfig', 'saveQueueItem'];
 const eventLabels = () => ({
   started: t('任务已开始'), start: t('任务已开始'), resumed: t('已继续'), resume: t('已继续'),
@@ -98,7 +116,7 @@ function safeFailure(error, fallback = t('操作未完成，请重试。')) {
   }
   return fallback;
 }
-function canEdit() { return loaded && !latestJob?.enabled && !pendingAction && !importing; }
+function canEdit() { return loaded && !latestJob?.enabled && !pendingAction && !startPreparation && !importing; }
 function displayedConfig() { return latestJob?.enabled ? normalized(latestJob.config || latestJob) : draftConfig; }
 function setField(id, value) { if ($(id).value !== String(value ?? '')) $(id).value = String(value ?? ''); }
 function hidePrompt() {
@@ -145,16 +163,36 @@ function gatherConfig() {
 }
 async function persistDraftNow() {
   clearTimeout(saveTimer);
+  saveTimer = null;
+  if (!loaded || pendingAction === 'CLEAR_DATA' || !draftGeneration || !Number.isSafeInteger(draftRevision))
+    throw new Error(t('本机保存失败，请检查扩展存储空间。'));
   const snapshot = readConfig(clone(draftConfig), { allowEmpty: true });
-  await chrome.storage.local.set({ config: snapshot });
+  const epoch = contentEpoch;
+  const work = draftSaveQueue.then(async () => {
+    if (!loaded || pendingAction === 'CLEAR_DATA' || epoch !== contentEpoch || !persistedDraft)
+      throw new Error(t('本机保存失败，请检查扩展存储空间。'));
+    const response = await request({ type: 'SAVE_DRAFT', generation: draftGeneration, revision: draftRevision,
+      base: clone(persistedDraft), config: snapshot });
+    if (!response?.ok) {
+      if (response?.conflict && response.draftGeneration === draftGeneration && Number.isSafeInteger(response.draftRevision)) {
+        draftRevision = response.draftRevision;
+      }
+      throw new Error(t('本机保存失败，请检查扩展存储空间。'));
+    }
+    if (!loaded || pendingAction === 'CLEAR_DATA' || response.draftGeneration !== draftGeneration)
+      throw new Error(t('本机保存失败，请检查扩展存储空间。'));
+    draftRevision = response.draftRevision;
+    persistedDraft = snapshot;
+  });
+  draftSaveQueue = work.catch(() => undefined);
+  await work;
 }
 function saveDraft() {
-  const snapshot = clone(draftConfig);
+  contentEpoch++;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    let validated;
-    try { validated = readConfig(snapshot, { allowEmpty: true }); } catch { return; }
-    chrome.storage.local.set({ config: validated }).catch(() => tell(t('本机保存失败，请检查扩展存储空间。'), true));
+    saveTimer = null;
+    persistDraftNow().catch(() => tell(t('本机保存失败，请检查扩展存储空间。'), true));
   }, 180);
 }
 function onConfigurationInput() {
@@ -282,7 +320,8 @@ function renderDeliveryDiagnostics() {
   if (!list) return;
   const expanded = new Set([...list.querySelectorAll('details[open]')].map(item => item.dataset.sequence));
   $('deliveryDiagnosticHealth').textContent = diagnosticHealth?.persistence === 'degraded'
-    ? t('记录保存失败；导出可能不完整。') : '';
+    ? t('记录保存失败；导出可能不完整。') : diagnosticsReadUnconfirmed
+      ? t('诊断记录暂时无法读取；显示可能不完整。') : '';
   list.replaceChildren();
   const traces = deliveryDiagnostics.map(sanitizeDeliveryDiagnostics).filter(Boolean).slice(-20).reverse();
   if (!traces.length) { list.textContent = t('尚无新版发送诊断。'); return; }
@@ -315,8 +354,8 @@ function paint(job) {
   if (currentSourceIdentity !== sourceIdentity) { hidePrompt(); closeQueueEditor(); currentSourceIdentity = sourceIdentity; }
   const config = displayedConfig();
   const enabled = job?.enabled === true;
-  const busy = !!pendingAction || importing;
-  const activating = pendingAction === 'START' || pendingAction === 'RESUME';
+  const busy = !!pendingAction || !!startPreparation || importing;
+  const activating = !!startPreparation || pendingAction === 'START' || pendingAction === 'RESUME';
   const blocked = job?.needsAttention || ['waiting', 'blocked', 'unknown'].includes(job?.phase);
   $('badge').textContent = enabled ? blocked ? t('运行 · 等待') : t('运行中') : job ? t('已暂停') : t('未开始');
   $('badge').classList.toggle('on', enabled); $('badge').classList.toggle('attention', enabled && blocked);
@@ -341,7 +380,7 @@ function paint(job) {
   $('resume').hidden = enabled || activating || !job; $('resume').disabled = !loaded || busy;
   $('check').disabled = !loaded || busy; $('sendNow').disabled = busy || !enabled;
   $('targetSelect').disabled = !loaded || busy || enabled;
-  for (const id of [...configFields, 'keepAwake', 'encoding', 'queueName', 'queueText', 'templateName', 'templateSelect']) $(id).disabled = !canEdit();
+  for (const id of [...configFields, 'keepAwake', 'encoding', 'queueName', 'queueText', 'templateName', 'templateSelect', 'manualSubmissionSequence']) $(id).disabled = !canEdit();
   $('prompt').readOnly = enabled || busy; $('prompt').disabled = !loaded;
   $('togglePrompt').disabled = !loaded || importing;
   for (const id of editableButtons) $(id).disabled = !canEdit();
@@ -361,20 +400,125 @@ function paint(job) {
   renderPromptMeta(config); renderQueue(config); renderTargets(); renderCountdown();
 }
 async function refresh() {
+  const requestId = ++stateRequest;
+  const listRevision = diagnosticListRevision;
+  const currentLogRevision = logRevision;
+  const currentJobRevision = jobRevision;
+  const currentContentEpoch = contentEpoch;
+  void refreshDiagnosticHealth();
   try {
+    const localRevision = localDiagnosticHealthRevision;
+    const sessionRevision = sessionDiagnosticHealthRevision;
     const state = await request({ type: 'GET_STATE' });
     if (!state?.ok) throw new Error(state?.error || t('无法读取扩展状态。'));
-    if (!loaded) { draftConfig = normalized(state.config); loaded = true; }
+    if (requestId < appliedStateRequest) return;
+    appliedStateRequest = requestId;
+    if (state.configAvailable !== false && currentContentEpoch === contentEpoch
+        && typeof state.draftGeneration === 'string' && Number.isSafeInteger(state.draftRevision)) {
+      if (!loaded) { draftConfig = normalized(state.config); loaded = true; }
+      persistedDraft = readConfig(normalized(state.config), { allowEmpty: true });
+      draftGeneration = state.draftGeneration;
+      draftRevision = state.draftRevision;
+    }
+    if (!loaded && state.configAvailable === false && currentContentEpoch === contentEpoch) {
+      tell(t('配置暂时无法读取；暂停仍可使用，重试前不会覆盖本地配置。'), true);
+    }
     targets = Array.isArray(state.availableTargets) ? state.availableTargets : targets;
-    if (Array.isArray(state.logs)) { logs = state.logs; renderLogs(); }
-    deliveryDiagnostics = Array.isArray(state.deliveryDiagnostics) ? state.deliveryDiagnostics : [];
-    diagnosticHealth = state.diagnosticsHealth; renderDeliveryDiagnostics();
-    paint(state.job || null);
-  } catch (error) { tell(safeFailure(error), true); }
+    if (currentLogRevision === logRevision && Array.isArray(state.logs)) { logs = state.logs; renderLogs(); }
+    if (localRevision === localDiagnosticHealthRevision && sessionRevision === sessionDiagnosticHealthRevision) {
+      diagnosticsReadUnconfirmed = state.diagnosticsReadIncomplete === true || state.diagnosticsHealth?.persistence === 'unknown';
+    }
+    if (listRevision === diagnosticListRevision && Array.isArray(state.deliveryDiagnostics)) deliveryDiagnostics = state.deliveryDiagnostics;
+    if (localRevision === localDiagnosticHealthRevision && sessionRevision === sessionDiagnosticHealthRevision &&
+        state.diagnosticsHealth?.persistence === 'degraded') {
+      degradedDiagnosticHealth = state.diagnosticsHealth;
+      void refreshDiagnosticHealth();
+    }
+    diagnosticHealth = degradedDiagnosticHealth || sessionDiagnosticHealth || localDiagnosticHealth;
+    renderDeliveryDiagnostics();
+    paint(currentJobRevision === jobRevision ? state.job || null : latestJob);
+  } catch (error) { if (requestId === stateRequest) tell(safeFailure(error), true); }
+}
+async function refreshDiagnosticHealth() {
+  const requestId = ++diagnosticHealthRequest;
+  const localRevision = localDiagnosticHealthRevision;
+  const sessionRevision = sessionDiagnosticHealthRevision;
+  let localSettled = false, sessionSettled = false;
+  const renderHealth = () => {
+    if (requestId !== diagnosticHealthRequest) return;
+    if (localSettled && sessionSettled && localRevision === localDiagnosticHealthRevision &&
+        sessionRevision === sessionDiagnosticHealthRevision) degradedDiagnosticHealth = null;
+    diagnosticHealth = degradedDiagnosticHealth || sessionDiagnosticHealth || localDiagnosticHealth;
+    renderDeliveryDiagnostics();
+  };
+  await Promise.allSettled([
+    Promise.resolve().then(() => chrome.storage.local.get('diagnosticsHealth')).then(value => {
+      if (requestId === diagnosticHealthRequest && localRevision === localDiagnosticHealthRevision) {
+        localDiagnosticHealth = value.diagnosticsHealth;
+        localSettled = true;
+        if (localDiagnosticHealth?.persistence === 'degraded') degradedDiagnosticHealth = localDiagnosticHealth;
+        renderHealth();
+      }
+    }),
+    Promise.resolve().then(() => chrome.storage.session.get('diagnosticsHealth')).then(value => {
+      if (requestId === diagnosticHealthRequest && sessionRevision === sessionDiagnosticHealthRevision) {
+        sessionDiagnosticHealth = value.diagnosticsHealth;
+        sessionSettled = true;
+        if (sessionDiagnosticHealth?.persistence === 'degraded') degradedDiagnosticHealth = sessionDiagnosticHealth;
+        renderHealth();
+      }
+    }),
+  ]);
+}
+function wellFormedText(value) {
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xD800 && code <= 0xDBFF) {
+      const next = value.charCodeAt(++index);
+      if (!(next >= 0xDC00 && next <= 0xDFFF)) return false;
+    } else if (code >= 0xDC00 && code <= 0xDFFF) return false;
+  }
+  return true;
+}
+async function downloadPromptTxt() {
+  if (!canEdit()) return;
+  if (draftConfig.mode !== 'repeat') { tell(t('手动 TXT 下载仅支持重复提示词；请先选择重复模式。'), true); return; }
+  const value = draftConfig.prompt;
+  if (typeof value !== 'string' || !value.trim()) { tell(t('请先输入或导入提示词'), true); return; }
+  if (!wellFormedText(value)) { tell(t('提示词包含无法无损编码为 UTF-8 的字符；未创建文件。'), true); return; }
+  const sequence = $('manualSubmissionSequence').value;
+  if (!/^[1-9]\d*$/.test(sequence) || !Number.isSafeInteger(Number(sequence))) {
+    tell(t('请输入有效的正整数提交序号。'), true); return;
+  }
+  const revision = jobRevision, epoch = contentEpoch;
+  let state;
+  try { state = await chrome.runtime.sendMessage({ type: 'GET_STATE' }); }
+  catch { tell(t('无法确认任务已暂停；未创建文件。'), true); return; }
+  if (!state?.ok || !Object.hasOwn(state, 'job') || (state.job?.enabled !== false && state.job !== null)
+      || revision !== jobRevision || epoch !== contentEpoch || !canEdit()
+      || draftConfig.prompt !== value || draftConfig.mode !== 'repeat' || $('manualSubmissionSequence').value !== sequence) {
+    tell(t('无法确认任务已暂停；未创建文件。'), true); return;
+  }
+  let url;
+  try {
+    const filename = `agent-continue-${new Date().toISOString().replace(/[:.]/g, '-')}-${sequence}.txt`;
+    url = URL.createObjectURL(new Blob([value], { type: 'text/plain;charset=utf-8' }));
+    const link = document.createElement('a'); link.href = url; link.download = filename;
+    link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    tell(t('已请求下载 TXT；请检查浏览器下载结果，保持任务暂停并手动上传和发送。'));
+  } catch {
+    if (url) URL.revokeObjectURL(url);
+    tell(t('TXT 下载请求失败；请检查浏览器下载设置。'), true);
+  }
 }
 async function act(type, extras = {}) {
   if (pendingAction && !['PAUSE', 'CLEAR_DATA'].includes(type)) return;
-  if (type === 'CLEAR_DATA') { contentEpoch += 1; clearTimeout(saveTimer); }
+  if (['PAUSE', 'CLEAR_DATA'].includes(type)) startPreparation = null;
+  if (type === 'CLEAR_DATA') { contentEpoch += 1; clearTimeout(saveTimer); loaded = false; }
+  const clearingLogRevision = logRevision;
+  const clearingListRevision = diagnosticListRevision;
+  const clearingLocalHealthRevision = localDiagnosticHealthRevision;
+  const clearingSessionHealthRevision = sessionDiagnosticHealthRevision;
   const sequence = ++actionSequence;
   pendingAction = type; paint(latestJob);
   tell(type === 'CHECK_PAGE' ? t('正在检查页面，不会填写或发送消息…') : t('正在处理…'));
@@ -386,7 +530,17 @@ async function act(type, extras = {}) {
     else if (type === 'START') { hidePrompt(); closeQueueEditor(); showPanel('task'); tell(t('任务已启动。你可以切换标签页，继续使用电脑。')); }
     else if (type === 'PAUSE') tell(t('后续发送已暂停。已经提交的消息无法撤回。'));
     else if (type === 'RESUME') { hidePrompt(); closeQueueEditor(); showPanel('task'); tell(t('已按原任务配置继续，计时重新开始。')); }
-    else if (type === 'CLEAR_LOGS') { logs = []; renderLogs(); tell(t('本机运行日志已清空。')); }
+    else if (type === 'CLEAR_LOGS') {
+      if (clearingLogRevision === logRevision) { logRevision++; logs = []; }
+      if (clearingListRevision === diagnosticListRevision) { diagnosticListRevision++; deliveryDiagnostics = []; }
+      if (clearingLocalHealthRevision === localDiagnosticHealthRevision && clearingSessionHealthRevision === sessionDiagnosticHealthRevision) {
+        localDiagnosticHealthRevision++; sessionDiagnosticHealthRevision++;
+        localDiagnosticHealth = null; sessionDiagnosticHealth = null; degradedDiagnosticHealth = null;
+        diagnosticsReadUnconfirmed = false;
+      }
+      diagnosticHealth = degradedDiagnosticHealth || sessionDiagnosticHealth || localDiagnosticHealth;
+      renderLogs(); tell(t('本机运行日志已清空。'));
+    }
     else if (type === 'CLEAR_DATA') {
       messageRecipes.clear(); lastTranslation = null;
       clearTimeout(saveTimer); draftConfig = normalized(); templates = []; logs = []; loaded = false;
@@ -503,16 +657,36 @@ $('goPrompt').addEventListener('click', () => showPanel('prompt'));
 $('targetSelect').addEventListener('change', () => { explicitTargetSelection = true; selectSavedTarget = false; selectedTabId = Number($('targetSelect').value) || null; });
 $('start').addEventListener('click', async () => {
   if (!canEdit()) return;
+  const preparation = {};
+  startPreparation = preparation;
+  paint(latestJob);
+  const startEpoch = contentEpoch;
+  const currentStart = () => startPreparation === preparation && startEpoch === contentEpoch
+    && loaded && !latestJob?.enabled && !pendingAction && !importing;
   draftConfig = gatherConfig();
   try {
-    if (draftConfig.keepAwake) {
-      const granted = await chrome.permissions.request({ permissions: ['power'] });
+    const permission = draftConfig.keepAwake ? chrome.permissions.request({ permissions: ['power'] }) : null;
+    const reservation = request({ type: 'PREPARE_START' }).then(value => ({ value }), error => ({ error }));
+    if (permission) {
+      const granted = await permission;
+      if (!currentStart()) return;
       if (!granted) { draftConfig.keepAwake = false; $('keepAwake').checked = false; }
     }
+    const outcome = await reservation;
+    if (!currentStart()) return;
+    if (outcome.error) throw outcome.error;
+    const reserved = outcome.value;
+    if (!reserved?.ok || typeof reserved.startToken !== 'string') throw new Error(reserved?.error || t('操作未完成，请重试。'));
     draftConfig = readConfig(draftConfig);
     await persistDraftNow();
-  } catch (error) { tell(safeFailure(error, t('本机保存失败，尚未启动。')), true); return; }
-  act('START', { config: clone(draftConfig), ...selectedTarget() });
+    if (!currentStart()) return;
+    startPreparation = null;
+    act('START', { config: clone(draftConfig), startToken: reserved.startToken, ...selectedTarget() });
+  } catch (error) {
+    if (startPreparation === preparation) tell(safeFailure(error, t('本机保存失败，尚未启动。')), true);
+  } finally {
+    if (startPreparation === preparation) { startPreparation = null; paint(latestJob); }
+  }
 });
 $('pause').addEventListener('click', () => act('PAUSE'));
 $('resume').addEventListener('click', () => act('RESUME'));
@@ -534,6 +708,7 @@ $('prompt').addEventListener('input', () => {
   draftConfig.prompt = $('prompt').value; draftConfig.promptSource = 'manual'; saveDraft(); renderPromptMeta(draftConfig);
 });
 $('importPrompt').addEventListener('click', () => $('promptFile').click());
+$('exportPromptTxt').addEventListener('click', downloadPromptTxt);
 $('promptFile').addEventListener('change', event => importFiles(event.target.files));
 $('importQueue').addEventListener('click', () => $('queueFiles').click());
 $('queueFiles').addEventListener('change', event => importFiles(event.target.files, true));
@@ -604,9 +779,15 @@ $('saveTemplate').addEventListener('click', async () => {
   if (!name) { tell(t('请先填写模板名称。'), true); return; }
   if (!draftConfig.prompt?.trim() && !draftConfig.queue.length) { tell(t('当前还没有可保存的提示词。'), true); return; }
   if (templates.length >= 30) { tell(t('最多保存 30 个模板，请先删除不需要的模板。'), true); return; }
-  templates.push({ id: crypto.randomUUID(), name, prompt: draftConfig.prompt, queue: clone(draftConfig.queue), mode: draftConfig.mode });
-  try { await chrome.storage.local.set({ templates }); renderTemplates(); $('templateName').value = ''; tell(t('模板已保存在本机。')); }
-  catch { templates.pop(); tell(t('模板保存失败，请检查本机存储空间。'), true); }
+  const generation = draftGeneration, revision = templateRevision;
+  const base = clone(templates);
+  const next = [...base, { id: crypto.randomUUID(), name, prompt: draftConfig.prompt, queue: clone(draftConfig.queue), mode: draftConfig.mode }];
+  try {
+    const response = await request({ type: 'SAVE_TEMPLATES', generation, base, templates: next });
+    if (!response?.ok || !loaded || generation !== draftGeneration) throw new Error();
+    if (revision === templateRevision) templates = next;
+    renderTemplates(); $('templateName').value = ''; tell(t('模板已保存在本机。'));
+  } catch { tell(t('模板保存失败，请检查本机存储空间。'), true); }
 });
 $('loadTemplate').addEventListener('click', () => {
   if (!canEdit()) return;
@@ -619,8 +800,14 @@ $('deleteTemplate').addEventListener('click', async () => {
   if (!canEdit()) return;
   const id = $('templateSelect').value;
   if (!templates.some(item => item.id === id)) { tell(t('请先选择模板。'), true); return; }
-  const remaining = templates.filter(item => item.id !== id);
-  try { await chrome.storage.local.set({ templates: remaining }); templates = remaining; renderTemplates(); tell(t('所选模板已删除。当前提示词保持不变。')); }
+  const generation = draftGeneration, revision = templateRevision;
+  const base = clone(templates), remaining = base.filter(item => item.id !== id);
+  try {
+    const response = await request({ type: 'SAVE_TEMPLATES', generation, base, templates: remaining });
+    if (!response?.ok || !loaded || generation !== draftGeneration) throw new Error();
+    if (revision === templateRevision) templates = remaining;
+    renderTemplates(); tell(t('所选模板已删除。当前提示词保持不变。'));
+  }
   catch { tell(t('模板未能删除。'), true); }
 });
 $('exportConfig').addEventListener('click', () => {
@@ -681,19 +868,69 @@ $('diagnoseTiming')?.addEventListener('click', async () => {
 $('clearData').addEventListener('click', () => $('clearDialog').showModal());
 $('cancelClear').addEventListener('click', () => $('clearDialog').close());
 $('confirmClear').addEventListener('click', () => { $('clearDialog').close(); clearTimeout(saveTimer); act('CLEAR_DATA'); });
+function invalidateDraft() {
+  contentEpoch++; clearTimeout(saveTimer); saveTimer = null; loaded = false;
+  persistedDraft = null; draftGeneration = null; draftRevision = null;
+  draftConfig = normalized();
+  templateRevision++; templates = []; renderTemplates();
+  hidePrompt(); closeQueueEditor(); paint(latestJob);
+}
+chrome.runtime.onMessage?.addListener?.((message, sender) => {
+  if (message?.type !== 'DRAFT_DATA_CLEARED' || sender.id !== chrome.runtime.id
+      || typeof message.generation !== 'string' || message.generation === draftGeneration) return;
+  invalidateDraft();
+});
 chrome.storage.onChanged.addListener((changes, area) => {
-  if ((area === 'session' || area === 'local') && changes.job) paint(changes.job.newValue || null);
-  if (area === 'local' && changes.logs) { logs = Array.isArray(changes.logs.newValue) ? changes.logs.newValue : []; renderLogs(); }
+  if (area === 'local' && changes.config) {
+    if (changes.config.newValue === undefined) {
+      invalidateDraft();
+    } else if (pendingAction !== 'CLEAR_DATA') {
+      const previous = normalized(changes.config.oldValue);
+      const next = normalized(changes.config.newValue);
+      persistedDraft = readConfig(clone(next), { allowEmpty: true });
+      if (loaded) {
+        const localPromptChanged = draftConfig.prompt !== previous.prompt;
+        for (const key of Object.keys(next)) {
+          if (JSON.stringify(draftConfig[key]) !== JSON.stringify(previous[key])) next[key] = clone(draftConfig[key]);
+        }
+        if (localPromptChanged) next.promptSource = draftConfig.promptSource;
+      }
+      if (JSON.stringify(next) !== JSON.stringify(draftConfig) &&
+          JSON.stringify(next) !== JSON.stringify(normalized(draftConfig))) contentEpoch++;
+      draftConfig = next; loaded = true;
+      queueSignature = ''; paint(latestJob);
+    }
+  }
+  if (area === 'local' && changes.templates) {
+    templateRevision++;
+    templates = Array.isArray(changes.templates.newValue) ? changes.templates.newValue.filter(item =>
+      typeof item?.id === 'string' && typeof item.name === 'string' && typeof item.prompt === 'string' && Array.isArray(item.queue)).slice(0, 30) : [];
+    renderTemplates();
+  }
+  if ((area === 'session' || area === 'local') && changes.job) { jobRevision++; paint(changes.job.newValue || null); }
+  if (area === 'local' && changes.logs) { logRevision++; logs = Array.isArray(changes.logs.newValue) ? changes.logs.newValue : []; renderLogs(); }
   if (area === 'local' && changes.deliveryDiagnostics) {
+    diagnosticListRevision++;
     deliveryDiagnostics = Array.isArray(changes.deliveryDiagnostics.newValue) ? changes.deliveryDiagnostics.newValue : [];
+    diagnosticHealth = degradedDiagnosticHealth || sessionDiagnosticHealth || localDiagnosticHealth;
     renderDeliveryDiagnostics();
   }
-  if (changes.diagnosticsHealth) { diagnosticHealth = changes.diagnosticsHealth.newValue; renderDeliveryDiagnostics(); }
+  if ((area === 'local' || area === 'session') && changes.diagnosticsHealth) {
+    const previous = area === 'local' ? localDiagnosticHealth : sessionDiagnosticHealth;
+    if (area === 'local') { localDiagnosticHealthRevision++; localDiagnosticHealth = changes.diagnosticsHealth.newValue; }
+    else { sessionDiagnosticHealthRevision++; sessionDiagnosticHealth = changes.diagnosticsHealth.newValue; }
+    if (changes.diagnosticsHealth.newValue?.persistence === 'degraded') degradedDiagnosticHealth = changes.diagnosticsHealth.newValue;
+    else if (previous?.persistence === 'degraded') {
+      degradedDiagnosticHealth = [sessionDiagnosticHealth, localDiagnosticHealth].find(health => health?.persistence === 'degraded') || null;
+    }
+    diagnosticHealth = degradedDiagnosticHealth || sessionDiagnosticHealth || localDiagnosticHealth;
+    renderDeliveryDiagnostics();
+  }
 });
 window.addEventListener('pagehide', () => {
-  if (loaded && !latestJob?.enabled && !importing) {
+  if (loaded && !latestJob?.enabled && !importing && !pendingAction && saveTimer) {
     clearTimeout(saveTimer);
-    try { chrome.storage.local.set({ config: readConfig(clone(draftConfig), { allowEmpty: true }) }).catch(() => undefined); } catch { /* Keep last valid draft. */ }
+    persistDraftNow().catch(() => undefined);
   }
   hidePrompt(); closeQueueEditor(); clearInterval(countdownTimer);
   messageRecipes.clear(); lastTranslation = null;
@@ -713,12 +950,15 @@ if ($('language')) $('language').value = getLanguage();
 
 const countdownTimer = setInterval(renderCountdown, 1000);
 paint(null);
+void refresh();
 (async () => {
+  const currentTemplateRevision = templateRevision;
   try {
-    const local = await chrome.storage.local.get(['templates', 'uiTheme']);
-    templates = Array.isArray(local.templates) ? local.templates.filter(item => typeof item?.id === 'string' && typeof item.name === 'string' && typeof item.prompt === 'string' && Array.isArray(item.queue)).slice(0, 30) : [];
+    const local = await chrome.storage.local.get(['templates', 'uiTheme', 'draftClearPending']);
+    if (currentTemplateRevision === templateRevision && local.draftClearPending !== true) {
+      templates = Array.isArray(local.templates) ? local.templates.filter(item => typeof item?.id === 'string' && typeof item.name === 'string' && typeof item.prompt === 'string' && Array.isArray(item.queue)).slice(0, 30) : [];
+    }
     const theme = ['system', 'light', 'dark'].includes(local.uiTheme) ? local.uiTheme : 'system';
     $('theme').value = theme; applyTheme(theme); renderTemplates();
   } catch { tell(t('部分本机偏好未能载入。'), true); }
-  await refresh();
 })();

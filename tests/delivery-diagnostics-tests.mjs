@@ -5,10 +5,10 @@ import { buildActivityExport } from '../activity-export.js';
 
 const now = Date.UTC(2026, 10, 10, 12);
 const secret = 'SYNTHETIC_PRIVATE https://example.invalid/private C:\\private\\prompt.txt';
-const counterNames = ['pageAdmissions', 'modelWrites', 'domWrites', 'fillCalls', 'readinessChecks',
+const counterNames = ['pageAdmissions', 'modelWrites', 'domWrites', 'textChunks', 'slowChunks', 'rejectedChunks', 'chunkRestarts', 'prefixRewriteRestarts', 'chunkSettlementRestarts', 'chunkUnserializableChecks', 'chunkUnserializableRestarts', 'chunkUnserializableRecoveries', 'chunkDifferences', 'insertedBlankSeparators', 'fillCalls', 'readinessChecks',
   'authorizationChecks', 'grantRequests', 'grantReadbacks', 'retiredReadbacks', 'dispatchAttempts',
   'receiptChecks', 'manualIntents', 'attachmentsRemoved', 'transportErrors', 'leaseRenewals', 'documentChanges'];
-const timingNames = ['modelWriteMs', 'domWriteMs', 'maxModelWriteMs', 'maxDomWriteMs', 'elapsedMs', 'stageElapsedMs'];
+const timingNames = ['modelWriteMs', 'domWriteMs', 'maxModelWriteMs', 'maxDomWriteMs', 'serializationMs', 'maxSerializationMs', 'elapsedMs', 'stageElapsedMs'];
 const observationNames = ['hidden', 'sendPresent', 'sendEnabled', 'composerPresent', 'busy', 'manualPending'];
 const reasons = ['starting', 'prepared', 'ready', 'waiting-send', 'send-unavailable', 'send-ambiguous',
   'unsupported-view', 'composer-unavailable', 'composer-changed', 'view-changed', 'not-editable',
@@ -70,6 +70,23 @@ test('all required fixed reason, state and stage enums round trip without free t
   assert.equal(invalid.resultChannel, 'none');
 });
 
+for (const reason of ['paste-unconfirmed', 'paste-attachment-unconfirmed', 'chunk-unconfirmed', 'chunk-attachment', 'chunk-mismatch']) {
+  test(`${reason} survives trace updates, sanitization and export without content`, () => {
+    const trace = updateDeliveryTrace(createDeliveryTrace(1, now), {
+      state: 'unknown', stage: 'prepare', reason, prompt: secret,
+      observations: { hidden: true, content: secret },
+    }, now + 5);
+    assert.equal(trace.reason, reason);
+    assert.equal(trace.history.at(-1).reason, reason);
+    assert.equal(sanitizeDeliveryDiagnostics(trace).reason, reason);
+    const exported = exportActivity({ deliveries: [trace], logs: [{ at: now, event: 'unconfirmed', message: secret,
+      diagnostic: { code: reason, durationMs: 5, prompt: secret } }] });
+    assert.equal(exported.deliveries[0].reason, reason);
+    assert.equal(exported.logs[0].diagnostic.code, reason);
+    assert.equal(JSON.stringify(exported).includes(secret), false);
+  });
+}
+
 test('sanitization recursively drops malicious fields, values, prototypes and accessors', () => {
   const input = { ...createDeliveryTrace(1, now), prompt: secret, path: secret, url: secret, rawError: new Error(secret),
     reason: secret, counters: { pageAdmissions: 4, modelWrites: secret, prompt: secret, nested: { prompt: secret } },
@@ -110,6 +127,49 @@ test('only nonnegative safe counters, finite safe timings and real booleans surv
   assert.deepEqual(JSON.parse(JSON.stringify(boundary)), boundary);
   assert.equal(Object.keys(boundary.counters).length, counterNames.length);
   assert.equal(Object.keys(boundary.timings).length, timingNames.length);
+});
+
+test('chunkUnserializableChecks retains valid safe counts through sanitization', () => {
+  const base = createDeliveryTrace(1, now);
+  for (const count of [0, 7, Number.MAX_SAFE_INTEGER]) {
+    const value = sanitizeDeliveryDiagnostics({ ...base, counters: { chunkUnserializableChecks: count } });
+    assert.deepEqual(value.counters, { chunkUnserializableChecks: count });
+  }
+});
+
+test('chunkUnserializableChecks exports valid counts without private fields', () => {
+  const trace = { ...createDeliveryTrace(1, now), prompt: secret,
+    counters: { chunkUnserializableChecks: 7, prompt: secret } };
+  for (const includeTimestamps of [false, true]) {
+    const output = exportActivity({ deliveries: [trace], includeTimestamps });
+    assert.deepEqual(output.deliveries[0].counters, { chunkUnserializableChecks: 7 });
+    assert.equal(JSON.stringify(output).includes(secret), false);
+  }
+});
+
+test('chunkUnserializableChecks rejects invalid or accessor values in sanitization and export', () => {
+  const base = createDeliveryTrace(1, now);
+  for (const bad of [-1, 1.5, '2', null, true, [], {}, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1, secret]) {
+    const trace = { ...base, counters: { chunkUnserializableChecks: bad } };
+    assert.deepEqual(sanitizeDeliveryDiagnostics(trace).counters, {});
+    assert.deepEqual(exportActivity({ deliveries: [trace] }).deliveries[0].counters, {});
+  }
+  const counters = {};
+  Object.defineProperty(counters, 'chunkUnserializableChecks', { get() { throw new Error(secret); } });
+  const trace = { ...base, counters };
+  assert.deepEqual(sanitizeDeliveryDiagnostics(trace).counters, {});
+  assert.deepEqual(exportActivity({ deliveries: [trace] }).deliveries[0].counters, {});
+});
+
+test('chunkUnserializableChecks updates merge absolute counts without decreasing', () => {
+  const base = createDeliveryTrace(1, now);
+  const first = updateDeliveryTrace(base, { counters: { chunkUnserializableChecks: 7 } }, now + 1);
+  const lower = updateDeliveryTrace(first, { counters: { chunkUnserializableChecks: 2 } }, now + 2);
+  const higher = updateDeliveryTrace(lower, { counters: { chunkUnserializableChecks: 9 } }, now + 3);
+  assert.equal(first.counters.chunkUnserializableChecks, 7);
+  assert.equal(lower.counters.chunkUnserializableChecks, 7);
+  assert.equal(higher.counters.chunkUnserializableChecks, 9);
+  assert.equal(base.counters.chunkUnserializableChecks, 0);
 });
 
 test('updates max-merge absolute totals without mutation or identity replacement', () => {

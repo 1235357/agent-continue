@@ -20,6 +20,23 @@ const hostModule = new URL('../native/desktop-commander/device-native-host.mjs',
 const project = new URL('../', import.meta.url);
 const encode = value => JSON.stringify(value) + '\n';
 const exec = promisify(execFile);
+const workerDependencies = ['background.js', 'config.js', 'adapter.js', 'editor-commit.js', 'delivery-diagnostics.js',
+  'preset.js', 'i18n-runtime.js', 'current-account-setup.js', 'setup-handoff.js', 'admin-installation-pause.js', 'setup-controller.js'];
+function remapSetupHandoff(source, device, admin) {
+  for (const [original, replacement] of [['com.agentcontinue.device_wake', device],
+    ['com.agentcontinue.administrator_owner', admin]]) {
+    assert.match(replacement, /^com\.agentcontinue\.fixture_(?:device|admin)_[a-f0-9]{24}$/);
+    assert.equal(source.split(original).length, 2, 'cannot safely remap setup host');
+    source = source.replace(original, replacement);
+  }
+  return source;
+}
+function remapDeviceControl(source, device) {
+  assert.match(device, /^com\.agentcontinue\.fixture_device_[a-f0-9]{24}$/);
+  const original = 'com.agentcontinue.device_control';
+  assert.equal(source.split(original).length, 2, 'cannot safely remap device control host');
+  return source.replace(original, device);
+}
 const hostedRequested = process.env.AC_HOSTED_BROWSER_ACCEPTANCE === 'accept-dedicated-test-tunnel';
 const requestedWebWindow = process.env.AC_HOSTED_WEB_WINDOW_SECONDS;
 assert.ok(requestedWebWindow === undefined || hostedRequested && /^(?:[1-9]|[1-9][0-9]|1[0-7][0-9]|180)$/.test(requestedWebWindow),
@@ -214,6 +231,27 @@ async function catalogCounts(file) {
   }
 }
 
+test('Windows startup fixture includes the real background dependencies', async () => {
+  for (const name of ['editor-commit.js', 'delivery-diagnostics.js']) {
+    assert.ok(workerDependencies.includes(name), 'missing background dependency: ' + name);
+  }
+});
+
+test('Windows startup fixture isolates native host names', async () => {
+  const source = await fs.readFile(new URL('../setup-handoff.js', import.meta.url), 'utf8');
+  const device = 'com.agentcontinue.fixture_device_' + 'a'.repeat(24);
+  const admin = 'com.agentcontinue.fixture_admin_' + 'b'.repeat(24);
+  const remapped = remapSetupHandoff(source, device, admin);
+  assert.ok(remapped.includes("const HOST = '" + admin + "';"));
+  assert.ok(remapped.includes("sendNativeMessage('" + device + "',request)"));
+  assert.ok(!remapped.includes('com.agentcontinue.administrator_owner'));
+  assert.ok(!remapped.includes('com.agentcontinue.device_wake'));
+  const control = await fs.readFile(new URL('../device-control.js', import.meta.url), 'utf8');
+  const isolatedControl = remapDeviceControl(control, device);
+  assert.ok(isolatedControl.includes("export const HOST = '" + device + "';"));
+  assert.ok(!isolatedControl.includes('com.agentcontinue.device_control'));
+});
+
 const scenarios = hostedRequested ? ['dedicated hosted tunnel'] : ['pause', 'running intent', 'unfinished pause receipt'];
 for (const mode of scenarios) {
 const hosted = mode === 'dedicated hosted tunnel';
@@ -233,7 +271,7 @@ test('Windows Chromium startup respects ' + mode,
     const bindingFile = hosted ? path.join(app, 'device-native-binding.json') : path.join(scratch, 'binding.json');
     const report = path.join(scratch, 'startup.json');
     const entry = path.join(app, 'device-native-host.mjs');
-    const host = 'com.agentcontinue.fixture_' + randomBytes(12).toString('hex');
+    const host = 'com.agentcontinue.fixture_device_' + randomBytes(12).toString('hex');
     const regKey = 'HKCU\\Software\\Chromium\\NativeMessagingHosts\\' + host;
     const reg = (...args) => spawnSync(path.join(process.env.SystemRoot, 'System32', 'reg.exe'), args,
       { windowsHide: true, timeout: 5000, encoding: 'utf8' });
@@ -248,7 +286,7 @@ test('Windows Chromium startup respects ' + mode,
       if (error.code === 'ENOENT') return true;
       throw error;
     }))).then(values => values.every(Boolean));
-    let context, registered = false;
+    let context, registered = false, preserveState = true;
     const open = () => chromium.launchPersistentContext(browserProfile, {
       channel: 'chromium', headless: true,
       env: Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('AC_HOSTED_'))),
@@ -358,18 +396,26 @@ try {
         ...(productWorker ? { action: {}, commands: { 'toggle-running': { description: 'Toggle task' } } } : {}),
       }));
       for (const name of ['browser-wake.js', 'admin-browser.js', 'admin-control.js', 'devices.html', 'devices.css', 'devices.js', 'device-control.js', 'i18n.js',
-        ...(productWorker ? ['background.js', 'config.js', 'adapter.js', 'preset.js', 'i18n-runtime.js',
-          'current-account-setup.js', 'setup-handoff.js', 'admin-installation-pause.js', 'setup-controller.js'] : [])]) {
+        ...(productWorker ? workerDependencies : [])]) {
         const source = hosted ? path.join(path.dirname(process.env.AC_HOSTED_SETUP), 'AgentContinue', name) : new URL(name, project);
         await fs.copyFile(source, path.join(extension, name));
       }
+      const control = path.join(extension, 'device-control.js');
+      await fs.writeFile(control, remapDeviceControl(await fs.readFile(control, 'utf8'), host));
+      const admin = path.join(extension, 'admin-browser.js');
+      const adminSource = await fs.readFile(admin, 'utf8');
+      const adminBinding = "export const ADMIN_BROWSER_HOST = 'com.agentcontinue.administrator_owner';";
+      const adminHost = 'com.agentcontinue.fixture_admin_' + randomBytes(12).toString('hex');
+      assert.equal(adminSource.split(adminBinding).length, 2, 'cannot safely remap the administrator host');
+      await fs.writeFile(admin, adminSource.replace(adminBinding, `export const ADMIN_BROWSER_HOST = '${adminHost}';`));
+      const wake = path.join(extension, 'browser-wake.js');
+      const source = await fs.readFile(wake, 'utf8');
+      const binding = "export const BROWSER_WAKE_HOST = 'com.agentcontinue.device_wake';";
+      assert.equal(source.split(binding).length, 2, 'cannot safely remap the product host');
+      await fs.writeFile(wake, source.replace(binding, `export const BROWSER_WAKE_HOST = '${host}';`));
       if (productWorker) {
-        // Change only the fixture destination; never invoke the installed production host.
-        const wake = path.join(extension, 'browser-wake.js');
-        const source = await fs.readFile(wake, 'utf8');
-        const binding = "export const BROWSER_WAKE_HOST = 'com.agentcontinue.device_wake';";
-        assert.equal(source.split(binding).length, 2, 'cannot safely remap the product host');
-        await fs.writeFile(wake, source.replace(binding, `export const BROWSER_WAKE_HOST = '${host}';`));
+        const handoff = path.join(extension, 'setup-handoff.js');
+        await fs.writeFile(handoff, remapSetupHandoff(await fs.readFile(handoff, 'utf8'), host, adminHost));
       } else await fs.writeFile(path.join(extension, workerName), `
 import { bindBrowserWake, BROWSER_DEVICE_MESSAGE } from './browser-wake.js';
 let wake;
@@ -489,6 +535,7 @@ void chrome.storage.local.get('armed').then(({armed}) => {
         if (shellEvidence) assert.equal(shellEvidence.verified, true, 'hosted shell invocation did not match its acceptance contract');
         if (webProbeDirectory) assert.equal(readEvidenceVerified, true, 'hosted read evidence did not meet its acceptance gate');
         if (canaryExpectation) assert.equal(canaryVerified, true, 'hosted canary did not meet its discovery or invocation gate');
+        preserveState = false;
         return;
       }
 
@@ -602,9 +649,11 @@ void chrome.storage.local.get('armed').then(({armed}) => {
         await context.close();
         context = undefined;
         await waitFor(released, 'reopened browser did not release the fixture owner');
+        await waitFor(() => fixtureExited(recovered.pid), 'recovered fixture host process did not exit');
       }
       assert.equal(await fs.readFile(intentFile, 'utf8'), savedIntent);
       if (interrupted) assert.equal(await fs.readFile(journalFile, 'utf8'), journal);
+      preserveState = false;
     } finally {
       await context?.close();
       if (registered) {
@@ -614,9 +663,12 @@ void chrome.storage.local.get('armed').then(({armed}) => {
         assert.equal(reg('delete', regKey, '/f').status, 0);
         assert.equal(reg('query', regKey).status, 1);
       }
-      if (hosted) await waitFor(released, 'hosted ownership is unconfirmed; preserving the disposable test state');
-      assert.equal(await fs.realpath(scratch), scratch);
-      await fs.rm(scratch, { recursive: true, maxRetries: 4, retryDelay: 100 });
+      if (preserveState) process.stderr.write('Fixture state preserved at ' + scratch + '\n');
+      else {
+        if (hosted) await waitFor(released, 'hosted ownership is unconfirmed; preserving the disposable test state');
+        assert.equal(await fs.realpath(scratch), scratch);
+        await fs.rm(scratch, { recursive: true, maxRetries: 4, retryDelay: 100 });
+      }
     }
   });
 }

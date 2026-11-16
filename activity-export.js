@@ -7,7 +7,7 @@ const EVENTS = new Set([
   'target-closed', 'quiet', 'skipped', 'done', 'stopped', 'browser-restored',
   'interrupted', 'cancelled', 'ready', 'replaced', 'scheduler-error', 'timing-diagnostics',
 ]);
-const DIAGNOSTICS = new Set(['adapter-result', 'execution-exception', 'execution-timeout', 'no-valid-result', 'existing-draft', 'composer-changed', 'timing-probe', 'send-not-ready', 'commit-not-dispatched']);
+const DIAGNOSTICS = new Set(['adapter-result', 'execution-exception', 'execution-timeout', 'no-valid-result', 'existing-draft', 'composer-changed', 'composer-unstable', 'composer-slow-write', 'chunk-unconfirmed', 'chunk-attachment', 'chunk-mismatch', 'timing-probe', 'send-not-ready', 'commit-not-dispatched', 'paste-unconfirmed', 'paste-attachment-unconfirmed', 'receipt-ambiguous', 'receipt-mismatch', 'document-replaced', 'unconfirmed-retry']);
 const validTime = value => Number.isSafeInteger(value) && value >= 0 && value <= 8_640_000_000_000_000;
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const validMs = value => typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= Number.MAX_SAFE_INTEGER;

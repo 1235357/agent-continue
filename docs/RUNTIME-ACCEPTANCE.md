@@ -1,5 +1,462 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Candidate 3.0.14 (2026-11-15)
+
+The current source candidate has not been installed, released, submitted to the
+Store or accepted on a live ChatGPT or Dot conversation. This version-only update
+does not turn the historical observations below into current-candidate receipts.
+See the validation record for the unresolved synthetic wrong-submission and
+regression failures.
+
+## Manual TXT Candidate (2026-11-14)
+
+The uninstalled UI can request a local UTF-8 TXT download from the editable
+repeat-prompt draft while paused, using a user-entered sequence and UTC
+timestamp. It does not automatically upload or send; the current scheduler
+removes pending attachments. The HTTP UI fixture verifies actual synthetic
+download bytes, including 4000 lines. Isolated MV3 case 67 intercepts the
+anchor and verifies Blob/name/no-send, not the actual download; two CDP-attached
+headless download-event attempts timed out. A fresh paused-state read is not a
+cross-panel lock. Full UI regression remains red on Clear/late config write,
+and live candidate acceptance, automatic attachment upload and release remain
+outstanding. No user prompt was downloaded or uploaded in these tests.
+
+## Mismatched Receipt Candidate (2026-11-14)
+
+The uninstalled candidate pauses and records `receipt-mismatch` for a new
+serializable user message differing from the configured prompt after dispatch;
+the two result channels and manual-intent diagnostic paths are covered by
+synthetic tests. Background-v2 178/178, state 62/62, diagnostics/i18n/support/
+public docs 69/69 and isolated MV3/ProseMirror cases 64–66 3/3 are not live or
+full-suite acceptance. The delayed-model fixture still submits stale text, and
+Dot remains 79/81; release adapter is 74/80. A mismatched row is evidence of
+uncertainty, not proof of attribution or server receipt.
+
+An OS-temp synthetic attachment prototype has five isolated Chromium tests;
+its file-input change event is untrusted and upload completion is simulated.
+An isolated surrogate is replaced by U+FFFD during File string conversion.
+The prototype is not integrated or verified on ChatGPT/Dot, and no production
+attachment mode, durable sequence, user consent flow or privacy update exists.
+
+## Target-Loss Diagnostics (2026-11-14)
+
+Synthetic target-close and navigation cases now retain `document-replaced`
+in the activity log and sanitized export without prompt content. A confirmed
+receipt racing those pauses does not carry that unknown diagnostic. Fresh
+background-v2 174/174, state 62/62, diagnostics/i18n/support/public docs 69/69,
+and isolated MV3 cases 64–65 2/2 do not establish full or live acceptance.
+
+## Transaction Prototype (2026-11-14)
+
+An unintegrated IndexedDB state prototype passes 10/10 synthetic Chromium
+multi-page transaction tests. It is not used by the current popup or service
+worker and does not fix the existing post-Clear `chrome.storage.local` race.
+Service-worker restarts, migration, old writes, quota failures and cross-store
+task/log behavior remain acceptance gaps; no user storage was migrated.
+
+Isolated MV3/official ProseMirror cases 64–65 pass 2/2 for an ambiguous receipt
+and a document replacement after dispatch. Fresh Dot remains 78/80, release
+adapter 74/80, UI Clear/late-write fails, and the independently run delayed
+manual paste still refills 88799 characters after one manual submission. These
+fixture results do not establish behavior on a live ChatGPT or Dot page.
+
+## Unknown Submission Candidate (2026-11-14)
+
+The uninstalled candidate pauses terminal unknown results and target loss during
+sending. Synthetic tests cover repeat/queue, both result channels, explicit
+Resume, target-loss receipt races and manual intent: background-v2 172/172,
+state 62/62, diagnostics/i18n/support/public documentation 69/69. These are not
+real-site, crash-atomicity, or end-to-end release acceptance evidence. Existing
+stale-model, late-paste and clear/late-write counterexamples remain unresolved.
+
+In a second self-created ordinary ChatGPT temporary chat, a manually uploaded
+synthetic TXT produced its start/middle/end markers. The local test file and tab
+were removed; the page warned of possible service-side retention for up to 30
+days. One blank ordinary composer exposed neither Tiptap's owner view nor
+`pmViewDesc.view` in a read-only check. Dot, automatic extension upload, byte
+fidelity and attachment/message semantic equivalence remain unverified.
+
+## Synthetic Attachment and Stale Model (2026-11-14)
+
+An assistant-created ordinary ChatGPT temporary chat manually uploaded one
+synthetic TXT and returned its unique marker after one short request. The local
+test file was deleted and the tab closed; the page warned that a server-side
+copy may be retained up to 30 days. No real user prompt, file or original Dot
+was used. This is not an automated extension, Dot, arbitrary-size, exact-byte or
+message-equivalence acceptance; TXT mode remains unimplemented.
+
+The fresh isolated Dot run is 78/80: a newly added delayed-model fixture sent
+stale text before reporting unknown, and the NBSP receipt case remained unknown.
+The UI clear/late-config-write and PM delayed-manual paste tests also failed;
+the latter refilled 88799 characters after manual submission. These findings
+are test-environment counterexamples, not a diagnosed live-site mechanism.
+Current WIP is not installed or published and full acceptance is incomplete.
+
+## Slow Write Candidate (2026-11-14 Asia/Shanghai)
+
+The uninstalled candidate records `composer-slow-write` and pauses after a
+measured long DOM write with a changed or unready composer. Isolated page and
+MV3 fixtures exercise single admission, preserved content, no dispatch,
+manual/dispatch uncertainty and the ready-once path. The 2-second trigger
+is a heuristic, does not interrupt an already blocking write, and is not a
+real ChatGPT or Dot acceptance result. Remaining failures include the delayed
+paste callback, NBSP receipt ambiguity, release-adapter tests and late config
+writes after Clear. Do not install, publish, or claim full acceptance from
+these partial results. TXT attachment delivery remains unimplemented.
+
+## Incident Checkpoint (2026-11-13 UTC)
+
+The latest original goal readback is `active`; earlier `paused` readbacks below
+are historical. No goal status was changed or completion asserted.
+
+The supplied activity (4) file's 20 retained delivery snapshots include sequence
+46 with 669 DOM writes, 134 page admissions, about 15127119.7 ms cumulative write
+time, zero recorded dispatch attempts and a cancelled result; sequences 47 and 48
+have 186 and 135 writes. Sixteen other unknown snapshots record a dispatch attempt;
+none is proof of server receipt or non-receipt. The file is relative-timestamped
+and cannot establish the exact installed bytes or page CPU root cause.
+
+The requested timestamp-and-count TXT attachment mode is not implemented. Current
+MV3 attachment fixtures 37/38 verify that the existing text-only policy removes or
+waits for pending attachments. A synthetic File/DataTransfer input change is not
+evidence of real ChatGPT/Dot upload, file availability, or instruction execution.
+At that earlier checkpoint no file was uploaded; see the newer manual ordinary
+ChatGPT synthetic-file result above. No user prompt was uploaded.
+
+An earlier incident snapshot records three DOM writes totalling about 52.06 seconds and
+no recorded automated dispatch; it does not identify the exact installed build
+or site-side cause. Chrome readback identifies the enabled kpjg instance as
+3.0.12 and its toolbar as manually paused. No reload, installation or send to
+the user's Dot was performed. Local HEAD is c9e5dba, one accidental test-only
+commit ahead of local origin/main 2270e9f, with 22 tracked WIP files.
+
+Isolated MV3/official ProseMirror tests show faster long-multiline paste and
+accurate synthetic model submission in selected cases, plus a reproducible
+unresolved late paste after manual Send. A never-handled paste now produces a
+conservative pause after a bounded observation, without cancelling page callbacks;
+no real-site result is established. Selected background 155/155, state 62/62,
+editor 114/114, diagnostics 23/23 and support 24/24 are not full regression.
+NBSP receipt comparisons and ambiguity handling pass eight targeted tests but Dot
+is 73/74 because one native space representation becomes unknown after one send;
+the tested ambiguous result pauses without automatic replay. Release-adapter had
+78 tests, 72 passing and 6 failing before two ambiguity tests were added; the cross-panel clear/late-write UI
+test fails. Shape MV3 is 6/6 and CR-only 2/2; delayed manual paste still fails.
+Independent synthetic interleavings
+still show late MAIN dispatch, lost late receipts, snapshot-crash and storage-hang
+risks; none constitutes a live-site fix or acceptance.
+Do not install or publish the old 2270 package as if it contained current WIP.
+
+## Historical Safety Gaps (2026-11-11)
+
+The current uncommitted background and popup changes are not in the installed
+cbob instance or the existing 2270 package. Synthetic background 105/105 and
+state 60/60 are local checks; UI previously passed 56/56 but now fails a new
+cross-panel stale-prompt test and also contains a post-clear late-write assertion.
+These results do not establish a complete current regression or live acceptance.
+Independent isolated interleavings reproduce stale configuration overwrite and
+post-clear config/template write resurrection. Legacy configuration migration is
+now projected at read time rather than writing an old startup snapshot; its
+bounded race test passes. Diagnostic clear/read regressions pass in-process, but
+failed-clear invalidation is not proven across worker restart. A cold-start
+resumeJob read can block Pause, as can a slow onStartup browser API in the queue;
+the attempted initialization bypass was withdrawn after it allowed old state
+to revive following an acknowledged pause. Latest Windows fixture cleanup
+changes have not had the prior seven-file 151/151 run repeated, and registration
+ownership/cleanup remains unsafe to assume. Preserve the old instance, prompt,
+native registrations and unrelated production tasks. Do not publish the older
+2270 ZIP as if it included these changes.
+
+## Resumed Source Acceptance (2026-11-11 Asia/Shanghai)
+
+The same original Windows-first goal read active at this historical checkpoint;
+the newer paused readback above supersedes it without a goal mutation. The existing
+owner-authorized project task continues; below usageLimited/freeze observations
+remain historical.
+Source fixes were actually committed/pushed as4698bc6, the60/60 count correction
+as350ebb4, and the registration EOF fixture/3regressions/VALIDATION as2270e9f.
+Local HEAD/origin-main and public gh refs agree on
+2270e9fe29eeecb291e06703488fe49d6ffd67b0. Two local handoff edits, two fixture
+test edits and untracked sealed-handoff material remain outside those commits;
+none was uploaded.
+This source slice alone does not establish installed, production, Release or Store
+success. The separately evidenced limited live-site checks are recorded below.
+Repeated trusted Enter was independently identified and RED in two new unit
+cases and both actualMV3 MAIN/legacy cases56/57. They observed an actual manual
+site submit but SEND_NOW remained pending; after removing only the repeat-key
+exclusion, editor104/104 and scopedMV3 2/2 pass. Both paths still enforce trusted
+origin, scoped editor, modifiers, IME and prevented-event guards. Manual delivery
+never increments the extension dispatch counter or authorizes another write.
+
+Independent implementation review reran104/104 and found0Critical/Important.
+Post-fix full rootnpm exited0 with editor104/104, background80/80, state60/60,
+adapter72/72, integration14/14, UI41/41, support59/59, actualMV3 57/57 and separate
+editor-browser11/11. Earlier runtime-only Store ZIP extracted-byte MV3 passes57/57
+without selecting cases, with its setup descriptor null. A later complete fresh
+administrator bundle and combined six assets now verify under OS-temp
+agent-continue-20261111-fullsetup-qi0b68m7; installed/published/activated are false.
+The setup-linked paired extension candidates also verify and extracted-store
+complete MV3 passes57/57 (agent-continue-20261111-final-combined-mv3.log).
+README/README.zh-CN/VALIDATION/PRIVACY changed afterward, making only the old
+packages/ pair stale. Its packages-current-20261111 replacement was valid then;
+350ebb4's count correction supersedes that pair with packages-main-350ebb4 below.
+Actual npm package gate's old114/115 windows_release_metadata result is closed.
+The old7-file generatedv3.0.6 closure was independently validated then atomically
+preserved outside the repo at D:/Desktop/AgentContinue-Transient-20261111-suKSTb/
+windows-release-v3.0.6. Fresh prepack against the realv3.0.12 builder receipt now
+passes actual root tarball/runnableCLI and complete115/115 package gate,0fail/skip,
+exit0; command-execution4365e034c041537ad6be8b59babe615a/output.log. No production
+validator/non-overwrite guard changed, no file deleted or receipt fabricated.
+Prior packages-current-20261111 pair had252matching then-current/projected
+members each; Store SHA621f0d0d231b1b47098749544de27645b3914aff2582f2c36c26520164ba0827.
+Exact extraction completeMV3 now passes57/57, exit0; native-release53/53 and
+Windows signing-process checks8/8 pass with0fail/skip. Independent read-only
+review9ef60f45 confirmed original-receipt closure, actual tarball/CLI115/115 and
+all252 normalized pair members/hashes; production validation was not weakened.
+This does not establish custom-EXE signing, installation or publication.
+Standalone Python release suite206total/
+161pass/0fail/45skips.
+Full native285total/281pass/0fail/4explicit platform skips;
+bootstrap297total/281pass/0fail/16explicit security/platform/cache skips. Hosted
+launcher now12/12pass/0fail/0skip with a freshly built source-only preview kit
+under the read-only Plan path; no protected installation or activation. The
+prior11/12skip result is historical. Neither supersedes cloud42875069957.
+Only fixture directory-pollution cause is established; cloud timeout cause remains
+unproven. No Defender opt-in or TEST_PM_CASES full-suite narrowing is used.
+The owner now supplied screenshots showing signed-in Dot, GitHub and Store;
+this proves only those visible signed-in pages, not extension version or tools.
+Owner screenshots show no return-control button. Computer Use verified TRAE's
+default was System Browser/Chrome-connected, then changed it to Built-in Browser;
+no data clearing, logout, restart or separate ChatGPT-app task modification. Before
+this switch a numeric other-ChatGPT connection received one new homepage navigation
+without sends; that is not verified in-app control or zero external action. The
+latest /goal continue tabs read after the switch again explicitly refused as
+human-locked. Stopped browser tools, did not bypass; recovery/routing remains
+unverified, not missing owner authorization. Do not ask for an unobserved button.
+The owner later explicitly selected TRAE-browseruse-external and again continued
+the original active goal. External connect succeeded. In dedicated temporary
+page500170799, one bounded no-tools/no-files smoke message was really sent;
+https://chatgpt.com/c/6af39730-3ea0-83e9-8b06-f455ee3dd0f5?temporary-chat=true
+showed the exact sent message and AC-BROWSER-OK reply, cleared composer and no
+Stop. A normal Temporary chat explanation was inspected then dismissed with its
+Continue control before the successful Send; the blocked first click was not a
+send. Resume inspection identified the later dialog as floating New chat controls
+(Restore/Expand/Minimize/Dock), not an unknown security prompt; no click.
+Do not repeat this smoke. External web send/reply is proven, but current candidate
+installation/source, scheduler/counters/Pause, Dot, administrator tools and full
+Revoke/reopen lifecycle remain unverified. This is not built-in browser acceptance
+or a bypass of its human-lock. The existing Dot conversation was not changed.
+Current external Chrome UI confirms enabled3.0.12, ID
+kpjgmkakklpdhjmbfahlkffgkcphebkc, unpacked source [Develop]/agent-continue-main,
+not the current candidate. LF-normalized background/adapter/editor-commit all
+mismatch the current extracted Store candidate; the installed source's setup
+entry is null. Version alone is not repair deployment evidence. Existing console
+remains Paused, confirmed0, prompt3566characters, in-flight cancellation unknown;
+no settings, prompt, job or old source was edited/resumed/reloaded.
+A Load unpacked folder chooser(pid199152/window41422602) was prepared with the
+exact extracted-store-current-20261111 path, but Select Folder was NOT clicked.
+The later goal-continuation message did not explicitly answer installation consent;
+our chooser was normally cancelled and Chrome extensions page read back. No
+candidate installation occurred and no modal remains pending. A future install
+still needs action-time confirmation; preserve original tasks/native/admin approvals.
+Finite independent continuity review96a944ce passed the five current records;
+two old-package rebuild statements were clarified, not a full historical audit.
+A subsequent read-only check of the dedicated ordinary ChatGPT smoke page found
+one matching current ProseMirror editor and modern search-unit/message-ids nodes
+for user1/assistant1. Existing first-token handling covers the assistant's repeated
+ID. This is page-shape evidence, not a new send or candidate dispatch acceptance.
+That prior Store inspection found252members,0then-current drift, exact extraction
+and CRC clean at SHA621f0d0d231b1b47098749544de27645b3914aff2582f2c36c26520164ba0827;
+350ebb4's corrected package below supersedes it. Do not upload that older hash.
+These two current handoff documents are not members of that archive.
+Cloud42875069957 original logs remain missing. A disposable instrumented launcher
+copy and synthetic stub measured ordinary/explicit-key/nonzero-child under the
+unchanged15s test watchdog at2666/2544/2786ms; phases completed, each called its
+stub once and nonzero correctly retained manager_start_unconfirmed. Script and
+report are in OS-temp agent-continue-hosted-stage-diagnostic-20261111.mjs and
+agent-continue-hosted-stage-20261111-nZAyGS. Production launcher stayed unchanged;
+no actual installation/connection/elevation/registration or raw key output.
+Independent reviewe025 found no blocker; these partial instrumented local checks
+are not a new complete12/12 result or proof that the cloud cause is fixed.
+Official gh2.102.0 portable ZIP and Valid GitHub, Inc. Authenticode were verified
+under OS-temp agent-continue-gh-portable-20261111-fd1e0e00, then used without a
+system installation, PATH change, new OAuth or raw-token output. Isolated public
+API reads confirm remote main c00499f and latest Release v3.0.11 published
+2026-11-10T09:04:28Z. Normal gh auth status reports no logged-in hosts. Original
+Windows job130036074423 logs return403 requiring repository admin; its public
+annotation only says exit1. No retry/bypass. Existing noninteractive Git
+push --dry-run origin main exits0; this is not an actual push, WIP publication or
+proof of Release API write permission. Actual main pushes are recorded above.
+Read release.yml uses a new v* tag and job GITHUB_TOKEN for strict main-source,
+sidecar/npm/browser gates and gh release create, so a later existing-Git tag path
+need not require personal OAuth. No tag push/release trigger occurred; real
+acceptance remains required. Source iteration/CI advance independently of Store. External Chrome Computer Use freshly read item
+jpioilmpbolfokedaefmbfbjeaahfdkl: Pending review, Draft3.0.11, Published2.1.0,
+English default with Chinese available. Upload new package and Submit for review
+are disabled. The normally dismissed explanation says "You may not edit or
+publish an item that is in review." No withdrawal, rollback,3.0.12 upload or new
+submission receipt exists; this is external status evidence, not in-app submission.
+Independent coexistence review7205 confirms separate IDs isolate storage/alarms/
+ISOLATED state but not MAIN's shared Symbol.for('agent-continue.editor-commit.v1')
+Map. Tokens carry no extension ID; a distinct ID alone is not full-isolation
+acceptance. Old observers' original document/editor guards do not prove pending
+cancellation. Preserve old prompts/tasks/native registration and test only on new
+project-owned pages. All prior research agents have returned.
+Privacy form single purpose/seven permission justifications were read without
+editing or saving. The owner's screenshot confirms User activity/Website content
+and the three limited-use statements checked; other absent UIA toggle values are
+not checkbox evidence. Policy URL points to the project's Pages privacy page.
+Initial WebFetch was the old11-10body. Following main push, normal no-cache curl
+response's complete HTML-unescaped privacy-content equals350ebb4:PRIVACY.md,
+including11-11/held-repeated Enter; SHA256
+683b4ff482b4b04e63d377cef60ff05199a8775508cc127addda9dbed13aa4e3.
+privacy-pages-after-main-verification.json under the temp gh root records this
+completed hosted-policy parity check; it is not a Store edit/submission. Independent
+current-record review9032 found no substantive conflict in its finite inputs;
+subsequent portable-CLI/Git evidence supersedes its no-further-progress premise.
+
+Main350ebb4 current pair was rebuilt under packages-main-350ebb4 in the fullsetup
+root; GitHub2839170B/SHA256
+fcdcdf97b9b57a91e5a8a8c0bb2518f8d26b68cf94304428328f51522f5372dd;
+Store2832114B/SHA256
+368cfc56bc3df9d4c909d136fd216c8a6630d854f4d74fea0bed3866e59c3867.
+The verification JSON proves252members/pair/CRC/extraction, tracked-source
+transforms and derived-vendor hashes against the188-item committed inventory.
+Vendor SOURCE.json retains checkout CRLF but identical JSON/LF bytes; vendor
+binaries are not all directly git-tracked. Exact extracted-store-main-350ebb4
+complete official ProseMirror/MV3 passed57/57, exit0, command9aa6b796. Its later
+observed installation is recorded below; the agent did not perform that installation.
+Retained full npm and fresh direct runs establish state60/60, not64/64, plus
+editor104/104 and background80/80. Absolute bracketed path node --test once
+found0tests and does not count; direct absolute-file execution ran104. Shell cwd
+once landed in System32; use absolute files/explicit child-process cwd.
+Extension CI42926200779 on350ebb4 and42925907586 on4698bc6 are success; Pages
+42925907401 on4698bc6 success. Native42925907434 on4698bc6 completed failure at
+2026-11-11T00:05:27Z, macOS/Ubuntu success. Windows130212190276 completed failure
+at00:05:26Z: step18 hosted launch/preflight success (23:57:45Z–23:59:19Z), step19
+guided browser-managed registration/standalone control failure, later gates skipped.
+Public annotation only says Process completed with exit code 1; exact case,
+stderr and root cause are not proven. Original logs403 was not bypassed. Watch
+commande09d2cb9fbf46ef5f0e0f2002ea438c2 ended exit1; nothing remains in flight.
+Only VALIDATION.md changed between those SHAs, so no direct350ebb4 native run.
+The investigation follows tunnel.test.mjs/ConPTY/preload under their original
+owned-root, loopback, registry-capture and watchdog boundaries. Local targeted
+Chromium passes1/1 exit0 (~45s); browser-managed baseline/control runs fail JSON.parse
+at tunnel.test.mjs461, installer exit0 but only256 receipt characters. A content-free
+reader proxy observes register10/256-byte chunks, no VT and incomplete JSON; it
+replaced a rejected temp socket-method assignment, not production code. Waiting
+on the same stream after foreground exit obtains103 more bytes and a full358-char
+receipt, proving local early return. Commit2270e9fe29eeecb291e06703488fe49d6ffd67b0
+only changes register-stage EOF draining plus3regressions/VALIDATION. RED18/2fail
+becomes18/18; uninstrumented browser-managed1/1 and both step19modes2/2 pass exit0.
+Complete Python209total/164pass/0fail/45skips. Independent9cc9 review found no issue
+and reran18/18. Adjacent guided paired PowerShell/cold CMD modes pass2/2 exit0;
+fresh docs/setup-entry36/36. Original deadline,64KiB/strict checks, detached-close and fixture
+protections remain. This is not proof of the former cloud's exact stderr/cause.
+Actual normal push and public gh refs agree HEAD/origin/remote2270e9f. Native watch
+command1f3f1ff4c4cd7b412533d35ec67e3aaf ended exit1 from anonymous API rate limit403
+at00:37:22Z, not a CI failure. Last Windows130233530004 was atstep13; Ubuntu/macOS
+success. A later jobs jq filter lost quoting and reported function not defined
+failure/0; Extension was then in_progress. A later read-only check at 2026-11-11
+09:16 Asia/Shanghai found Extension42932220247 success, while Native42932220167
+was still in_progress. Later09:30 readback found Native failure: Ubuntu/macOS
+success; Windows130233530004 failed step41 `Verify Chromium startup and native
+port recovery`. Public annotation only says exit1; job logs returned403, so the
+specific cloud case/error remains unknown. No watch remains in flight. At this
+historical checkpoint get_goal returned active; see the newer readback above.
+Two real-background fixture copy lists omitted editor-commit.js and
+delivery-diagnostics.js; local negative checks failed before adding them. A separate
+review found the startup fixture could probe the fixed administrator host. The
+machine has that host registered in HKLM Chrome64, with one exact allowed origin
+and no wildcard; one local targeted run occurred before this discovery, and actual
+lookup/host launch is not proven. Current uncommitted fixture copies remap wake,
+administrator, setup and standard device hosts to random fixture names. Independent
+review found no confirmed blocking issue in scope, with dependency-closure and
+exceptional-cleanup limits. The exact seven-file workflow command passed twice at
+an earlier snapshot, 151/151,0fail/skip with recovery at30304ms and both administrator Chromium
+cases; HKCU Chromium fixture-host prefix readback found0 remaining. A proposed
+exceptional-cleanup helper was independently found incomplete and removed, so the
+later fixture cleanup WIP and ownership findings remain unverified. This is not
+proof of the unavailable cloud error or live hosted administrator acceptance.
+No product runtime file changed at that earlier snapshot; current runtime WIP is
+described at the top of this document.
+Independent review83e35051 returned:62tracked+188reviewed-vendor entries cover
+252members;21runtime/26bootstrap-installer/8administrator source files match main
+under declared transforms, and all six combined hashes match. The original
+receipts have no sourceRevision; actual byte closure establishes correspondence,
+not a version label. Its supplied offline policy snapshot is not alone online
+proof; the fresh HTTP comparison above is separate evidence. Actual push/public
+gh ref evidence, not offline origin/main, establishes remote state. All reviewers
+have returned.
+Chooser pid88704/window36833608 previously held extracted-store-main-350ebb4;
+the agent never clicked Select Folder or received an explicit answer. Fresh
+Computer Use now reports that pid not running. Chrome50480/window331704 remains
+on old kpjg detail, TeamViewer foreground; no action taken then. Subsequent Chrome
+Details confirms cbobmgplbipnobbllnmbaohjmcdncgnp enabled3.0.12, Unpacked loaded
+from fullsetup/extracted-store-main-350ebb4. The agent did not install it and
+installer identity/time is unknown. All252files equal350ZIP; compared with2270ZIP
+only VALIDATION.md differs, all runtime bytes identical. This is runtime lineage,
+not latest entire2270package installation. Its options are Not started/Confirmed0/
+no bound target initially. Agent-only164-char test prompt AC-LIVE-2270-ONE asks
+for exact echo and no tools/files, bound only to dedicated temporary conversation
+c/6af39730-3ea0-83e9-8b06-f455ee3dd0f5. Interval1minute, confirmed limit1, no
+immediate first send. Check page found composer without typing/sending. Actual
+Start read Running/Bound/Tab protection Enabled. First1min background schedule
+now proves target hidden, user/assistant1/1→2/2, exactly one164-char test user and
+AC-LIVE-2270-ONE-OK, composer0/busyfalse. Console confirmed1/limit1 automatically
+Paused/Timer not started/Tab protection Not started, without SendNow/manual send.
+This ordinary ChatGPT cycle proves background dispatch/count/limit-pause only.
+After the interruption, the next planned manual-pause round had already reached
+its limit: the activity log records a confirmed send, so it is not a pre-due
+manual-pause pass. A new owned temporary conversation
+c/6af3c276-7a6c-83ea-ad85-35bdcb20096c received one manual setup message and
+exact setup reply. On cbob, after a no-send page check, a one-minute/limit-one
+task with immediate first send off was started at 19:21:50 and manually paused
+at 19:21:51 on the browser's displayed 2026-11-10 -06:00 clock. After the
+original due time had passed, the target still showed only the setup user/reply,
+an empty composer and no scheduled marker; console showed Paused, confirmed0,
+Timer not started and Tab protection Not started. This proves one pre-dispatch
+manual-pause case, not cancellation of an in-flight submission. Settings switched
+English to Simplified Chinese and back to English; visible labels followed.
+Dot, manual takeover, administrator and controlled running-intent reopen remain
+unverified. Original kpjg/prompt/native/Dot remain untouched.
+The old prepared-chooser pointer is withdrawn. New2270e9f documentation means350
+is no longer final; packages-main-2270e9f built exit0 and252member pair/CRC/
+committed transformations/vendor/entry/exact extraction verify. GitHub2839443B
+SHA38d03477f31b0bd140c768b6f898777726aa04eea8091cdd72861174b6bb7a3f;
+Store2832387B SHA503d166416f7908669728a07b9408082941fe760c9594c9502ae33f21ebbc15f.
+extracted-store-main-2270e9f complete actual MV3 gate finished57/57 exit0,
+no TEST_PM_CASES selection. Command48322a40a17778ef5c58f01fd41f5f64, fullsetup root
+extracted-main-2270e9f-mv3.log; the complete2270 package was not verified as
+installed. Its runtime-equivalent350 instance has the limited live evidence above,
+not administrator acceptance. Preserve old tasks/prompts/native binding; no new
+Release or Store submission receipt exists.
+
+## Handoff Freeze (2026-11-10, historical)
+
+See [the consolidated current handoff](handoffs/2026-11-10-PROJECT-HANDOFF.zh-CN.md).
+Current working-tree focused verification: background-v2 80/80 and editor102/102
+exit0. These supersede the earlier74-case count, not the missing full final
+suite or live-site gates. Source patches remain uncommitted on c00499f; existing
+3.0.12 archives do not contain them. Goal readback is usageLimited; handoff is
+not product completion or a publication receipt.
+
+## Activity Persistence Follow-up (2026-11-10)
+
+New synthetic RED tests prove that legacy log I/O could still fail a committed
+Start and indefinitely retain send completion/Pause's control queue. The
+candidate now has an independent bounded activity drain, a250ms diagnostic
+observation-only limit, degradation health and clear epochs. Background74/74
+and state60/60 exit0, including pending reads/writes and late clear recovery.
+These are not owner-page or final-published receipts. Earlier3.0.12 hashes below
+predate this follow-up and must not be installed or submitted as its repair.
+
+c00499f Extension CI42875070408 is SUCCESS; Windows native42875069957 FAILED
+hosted-launcher fixture Starts/packing. Local repeat is11 pass/1 skip, not a
+replacement for its failed runner receipt. Neither covers uncommitted follow-up
+changes. Live Store readback still shows3.0.11 Pending review, English default;
+there was no new upload/submission. A chrome-extension protocol read was
+explicitly denied by the supported built-in browser API, not a missing consent.
+
 ## Manual Handoff and Schema5 Candidate (2026-11-10)
 
 Actual isolated MV3/official-ProseMirror tests48-52 pass: with the final grant

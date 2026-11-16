@@ -14,6 +14,47 @@ const generation = 'f'.repeat(32);
 const pauseOperation = 'a'.repeat(32);
 const target = generation + ':' + pauseOperation;
 const idleTarget = generation + ':idle';
+const workerDependencies = ['background.js', 'i18n.js', 'i18n-runtime.js', 'config.js', 'adapter.js',
+  'editor-commit.js', 'delivery-diagnostics.js', 'current-account-setup.js', 'setup-handoff.js',
+  'admin-control.js', 'admin-installation-pause.js', 'setup-controller.js'];
+function remapSetupHandoff(source, device, admin) {
+  for (const [original, replacement, pattern] of [
+    ['com.agentcontinue.device_wake', device, /^com\.agentcontinue\.setup_fixture_[a-f0-9]{24}$/],
+    ['com.agentcontinue.administrator_owner', admin, /^com\.agentcontinue\.admin_fixture_[a-f0-9]{24}$/],
+  ]) {
+    assert.match(replacement, pattern);
+    assert.equal(source.split(original).length, 2, 'cannot safely remap setup host');
+    source = source.replace(original, replacement);
+  }
+  return source;
+}
+function remapWake(source, device) {
+  assert.match(device, /^com\.agentcontinue\.setup_fixture_[a-f0-9]{24}$/);
+  const original = 'com.agentcontinue.device_wake';
+  assert.equal(source.split(original).length, 2, 'cannot safely remap wake host');
+  return source.replace(original, device);
+}
+
+test('administrator Chromium fixture includes the real background dependencies', async () => {
+  for (const name of ['editor-commit.js', 'delivery-diagnostics.js']) {
+    assert.ok(workerDependencies.includes(name), 'missing background dependency: ' + name);
+  }
+});
+
+test('administrator Chromium fixture isolates setup native hosts', async () => {
+  const source = await fs.readFile(new URL('../setup-handoff.js', import.meta.url), 'utf8');
+  const device = 'com.agentcontinue.setup_fixture_' + 'a'.repeat(24);
+  const admin = 'com.agentcontinue.admin_fixture_' + 'b'.repeat(24);
+  const remapped = remapSetupHandoff(source, device, admin);
+  assert.ok(remapped.includes("const HOST = '" + admin + "';"));
+  assert.ok(remapped.includes("sendNativeMessage('" + device + "',request)"));
+  assert.ok(!remapped.includes('com.agentcontinue.administrator_owner'));
+  assert.ok(!remapped.includes('com.agentcontinue.device_wake'));
+  const wake = await fs.readFile(new URL('../browser-wake.js', import.meta.url), 'utf8');
+  const isolatedWake = remapWake(wake, device);
+  assert.ok(isolatedWake.includes("export const BROWSER_WAKE_HOST = '" + device + "';"));
+  assert.ok(!isolatedWake.includes('com.agentcontinue.device_wake'));
+});
 
 for (const fullBackground of [false, true]) {
 test(fullBackground ? 'disposable Windows Chromium full background refuses unconfirmed installation Pause support' :
@@ -44,19 +85,22 @@ test(fullBackground ? 'disposable Windows Chromium full background refuses uncon
         '--host-resolver-rules=MAP * ~NOTFOUND',
         '--disable-extensions-except=' + extension, '--load-extension=' + extension],
     });
-    let context, registered = false;
+    let context, registered = false, preserveState = true;
     try {
       await fs.mkdir(extension);
       const module = await fs.readFile(new URL('admin-browser.js', project), 'utf8');
       const fixedHost = "'com.agentcontinue.administrator_owner'";
       assert.equal(module.split(fixedHost).length, 2);
       await fs.writeFile(path.join(extension, 'admin-browser.js'), module.replace(fixedHost, JSON.stringify(host)));
-      for (const file of ['background.js', 'i18n.js', 'i18n-runtime.js', 'config.js', 'adapter.js',
-        'current-account-setup.js', 'setup-handoff.js', 'admin-control.js', 'admin-installation-pause.js', 'setup-controller.js']) {
+      for (const file of workerDependencies) {
         await fs.copyFile(new URL(file, project), path.join(extension, file));
       }
+      const handoff = path.join(extension, 'setup-handoff.js');
+      const setupHost = 'com.agentcontinue.setup_fixture_' + randomBytes(12).toString('hex');
+      await fs.writeFile(handoff, remapSetupHandoff(await fs.readFile(handoff, 'utf8'), setupHost, host));
       // Isolate the real background dispatcher from the other native host and private preset.
-      await fs.copyFile(new URL('browser-wake.js', project), path.join(extension, 'browser-wake-source.js'));
+      await fs.writeFile(path.join(extension, 'browser-wake-source.js'), remapWake(
+        await fs.readFile(new URL('browser-wake.js', project), 'utf8'), setupHost));
       await fs.writeFile(path.join(extension, 'browser-wake.js'),
         "export { validPreparedReference } from './browser-wake-source.js'; " +
         "export const BROWSER_DEVICE_MESSAGE = 'BROWSER_DEVICE_CONTROL_V1'; export const bindBrowserWake = () => null;");
@@ -161,6 +205,7 @@ test(fullBackground ? 'disposable Windows Chromium full background refuses uncon
           'unconfirmed installation support must not downgrade to the legacy Pause protocol');
         assert.deepEqual(await traceRows(), ['wake'], 'the refusal must not send legacy Pause or fence');
         assert.equal(await previous(page), undefined, 'a pre-admission refusal must not fabricate a Pause record');
+        preserveState = false;
         return;
       }
       const [first, duplicate] = await Promise.all([initiatePause(page), initiatePause(other)]);
@@ -232,20 +277,19 @@ test(fullBackground ? 'disposable Windows Chromium full background refuses uncon
       assert.deepEqual(await previous(page), afterRecorded);
       assert.deepEqual(await requestPause(page, fresh.operationId), recordedReceipt);
       assert.equal(await fs.readFile(recorded, 'utf8'), fresh.operationId);
+      preserveState = false;
     } finally {
-      try { await context?.close(); }
-      finally {
-        try {
-          if (registered) {
-            assert.ok(reg('query', key, '/ve').includes(manifest), 'fixture registration changed');
-            reg('delete', key, '/f');
-            assert.throws(() => reg('query', key, '/ve'));
-          }
-        } finally {
-          assert.match(path.basename(scratch), /^ac-admin-chromium-[a-zA-Z0-9]{6}$/);
-          assert.equal(await fs.realpath(scratch), scratch);
-          await fs.rm(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-        }
+      await context?.close();
+      if (registered) {
+        assert.ok(reg('query', key, '/ve').includes(manifest), 'fixture registration changed');
+        reg('delete', key, '/f');
+        assert.throws(() => reg('query', key, '/ve'));
+      }
+      if (preserveState) process.stderr.write('Fixture state preserved at ' + scratch + '\n');
+      else {
+        assert.match(path.basename(scratch), /^ac-admin-chromium-[a-zA-Z0-9]{6}$/);
+        assert.equal(await fs.realpath(scratch), scratch);
+        await fs.rm(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
       }
     }
   });

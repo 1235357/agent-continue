@@ -1,5 +1,54 @@
 # Changelog
 
+## [3.0.15] - 2026-11-16
+
+- Remove artificial 1,000-character cap in editor-commit.js on the MAIN-world
+  single-transaction ProseMirror model commit path. Long prompts (10,000+ characters,
+  including full 10,840-character multi-paragraph prompts) now transact atomically into
+  ProseMirror document state in ~2 ms without falling back to chunked DOM insertion.
+- Prevent multi-chunk DOM fragmentation and caret position reset, resolving the
+  incomplete prompt injection issue where late chunks overwrote earlier chunks.
+- Eliminate 10-second retry wait loops caused by draft mismatch in the editor, allowing
+  immediate automatic Send button detection and dispatch without manual user intervention.
+
+## [3.0.14] - Unreleased Candidate
+
+- Start long rich-text insertion with segments of at most 1,000 UTF-16 units,
+  preserving surrogate pairs and the existing adaptive reduction and guards.
+- Report a generic pending result instead of claiming the Send control is not
+  ready when the worker has no evidence about that control. This candidate has
+  not been installed, released or validated on live sites; the independent npm
+  CLI version is unchanged.
+- Count unreadable post-write and between-chunk checks without recording content;
+  a verified cancellation acknowledgement also carries the current diagnostic
+  snapshot. Unresponsive pages and later events can still be missing.
+- Preserve an in-flight permit deadline while Pause waits for cancellation, and
+  retain that deadline across Clear Data when cancellation is unconfirmed.
+  A cancellation acknowledgement reporting an unconfirmed dispatch is marked
+  unknown. These measures do not retract an already-issued page operation.
+- Pause a terminal unknown send result even without recorded dispatch evidence,
+  without increasing confirmed sends. The user must inspect the conversation:
+  explicit Resume may submit an unconfirmed prompt again and cause duplicates.
+  A still-active receipt wait can instead continue without a terminal result.
+- On recovery, conservatively pause an enabled legacy idle task when its
+  cumulative unknown count is nonzero, even if the historical unknown was
+  already resolved; the count alone does not prove a current unresolved send.
+  When a page document is replaced and non-submission cannot be established,
+  pause rather than replay the attempt. Inspect the conversation before resuming.
+
+## [3.0.13] - Unreleased Candidate
+
+- Avoid immediately restarting a persistent long-text insertion when an
+  intermediate post-write or between-chunk draft is temporarily unreadable.
+  Wait under the same cancellable authorization and resume only after the
+  appropriate previously verified text matches; otherwise do not dispatch it.
+- Stop adding blank lines solely because one prompt is split into segments.
+  CR/CRLF remain normalized to LF and exact delivery is not guaranteed.
+- Pause without dispatch when two complete chunked passes repeat the same
+  visible text mismatch; an independent stale send model remains unresolved.
+- Preserve content-free recovery counters in Activity exports. This candidate
+  has not been installed, published or validated against real ChatGPT or Dot.
+
 ## [3.0.12] - Unreleased Candidate
 
 - Observe trusted held/repeated Enter submission in both MAIN and legacy

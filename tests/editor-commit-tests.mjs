@@ -286,6 +286,15 @@ test('receipt listener cleanup also runs when the worker reply throws', async ()
   assert.equal(h.state.metrics.clicks, 0);
 });
 
+test('long text enters the one-transaction MAIN editor path and transacts successfully', () => {
+  const h = fixture();
+  const result = h.run({ phase: 'prepare', prompt: 'SYNTHETIC_LONG_' + 'x'.repeat(2000) });
+  assert.equal(result.supported, true);
+  assert.equal(result.dispatched, false);
+  assert.equal(result.code, 'prepared');
+  assert.equal(h.state.metrics.transactions, 1);
+});
+
 test('serialized helper synchronously transacts the configured logical lines, then clicks once', async () => {
   const h = fixture({ renderedText: 'stale DOM rendering', onCommit(state) {
     queueMicrotask(() => state.setText('later page rewrite'));
@@ -604,6 +613,55 @@ for (const viewOnly of [false, true]) {
     assert.equal(h.state.metrics.clicks, 1);
     assert.deepEqual(h.state.metrics.sent, [h.args.prompt]);
   });
+}
+
+for (const dot of [false, true]) {
+  test(`persistent model restoration stays within two writes for one token without dispatch (dot=${dot})`, () => {
+    const h = fixture({ dot, onCommit(state) {
+      state.setText('page restored draft');
+    } });
+    const args = { receiptBoundaryToken: randomUUID() };
+    const outcomes = ['prepare', 'prepare', 'commit'].map(phase => h.run({ ...args, phase }));
+    for (const outcome of outcomes) assert.equal(outcome.dispatched, false);
+    noDispatch(h);
+    assert.equal(h.state.view.state.doc.lines.join('\n'), 'page restored draft');
+    assert.ok(h.state.metrics.transactions <= 2, `Expected at most two model writes, got ${h.state.metrics.transactions}`);
+  });
+}
+
+for (const dot of [false, true]) {
+  for (const input of ['click', 'enter']) {
+    for (const phase of ['prepare', 'commit']) {
+      test(`unstable preparation fences ${phase} after trusted ${input} with lost notification (dot=${dot})`, () => {
+        const h = fixture({ dot, onCommit(state) {
+          state.setText('page restored draft');
+        } });
+        const args = { receiptBoundaryToken: randomUUID() };
+        const unstable = h.run({ ...args, phase: 'prepare' });
+        assert.equal(unstable.code, 'composer-unstable');
+        assert.equal(unstable.dispatched, false);
+        assert.equal(h.state.metrics.transactions, 2);
+
+        h.state.setText(h.args.prompt);
+        if (input === 'click') {
+          const send = h.state.buttons[0];
+          send.closest = selector => selector.includes('send-button') ? send : null;
+          h.state.emit('click', { target: send });
+        } else {
+          h.state.emit('keydown', { target: h.state.editor, key: 'Enter', ctrlKey: dot });
+        }
+        h.state.setText('');
+        h.state.advanceTime(301);
+        const before = h.state.metrics.transactions;
+        const retry = h.run({ ...args, phase });
+        assert.equal(h.state.metrics.transactions, before, 'A lost notification must not permit another model write');
+        assert.equal(h.state.view.state.doc.lines.join('\n'), '');
+        assert.equal(retry.code, 'manual-submission');
+        assert.equal(retry.dispatched, false);
+        noDispatch(h);
+      });
+    }
+  }
 }
 
 test('observation preserves explicit keyboard choice without changing a disabled model', () => {

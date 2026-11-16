@@ -9,6 +9,35 @@ test('send implementation has no content-change veto or refill-count abort', () 
   assert.doesNotMatch(source, /changedDraft|composer-changed|填写后检测到内容变化|重新填写后检测到内容变化|refills === 2/);
 });
 
+test('finite readiness bounds writes while repeated restoration never settles', async () => {
+  let restores = 0;
+  const h = fixture({ authorizeWait: (state, message) => {
+    if (message.delayMs === 180 && state.clicks === 0) {
+      restores++;
+      state.editor.value = 'SYNTHETIC_RESTORED_DRAFT';
+    }
+    return true;
+  }, args: { extensionClock: true, extensionPriority: true } });
+  const outcome = await h.run();
+  assert.equal(outcome.status, 'blocked');
+  assert.equal(outcome.diagnosticProgress.counters.dispatchAttempts, 0);
+  assert.equal(h.state.clicks, 0);
+  assert.ok(restores >= 2);
+  assert.ok(outcome.diagnosticProgress.counters.domWrites <= 2);
+});
+
+function receipt(value, key) {
+  return {
+    nodeType: 1,
+    nodeName: 'DIV',
+    tagName: 'DIV',
+    innerText: value,
+    get childNodes() { return [{ nodeType: 3, nodeName: '#text', data: this.innerText }]; },
+    getAttribute: name => name === 'data-message-id' ? key() : null,
+    closest: () => null,
+  };
+}
+
 // Deliberately small DOM contract: selectors are routed, not browser-parsed.
 // Coverage excludes real layout, browser event trust, ProseMirror/React integration,
 // contenteditable serialization, stop controls, and cross-run retries.
@@ -112,11 +141,11 @@ function fixture(options = {}) {
     manualSubmit(init = {}) {
       state.emit(init.type ?? 'click', init);
       const value = editor.value;
-      users.push({ innerText: value, getAttribute: name => name === 'data-message-id' ? 'manual-user-' + users.length : null });
+      users.push(receipt(value, () => 'manual-user-' + users.length));
       editor.value = '';
       state.working = true;
     },
-    addUser(value, key) { users.push({ innerText: value, getAttribute: name => name === 'data-message-id' ? key : null }); },
+    addUser(value, key) { users.push(receipt(value, () => key)); },
     enableSend() { button.disabled = false; },
     replaceSendButton() {
       button.isConnected = false;
@@ -139,7 +168,7 @@ function fixture(options = {}) {
       }
     }
     if (now >= acceptedAt && !users.length) {
-      users.push({ innerText: sentTexts.at(-1), getAttribute: name => name === 'data-message-id' ? 'new-user' : null });
+      users.push(receipt(sentTexts.at(-1), () => 'new-user'));
       editor.value = '';
     }
   };
@@ -281,7 +310,20 @@ test('manual handoff is not inferred from a synthetic click triggering a trusted
   assert.equal(h.state.messages.filter(message => message.type === 'MANUAL_SUBMISSION').length, 0);
 });
 
-for (const kind of ['untrusted', 'unrelated-payload', 'other-control', 'shift-enter', 'composing-enter']) {
+test('a trusted manual Send with different text is observed instead of resubmitted', async () => {
+  const h = fixture({ disabledSend: true, args: { persistentDelivery: true } });
+  h.state.schedule(60, () => {
+    h.state.editor.value = 'unrelated manual text';
+    h.state.manualSubmit();
+  });
+  const outcome = await h.run();
+  assert.equal(outcome.status, 'unknown');
+  assert.equal(h.state.clicks, 0);
+  assert.equal(outcome.diagnosticProgress.counters.manualIntents, 1);
+  assert.equal(h.state.messages.filter(message => message.type === 'MANUAL_SUBMISSION').length, 1);
+});
+
+for (const kind of ['untrusted', 'other-control', 'shift-enter', 'composing-enter']) {
   test(`manual handoff ignores ${kind}`, async () => {
     const h = fixture();
     h.state.schedule(60, () => {
@@ -289,7 +331,6 @@ for (const kind of ['untrusted', 'unrelated-payload', 'other-control', 'shift-en
         : kind === 'other-control' ? { target: { closest: () => null } }
           : kind === 'shift-enter' ? { type: 'keydown', key: 'Enter', shiftKey: true }
             : kind === 'composing-enter' ? { type: 'keydown', key: 'Enter', isComposing: true } : {};
-      if (kind === 'unrelated-payload') h.state.editor.value = 'unrelated manual text';
       h.state.emit(event.type ?? 'click', event);
     });
     const outcome = await h.run();
@@ -302,7 +343,7 @@ for (const kind of ['untrusted', 'unrelated-payload', 'other-control', 'shift-en
 
 for (const kind of ['unrelated-receipt', 'historical-receipt']) {
   test(`manual handoff cannot confirm ${kind}`, async () => {
-    const old = { innerText: 'continue fixture', getAttribute: name => name === 'data-message-id' ? 'old-user' : null };
+    const old = receipt('continue fixture', () => 'old-user');
     const h = fixture({ disabledSend: true, messages: kind === 'historical-receipt' ? [old] : [], args: { persistentDelivery: true } });
     h.state.schedule(60, () => {
       h.state.emit('click');
@@ -315,6 +356,38 @@ for (const kind of ['unrelated-receipt', 'historical-receipt']) {
     assert.notEqual(outcome.retryable, true);
   });
 }
+
+for (const [prompt, observed] of [
+  ['continue\u00a0fixture', 'continue fixture'],
+  ['continue fixture', 'continue\u00a0fixture'],
+]) {
+  test(`manual handoff cannot confirm an NBSP versus space receipt (${JSON.stringify(prompt)})`, async () => {
+    const h = fixture({ disabledSend: true, args: { prompt, persistentDelivery: true } });
+    let writesAtManual;
+    h.state.schedule(60, () => {
+      h.state.emit('click');
+      h.state.addUser(observed, 'manual-mismatch');
+      h.state.editor.value = '';
+      writesAtManual = h.state.writes;
+    });
+    const outcome = await h.run();
+    assert.equal(h.state.clicks, 0);
+    assert.equal(h.state.stops, 0);
+    assert.equal(h.state.writes, writesAtManual);
+    assert.notEqual(outcome.retryable, true);
+    assert.equal(outcome.status, 'unknown');
+  });
+}
+
+test('manual handoff confirms an exact NBSP receipt', async () => {
+  const prompt = 'continue\u00a0fixture';
+  const h = fixture({ disabledSend: true, args: { prompt, persistentDelivery: true } });
+  h.state.schedule(60, () => h.state.manualSubmit());
+  const outcome = await h.run();
+  assert.equal(h.state.clicks, 0);
+  assert.equal(h.state.stops, 0);
+  assert.equal(outcome.status, 'manual-sent');
+});
 
 test('manual handoff accepts the MAIN no-dispatch manualSubmission protocol', async () => {
   const h = fixture({ args: { modelCommit: true, persistentDelivery: true }, commit: state => {
@@ -527,16 +600,59 @@ test('acceptance beyond confirmation window remains unknown without retry or cle
   assert.equal(f.state.editor.value, 'continue fixture');
 });
 
+for (const [prompt, observed] of [
+  ['continue\u00a0fixture', 'continue fixture'],
+  ['continue fixture', 'continue\u00a0fixture'],
+]) {
+  test(`scheduled send cannot confirm an NBSP versus space receipt (${JSON.stringify(prompt)})`, async () => {
+    const f = fixture({ args: { prompt }, acceptDelay: Infinity, onSubmit: state => {
+      state.addUser(observed, 'different-user');
+      state.editor.value = '';
+    } });
+    const outcome = await f.run();
+    assert.deepEqual(f.state.sentTexts, [prompt]);
+    assert.equal(f.state.clicks, 1);
+    assert.equal(f.state.keys, 0);
+    assert.notEqual(outcome.retryable, true);
+    assert.equal(outcome.status, 'unknown');
+  });
+}
+
+for (const [prompt, observed] of [
+  ['SYNTHETIC\u00a0RECEIPT', 'SYNTHETIC RECEIPT'],
+  ['SYNTHETIC RECEIPT', 'SYNTHETIC\u00a0RECEIPT'],
+]) {
+  test(`scheduled NBSP/space ambiguous receipt has a non-replay diagnostic (${JSON.stringify(prompt)})`, async () => {
+    const f = fixture({ args: { prompt, persistentDelivery: true }, acceptDelay: Infinity, onSubmit: state => {
+      state.addUser(observed, 'ambiguous-user');
+      state.editor.value = '';
+    } });
+    const outcome = await f.run();
+    assert.deepEqual(f.state.sentTexts, [prompt]);
+    assert.equal(f.state.clicks, 1);
+    assert.equal(f.state.keys, 0);
+    assert.equal(outcome.status, 'unknown');
+    assert.notEqual(outcome.retryable, true);
+    assert.equal(outcome.diagnosticCode, 'receipt-ambiguous');
+    assert.equal(JSON.stringify(outcome.diagnosticProgress).includes('SYNTHETIC'), false);
+  });
+}
+
+test('scheduled send confirms an exact NBSP receipt', async () => {
+  const prompt = 'continue\u00a0fixture';
+  const f = fixture({ args: { prompt } });
+  const outcome = await f.run();
+  assert.deepEqual(f.state.sentTexts, [prompt]);
+  assert.equal(f.state.clicks, 1);
+  assert.equal(outcome.status, 'sent');
+});
+
 for (const dot of [false, true]) {
   for (const extensionPriority of [false, true]) {
     for (const initialKey of [null, 'old-user']) {
       test(`known history cannot confirm after its key changes (dot=${dot}, priority=${extensionPriority}, keyed=${!!initialKey})`, async () => {
         let key = initialKey;
-        const history = {
-          innerText: 'continue fixture',
-          getAttribute: name => name === 'data-message-id' ? key : null,
-          closest: () => null,
-        };
+        const history = receipt('continue fixture', () => key);
         const f = fixture({
           dot, messages: [history], acceptDelay: Infinity,
           args: { extensionPriority },
@@ -553,11 +669,7 @@ for (const dot of [false, true]) {
 
 test('a recycled known message node remains uncertain even with new submitted text and ID', async () => {
   let key = 'old-user';
-  const history = {
-    innerText: 'earlier fixture message',
-    getAttribute: name => name === 'data-message-id' ? key : null,
-    closest: () => null,
-  };
+  const history = receipt('earlier fixture message', () => key);
   const f = fixture({
     messages: [history], acceptDelay: Infinity,
     onSubmit: () => { history.innerText = 'continue fixture'; key = 'new-user'; },

@@ -31,15 +31,15 @@ const checks = [];
 const pass = name => { checks.push(name); console.log('PASS ' + name); };
 pass('Config: mandatory priority defaults to true, normalizes legacy false without mutating input, preserves other settings, and rejects non-booleans.');
 const priorityNotices = {
-  en: 'Scheduled sends replace unsent text and remove pending attachments before sending the configured prompt.',
-  zh_CN: '定时发送会替换未发送文字，并在发送配置的提示词前移除待发送附件。',
+  en: 'Sending replaces drafts and removes pending attachments; CR/CRLF become LF. Wrong or duplicate sends are possible. Check the conversation before Resume; Resume may resend.',
+  zh_CN: '发送会覆盖草稿并移除待发送附件；CR/CRLF 会规范为 LF。可能错发或重复发送。继续前请检查会话；继续可能重发。',
 };
 const original = { ...structuredClone(DEFAULT_CONFIG), prompt: 'SYNTHETIC-PRIVATE-PROMPT\n  Preserve these spaces.\n', intervalMinutes: 20,
   queue: [{ name: '合成队列 A', text: 'SYNTHETIC-QUEUE-A' }, { name: '合成队列 B', text: 'SYNTHETIC-QUEUE-B' }] };
 const resources = new Set(['popup.html', 'popup.css', 'popup.js', 'config.js', 'file-import.js',
   'static-locale.js', 'i18n.js', 'i18n-html.js', 'i18n-popup.js', 'i18n-runtime.js', 'activity-export.js', 'delivery-diagnostics.js']);
 
-async function createPage({ full = false, enabled = false, uiLanguage, fixture = original, title = 'Your dot', statusText = '合成测试任务。', initialTarget = 41, availableTargets = null } = {}) {
+async function createPage({ full = false, enabled = false, uiLanguage, fixture = original, title = 'Your dot', statusText = '合成测试任务。', initialTarget = 41, availableTargets = null, localHealth = null, sessionHealth = null, healthReadMode = null, configUnavailable = false } = {}) {
   const context = await browser.newContext({ viewport: { width: full ? 1200 : 650, height: full ? 900 : 600 }, locale: 'zh-CN', colorScheme: 'light', acceptDownloads: true });
   await context.route('**/*', async route => {
     const name = new URL(route.request().url()).pathname.slice(1);
@@ -50,14 +50,15 @@ async function createPage({ full = false, enabled = false, uiLanguage, fixture =
     if (!resources.has(name)) return route.abort();
     return route.fulfill({ status: 200, contentType: name.endsWith('.html') ? 'text/html' : name.endsWith('.css') ? 'text/css' : 'application/javascript', body: await fs.readFile(path.join(root, name)) });
   });
-  await context.addInitScript(({ original, enabled, uiLanguage, title, statusText, availableTargets }) => {
+  await context.addInitScript(({ original, enabled, uiLanguage, title, statusText, availableTargets, localHealth, sessionHealth, healthReadMode, configUnavailable }) => {
     const mock = {
-      config: structuredClone(original), templates: [], uiTheme: 'system', listeners: [], requests: [],
+      config: structuredClone(original), templates: [], uiTheme: 'system', listeners: [], requests: [], draftGeneration: crypto.randomUUID(), draftRevision: 0,
       logs: [{ at: Date.now(), event: 'started', message: '合成任务已就绪；没有记录正文。' }],
       job: { ...structuredClone(original), id: 'test-job', enabled, phase: 'idle', tabId: 41,
         url: 'https://chatgpt.com/dots/home', title, sentCount: 2,
         nextAt: Date.now() + 20 * 60000, discardProtection: 'active', statusText, queueIndex: 0 },
       exports: [], tabs: [], tabAttempts: [], configWrites: [], permissionRequests: [], grantPower: true,
+      diagnosticsHealth: localHealth, sessionDiagnosticsHealth: sessionHealth, healthReadMode, configUnavailable,
       availableTargets: availableTargets || [{ id: 41, title, url: 'https://chatgpt.com/dots/home' }, { id: 42, title: '测试对话', url: 'https://chatgpt.com/c/test' }],
     };
     if (uiLanguage !== undefined) mock.uiLanguage = uiLanguage;
@@ -70,8 +71,35 @@ async function createPage({ full = false, enabled = false, uiLanguage, fixture =
         getURL: resource => 'https://ui-fixture.invalid/' + resource,
         async sendMessage(message) {
           mock.requests.push(structuredClone(message));
-          if (message.type === 'GET_STATE') return { ok: true, config: structuredClone(mock.config), job: structuredClone(mock.job), logs: structuredClone(mock.logs),
-            availableTargets: structuredClone(mock.availableTargets) };
+          if (message.type === 'GET_STATE') {
+            const snapshot = { ok: true, ...(mock.configUnavailable ? { configAvailable: false } : { configAvailable: true, config: structuredClone(mock.config), draftGeneration: mock.draftGeneration, draftRevision: mock.draftRevision }), job: structuredClone(mock.job), logs: structuredClone(mock.logs),
+              deliveryDiagnostics: structuredClone(mock.deliveryDiagnostics), availableTargets: structuredClone(mock.availableTargets),
+              diagnosticsHealth: mock.stateHealthUnknown ? { persistence: 'unknown', writeFailures: 0 } :
+                structuredClone(mock.sessionDiagnosticsHealth || mock.diagnosticsHealth) };
+            if (mock.rejectState) throw new Error('fixture state read failure');
+            if (mock.deferState) await new Promise(resolve => { mock.stateResolvers.push(resolve); });
+            return snapshot;
+          }
+          if (message.type === 'PREPARE_START') return { ok: true, startToken: crypto.randomUUID() };
+          if (message.type === 'SAVE_DRAFT') {
+            if (mock.deferConfigSave) await new Promise(resolve => { mock.finishConfigSave = resolve; });
+            if (message.generation !== mock.draftGeneration || message.revision !== mock.draftRevision)
+              return { ok: false, conflict: true, draftGeneration: mock.draftGeneration, draftRevision: mock.draftRevision };
+            const old = mock.config;
+            mock.config = structuredClone(message.config);
+            mock.configWrites.push(structuredClone(message.config));
+            mock.draftRevision++;
+            notify('config', old, mock.config);
+            return { ok: true, draftGeneration: mock.draftGeneration, draftRevision: mock.draftRevision };
+          }
+          if (message.type === 'SAVE_TEMPLATES') {
+            if (message.generation !== mock.draftGeneration || JSON.stringify(message.base) !== JSON.stringify(mock.templates))
+              return { ok: false, conflict: true };
+            const old = mock.templates;
+            mock.templates = structuredClone(message.templates);
+            notify('templates', old, mock.templates);
+            return { ok: true };
+          }
           if (message.type === 'CHECK_PAGE') return { ok: true, result: { status: 'ready', message: '合成页面可用；未填写或发送。' } };
           if (message.type === 'CHECK_TIMING') {
             if (mock.deferTiming) await new Promise(resolve => { mock.finishTiming = resolve; });
@@ -100,18 +128,32 @@ async function createPage({ full = false, enabled = false, uiLanguage, fixture =
           }
           if (message.type === 'CLEAR_LOGS') { mock.logs = []; return { ok: true }; }
           if (message.type === 'CLEAR_DATA') {
-            mock.job = null; mock.config = null; mock.templates = []; mock.logs = []; mock.uiTheme = 'system'; return { ok: true };
+            const oldConfig = mock.config;
+            const oldTemplates = mock.templates;
+            mock.draftGeneration = crypto.randomUUID(); mock.draftRevision = 0;
+            mock.job = null; mock.config = null; mock.templates = []; mock.logs = []; mock.uiTheme = 'system';
+            notify('config', oldConfig, undefined);
+            if (oldTemplates.length) notify('templates', oldTemplates, undefined);
+            if (mock.deferClear) await new Promise(resolve => { mock.finishClear = resolve; });
+            return { ok: true };
           }
           throw new Error('Unexpected mock request');
         },
       },
       storage: {
         onChanged: { addListener(listener) { mock.listeners.push(listener); } },
-        session: { async get() { return {}; } },
+        session: { async get() {
+          if (mock.healthReadMode === 'reject-session') throw new Error('fixture session read failure');
+          if (mock.healthReadMode === 'empty-session') return { diagnosticsHealth: undefined };
+          return { diagnosticsHealth: structuredClone(mock.sessionDiagnosticsHealth) };
+        } },
         local: {
-          async get(keys) { const result = {}; for (const key of typeof keys === 'string' ? [keys] : keys || []) result[key] = structuredClone(mock[key]); return result; },
+          async get(keys) {
+            if (keys === 'diagnosticsHealth' && mock.healthReadMode === 'hang-local') return new Promise(() => {});
+            if (keys === 'diagnosticsHealth' && mock.healthReadMode === 'reject-local') throw new Error('fixture local read failure');
+            const result = {}; for (const key of typeof keys === 'string' ? [keys] : keys || []) result[key] = structuredClone(mock[key]); return result;
+          },
           async set(values) {
-            if (mock.deferConfigSave && Object.hasOwn(values, 'config')) await new Promise(resolve => { mock.finishConfigSave = resolve; });
             for (const [key, value] of Object.entries(values)) { const old = mock[key]; mock[key] = structuredClone(value); notify(key, old, value); }
             if (Object.hasOwn(values, 'config')) mock.configWrites.push(structuredClone(values.config));
           },
@@ -126,11 +168,12 @@ async function createPage({ full = false, enabled = false, uiLanguage, fixture =
     };
     const nativeCreate = URL.createObjectURL.bind(URL);
     URL.createObjectURL = blob => { mock.exports.push(blob); return nativeCreate(blob); };
-  }, { original: fixture, enabled, uiLanguage, title, statusText, availableTargets });
+  }, { original: fixture, enabled, uiLanguage, title, statusText, availableTargets, localHealth, sessionHealth, healthReadMode, configUnavailable });
   const page = await context.newPage();
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto('https://ui-fixture.invalid/popup.html' + (full ? '?view=full' + (initialTarget === null ? '' : '&targetTabId=' + initialTarget) : ''));
-  await page.waitForFunction(() => !document.querySelector('#check').disabled && document.querySelector('#targetSelect').options.length > 1)
+  await page.waitForFunction(() => document.querySelector('#targetSelect').options.length > 1 &&
+    (globalThis.__uiMock.configUnavailable || !document.querySelector('#check').disabled))
     .catch(async error => { throw new Error(JSON.stringify({ errors, state: await page.evaluate(() => ({ requests: globalThis.__uiMock?.requests, feedback: document.querySelector('#feedback')?.textContent })) }), { cause: error }); });
   if (screenshotFont) {
     await page.addStyleTag({ content: '@font-face{font-family:"Microsoft YaHei";src:url("/__test-font.otf") format("opentype");font-display:block}' });
@@ -194,6 +237,436 @@ async function capture(page, name) {
 }
 
 try {
+  for (const uiLanguage of ['en', 'zh_CN']) {
+    const manual = await createPage({ full: true, uiLanguage }); const { page } = manual;
+    try {
+      await page.locator('#tab-prompt').click();
+      assert.equal(await page.locator('#exportPromptTxt').count(), 1, 'manual TXT export control must exist');
+      await page.locator('#manualTxtNotice').locator('..').locator('summary').click();
+      assert.equal(await page.locator('#exportPromptTxt').isEnabled(), true);
+      await page.locator('#manualSubmissionSequence').fill('12');
+      const download = page.waitForEvent('download');
+      await page.locator('#exportPromptTxt').click();
+      const item = await download;
+      assert.match(item.suggestedFilename(), /^agent-continue-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-12\.txt$/);
+      assert.equal(await page.evaluate(async () => __uiMock.exports.at(-1).text()), original.prompt);
+      assert.equal(await page.evaluate(() => __uiMock.requests.some(request => ['START', 'RESUME', 'SEND_NOW'].includes(request.type))), false);
+      const instruction = await page.locator('#manualTxtNotice').innerText();
+      assert.match(instruction, uiLanguage === 'en' ? /manual|manually/i : /手动/);
+      assert.match(instruction, uiLanguage === 'en' ? /pause/i : /暂停/);
+    } finally { await manual.context.close(); }
+  }
+  {
+    const payload = '  SYNTHETIC 中文 🧭\r\n\n\tEnd  ';
+    const exact = await createPage({ full: true, fixture: { ...structuredClone(original), prompt: payload } }); const { page } = exact;
+    try {
+      await page.locator('#tab-prompt').click();
+      await page.locator('#manualTxtNotice').locator('..').locator('summary').click();
+      await page.locator('#manualSubmissionSequence').fill('1');
+      const download = page.waitForEvent('download');
+      await page.locator('#exportPromptTxt').click();
+      const item = await download;
+      assert.deepEqual(await fs.readFile(await item.path()), Buffer.from(payload, 'utf8'));
+      const bytes = await page.evaluate(async () => [...new Uint8Array(await __uiMock.exports.at(-1).arrayBuffer())]);
+      assert.deepEqual(bytes, [...Buffer.from(payload, 'utf8')]);
+    } finally { await exact.context.close(); }
+  }
+  {
+    const payload = Array.from({ length: 4000 }, (_, index) => `SYNTHETIC_LINE_${index}: 中文 🧭\r\n`).join('');
+    const long = await createPage({ full: true, fixture: { ...structuredClone(original), prompt: payload } }); const { page } = long;
+    try {
+      await page.locator('#tab-prompt').click();
+      assert.equal(await page.locator('#prompt').inputValue(), '');
+      await page.locator('#manualTxtNotice').locator('..').locator('summary').click();
+      await page.locator('#manualSubmissionSequence').fill('4000');
+      const download = page.waitForEvent('download');
+      await page.locator('#exportPromptTxt').click();
+      const item = await download;
+      assert.deepEqual(await fs.readFile(await item.path()), Buffer.from(payload, 'utf8'));
+      assert.equal(await page.locator('#prompt').inputValue(), '');
+      assert.equal(await page.evaluate(() => __uiMock.requests.some(request => ['START', 'RESUME', 'SEND_NOW'].includes(request.type))), false);
+    } finally { await long.context.close(); }
+  }
+  {
+    const empty = await createPage({ full: true, fixture: { ...structuredClone(original), prompt: '  \n' } }); const { page } = empty;
+    try {
+      await page.locator('#tab-prompt').click();
+      await page.locator('#manualTxtNotice').locator('..').locator('summary').click();
+      await page.locator('#manualSubmissionSequence').fill('1');
+      await page.locator('#exportPromptTxt').click();
+      assert.equal(await page.evaluate(() => __uiMock.exports.length), 0);
+      assert.equal(await page.locator('#feedback').evaluate(element => element.classList.contains('error')), true);
+    } finally { await empty.context.close(); }
+  }
+  {
+    const running = await createPage({ full: true, enabled: true }); const { page } = running;
+    try {
+      await page.locator('#tab-prompt').click();
+      assert.equal(await page.locator('#exportPromptTxt').isDisabled(), true);
+      assert.equal(await page.evaluate(() => __uiMock.exports.length), 0);
+    } finally { await running.context.close(); }
+  }
+  {
+    const stale = await createPage({ full: true }); const { page } = stale;
+    try {
+      await page.locator('#tab-prompt').click();
+      await page.locator('#manualTxtNotice').locator('..').locator('summary').click();
+      await page.locator('#manualSubmissionSequence').fill('1');
+      await page.evaluate(() => { __uiMock.job.enabled = true; });
+      await page.locator('#exportPromptTxt').click();
+      assert.equal(await page.evaluate(() => __uiMock.exports.length), 0, 'stale paused UI must not create a file after another panel starts');
+    } finally { await stale.context.close(); }
+  }
+  for (const job of [{ enabled: null }, { enabled: 0 }, { enabled: '' }, {}, false, 0, '']) {
+    const malformed = await createPage({ full: true }); const { page } = malformed;
+    try {
+      await page.locator('#tab-prompt').click();
+      await page.locator('#manualTxtNotice').locator('..').locator('summary').click();
+      await page.locator('#manualSubmissionSequence').fill('1');
+      await page.evaluate(value => { __uiMock.job = value; }, job);
+      await page.locator('#exportPromptTxt').click();
+      await page.waitForFunction(() => document.querySelector('#feedback').classList.contains('error'));
+      assert.equal(await page.evaluate(() => __uiMock.exports.length), 0,
+        'malformed scheduler state must not authorize a plaintext download');
+    } finally { await malformed.context.close(); }
+  }
+  {
+    const failing = await createPage({ full: true }); const { page } = failing;
+    try {
+      await page.locator('#tab-prompt').click();
+      await page.locator('#manualTxtNotice').locator('..').locator('summary').click();
+      await page.locator('#manualSubmissionSequence').fill('1');
+      await page.evaluate(() => { __uiMock.rejectState = true; });
+      await page.locator('#exportPromptTxt').click();
+      await page.waitForFunction(() => document.querySelector('#feedback').classList.contains('error'));
+      assert.equal(await page.evaluate(() => __uiMock.exports.length), 0);
+    } finally { await failing.context.close(); }
+  }
+  {
+    const deferred = await createPage({ full: true }); const { page } = deferred;
+    try {
+      await page.locator('#tab-prompt').click();
+      await page.locator('#manualTxtNotice').locator('..').locator('summary').click();
+      await page.locator('#manualSubmissionSequence').fill('1');
+      await page.evaluate(() => { __uiMock.stateResolvers = []; __uiMock.deferState = true; });
+      await page.locator('#exportPromptTxt').click();
+      await page.waitForFunction(() => __uiMock.stateResolvers.length === 1);
+      await page.evaluate(() => {
+        const before = structuredClone(__uiMock.job);
+        __uiMock.job.enabled = true;
+        for (const listener of __uiMock.listeners) listener({ job: { oldValue: before, newValue: structuredClone(__uiMock.job) } }, 'session');
+        __uiMock.stateResolvers.shift()();
+      });
+      await page.waitForFunction(() => document.querySelector('#feedback').classList.contains('error'));
+      assert.equal(await page.evaluate(() => __uiMock.exports.length), 0);
+    } finally { await deferred.context.close(); }
+  }
+  {
+    const changing = await createPage({ full: true }); const { page } = changing;
+    try {
+      await page.locator('#tab-prompt').click();
+      await page.locator('#manualTxtNotice').locator('..').locator('summary').click();
+      await page.locator('#manualSubmissionSequence').fill('1');
+      await page.evaluate(() => { __uiMock.stateResolvers = []; __uiMock.deferState = true; });
+      await page.locator('#exportPromptTxt').click();
+      await page.waitForFunction(() => __uiMock.stateResolvers.length === 1);
+      await page.locator('#togglePrompt').click();
+      await page.locator('#prompt').fill('SYNTHETIC_INTERVENING_EDIT');
+      await page.locator('#prompt').fill(original.prompt);
+      await page.evaluate(() => __uiMock.stateResolvers.shift()());
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      assert.equal(await page.evaluate(() => __uiMock.exports.length), 0,
+        'a draft edited during the pause check must not download an earlier click snapshot');
+      assert.equal(await page.locator('#feedback').evaluate(element => element.classList.contains('error')), true);
+    } finally { await changing.context.close(); }
+  }
+  {
+    const rejected = await createPage({ full: true }); const { page } = rejected;
+    try {
+      await page.locator('#tab-prompt').click();
+      await page.locator('#manualTxtNotice').locator('..').locator('summary').click();
+      await page.locator('#manualSubmissionSequence').fill('1');
+      await page.evaluate(() => { HTMLAnchorElement.prototype.click = () => { throw new Error('SYNTHETIC_PRIVATE_DOWNLOAD_ERROR'); }; });
+      await page.locator('#exportPromptTxt').click();
+      await page.waitForFunction(() => document.querySelector('#feedback').classList.contains('error'));
+      assert.equal((await page.locator('#feedback').innerText()).includes('SYNTHETIC_PRIVATE_DOWNLOAD_ERROR'), false);
+    } finally { await rejected.context.close(); }
+  }
+  for (const sequence of ['', '0', '-1', '1.5', '9007199254740992']) {
+    const invalid = await createPage({ full: true }); const { page } = invalid;
+    try {
+      await page.locator('#tab-prompt').click();
+      await page.locator('#manualTxtNotice').locator('..').locator('summary').click();
+      await page.locator('#manualSubmissionSequence').fill(sequence);
+      await page.locator('#exportPromptTxt').click();
+      assert.equal(await page.evaluate(() => __uiMock.exports.length), 0, `invalid sequence ${sequence} must not create a file`);
+      assert.equal(await page.locator('#feedback').evaluate(element => element.classList.contains('error')), true);
+    } finally { await invalid.context.close(); }
+  }
+  {
+    const invalid = await createPage({ full: true, fixture: { ...structuredClone(original), prompt: 'SYNTHETIC_\uD800_END' } }); const { page } = invalid;
+    try {
+      await page.locator('#tab-prompt').click();
+      await page.locator('#manualTxtNotice').locator('..').locator('summary').click();
+      await page.locator('#manualSubmissionSequence').fill('1');
+      await page.locator('#exportPromptTxt').click();
+      assert.equal(await page.evaluate(() => __uiMock.exports.length), 0, 'invalid UTF-16 must not be silently replaced');
+      assert.equal(await page.locator('#feedback').evaluate(element => element.classList.contains('error')), true);
+    } finally { await invalid.context.close(); }
+  }
+  {
+    const queued = await createPage({ full: true, fixture: { ...structuredClone(original), mode: 'queue-loop' } }); const { page } = queued;
+    try {
+      await page.locator('#tab-prompt').click();
+      await page.locator('#manualTxtNotice').locator('..').locator('summary').click();
+      await page.locator('#manualSubmissionSequence').fill('2');
+      await page.locator('#exportPromptTxt').click();
+      assert.equal(await page.evaluate(() => __uiMock.exports.length), 0, 'manual TXT export must not guess a queue item');
+      assert.equal(await page.locator('#feedback').evaluate(element => element.classList.contains('error')), true);
+    } finally { await queued.context.close(); }
+  }
+  pass('Manual TXT: both languages, UTF-8 bytes, sequence validation, paused guard, empty prompt and invalid UTF-16 checks.');
+  if (process.env.TEST_MANUAL_TXT_ONLY === '1') {
+    await browser.close();
+    process.exit(0);
+  }
+  for (const pending of ['permission', 'config save']) {
+    const fixture = { ...structuredClone(original), keepAwake: pending === 'permission' };
+    const starting = await createPage({ full: true, fixture }); const { page } = starting;
+    try {
+      await page.evaluate(pending => {
+        if (pending === 'permission') chrome.permissions.request = async () => new Promise(resolve => { __uiMock.finishPermission = resolve; });
+        else __uiMock.deferConfigSave = true;
+      }, pending);
+      await page.locator('#start').click();
+      await page.waitForFunction(pending => typeof __uiMock[pending === 'permission' ? 'finishPermission' : 'finishConfigSave'] === 'function', pending);
+      assert.equal(await page.locator('#pause').isVisible(), true,
+        `Pause must be available while Start is awaiting ${pending}`);
+      assert.equal(await page.locator('#start').isVisible(), false);
+      await page.locator('#pause').click();
+      await page.evaluate(pending => {
+        if (pending === 'permission') __uiMock.finishPermission(true);
+        else { __uiMock.deferConfigSave = false; __uiMock.finishConfigSave(); }
+      }, pending);
+      await page.waitForFunction(() => __uiMock.requests.some(request => request.type === 'PAUSE'));
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      assert.equal(await page.evaluate(() => __uiMock.requests.filter(request => request.type === 'START').length), 0,
+        `Pause during pending ${pending} must prevent the delayed Start`);
+      assert.equal(await page.evaluate(() => __uiMock.job?.enabled), false);
+      pass(`Pause: a pending Start cannot run after ${pending} completes.`);
+    } finally { await starting.context.close(); }
+  }
+  {
+    const starting = await createPage({ full: true }); const { page } = starting;
+    try {
+      await page.evaluate(() => { __uiMock.deferConfigSave = true; });
+      await page.locator('#start').click();
+      await page.waitForFunction(() => typeof __uiMock.finishConfigSave === 'function');
+      await page.locator('#start').evaluate(button => button.click());
+      await page.evaluate(() => { __uiMock.deferConfigSave = false; __uiMock.finishConfigSave(); });
+      await page.waitForFunction(() => __uiMock.requests.some(request => request.type === 'START'));
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      assert.equal(await page.evaluate(() => __uiMock.requests.filter(request => request.type === 'START').length), 1,
+        'a duplicate activation cannot queue a second Start while saving');
+      assert.equal(await page.evaluate(() => __uiMock.job?.enabled), true);
+      pass('Start: duplicate activation during preparation produces one request.');
+    } finally { await starting.context.close(); }
+  }
+  {
+    const starting = await createPage({ full: true, fixture: { ...structuredClone(original), keepAwake: true } });
+    const { page } = starting;
+    try {
+      await page.evaluate(() => {
+        chrome.permissions.request = async () => new Promise(resolve => { __uiMock.finishPermission = resolve; });
+        const send = chrome.runtime.sendMessage;
+        chrome.runtime.sendMessage = message => message.type === 'PREPARE_START'
+          ? Promise.reject(new Error('Synthetic reservation failure')) : send(message);
+      });
+      await page.locator('#start').click();
+      await page.waitForFunction(() => typeof __uiMock.finishPermission === 'function');
+      await page.locator('#pause').click();
+      await page.evaluate(() => __uiMock.finishPermission(true));
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      assert.equal(await page.evaluate(() => __uiMock.requests.filter(request => request.type === 'START').length), 0);
+      assert.deepEqual(starting.errors, [], 'a rejected reservation must be observed even after Pause');
+      pass('Pause: a rejected reservation cannot leak an unhandled rejection.');
+    } finally { await starting.context.close(); }
+  }
+  if (process.env.TEST_PAUSE_PENDING_START_ONLY === '1') {
+    await browser.close();
+    process.exit(0);
+  }
+  {
+    const survivor = await createPage({ full: true }); const { page } = survivor;
+    try {
+      await page.locator('#interval').fill('41');
+      const updated = { ...structuredClone(original), prompt: 'SYNTHETIC-NEWER-PROMPT\n', promptSource: 'file' };
+      await page.evaluate(config => {
+        const oldValue = structuredClone(__uiMock.config);
+        __uiMock.config = structuredClone(config);
+        for (const listener of __uiMock.listeners) listener({ config: { oldValue, newValue: structuredClone(config) } }, 'local');
+      }, updated);
+      await page.waitForFunction(() => __uiMock.config.intervalMinutes === 41);
+      assert.equal(await page.evaluate(() => __uiMock.config.prompt), updated.prompt,
+        'a pending settings save must retain a newer prompt from another panel');
+      assert.equal(await page.evaluate(() => __uiMock.config.promptSource), 'file');
+      pass('Cross-panel config: a pending settings save preserves a newer prompt.');
+    } finally { await survivor.context.close(); }
+  }
+  {
+    const survivor = await createPage({ full: true }); const { page } = survivor;
+    try {
+      await page.locator('#tab-prompt').click();
+      await page.locator('#togglePrompt').click();
+      await page.locator('#prompt').fill('SYNTHETIC-PENDING-PROMPT');
+      const updated = { ...structuredClone(original), intervalMinutes: 37 };
+      await page.evaluate(config => {
+        const oldValue = structuredClone(__uiMock.config);
+        __uiMock.config = structuredClone(config);
+        for (const listener of __uiMock.listeners) listener({ config: { oldValue, newValue: structuredClone(config) } }, 'local');
+      }, updated);
+      assert.equal(await page.locator('#prompt').inputValue(), 'SYNTHETIC-PENDING-PROMPT');
+      await page.waitForFunction(() => __uiMock.config.prompt === 'SYNTHETIC-PENDING-PROMPT');
+      assert.equal(await page.evaluate(() => __uiMock.config.intervalMinutes), 37);
+      pass('Cross-panel config: a pending prompt edit preserves a newer setting.');
+    } finally { await survivor.context.close(); }
+  }
+  {
+    const survivor = await createPage({ full: true }); const { page } = survivor;
+    try {
+      await page.locator('#tab-prompt').click();
+      await page.locator('#togglePrompt').click();
+      await page.locator('#prompt').fill('SYNTHETIC-PENDING-MANUAL');
+      const updated = { ...structuredClone(original), prompt: 'SYNTHETIC-REMOTE-FILE', promptSource: 'file' };
+      await page.evaluate(config => {
+        const oldValue = structuredClone(__uiMock.config);
+        __uiMock.config = structuredClone(config);
+        for (const listener of __uiMock.listeners) listener({ config: { oldValue, newValue: structuredClone(config) } }, 'local');
+      }, updated);
+      await page.waitForFunction(() => __uiMock.config.prompt === 'SYNTHETIC-PENDING-MANUAL');
+      assert.equal(await page.evaluate(() => __uiMock.config.promptSource), 'manual',
+        'a locally edited prompt must retain its matching source');
+      pass('Cross-panel config: a pending manual prompt retains its source.');
+    } finally { await survivor.context.close(); }
+  }
+  {
+    const survivor = await createPage({ full: true }); const { page } = survivor;
+    try {
+      assert.deepEqual(await page.evaluate(() => __uiMock.config), original);
+      assert.equal(await page.evaluate(() => __uiMock.configWrites.length), 0);
+      const updated = { ...structuredClone(original), prompt: 'SYNTHETIC-OTHER-PANEL-PROMPT\n', intervalMinutes: 37 };
+      await page.evaluate(config => {
+        const oldValue = structuredClone(__uiMock.config);
+        __uiMock.config = structuredClone(config);
+        for (const listener of __uiMock.listeners) listener({ config: { oldValue, newValue: structuredClone(config) } }, 'local');
+      }, updated);
+      assert.deepEqual(await page.evaluate(() => __uiMock.config), updated);
+      await page.evaluate(async () => {
+        dispatchEvent(new Event('pagehide'));
+        await new Promise(resolve => setTimeout(resolve, 250));
+      });
+      assert.deepEqual(await page.evaluate(() => __uiMock.config), updated,
+        'pagehide in an unedited panel must not overwrite another panel’s newer configuration');
+      assert.deepEqual(survivor.errors, []);
+      pass('Cross-panel config: pagehide in an unedited panel preserves the newer configuration.');
+    } finally { await survivor.context.close(); }
+  }
+  {
+    const survivor = await createPage({ full: true }); const { page } = survivor;
+    try {
+      const updated = { ...structuredClone(original), prompt: 'SYNTHETIC-NEWER-PROMPT\n', intervalMinutes: 37 };
+      await page.evaluate(config => {
+        const oldValue = structuredClone(__uiMock.config);
+        __uiMock.config = structuredClone(config);
+        for (const listener of __uiMock.listeners) listener({ config: { oldValue, newValue: structuredClone(config) } }, 'local');
+      }, updated);
+      await page.locator('#interval').fill('41');
+      await page.waitForFunction(() => __uiMock.config.intervalMinutes === 41);
+      assert.equal(await page.evaluate(() => __uiMock.config.prompt), updated.prompt,
+        'editing an interval in an older panel must not overwrite the newer prompt');
+      pass('Cross-panel config: editing the interval preserves a newer prompt.');
+    } finally { await survivor.context.close(); }
+  }
+  {
+    const survivor = await createPage({ full: true }); const { page } = survivor;
+    try {
+      await page.locator('#tab-prompt').click();
+      await page.locator('#templateName').fill('SYNTHETIC-OLD-TEMPLATE');
+      await page.locator('#saveTemplate').click();
+      await page.waitForFunction(() => __uiMock.templates.length === 1 && document.querySelector('#templateSelect').options.length === 2);
+      await page.evaluate(() => chrome.runtime.sendMessage({ type: 'CLEAR_DATA' }));
+      assert.deepEqual(await page.evaluate(() => __uiMock.templates), []);
+      await page.locator('#tab-logs').click();
+      await page.waitForFunction(() => !document.querySelector('#check').disabled);
+      await page.locator('#tab-prompt').click();
+      await page.locator('#togglePrompt').click();
+      await page.locator('#prompt').fill('SYNTHETIC-NEW-PROMPT');
+      await page.locator('#templateName').fill('SYNTHETIC-NEW-TEMPLATE');
+      await page.locator('#saveTemplate').click();
+      await page.waitForFunction(() => __uiMock.templates.some(template => template.name === 'SYNTHETIC-NEW-TEMPLATE'));
+      const templates = await page.evaluate(() => structuredClone(__uiMock.templates));
+      assert.deepEqual(templates.map(template => template.name), ['SYNTHETIC-NEW-TEMPLATE'],
+        'saving a new template in a surviving panel must not resurrect templates cleared by another panel');
+      assert.equal(templates[0].prompt, 'SYNTHETIC-NEW-PROMPT');
+      assert.equal(await page.locator('#templateSelect option').count(), 2);
+      assert.deepEqual(survivor.errors, []);
+      pass('Clear Data: another panel cannot resurrect old templates when saving a new one.');
+    } finally { await survivor.context.close(); }
+  }
+  {
+    const failures = [];
+    for (const pending of ['permission', 'config save']) {
+      const fixture = { ...structuredClone(original), keepAwake: pending === 'permission' };
+      const clearing = await createPage({ full: true, fixture }); const { page } = clearing;
+      try {
+        await page.evaluate(pending => {
+          if (pending === 'permission') {
+            chrome.permissions.request = async () => new Promise(resolve => { __uiMock.finishPermission = resolve; });
+          } else __uiMock.deferConfigSave = true;
+        }, pending);
+        await page.locator('#start').click();
+        await page.waitForFunction(pending => typeof __uiMock[pending === 'permission' ? 'finishPermission' : 'finishConfigSave'] === 'function', pending);
+        await page.evaluate(async pending => {
+          await chrome.runtime.sendMessage({ type: 'CLEAR_DATA' });
+          if (pending === 'permission') __uiMock.finishPermission(true);
+          else { __uiMock.deferConfigSave = false; __uiMock.finishConfigSave(); }
+          await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        }, pending);
+        assert.equal(await page.evaluate(() => __uiMock.requests.filter(request => request.type === 'START').length), 0,
+          `cross-panel clear must cancel START after pending ${pending}`);
+        if (pending === 'config save') {
+          assert.notEqual(await page.evaluate(() => __uiMock.config?.prompt), fixture.prompt,
+            'a config save released after cross-panel clear must not restore the old prompt');
+          assert.equal(await page.evaluate(prompt => __uiMock.configWrites.some(config => config.prompt === prompt), fixture.prompt), false,
+            'a config save released after cross-panel clear must not write the old prompt');
+        }
+        pass(`Clear Data: another panel cancels START after pending ${pending}.`);
+      } catch (error) { failures.push(error); }
+      finally { await clearing.context.close(); }
+    }
+    if (failures.length) throw new AggregateError(failures, 'Cross-panel clear START cancellation failures');
+  }
+  {
+    const diagnostic = await createPage({ full: true }); const { page } = diagnostic;
+    await page.locator('#tab-logs').click();
+    await page.evaluate(() => {
+      __uiMock.stateHealthUnknown = true; __uiMock.healthReadMode = 'reject-session';
+      __uiMock.deferState = true; __uiMock.stateResolvers = [];
+    });
+    await page.locator('#refreshLogs').click();
+    await page.waitForFunction(() => __uiMock.stateResolvers.length === 1);
+    await page.evaluate(async () => {
+      const now = Date.now();
+      __uiMock.deliveryDiagnostics = [{ sequence: 18, startedAt: now, updatedAt: now, state: 'running', stage: 'page', reason: 'starting' }];
+      for (const listener of __uiMock.listeners) listener({ deliveryDiagnostics: { newValue: __uiMock.deliveryDiagnostics } }, 'local');
+      __uiMock.stateResolvers[0]();
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    });
+    assert.equal(await page.locator('#deliveryDiagnosticList summary').count(), 1);
+    assert.match(await page.locator('#deliveryDiagnosticHealth').innerText(), /could not be read/,
+      'a list update must not discard an unknown health response');
+    await diagnostic.context.close();
+  }
   for (const full of [false, true]) for (const uiLanguage of ['en', 'zh_CN']) {
     const fixture = { ...structuredClone(original), extensionPriority: false };
     const { page, context, errors } = await createPage({ full, uiLanguage, fixture });
@@ -282,7 +755,8 @@ try {
     assert.deepEqual(state.configWrites, [original], 'draft is persisted exactly once before navigation');
     assert.deepEqual(state.config, original);
     assert.deepEqual(state.job, before, 'scheduler state is unchanged');
-    assert.deepEqual(state.requests.filter(r => r.type !== 'GET_STATE'), []);
+    assert.deepEqual(state.requests.filter(r => !['GET_STATE', 'SAVE_DRAFT'].includes(r.type)), []);
+    assert.equal(state.requests.filter(r => r.type === 'SAVE_DRAFT').length, 1);
     assert.deepEqual(state.permissionRequests, []);
     assert.deepEqual(errors, []);
     await context.close(); pass(`Windows ${id} preserves draft and scheduler (full=${full}, enabled=${enabled}, rejectTabs=${rejectTabs})`);
@@ -360,6 +834,12 @@ try {
       assert.equal((await page.locator('#tab-settings').textContent()).trim(), language === 'en' ? '⌘Settings' : '⌘设置');
       assert.equal(await page.locator('#composerPriorityNotice').textContent(), priorityNotices[language]);
       assert.equal(await page.locator('#composerPriorityNotice').isVisible(), true);
+      await page.locator('#tab-logs').click();
+      await page.locator('.help-card summary').click();
+      const waitingHelp = await page.locator('.help-card p').first().innerText();
+      assert.match(waitingHelp, language === 'en' ? /final outcome is unknown.*pauses automatically/ : /终态未知时，任务会自动暂停/);
+      assert.match(waitingHelp, language === 'en' ? /Check the target conversation.*Resume may resend/ : /先检查目标会话.*继续可能重发/);
+      await page.locator('.help-card summary').click();
       assert.equal(await page.locator('#prompt').getAttribute('placeholder'), language === 'en' ? 'Enter the complete prompt to repeat...' : '输入需要重复发送的完整提示词…');
       assert.equal(await page.locator('#expand').getAttribute('aria-label'), language === 'en' ? 'Open full console' : '打开完整控制台');
       for (const panel of ['task', 'prompt', 'settings', 'logs']) {
@@ -649,6 +1129,32 @@ try {
   pass('Clear/import race: clearing all data invalidates an in-flight file import so old private contents cannot be written back.');
   await full.context.close();
 
+  {
+    const clearing = await createPage({ full: true }); const { page } = clearing;
+    await page.evaluate(() => { __uiMock.deferClear = true; });
+    await page.locator('#tab-settings').click();
+    await page.locator('#clearData').click(); await page.locator('#confirmClear').click();
+    await page.waitForFunction(() => typeof __uiMock.finishClear === 'function');
+    await page.evaluate(() => dispatchEvent(new Event('pagehide')));
+    assert.equal(await page.evaluate(() => __uiMock.configWrites.length), 0);
+    assert.equal(await page.evaluate(() => __uiMock.config), null);
+    await page.evaluate(() => __uiMock.finishClear());
+    pass('Clear Data: pagehide during a pending clear cannot restore the previous draft.');
+    await clearing.context.close();
+  }
+  {
+    const clearing = await createPage({ full: true }); const { page } = clearing;
+    await page.evaluate(() => {
+      __uiMock.config = null;
+      for (const listener of __uiMock.listeners) listener({ config: { newValue: undefined } }, 'local');
+      dispatchEvent(new Event('pagehide'));
+    });
+    assert.equal(await page.evaluate(() => __uiMock.configWrites.length), 0);
+    assert.equal(await page.evaluate(() => __uiMock.config), null);
+    pass('Clear Data: another panel observing config removal cannot restore the previous draft.');
+    await clearing.context.close();
+  }
+
   for (const language of ['en', 'zh_CN']) {
     const diagnostic = await createPage({ full: true, uiLanguage: language });
     const { page } = diagnostic;
@@ -720,6 +1226,182 @@ try {
     await diagnostic.context.close();
   }
   {
+    const diagnostic = await createPage({ full: true }); const { page } = diagnostic;
+    await page.locator('#tab-logs').click();
+    await page.evaluate(() => {
+      __uiMock.sessionDiagnosticsHealth = { persistence: 'degraded', writeFailures: 1 };
+      for (const listener of __uiMock.listeners) listener({
+        diagnosticsHealth: { newValue: __uiMock.sessionDiagnosticsHealth },
+      }, 'session');
+    });
+    assert.match(await page.locator('#deliveryDiagnosticHealth').innerText(), /persistence failed/);
+    await page.evaluate(() => {
+      __uiMock.diagnosticsHealth = { persistence: 'available', writeFailures: 0 };
+      for (const listener of __uiMock.listeners) listener({
+        diagnosticsHealth: { newValue: __uiMock.diagnosticsHealth },
+      }, 'local');
+    });
+    assert.match(await page.locator('#deliveryDiagnosticHealth').innerText(), /persistence failed/,
+      'a local update must not clear a session-level persistence failure');
+    await page.evaluate(() => {
+      __uiMock.sessionDiagnosticsHealth = undefined;
+      for (const listener of __uiMock.listeners) listener({ diagnosticsHealth: { newValue: undefined } }, 'session');
+    });
+    assert.equal(await page.locator('#deliveryDiagnosticHealth').innerText(), '',
+      'removing session health must reveal the latest local state');
+    assert.deepEqual(diagnostic.errors, []);
+    pass('Delivery diagnostics: session persistence failure survives later local health updates.');
+    await diagnostic.context.close();
+  }
+  {
+    const clearing = await createPage({ full: true }); const { page } = clearing;
+    await page.locator('#tab-logs').click();
+    await page.evaluate(() => { __uiMock.deferState = true; __uiMock.stateResolvers = []; });
+    await page.locator('#refreshLogs').click();
+    await page.waitForFunction(() => __uiMock.stateResolvers.length === 1);
+    await page.locator('#tab-settings').click();
+    await page.locator('#clearData').click();
+    await page.locator('#confirmClear').click();
+    await page.waitForFunction(() => __uiMock.job === null && __uiMock.config === null);
+    await page.evaluate(() => { __uiMock.stateResolvers[0](); });
+    await page.waitForFunction(() => __uiMock.stateResolvers.length >= 2);
+    await page.evaluate(() => dispatchEvent(new Event('pagehide')));
+    assert.equal(await page.evaluate(() => __uiMock.configWrites.length), 0,
+      'a pre-clear state response must not cause a cleared prompt to be written back');
+    assert.equal(await page.evaluate(() => __uiMock.config), null);
+    await page.evaluate(() => { __uiMock.stateResolvers.slice(1).forEach(resolve => resolve()); });
+    pass('Clear Data fences earlier state responses before pagehide.');
+    await clearing.context.close();
+  }
+  {
+    const unavailable = await createPage({ full: true, enabled: true, configUnavailable: true });
+    const { page } = unavailable;
+    assert.equal(await page.locator('#pause').isVisible(), true);
+    assert.equal(await page.locator('#pause').isEnabled(), true);
+    assert.equal(await page.locator('#prompt').isDisabled(), true);
+    await page.evaluate(() => dispatchEvent(new Event('pagehide')));
+    assert.equal(await page.evaluate(() => __uiMock.configWrites.length), 0,
+      'an unreadable configuration must not be overwritten with defaults');
+    await page.locator('#pause').click();
+    await page.waitForFunction(() => __uiMock.job.enabled === false);
+    assert.equal(await page.locator('#start').isDisabled(), true);
+    assert.equal(await page.locator('#resume').isDisabled(), true);
+    await page.locator('#tab-settings').click();
+    await page.locator('#setupWindows').click();
+    assert.equal(await page.evaluate(() => __uiMock.configWrites.length), 0,
+      'device navigation must not overwrite unreadable settings');
+    assert.equal(await page.evaluate(() => __uiMock.config.prompt), original.prompt);
+    pass('Configuration unavailable: Pause stays accessible, editing and draft writes stay disabled.');
+    await unavailable.context.close();
+  }
+  {
+    const diagnostic = await createPage({ full: true }); const { page } = diagnostic;
+    await page.locator('#tab-logs').click();
+    await page.evaluate(() => { __uiMock.stateHealthUnknown = true; __uiMock.healthReadMode = 'reject-session'; });
+    await page.locator('#refreshLogs').click();
+    await page.waitForFunction(() => document.querySelector('#deliveryDiagnosticHealth').textContent.includes('could not be read'),
+      undefined, { timeout: 2000 });
+    await page.evaluate(() => {
+      const now = Date.now();
+      __uiMock.deliveryDiagnostics = [{ sequence: 18, startedAt: now, updatedAt: now, state: 'running', stage: 'page', reason: 'starting' }];
+      for (const listener of __uiMock.listeners) listener({ deliveryDiagnostics: { newValue: __uiMock.deliveryDiagnostics } }, 'local');
+    });
+    assert.match(await page.locator('#deliveryDiagnosticHealth').innerText(), /could not be read/,
+      'a local trace update cannot confirm a failed session health read');
+    await diagnostic.context.close();
+  }
+  {
+    const diagnostic = await createPage({ full: true, sessionHealth: { persistence: 'degraded', writeFailures: 3 },
+      localHealth: { persistence: 'available', writeFailures: 0 }, healthReadMode: 'reject-local' });
+    const { page } = diagnostic;
+    await page.locator('#tab-logs').click();
+    assert.match(await page.locator('#deliveryDiagnosticHealth').innerText(), /persistence failed/,
+      'an inconsistent partial read must not clear an observed degraded snapshot');
+    await diagnostic.context.close();
+  }
+  {
+    const diagnostic = await createPage({ full: true }); const { page } = diagnostic;
+    await page.locator('#tab-logs').click();
+    await page.evaluate(() => {
+      __uiMock.rejectState = true; __uiMock.healthReadMode = 'reject-session';
+      __uiMock.diagnosticsHealth = { persistence: 'degraded', writeFailures: 1 };
+    });
+    await page.locator('#refreshLogs').click();
+    await page.waitForFunction(() => document.querySelector('#deliveryDiagnosticHealth').textContent.includes('persistence failed'),
+      undefined, { timeout: 2000 });
+    await diagnostic.context.close();
+  }
+  {
+    const diagnostic = await createPage({ full: true }); const { page } = diagnostic;
+    await page.locator('#tab-logs').click();
+    await page.evaluate(() => {
+      const now = Date.now();
+      const trace = { sequence: 17, startedAt: now - 1000, updatedAt: now, state: 'running', stage: 'readiness', reason: 'waiting-send' };
+      __uiMock.deliveryDiagnostics = [trace]; __uiMock.deferState = true; __uiMock.stateResolvers = [];
+      for (const listener of __uiMock.listeners) listener({ deliveryDiagnostics: { newValue: [trace] } }, 'local');
+    });
+    await page.locator('#refreshLogs').click();
+    await page.waitForFunction(() => __uiMock.stateResolvers.length === 1);
+    await page.evaluate(() => {
+      __uiMock.deliveryDiagnostics = [];
+      for (const listener of __uiMock.listeners) listener({ deliveryDiagnostics: { newValue: [] } }, 'local');
+      __uiMock.stateResolvers[0]();
+    });
+    await page.waitForFunction(() => __uiMock.requests.filter(request => request.type === 'GET_STATE').length >= 2);
+    assert.equal(await page.locator('#deliveryDiagnosticList summary').count(), 0,
+      'a late state response must not resurrect a cleared diagnostic');
+    assert.deepEqual(diagnostic.errors, []);
+    pass('Delivery diagnostics: a late state response cannot restore a cleared trace.');
+    await diagnostic.context.close();
+  }
+  {
+    const clearing = await createPage({ full: true }); const { page } = clearing;
+    await page.locator('#tab-logs').click();
+    await page.evaluate(() => { __uiMock.deferState = true; __uiMock.stateResolvers = []; });
+    await page.locator('#refreshLogs').click();
+    await page.waitForFunction(() => __uiMock.stateResolvers.length === 1);
+    await page.locator('#clearLogs').click();
+    await page.waitForFunction(() => __uiMock.logs.length === 0 && __uiMock.stateResolvers.length >= 2);
+    await page.evaluate(async () => {
+      __uiMock.stateResolvers[0]();
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    });
+    assert.doesNotMatch(await page.locator('#logList').innerText(), /合成任务已就绪/,
+      'a late pre-clear state response must not restore cleared logs');
+    await page.evaluate(() => __uiMock.stateResolvers.slice(1).forEach(resolve => resolve()));
+    await clearing.context.close();
+  }
+  {
+    const diagnostic = await createPage({ full: true, sessionHealth: { persistence: 'degraded', writeFailures: 2 },
+      localHealth: { persistence: 'available', writeFailures: 0 } });
+    const { page } = diagnostic;
+    await page.locator('#tab-logs').click();
+    assert.match(await page.locator('#deliveryDiagnosticHealth').innerText(), /persistence failed/);
+    await page.evaluate(() => {
+      __uiMock.diagnosticsHealth = { persistence: 'available', writeFailures: 0 };
+      for (const listener of __uiMock.listeners) listener({ diagnosticsHealth: { newValue: __uiMock.diagnosticsHealth } }, 'local');
+    });
+    assert.match(await page.locator('#deliveryDiagnosticHealth').innerText(), /persistence failed/,
+      'an existing session failure must survive a local update after opening');
+    const download = page.waitForEvent('download'); await page.locator('#exportLogs').click(); await download;
+    const report = await page.evaluate(async () => JSON.parse(await __uiMock.exports.at(-1).text()));
+    assert.equal(report.diagnosticsHealth.persistence, 'degraded');
+    assert.deepEqual(diagnostic.errors, []);
+    pass('Delivery diagnostics: existing session failure remains visible and agrees with export.');
+    await diagnostic.context.close();
+  }
+  for (const healthReadMode of ['hang-local', 'reject-session']) {
+    const diagnostic = await createPage({ full: true, sessionHealth: { persistence: 'degraded', writeFailures: 2 },
+      localHealth: { persistence: 'available', writeFailures: 0 }, healthReadMode });
+    const { page } = diagnostic;
+    await page.locator('#tab-logs').click();
+    await page.waitForFunction(() => document.querySelector('#deliveryDiagnosticHealth').textContent.includes('persistence failed'),
+      undefined, { timeout: 2000 });
+    assert.deepEqual(diagnostic.errors, []);
+    pass(`Delivery diagnostics: a ${healthReadMode} read cannot hide an existing session failure.`);
+    await diagnostic.context.close();
+  }
+  {
     const counter = await createPage({ full: true }); const { page } = counter;
     await page.evaluate(() => {
       const old = structuredClone(__uiMock.job);
@@ -732,6 +1414,65 @@ try {
     assert.deepEqual(counter.errors, []);
     pass('Confirmed total includes a verified manual handoff, with extension/manual attribution retained.');
     await counter.context.close();
+  }
+  {
+    const failures = [];
+    {
+      const clearing = await createPage({ full: true }); const { page } = clearing;
+      try {
+        await page.locator('#tab-logs').click();
+        await page.evaluate(() => {
+          const sendMessage = chrome.runtime.sendMessage;
+          chrome.runtime.sendMessage = async message => {
+            if (message.type !== 'CLEAR_LOGS') return sendMessage(message);
+            __uiMock.requests.push(structuredClone(message));
+            const oldValue = structuredClone(__uiMock.logs);
+            __uiMock.logs = [];
+            for (const listener of __uiMock.listeners) listener({ logs: { oldValue, newValue: undefined } }, 'local');
+            await new Promise(resolve => { __uiMock.finishClearLogs = resolve; });
+            return { ok: true };
+          };
+        });
+        await page.locator('#clearLogs').click();
+        await page.waitForFunction(() => typeof __uiMock.finishClearLogs === 'function');
+        await page.evaluate(() => {
+          __uiMock.logs = [{ at: Date.now(), event: 'started', message: 'SYNTHETIC-POST-CLEAR-LOG' }];
+          for (const listener of __uiMock.listeners) listener({ logs: { oldValue: undefined, newValue: __uiMock.logs } }, 'local');
+          __uiMock.deferState = true; __uiMock.stateResolvers = [];
+        });
+        assert.match(await page.locator('#logList').innerText(), /SYNTHETIC-POST-CLEAR-LOG/);
+        await page.evaluate(() => __uiMock.finishClearLogs());
+        await page.waitForFunction(() => __uiMock.stateResolvers.length > 0);
+        assert.match(await page.locator('#logList').innerText(), /SYNTHETIC-POST-CLEAR-LOG/,
+          'the clear response must not erase a newer log delivered by storage');
+        assert.deepEqual(clearing.errors, []);
+        pass('Clear logs: a late clear response preserves newer logs.');
+      } catch (error) { failures.push(error); }
+      finally { await clearing.context.close(); }
+    }
+    {
+      const diagnostic = await createPage({ full: true });
+      const { page } = diagnostic;
+      try {
+        await page.locator('#tab-logs').click();
+        await page.evaluate(() => {
+          __uiMock.diagnosticsHealth = { persistence: 'degraded', writeFailures: 1 };
+          for (const listener of __uiMock.listeners) listener({ diagnosticsHealth: { oldValue: undefined, newValue: __uiMock.diagnosticsHealth } }, 'local');
+        });
+        assert.match(await page.locator('#deliveryDiagnosticHealth').innerText(), /persistence failed/);
+        await page.evaluate(() => {
+          const oldValue = structuredClone(__uiMock.diagnosticsHealth);
+          __uiMock.diagnosticsHealth = undefined;
+          for (const listener of __uiMock.listeners) listener({ diagnosticsHealth: { oldValue, newValue: undefined } }, 'local');
+        });
+        assert.equal(await page.locator('#deliveryDiagnosticHealth').innerText(), '',
+          'removing the only degraded health record in another panel must clear its old warning');
+        assert.deepEqual(diagnostic.errors, []);
+        pass('Clear logs: another panel clears the old local health warning.');
+      } catch (error) { failures.push(error); }
+      finally { await diagnostic.context.close(); }
+    }
+    if (failures.length) throw new AggregateError(failures, 'Clear logs regression failures');
   }
   console.log(`\n${checks.length}/${checks.length} UI v2 scenarios passed.`);
 } finally { await browser.close(); }

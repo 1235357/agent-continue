@@ -66,6 +66,10 @@ export function readConfig(value = {}, { allowEmpty = false } = {}) {
     if (!item || typeof item.text !== 'string' || !item.text.trim()) throw new Error(t('队列提示词必须是非空文本。'));
     return { name: String(item.name || `提示词 ${index + 1}`).slice(0, 100), text: item.text };
   });
+  if (!allowEmpty && (mode === 'repeat' ? [prompt] : queue.map(item => item.text))
+    .some(text => text.includes('\u0000') || !text.isWellFormed())) {
+    throw new Error(t('提示词含 NUL 或无效 Unicode 代理项，浏览器无法原样发送；原内容已保留，请先修正。'));
+  }
   if (!allowEmpty && ((mode === 'repeat' && !prompt.trim()) || (mode !== 'repeat' && !queue.length))) throw new Error(mode === 'repeat' ? t('请先输入或导入提示词。') : t('请先向队列添加提示词。'));
   const booleans = {};
   for (const key of ['preventDiscard', 'keepAwake', 'waitForIdle', 'startImmediately', 'extensionPriority']) {

@@ -9,8 +9,10 @@ const root=path.resolve(process.env.EXTENSION_ROOT || path.dirname(here));
 const { setLanguage } = await import(pathToFileURL(path.join(root, 'i18n.js')));
 const url='https://chatgpt.com/c/test-conversation';
 const copy=value=>value===undefined ? undefined : structuredClone(value);
-const writerSource=readFileSync(path.join(root,'background.js'),'utf8')
-  .match(/async function logEvent\([\s\S]*?(?=\r?\nasync function updateBadge\()/)?.[0];
+const backgroundSource=readFileSync(path.join(root,'background.js'),'utf8');
+const readSource=backgroundSource.match(/const invalidation = \(\) => \{[\s\S]*?(?=\r?\nfunction diagnosticFailure\()/)?.[0];
+const writerSource=backgroundSource.match(/async function logEvent\([\s\S]*?(?=\r?\nasync function updateBadge\()/)?.[0];
+assert.ok(readSource,'The focused writer harness must execute the production log read dependencies');
 assert.ok(writerSource,'The focused writer harness must execute the production logEvent function');
 function writerHarness(logs=[]) {
   const state={logs:copy(logs)};
@@ -18,7 +20,9 @@ function writerHarness(logs=[]) {
     async get(){return {logs:copy(state.logs)};},
     async set(value){state.logs=copy(value.logs);},
   }}};
-  return {state,write:runInNewContext(`${writerSource}\nlogEvent`,{chrome,activityEpoch:0})};
+  return {state,write:runInNewContext(`${readSource}\n${writerSource}\nlogEvent`,{
+    chrome,activityEpoch:0,activityDiscardPrevious:false,activityStorageWrite:Promise.resolve(),
+  })};
 }
 let importId=0;
 const results=[];
@@ -235,7 +239,7 @@ await scenario('Pause rejects a pending redundant result without waiting for an 
   assert.equal(h.state.session.job.sentCount,0);
 });
 
-await scenario('A replacement document ends pre-dispatch observation and continuous recovery binds afresh without replaying the old run',async()=>{
+await scenario('A replacement document with unproven submission pauses until explicit Resume and preserves target isolation',async()=>{
   const h=await harness();await h.start();const gate=deferred();
   let replacement=false;
   h.chrome.scripting.executeScript=async request=>{
@@ -248,42 +252,97 @@ await scenario('A replacement document ends pre-dispatch observation and continu
       result:request.args[0].mode==='send'?(replacement?{status:'sent'}:await gate.promise):{status:'ready'}}];
   };
   const round=h.message({type:'SEND_NOW'});
-  await until(()=>h.state.injections.some(item=>item.args[0].mode==='send'));
-  const args=h.state.injections.find(item=>item.args[0].mode==='send').args[0];
-  assert.equal((await h.message({type:'CHECK_RUN',runId:args.runId},h.sender())).allowed,true);
-  replacement=true;
-  let completed=false;
-  round.then(()=>{completed=true;});
-  for(let i=0;i<250 && !completed;i++) await delay(20);
-  const recovered=completed;
-  if(!completed) await h.message({type:'PAUSE'});
-  await round;
-  assert.equal(recovered,true,'A read-only top-frame probe must detect replacement instead of renewing an unreachable document forever');
-  assert.equal(h.state.session.job.enabled,true);
-  assert.equal(h.state.session.job.phase,'idle');
-  assert.equal(h.state.session.job.sentCount,1);
-  assert.equal(h.state.session.job.unknownCount,0,'Pre-dispatch document loss is a retryable no-send observation, not an ambiguous submit');
-  assert.ok(h.state.session.job.nextAt>Date.now()+29*60000,'The normal interval begins only after the recovered confirmed send');
-  const sends=h.state.injections.filter(item=>item.args[0].mode==='send');
-  assert.equal(sends.length,2);
-  assert.notEqual(sends[0].args[0].runId,sends[1].args[0].runId,'Known no-submit replacement receives fresh authorization');
-  for(const request of h.state.injections.filter(item=>item.func.name==='pageInvocationState'))
-    assert.equal(request.target.documentIds,undefined,'Replacement diagnosis must not address the destroyed document');
-  assert.equal((await h.message({type:'CHECK_RUN',runId:args.runId},h.sender())).allowed,false);
-  gate.resolve({status:'sent'});
-  await delay(5);
-  assert.equal(h.state.session.job.sentCount,1,'A stale late return cannot count as a current send');
+  try {
+    await until(()=>h.state.injections.some(item=>item.args[0].mode==='send'));
+    const args=h.state.injections.find(item=>item.args[0].mode==='send').args[0];
+    assert.equal((await h.message({type:'CHECK_RUN',runId:args.runId},h.sender())).allowed,true);
+    replacement=true;
+    let completed=false;
+    round.then(()=>{completed=true;});
+    for(let i=0;i<250 && !completed;i++) await delay(20);
+    assert.equal(completed,true,'A read-only top-frame probe must detect replacement instead of renewing an unreachable document forever');
+    const result=await round;
+    assert.equal(result.job.enabled,false);
+    assert.equal(result.job.phase,'idle');
+    assert.equal(result.job.sentCount,0);
+    assert.equal(result.job.unknownCount,1,'Document replacement cannot prove the old page did not submit');
+    assert.equal(result.job.nextAt,null);
+    assert.equal(h.state.alarms.size,0);
+    assert.equal(h.state.local.resumeJob.enabled,false);
+    h.chrome.alarms.onAlarm.emit({name:'agent-continue-heartbeat'});
+    await delay(20);
+    assert.equal(h.state.injections.filter(item=>item.args[0].mode==='send').length,1,'No automatic replacement send is authorized');
+    for(const request of h.state.injections.filter(item=>item.func.name==='pageInvocationState'))
+      assert.equal(request.target.documentIds,undefined,'Replacement diagnosis must not address the destroyed document');
+    assert.equal((await h.message({type:'CHECK_RUN',runId:args.runId},h.sender())).allowed,false);
+    gate.resolve({status:'sent'});
+    await delay(5);
+    assert.equal(h.state.session.job.sentCount,0,'A stale late return cannot count as a current send');
+    h.chrome.scripting.executeScript=async request=>{
+      h.state.injections.push(request);
+      return [{frameId:0,documentId:'replacement-document',result:{status:request.args[0].mode==='check'?'ready':'sent'}}];
+    };
+    const resumed=await h.message({type:'RESUME'});
+    assert.equal(resumed.ok,true,JSON.stringify(resumed));
+    assert.equal(resumed.job.enabled,true);
+    h.state.tab.url='https://chatgpt.com/c/another-chat';
+    const foreign=await h.message({type:'SEND_NOW'});
+    assert.equal(foreign.job.sentCount,0);
+    assert.equal(h.state.injections.filter(item=>item.args[0].mode==='send').length,1,'Resume must not send into another conversation');
+    h.state.tab.url=url;
+    assert.equal((await h.message({type:'SEND_NOW'})).job.sentCount,1);
+    const sends=h.state.injections.filter(item=>item.args[0].mode==='send');
+    assert.equal(sends.length,2);
+    assert.notEqual(sends[0].args[0].runId,sends[1].args[0].runId,'Explicit Resume receives fresh authorization');
+    assert.equal(sends[1].target.tabId,h.state.tab.id);
+    assert.equal(sends[1].args[0].expectedUrl,url);
+    assert.equal((await h.message({type:'CHECK_RUN',runId:args.runId},{...h.sender(),documentId:'replacement-document'})).allowed,false);
+  } finally {
+    await h.message({type:'PAUSE'});
+    gate.resolve({status:'sent'});
+    await round;
+  }
+});
+
+await scenario('Observed manual submission with a lost notification before document replacement must pause without another admission',async()=>{
+  const h=await harness();await h.start();const gate=deferred();let replacement=false;
   h.chrome.scripting.executeScript=async request=>{
     h.state.injections.push(request);
-    return [{frameId:0,documentId:'replacement-document',result:{status:request.args[0].mode==='check'?'ready':'sent'}}];
+    if(request.func.name==='pageInvocationState') return [{frameId:0,documentId:replacement?'replacement-document':'synthetic-bound-document',
+      result:replacement?{state:'absent'}:{state:'running',diagnosticProgress:{stage:'receipt',reason:'manual-submission',
+        counters:{dispatchAttempts:0,manualIntents:1},observations:{manualPending:true}}}}];
+    return [{frameId:0,documentId:replacement?'replacement-document':'synthetic-bound-document',
+      result:request.args[0].mode==='send'?(replacement?{status:'sent'}:await gate.promise):{status:'ready'}}];
   };
-  assert.equal((await h.message({type:'SEND_NOW'})).job.sentCount,2);
-  await h.message({type:'PAUSE'});
+  const round=h.message({type:'SEND_NOW'});
+  try {
+    await until(()=>h.state.injections.some(item=>item.args[0].mode==='send'));
+    const args=h.state.injections.find(item=>item.args[0].mode==='send').args[0];
+    assert.equal((await h.message({type:'CHECK_RUN',runId:args.runId},h.sender())).allowed,true);
+    for(let i=0;i<300 && !h.state.local.deliveryDiagnostics?.some(item=>item.counters?.manualIntents===1 && item.observations?.manualPending===true);i++) await delay(20);
+    assert.ok(h.state.local.deliveryDiagnostics?.some(item=>item.counters?.manualIntents===1 && item.observations?.manualPending===true),
+      'The background must observe the manual progress before the document is replaced');
+    assert.equal(h.state.injections.filter(item=>item.args[0].mode==='send').length,1);
+    replacement=true;
+    let completed=false;round.then(()=>{completed=true;});
+    for(let i=0;i<300 && !completed;i++) await delay(20);
+    assert.equal(completed,true,'The replacement must resolve the original invocation');
+    const result=await round;
+    assert.deepEqual({admissions:h.state.injections.filter(item=>item.args[0].mode==='send').length,
+      enabled:result.job.enabled,sentCount:result.job.sentCount,unknownCount:result.job.unknownCount,
+      nextAt:result.job.nextAt,alarms:h.state.alarms.size,persistedEnabled:h.state.local.resumeJob.enabled},
+    {admissions:1,enabled:false,sentCount:0,unknownCount:1,nextAt:null,alarms:0,persistedEnabled:false},
+    'Observed manual intent cannot be treated as proof that the previous invocation was unsent');
+  } finally {
+    await h.message({type:'PAUSE'});
+    gate.resolve({status:'unknown'});
+    await round;
+  }
 });
 
 await scenario('Known pre-submission failures keep retrying without waiting an interval and Pause prevents later admissions',async()=>{
   const h=await harness();await h.start();let sends=0;
-  h.pageResult=async args=>args.mode==='send'?(++sends,{status:'blocked',retryable:true,message:'Synthetic remount'}):{status:'ready'};
+  h.pageResult=async args=>args.mode==='send'?(++sends,{status:'blocked',retryable:true,message:'Synthetic remount',diagnosticProgress:{counters:{dispatchAttempts:0,manualIntents:0}}}):{status:'ready'};
   const round=h.message({type:'SEND_NOW'});
   for(let i=0;i<100 && sends<2;i++) await delay(20);
   assert.ok(sends>=2,'A blocked pre-submit composer must retry without a one-minute or full-interval delay');
@@ -296,7 +355,112 @@ await scenario('Known pre-submission failures keep retrying without waiting an i
   assert.equal(h.state.session.job.enabled,false);
 });
 
-await scenario('Document replacement after a submission attempt remains unknown and never authorizes a replacement send',async()=>{
+await scenario('A retryable result missing manualIntents must not trigger another send',async()=>{
+  const h=await harness();await h.start();let sends=0;
+  h.pageResult=async args=>args.mode!=='send'?{status:'ready'}:++sends===1
+    ?{status:'blocked',retryable:true,diagnosticProgress:{counters:{dispatchAttempts:0}}}
+    :{status:'sent'};
+  const result=await h.message({type:'SEND_NOW'});
+  assert.equal(sends,1,'A missing manual-intent count cannot prove the first attempt was unsent');
+  assert.equal(result.job.enabled,false);
+  assert.equal(result.job.sentCount,0);
+  assert.equal(result.job.unknownCount,1);
+  assert.equal(result.job.nextAt,null);
+  assert.equal(h.state.alarms.size,0);
+  assert.equal(h.state.local.resumeJob.enabled,false);
+});
+
+await scenario('A retryable result with explicit zero counters permits a fresh send',async()=>{
+  const h=await harness();await h.start({maxSends:1});let sends=0;
+  h.pageResult=async args=>args.mode!=='send'?{status:'ready'}:++sends===1
+    ?{status:'blocked',retryable:true,diagnosticProgress:{counters:{dispatchAttempts:0,manualIntents:0}}}
+    :{status:'sent'};
+  const result=await h.message({type:'SEND_NOW'});
+  const admissions=h.state.injections.filter(item=>item.args[0].mode==='send');
+  assert.equal(sends,2);
+  assert.equal(admissions.length,2);
+  assert.notEqual(admissions[0].args[0].runId,admissions[1].args[0].runId);
+  assert.equal(result.job.sentCount,1);
+  assert.equal(result.job.unknownCount,0);
+  assert.equal(result.job.enabled,false);
+});
+
+for(const status of ['busy','draft','blocked','error']) {
+  for(const [label,evidence] of [
+    ['missing retry flag',{}],
+    ['false retry flag',{retryable:false}],
+    ['zero counters without retry flag',{diagnosticProgress:{counters:{dispatchAttempts:0,manualIntents:0}}}],
+    ['retry flag without counters',{retryable:true}],
+  ]) {
+    await scenario(`Send ${status} with ${label} must not schedule a resend`,async()=>{
+      const h=await harness();await h.start();let sends=0;
+      h.pageResult=async args=>args.mode!=='send'?{status:'ready'}:++sends===1
+        ?{status,...evidence,message:'Synthetic unconfirmed result'}:{status:'sent'};
+      try {
+        const result=await h.message({type:'SEND_NOW'});
+        const scheduled=copy(h.state.session.job);
+        const alarms=h.state.alarms.size;
+        const persisted=copy(h.state.local.resumeJob);
+        if(scheduled.enabled && Number.isFinite(scheduled.nextAt)) h.state.session.job.nextAt=Date.now()-1;
+        h.chrome.alarms.onAlarm.emit({name:'agent-continue-heartbeat'});
+        for(let i=0;i<50 && sends<2;i++) await delay(2);
+        assert.equal(sends,1,'An alarm must not dispatch an unproven send again');
+        assert.equal(result.job.sentCount,0);
+        assert.equal(scheduled.enabled,false);
+        assert.equal(scheduled.unknownCount,1);
+        assert.equal(scheduled.nextAt,null);
+        assert.equal(alarms,0);
+        assert.equal(persisted.enabled,false);
+      } finally {
+        await h.message({type:'PAUSE'});
+      }
+    });
+  }
+}
+
+for(const status of ['busy','draft','blocked','error']) {
+  await scenario(`Send ${status} with explicit retry and zero counters permits a fresh admission`,async()=>{
+    const h=await harness();await h.start({maxSends:1});let sends=0;
+    h.pageResult=async args=>args.mode!=='send'?{status:'ready'}:++sends===1
+      ?{status,retryable:true,diagnosticProgress:{counters:{dispatchAttempts:0,manualIntents:0}}}:{status:'sent'};
+    try {
+      const result=await h.message({type:'SEND_NOW'});
+      const admissions=h.state.injections.filter(item=>item.args[0].mode==='send');
+      assert.equal(sends,2);
+      assert.equal(admissions.length,2);
+      assert.notEqual(admissions[0].args[0].runId,admissions[1].args[0].runId);
+      assert.equal(result.job.sentCount,1);
+      assert.equal(result.job.unknownCount,0);
+      assert.equal(result.job.enabled,false);
+    } finally {
+      await h.message({type:'PAUSE'});
+    }
+  });
+}
+
+await scenario('Read-only busy reply checks may be scheduled again without any send',async()=>{
+  const h=await harness();await h.start();let checks=0;
+  h.pageResult=async args=>args.mode==='check'?(checks++,{status:'busy',message:'Synthetic working agent'}):{status:'sent'};
+  try {
+    h.state.session.job.awaitingReply=true;
+    h.state.session.job.nextAt=Date.now()-1;
+    h.chrome.alarms.onAlarm.emit({name:'agent-continue-heartbeat'});
+    await until(()=>checks===1 && h.state.session.job.phase==='idle');
+    assert.equal(h.state.session.job.enabled,true);
+    assert.ok(h.state.session.job.nextAt>Date.now());
+    assert.equal(h.state.alarms.size,1);
+    h.state.session.job.nextAt=Date.now()-1;
+    h.chrome.alarms.onAlarm.emit({name:'agent-continue-heartbeat'});
+    await until(()=>checks===2 && h.state.session.job.phase==='idle');
+    assert.equal(h.state.injections.filter(item=>item.args[0].mode==='send').length,0);
+    assert.equal(h.state.session.job.sentCount,0);
+    assert.equal(h.state.session.job.unknownCount,0);
+  } finally {
+    await h.message({type:'PAUSE'});
+  }
+});
+
+await scenario('Document replacement after a known submission remains unknown and pauses',async()=>{
   const h=await harness();await h.start();const gate=deferred();let replacement=false;
   h.chrome.tabs.sendMessage=async(id,message)=>({granted:true,...message});
   h.chrome.scripting.executeScript=async request=>{
@@ -319,7 +483,9 @@ await scenario('Document replacement after a submission attempt remains unknown 
   assert.equal(observed,true);
   assert.equal(h.state.session.job.sentCount,0);
   assert.equal(h.state.session.job.unknownCount,1,'Replacement cannot prove whether the previous submission succeeded');
-  assert.ok(h.state.session.job.nextAt>Date.now()+29*60000);
+  assert.equal(h.state.session.job.enabled,false);
+  assert.equal(h.state.session.job.nextAt,null);
+  assert.equal(h.state.local.resumeJob.enabled,false);
   assert.equal(h.state.injections.filter(item=>item.func.name==='editorCommit' && item.args[0].phase==='commit').length,1);
   gate.resolve({status:'sent'});
   await h.message({type:'PAUSE'});
@@ -380,24 +546,35 @@ await scenario('A live waiting invocation can refresh its command permit, but fo
   gate.resolve({status:'cancelled'});await round;
 });
 
-await scenario('Busy checks retry later and count only confirmed sends',async()=>{
-  const h=await harness();await h.start({maxSends:1});
-  h.pageResult=async()=>({status:'busy',message:'Agent working'});
-  const busy=await h.message({type:'SEND_NOW'});
-  assert.equal(busy.job.enabled,true);assert.equal(busy.job.sentCount,0);
-  assert.ok(busy.job.nextAt>Date.now()+59_000&&busy.job.nextAt<Date.now()+61_000);
-  h.pageResult=async()=>({status:'sent',message:'Confirmed'});
+await scenario('A busy send with explicit zero counters retries and counts only the confirmed send',async()=>{
+  const h=await harness();await h.start({maxSends:1});let sends=0;
+  h.pageResult=async args=>args.mode!=='send'?{status:'ready'}:++sends===1
+    ?{status:'busy',retryable:true,message:'Agent working',diagnosticProgress:{counters:{dispatchAttempts:0,manualIntents:0}}}
+    :{status:'sent',message:'Confirmed'};
   const sent=await h.message({type:'SEND_NOW'});
-  assert.equal(sent.job.sentCount,1);assert.equal(sent.job.enabled,false);
+  const admissions=h.state.injections.filter(item=>item.args[0].mode==='send');
+  assert.equal(sends,2);
+  assert.notEqual(admissions[0].args[0].runId,admissions[1].args[0].runId);
+  assert.equal(sent.job.sentCount,1);assert.equal(sent.job.unknownCount,0);assert.equal(sent.job.enabled,false);
 });
 
-await scenario('Unknown submission results skip this cycle and keep future cycles enabled',async()=>{
+await scenario('Unknown submission results persistently pause with the unresolved cycle intact',async()=>{
   const h=await harness();await h.start();h.pageResult=async()=>({status:'unknown',message:'Unconfirmed'});
   const result=await h.message({type:'SEND_NOW'});
-  assert.equal(result.job.enabled,true);assert.equal(result.job.sentCount,0);
-  assert.equal(h.state.alarms.size,1);
-  assert.ok(result.job.nextAt >= Date.now() + 30*60_000 - 1000);
-  await h.message({type:'PAUSE'});
+  assert.equal(result.job.enabled,false);assert.equal(result.job.sentCount,0);
+  assert.equal(result.job.unknownCount,1);assert.equal(result.job.needsAttention,true);
+  assert.equal(result.job.nextAt,null);assert.equal(h.state.alarms.size,0);
+  assert.equal(result.job.promptDelivery.ordinal,1);
+  assert.deepEqual(h.state.local.resumeJob.promptDelivery,result.job.promptDelivery);
+  assert.equal(h.state.local.resumeJob.enabled,false);
+  assert.equal((await h.message({type:'SEND_NOW'})).ok,false);
+  assert.equal(h.state.injections.filter(x=>x.args[0].mode==='send').length,1);
+  const restored=await harness({local:copy(h.state.local)});
+  assert.equal(restored.state.session.job.enabled,false);
+  assert.equal(restored.state.session.job.nextAt,null);
+  assert.deepEqual(restored.state.session.job.promptDelivery,result.job.promptDelivery);
+  assert.equal(restored.state.alarms.size,0);
+  assert.equal(restored.state.injections.length,0);
 });
 
 await scenario('Switching the bound tab waits without sending into another conversation',async()=>{
@@ -408,14 +585,15 @@ await scenario('Switching the bound tab waits without sending into another conve
   await h.message({type:'PAUSE'});
 });
 
-await scenario('A worker restarted during submission skips to the next full interval',async()=>{
+await scenario('A worker restarted during submission pauses until explicit review',async()=>{
   const first=await harness();await first.start();
   const snapshot=copy(first.state.session);
   snapshot.job.phase='sending';snapshot.job.runDeadline=Date.now()+12_000;
   const h=await harness({session:snapshot,tab:{autoDiscardable:false}});
-  assert.equal(h.state.session.job.enabled,true);
+  assert.equal(h.state.session.job.enabled,false);
   assert.equal(h.state.session.job.phase,'idle');
-  assert.ok(h.state.session.job.nextAt >= Date.now()+30*60_000-1000);
+  assert.equal(h.state.session.job.nextAt,null);
+  assert.equal(h.state.session.job.unknownCount,1);
   assert.equal(h.state.tab.autoDiscardable,false);
   assert.equal(h.state.injections.length,0);
 });
@@ -479,6 +657,53 @@ await scenario('An empty browser session clears old alarms instead of reusing ta
   assert.equal(h.state.alarms.size,0);
   assert.ok(!h.state.session.job);
   assert.equal(h.state.injections.length,0);
+});
+
+await scenario('Completed reads do not accumulate invalidation subscribers',async()=>{
+  const {invalidation,readUntilInvalidated}=runInNewContext(`${readSource}\n({invalidation,readUntilInvalidated})`);
+  const signal=invalidation();
+  assert.equal(typeof signal.subscribe,'function','Invalidation must support cancellable subscriptions');
+  const listeners=new Set();
+  const observed={
+    subscribe(callback){
+      listeners.add(callback);
+      const unsubscribe=signal.subscribe(callback);
+      return ()=>{listeners.delete(callback);unsubscribe();};
+    },
+  };
+  for(let i=0;i<32;i++) {
+    const result=await readUntilInvalidated(()=>i,observed);
+    assert.equal(result.value,i);
+    assert.equal(result.invalidated,undefined);
+    assert.equal(listeners.size,0,'A completed read must unsubscribe');
+  }
+  const failure=new Error('synthetic read failure');
+  const failed=await readUntilInvalidated(()=>{throw failure;},observed);
+  assert.equal(failed.error,failure);
+  assert.equal(listeners.size,0,'A failed read must unsubscribe');
+  const pending=deferred();
+  const reading=readUntilInvalidated(()=>pending.promise,observed);
+  await until(()=>listeners.size===1);
+  signal.invalidate();
+  assert.equal((await reading).invalidated,true);
+  assert.equal(listeners.size,0,'An invalidated read must unsubscribe');
+  pending.reject(new Error('late synthetic failure'));
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal((await readUntilInvalidated(()=>42,signal)).invalidated,true);
+});
+
+await scenario('Invalidation notifies only active subscribers and remains invalidated',async()=>{
+  const {invalidation}=runInNewContext(`${readSource}\n({invalidation})`);
+  const signal=invalidation();
+  const notifications=[];
+  const cancel=signal.subscribe(()=>notifications.push('cancelled'));
+  signal.subscribe(()=>notifications.push('active'));
+  cancel();
+  cancel();
+  signal.invalidate();
+  signal.invalidate();
+  signal.subscribe(()=>notifications.push('late'))();
+  assert.deepEqual(notifications,['active','late']);
 });
 
 await scenario('Log writer replaces non-array persisted logs with a valid record',async()=>{
@@ -615,20 +840,35 @@ for (const [name, pageResult, code] of [
     assert.equal((await round).job.enabled,false);
   });
 }
-await scenario('Mandatory priority reaches the adapter even for a legacy false flag and logs only bounded diagnostics', async()=>{
+await scenario('Mandatory priority reaches the adapter and unproven draft pauses while diagnostics remain bounded', async()=>{
   const h=await harness();
   await h.start({extensionPriority:false});
   h.pageResult=async()=>({status:'draft',diagnosticCode:'existing-draft',message:'Synthetic attachment.'});
-  await h.message({type:'SEND_NOW'});
+  const result=await h.message({type:'SEND_NOW'});
   assert.equal(h.state.injections.findLast(item=>item.args[0].mode==='send').args[0].extensionPriority,true);
-  assert.equal(h.state.local.logs.findLast(item=>item.event==='draft').diagnostic.code,'existing-draft');
+  assert.equal(result.job.enabled,false);
+  assert.equal(result.job.sentCount,0);
+  assert.equal(result.job.unknownCount,1);
+  assert.equal(result.job.nextAt,null);
+  assert.equal(h.state.alarms.size,0);
+  assert.equal(h.state.local.resumeJob.enabled,false);
+  assert.equal(h.state.local.logs.findLast(item=>item.event==='unconfirmed').diagnostic.code,'adapter-result');
+  const checked=await h.message({type:'CHECK_PAGE'});
+  assert.equal(checked.result.diagnosticCode,'existing-draft');
   h.pageResult=async()=>({status:'draft',diagnosticCode:'PRIVATE_SENTINEL',message:'Synthetic protection.'});
-  await h.message({type:'SEND_NOW'});
-  assert.equal(h.state.local.logs.findLast(item=>item.event==='draft').diagnostic,undefined);
+  const unknown=await h.message({type:'CHECK_PAGE'});
+  assert.equal(unknown.result.diagnosticCode,null);
+  const logs=writerHarness();
+  await logs.write('draft','Synthetic attachment.',{code:checked.result.diagnosticCode});
+  await logs.write('draft','Synthetic protection.',{code:'PRIVATE_SENTINEL'});
+  assert.equal(logs.state.logs[0].diagnostic.code,'existing-draft');
+  assert.equal(logs.state.logs[1].diagnostic,undefined);
+  assert.equal(h.state.injections.filter(item=>item.args[0].mode==='send').length,1);
   assert.doesNotMatch(JSON.stringify(h.state.local.logs),/PRIVATE_SENTINEL/);
+  assert.doesNotMatch(JSON.stringify(logs.state.logs),/PRIVATE_SENTINEL/);
   await h.message({type:'PAUSE'});
 });
-await scenario('An obsolete adapter result cannot restore the retired veto or replay a send', async () => {
+await scenario('An obsolete adapter result remains unknown and persistently pauses', async () => {
   for (const oldResult of [
     { status: 'draft', diagnosticCode: 'composer-changed', message: 'Synthetic legacy notice.' },
     { status: 'blocked', message: 'The composer content changed and was preserved.' },
@@ -640,7 +880,13 @@ await scenario('An obsolete adapter result cannot restore the retired veto or re
     assert.equal(job.sentCount, 0);
     assert.equal(job.unknownCount, 1);
     assert.equal(job.lastDiagnosticCode, 'no-valid-result');
-    assert.ok(job.nextAt >= Date.now() + 30 * 60_000 - 1000);
+    assert.equal(job.enabled, false);
+    assert.equal(job.needsAttention, true);
+    assert.equal(job.nextAt, null);
+    assert.equal(h.state.alarms.size, 0);
+    assert.equal(h.state.local.resumeJob.enabled, false);
+    assert.equal(job.promptDelivery.ordinal, 1);
+    assert.deepEqual(h.state.local.resumeJob.promptDelivery, job.promptDelivery);
     assert.ok(!job.statusText.includes(oldResult.message));
     assert.equal(h.state.injections.filter(x => x.args[0].mode === 'send').length, 1);
   }

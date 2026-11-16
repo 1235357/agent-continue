@@ -1,5 +1,1412 @@
 # Agent Continue Development Handoff
 
+## Current Candidate Status (2026-11-15)
+
+The uninstalled, unreleased source candidate is 3.0.14, not evidence of the
+bytes running in the owner's browser. A terminal unknown send now pauses without
+incrementing confirmed sends, even when no dispatch was recorded. A reply-check
+unknown is a waiting error, not a terminal send result; an active receipt wait
+may also remain pending. Inspect the conversation before explicitly resuming:
+the unconfirmed message may already have been sent and Resume can duplicate it.
+When a document is replaced, recovery only readmits if non-submission is proven;
+otherwise it pauses rather than replaying.
+
+Recovery migrates enabled legacy idle tasks conservatively: a prior unknown
+result, recognized interruption notice, or nonzero cumulative unknown count can
+pause the task. The count can include already-resolved history and does not by
+itself prove a currently unresolved send. Historical entries are retained. On
+2026-11-15, the focused legacy storage/restart suite passed 11/11, including
+individual migration write failures and a write-plus-removal failure; these
+synthetic cases are not proof of crash-atomicity for every storage failure.
+
+Pause preserves the in-flight permit deadline before awaiting cancellation;
+Start/Resume are fenced while it remains in force, and Clear Data may retain the
+deadline. Expiry is not evidence of non-submission. A cancellation ACK with a
+dispatch but no receipt records unknown, and neither a fence nor cancellation
+retracts an already-issued operation. A separate synthetic failure still allows
+an issued MAIN command before its deadline after pause persistence fails and
+cancellation is lost; recovery when all storage writes fail remains unproven.
+
+On 2026-11-15, two separately run isolated actual-MV3 short-text counterexamples
+failed: both button and Ctrl+Enter submitted the old independent synthetic model
+once, although the ProseMirror model and DOM showed the configured text; confirmed
+count remained zero and unknown count was one. This is a wrong submission, not
+just a missing receipt, and does not establish the live site's behavior.
+
+Product click/keyboard events are synthetic. A separate, unintegrated debugger
+experiment produced trusted input in a throwaway profile, but naive chunking
+corrupted a synthetic ProseMirror submission; a model-gated, surrogate-safe
+fixture then produced one exact sample. Actual Dot model synchronization,
+optional permission approval and safe product integration remain unproven.
+See the trusted-input comparison below; these observations do not validate real
+background sending or user-window noninterference.
+
+The 2026-11-15 recorded full `npm test` stopped at five adapter failures; Dot
+adapter was 79/81. The earlier selected MV3 115/115 predates later pause-fence
+changes, while the recorded later selection was 28/28 and background was 261/261.
+These are time-scoped local fixture results, not a new full-suite pass. Current
+candidate real ChatGPT/Dot acceptance, protected Pause/Revoke and browser-reopen
+acceptance, installation, release and Store submission remain incomplete. Do not
+publish or infer exactly-once delivery from these tests.
+
+## Candidate 3.0.14 (2026-11-15)
+
+The manifest now identifies the uninstalled, unreleased source candidate as
+3.0.14; the npm CLI remains 0.3.0. Long rich-text insertion now begins at 1,000
+UTF-16 units rather than 3,000. On a synthetic page rejecting segments larger
+than 1,000, the old candidate attempted and rejected 3,000 and 1,500 before
+sending the full text; the new candidate made no rejected writes and submitted
+one exact 4,505-unit message using either button or Ctrl+Enter. This does not
+prove that the real Dot has the same rejection condition.
+
+In a separate synthetic hidden-page performance sample, the same 122,399-unit
+1200-line input took 3.218–3.300 seconds across three earlier 3,000-unit runs
+with 42 writes, versus 8.298 seconds in one 1,000-unit run with 134 writes. The
+smaller chunks reduce initial operation size but can increase total waiting and
+verification; these are not live-site timings. An earlier selected MV3 batch
+passes 115/115, including cancellation races, slow-write recovery and unreadable
+checks. `chunkUnserializableChecks` records each failed serialization read in
+the chunk loop. A validated cancel acknowledgement now contributes its bounded
+content-free snapshot without double-counting an earlier readback. Missing or
+invalid acknowledgements and later events can still be absent. Old exports lack
+this field and cannot be interpreted as zero checks. The
+worker's generic 20-second waiting report no longer calls the Send control
+unready without evidence; the targeted test went red to green and background
+tests pass 243/243. A later selected batch of MV3 cases190–199 passes 10/10;
+the earlier 115/115 predates the latest pause-fence changes. Check is 128+8,
+support 69/69 and UI 65/65. Fresh `npm test` still
+stops at five finite adapter failures and Dot adapter is 79/81, including a
+stale-model wrong send.
+At that earlier pause checkpoint, known adapter or MAIN dispatch followed by an
+unknown result paused, as did an unconfirmed MAIN commit transport. Background
+tests passed 261/261 and a selected MV3 batch passed 28/28 on 2026-11-15. The
+later terminal-unknown policy is stated in Current Candidate Status above;
+missing evidence is not proof that no message was submitted, and an explicit
+Resume can repeat a prompt.
+An isolated actual-MV3 test previously allowed Resume if the worker stopped
+while Pause awaited a cancellation acknowledgement. The candidate now stores
+the old permit deadline in the paused job before that wait; this test and
+synthetic Clear Data/restart/fence-storage-failure cases pass. Clear Data may
+retain a local deadline until and after expiry; it contains no prompt text.
+An acknowledged dispatch without a receipt is recorded as unknown. If Pause
+state persistence fails, the live worker denies the old run and attempts page
+cancellation, but a separate synthetic fault injection still executes an already
+issued MAIN command before its deadline after restart when cancellation is lost.
+This is not proof of a real-site incident, and the changes cannot retract an
+already-issued command or establish exactly-once delivery.
+Chrome's Secure Preferences register the repository path and a service-worker
+version 3.0.13; the current disk manifest is 3.0.14. Registration is not proof of
+the running worker's exact code, and no reload was performed.
+The 3.0.13 observations below remain historical; 3.0.14 is not installed,
+released or validated in a real ChatGPT or Dot conversation.
+
+## Activity 7 and Candidate 3.0.13 (2026-11-15)
+
+The user's `agent-continue-activity (7).json` has SHA-256
+`EB827289C82A36163080E1D1AEDD0EA427144EF1B2C36F39A94327BB4BB4EF13`.
+It reports 3.0.12, which is not a byte fingerprint. Delivery 10 records six
+chunk writes, two slow chunks, no restarts or chunk differences, zero extension
+dispatch attempts, one manual intent and an unknown receipt over 48.492 seconds.
+Synchronous writes total 12.753 seconds, with an 8.712-second maximum. Busy,
+missing Send and manual pending are last observations, not a full page profile.
+The screenshots show partial input and a later report of truncation; neither a
+fixed input limit nor the website root cause is established. The extension did
+not dispatch in this recorded attempt. Do not operate on the original Dot.
+
+At that checkpoint the uninstalled, unreleased manifest candidate was 3.0.13;
+the npm CLI version remained independently 0.3.0. That candidate waits
+for a temporarily unserializable post-write draft under the existing persistent
+authorization and checks the expected text before continuing. In isolated actual
+MV3 cases180/181 the test went from eight writes and one full reselection to
+four writes and no later reselection; button and Ctrl+Enter each sent one exact
+synthetic prompt. Pause, persistent unreadability, mutation and attachment cases
+were separately exercised. This does not explain activity(7), which recorded no
+unserializable restart.
+
+The former segment-boundary behavior added two LF characters at each paragraph
+split and counted the modified message as a success. It no longer intentionally
+adds these characters: isolated cases186/187 each submitted the exact 5,478-unit
+synthetic text once. CR/CRLF are still normalized to LF, and the event adapter
+still starts at 3,000 UTF-16 units rather than the user's illustrative 1,000.
+No general statement about real prompt capacity or fidelity follows.
+
+The old two-pass stable-difference path actually submitted transformed synthetic
+text. New cases188/189 showed one wrong submission before the change, then zero
+dispatches and `chunk-mismatch` pause via either method after the change. This
+does not solve an independent stale send model: cases103, 158 and 159 still
+actually submit an old 30-unit synthetic message. Cases154/155 now stop without
+dispatch but fail their exact-auto-send expectation; in those fixtures the
+removed span's text is already in the ProseMirror model and DOM. A selected
+88/88 MV3 batch passes excluding those known failures. Fresh `npm test` stops
+at five finite release-adapter failures; Dot adapter was 79/81. `check`
+passed 128+8, support 65/65 and UI 65/65 at that checkpoint. Ordinary
+unknown results are currently retried on a later schedule and can duplicate
+messages; no change to that policy was made.
+
+DOM `click()` and keyboard events in the product are synthetic, not browser-level
+trusted actions. The earlier isolated debugger probe is not integrated and its
+broad permission needs informed consent. The live Dot cause, trusted background
+input, real ChatGPT/Dot acceptance, complete regression, installation, GitHub
+release and Store submission remain unfinished. `get_goal` was paused; do not
+claim completion or publish while known wrong-submission cases remain. Preserve
+all user data and work in progress.
+
+## Unreadable Chunk Evidence (2026-11-15)
+
+The user's activity(6) SHA-256 is
+`4B16154AFAD73C2C39BDD0EA5CF32E64A25F4D5DC32BC4820DA05CB070F4019D`.
+It reports version 3.0.12, but version is not a code hash. The final two
+deliveries each record 75 chunk writes, two restarts and two
+`chunkUnserializableRestarts`, zero automatic dispatch attempts, one manual
+intent and an unknown receipt. Their cumulative synchronous writes are about
+46.1 and 64.4 seconds; maximum single writes are about 9.1 and 13.7 seconds.
+The same traces report busy and no observed Send at their last snapshot; those
+observations need not match the later screenshots. The screenshots show selected
+text and a later short user bubble, but do not prove a complete prompt receipt.
+The actual DOM node causing the two unreadable checks is unknown.
+
+An isolated actual-MV3 test makes one between-chunk read temporarily
+unserializable while the verified underlying prefix remains unchanged. Before
+the change it rewrote eight chunks and made one full selection; after the
+uninstalled candidate it writes four chunks, makes no later full selection, and
+submits one exact synthetic message, for both button and Ctrl+Enter. Persistent
+delivery now waits while such a between-chunk read remains unavailable, and
+only continues if the exact prior prefix returns; changed data, pause and
+attachments retain their checks. A new content-free
+`chunkUnserializableRecoveries` counter is included in sanitized export.
+This does not cover every unserializable location or prove the real node was
+transient. Selected actual-MV3 cases 92–102, 104–140, 144–153 and 160–178
+pass 77/77; `check` 128+8 and `test:support` 65/65 pass. Fresh `npm test`
+still stops at five release-adapter failures, Dot adapter is 79/81, and strict
+synthetic cases103 and154 still demonstrate wrong submissions. Do not install,
+publish or claim real Dot success from this partial result.
+
+## Completed Draft Selection (2026-11-15)
+
+The user reports that a completed-looking prompt is selected rather than sent.
+The adapter selects the composer to replace the previous draft and again when
+it restarts a full insertion; the screenshot does not establish which path ran
+or whether the complete configured text was present. The user's installed bytes
+are not established, and this source candidate has not been installed.
+
+An isolated actual-MV3 synthetic case exposed a specific redundant restart:
+after the final chunk, a transient whitespace difference resolved on the next
+event turn, but the previous candidate rewrote all four chunks and sent once
+(eight writes). The candidate now rechecks a differing final segment after one
+short worker-controlled wait; if it exactly returns to the prepared text, it
+does not select or rewrite the completed prompt. If it stays different the
+existing comparison path remains; if it changes again, is unserializable, loses
+authorization or gains an attachment, existing guards remain. Cases164–172
+passed 9/9, covering both send methods, no completed-text selection, pause,
+attachment, a changed draft, delayed Send, and a synthetic opaque read. After
+the final attachment guard adjustment, a selected 71-case regression batch also
+passed 71/71. This is not a complete Dot fix or a real-site acceptance.
+Fresh full `npm test` still fails five release-adapter tests; Dot adapter remains
+79/81, and synthetic stale-model and transient-node wrong submissions remain.
+
+## Browser-Level Background Input (2026-11-15)
+
+The user clarifies that the extension itself should perform automatic,
+human-like background interaction. Current scheduler `click()` and synthetic
+KeyboardEvent do not provide trusted clicks or key events. Chrome documents
+`chrome.debugger` as an available CDP transport, with `Input` among permitted
+domains; its `debugger` permission carries an all-sites data warning and must
+not be silently enabled. Official references:
+https://developer.chrome.com/docs/extensions/reference/api/debugger and
+https://chromedevtools.github.io/devtools-protocol/tot/Input/.
+
+In a separate temporary MV3 extension and throwaway Chromium profile, a
+required-debugger-permission headless run delivered `isTrusted=true` mouse
+down/up/click to an inactive, actually hidden synthetic tab. Three CDP text
+insertions and Ctrl+Enter also produced trusted events; the other tab's active
+ID, input value and selection remained unchanged. The target reported focused
+after input. A headed run kept the target tab inactive and foreground value and
+selection unchanged, but its target reported `document.hidden=false`, so it is
+not proof of an actually hidden headed page or user-window noninterference.
+
+An actual ProseMirror synthetic fixture demonstrated that trusted input alone
+does not ensure correctness: naive consecutive 15-unit insertions cut a
+surrogate and sent reordered text. A second trial used surrogate-safe cuts,
+waited for the fixture's exact model after each segment, reset selection to the
+end, and then clicked once; that synthetic model and receipt matched. The
+fixture exposes its model; real Dot does not yet supply this evidence. Never
+infer the website's independent send model from trusted-event flags alone.
+
+Declaring debugger as optional and requesting it from a test extension page
+left the headless request unresolved after three seconds; the permission was
+not granted. A missing-permission attach was rejected. The exact cause of the
+unresolved prompt is unverified. The product manifest remains unchanged: this
+trusted-input experiment is not integrated, installed or ready to release.
+Production design still needs explicit permission, bound target/document
+validation and hit testing, user-focus and manual-intent arbitration, pause and
+in-flight input fences, single-attempt persistence, receipt handling, crash and
+detach handling, actual Dot/ordinary ChatGPT acceptance, and disclosure.
+
+The uninstalled scheduler now additionally requires matching extension sender
+identity in `checkRun`, covering CHECK_RUN, WAIT_RUN and COMMIT_RUN. A synthetic
+foreign-sender test failed before the check and passes after it; Chrome's real
+message-routing reachability of the forged sender has not been established.
+Fresh background suite 226/226 and isolated existing cases1–2, 92–102, 104,
+144–145, 148–153, 160–163 26/26 pass. This does not implement trusted input.
+
+## New Activity Evidence (2026-11-14)
+
+When a chunk mismatches, the uninstalled candidate now halves the next source
+segment instead of retrying the same size indefinitely, as it already did for
+a rejected write. Actual isolated MV3 case162 originally made 31 large writes
+and zero submissions in eight seconds; after the change it made two large and
+13 smaller writes, then submitted the exact synthetic prompt once. Case163
+confirmed the corresponding Ctrl+Enter path. Cases120–140, 144–153 and 160–163
+passed 35/35; support passed 65/65 and check passed 128+8. This does not prove
+the real Dot restarts have this cause or that the installed extension changed.
+An additional final-source selection passed 47/47 (cases1–4, 92–102, 104–119,
+144–153, 156–157 and 160–163). The fresh full `npm test` still exits at the
+safety suite with five release-adapter failures; subsequent suites do not run.
+The separately run Dot adapter remains 79/81 and strict case103 still sends a
+stale synthetic model. These failures remain release blockers.
+
+The supplied activity(5) SHA-256 is
+`36950B3201C5E1FEF2DE4B5D42DB2F1BA2A682DDF3B76077E3ECDCB7CBF9BD3C`.
+Its final delivery reports 627 chunk/DOM writes, ten chunk restarts,
+228,539.9 ms cumulative synchronous writes, a 9,754.9 ms maximum write,
+no recorded automatic dispatch and one manual submission intent with an
+unknown receipt. It does not establish the input limit, which mismatch caused
+restarts, complete prompt entry, or actual manual delivery.
+
+The uninstalled candidate adds content-free `chunkSettlementRestarts` and
+`chunkUnserializableRestarts` counters to distinguish changed serializable
+between-chunk text from an unserializable post-write or settled draft. Isolated
+actual-MV3 case160 first failed because the counter was absent, then confirmed
+one exact synthetic send and a sanitized Activity export. Case161 uses a
+synthetic isolated-world serialization probe; an earlier DOM-insertion test
+did not reach the intended condition and was revised. This is diagnostic work, not a real
+Dot send fix. An adversarial temporary-node case still submits altered synthetic
+text, and the independent stale send-model case103 still fails. A local trial
+allowing a transient mismatch to settle was reverted after it still sent altered
+text. A 540 ms trial passed two 500 ms delayed-model cases but failed case103;
+it was reverted because a fixed delay does not prove website-model readiness.
+No real prompt or user's existing conversation was used.
+Before the chunk-size change, selected isolated MV3 cases 1–4, 92–102, 104–119,
+144–153, 156, 157, 160 and 161 pass 45/45; support passes 65/65 and `npm run
+check` passes 128+8. `npm test` stops at five release-adapter failures; the Dot
+suite passes 79/81. Cases154/155 and 158/159 remain failing wrong-submission
+reproductions. In a combined run, case156 initially picked a previous delivery
+trace; the corrected test waits for the new sequence and passes in that batch.
+
+## Prefix Integrity (2026-11-14)
+
+The candidate now checks that a previously verified prefix remains present
+after each append. It retries a full replacement when the prefix changes. A
+changed result is eligible for submission only after two complete attempts
+produce the same per-boundary differences and the same final text. The new
+`prefixRewriteRestarts` count is content-free and survives a completed Activity
+export; a cancelled in-flight snapshot may omit the last events.
+
+Actual isolated MV3 case150 was red with a synthetic wrong submission and now
+passes with one exact submission after two earlier prefix replacements.
+Cases151–153 also pass for repeat interference/Pause, caret relocation and
+prefix-preserving duplication; cases120–140/150–153 passed 25/25 and
+cases92–102/104–119/144–149 passed 33/33. This does not guarantee that stable
+corruption is distinguishable from page normalization or that an independent
+site send model is current. The synthetic stale-model case103 still fails,
+and `npm test` exits with five release-adapter failures; no live Dot acceptance
+or release is established.
+
+## Serialization Diagnostics (2026-11-14)
+
+The uninstalled candidate records content-free `serializationMs` and
+`maxSerializationMs` independently of synchronous write timing. In isolated
+MV3 case146, a synthetic 300 ms serialization delay was reflected in the
+persisted trace and real Activity export. A separate synthetic 1,800-line run
+observed 62,402 paragraph visits across 26 chunks, approximately 82.1 ms of
+serialization and 1,232.8 ms of synchronous writes on one run; this is not a
+profile or diagnosis of the user's Dot.
+
+Skipping unchanged-prefix checks or using an incomplete MutationObserver
+optimization missed an intervening edit, so those experiments were reverted.
+The current source still performs complete checks; cases146–149 passed 4/4,
+and the final-source selection of cases92–102/104–119/144–149 passed 33/33.
+At that earlier checkpoint case150 was red; its current evidence is recorded
+in Prefix Integrity above. The independent stale-send-model case103 and five
+release-adapter cases remain red; a fresh `npm test` exits at the safety stage.
+
+## Current Candidate Checkpoint (2026-11-14)
+
+The candidate retries a rejected or unconfirmed text chunk using progressively
+smaller chunks and a complete replacement. A real isolated MV3 synthetic page
+that rejects operations above 1,000 UTF-16 units then receives one exact message.
+An adversarial page rejecting a surrogate pair never receives an empty or split
+chunk and remains pausable. The content-free `rejectedChunks` count survives
+diagnostic export; it does not identify the rejection mechanism. These are
+fixture results, not proof of Dot behavior.
+
+Draft and template writes now share a background queue. Clear fences stale
+generations and uses a persistent marker after pausing the task; a sampled failed
+cleanup remains unavailable after a real MV3 worker restart until Clear succeeds.
+The marker and multiple storage areas are not an atomic transaction: termination
+before the marker and already-issued legacy writes remain unresolved. No user
+data was cleared during these isolated tests.
+
+Fresh focused results: background 225/225; state 62/62; UI 65/65; support 65/65;
+`npm run check` 128+8; MV3 cases 68–71/141–143 7/7, 92–102/104–119 27/27,
+120–140 21/21, and 144–145 2/2. Strict case 103 still actually sends a synthetic
+stale external model; Dot adapter 79/81 and release adapter 76/81. No candidate
+has been installed or released, and the live Dot freeze remains unexplained.
+The following historical entries preserve prior evidence and are not current
+status where superseded.
+
+## Chunked Ordinary Text Investigation (2026-11-14)
+
+The user now explicitly asks for approximately 1,000-character staged insertion
+into one composer, followed by one submission, without deliberately producing
+an attachment. The activity file at the previously reported path has changed:
+SHA-256 `A4988FA0C0F97C9485201DB7DD5533D292FA24658E9B3C1B88118A7A07834160`.
+Its three retained attempts each have one DOM write, 17–35 ms maximum write,
+about ten seconds elapsed, `paste-unconfirmed`, and zero recorded dispatches.
+Earlier 669-write/44.9-second values describe the prior file contents only.
+
+In one real ordinary temporary ChatGPT session, user-interface operations
+entered 10,011 synthetic UTF-16 units in approximately 1,000-unit batches; the
+composer matched the generated source with no attachment. One manual Send
+created one matching user message. This is not an extension or Dot acceptance
+and temporary chats may remain server-side for up to 30 days.
+
+The WIP uses segmented `insertText` operations for long ProseMirror content,
+checks prefixes and pauses on rejected/mismatched segments or new attachments,
+and records a content-free `textChunks` counter. It avoids the one-shot MAIN
+model transaction for long text. CR/CRLF still normalize to LF; source strings
+remain stored unchanged. Isolated real-MV3 ProseMirror cases 92–102 and 104–106
+passed in focused runs; separate strict case 103 actually submitted a stale
+external model and fails, so DOM equality does not prove a site's send model.
+Chrome Secure Preferences names this repository as an unpacked extension path,
+but this does not identify the bytes currently loaded or prove a reload. The
+candidate has not passed live extension/Dot acceptance and is not release-ready.
+Shape tests with 100,000 synthetic characters in one, two and five lines each
+confirmed one exact local-fixture receipt, 100 text chunks and zero paste events
+in 5.8–6.7 seconds in the latest run; this is not a live-site guarantee. A
+different 10,000-line, more-than-100,000-character hidden-editor test exceeded
+its 60-second bound without a confirmed submission. The old paste-specific
+fixture expectations are being revised only where their contract is obsolete;
+the strict stale-model failure and other independent failures remain visible.
+
+## Old Directory Versus Candidate (2026-11-14)
+
+The previously observed unpacked source directory `agent-continue-main` was
+read without modifying it or inspecting stored prompts. Its adapter SHA-256 is
+`508C1FE9949ABFD7FC905184EC4C0CB28CC98E5235EF6227CE37F5C51B87F74B`, while
+the current repo candidate adapter is
+`0D18F74F90A0862CC6E749088CA2ECC52BC797F11BC39465F8188E8A3839B76D`.
+This verifies different files on disk, not that the browser currently runs
+either exact byte sequence or that the log's version identifies its code.
+
+The old adapter's plain-text serializer excludes `FONT`; when the page wraps
+unchanged prompt text in FONT, exact draft comparison therefore fails. It also
+uses synchronous `execCommand('insertText')` for long multiline replacement.
+In the same real isolated MV3/official ProseMirror FONT fixture, 1200 lines and
+122399 synthetic UTF-16 units yielded five writes, 6990 ms cumulative synchronous
+write time, 1839 ms maximum page heartbeat gap and one exact submission for
+the old directory. The candidate yielded one paste/write and one exact
+submission, 31–47 ms write time in separate runs. This is an instrumented
+synthetic mechanism, not a profile of the user's actual Dot.
+
+A second 50-line/5099-unit FONT fixture stays below the candidate's fast-paste
+threshold and therefore exercises its `execCommand` path. The old directory
+performed five writes, 495 input events and one submission; the candidate
+performed one write, 99 input events and one submission. This isolates the
+repeated FONT comparison problem from the change to synthetic paste. Old
+directory tests intentionally failed the one-write assertion; candidate
+50-line and 1200-line tests both passed. A vanilla 1200-line comparison
+recorded one old write of 823 ms versus one candidate paste write of 31 ms,
+each one run. Timings are hardware- and fixture-dependent, not benchmarks of
+the live site.
+
+The supplied log retains 669 writes across 134 admissions and a separate
+44.9-second maximum write, all with zero recorded dispatch attempts; these
+results are consistent with the reproduced amplification but do not prove
+causation or the current installed byte identity. Candidate focused cases
+74–88 and 90–91 passed 16/16. The strict matching-DOM/stale-external-model case
+89 still submitted the wrong synthetic text and failed; Dot adapter is 79/81,
+release adapter 76/81. No production source was modified during this probe.
+Do not install or release on this evidence; real Dot candidate verification,
+manual late-paste handling and broader acceptance remain incomplete.
+
+## Long Existing Draft Probe (2026-11-14)
+
+New isolated actual-MV3/official-ProseMirror scenarios 85–88 replace an existing
+synthetic matching 40714-unit draft, a different 39585-unit draft, 1200 mixed
+empty paragraphs, and a 40019-unit single line with the same 40714-unit prompt.
+Each produced one paste, one submission and the exact expected model text;
+the measured end-to-end times in the latest run were 311–328 ms. These are
+synthetic cases, not the real Dot crash or proof of a universal size limit.
+Two additional synthetic selection-rejection cases returned blocked without
+paste or submit. Focused cases 74–88 and 90–91 (excluding 84 and failing 89)
+passed 16/16; fast-paste passed 8/8; `npm run check` and support 62/62 passed.
+
+An attempted optimization skipped writing when the DOM already matched the
+prompt. A separate real-MV3 synthetic fixture showed that a page can keep a
+different external submission model and actually submit it despite the matching
+DOM. The optimization was removed; its strict failing case 89 remains in the
+normal suite and records one wrong-model submission even with a fresh paste.
+That counterexample also affects the prior event-based candidate: no arbitrary
+fixed delay, exact DOM match or paste alone proves that a third-party send
+handler uses the same model. It is not evidence that real Dot uses this model.
+There is no new production fix from this continuation. The real Dot stall,
+existing delayed-page paste, stale model, NBSP and release-suite failures,
+complete regression and real candidate acceptance remain open; no installation,
+commit, push, release or Store submission was made.
+
+## Continuation Checkpoint (2026-11-14)
+
+The finite-readiness adapter stops after two payload writes. A new isolated
+test showed that a page restoring a draft exactly twice needs a third write to
+recover; raising the cap to three made that test pass but caused both existing
+real-browser continuous-restore tests to fail their two-write bound. The cap
+change and its now-failing success expectation were removed. A separate bounded
+restoration test remains; no production source change from that experiment is
+retained. Continuous authorized delivery uses the existing slower backoff; this
+does not prove that every finite restoration recovers promptly.
+
+An older synthetic test expected a trusted Send click containing unrelated text
+to be ignored. It now explicitly simulates the human submission and requires
+unknown with zero extension clicks, preserving the established manual-handoff
+contract rather than pretending a submission was confirmed. The release adapter
+suite currently passes 76/81; five original finite-coverage/authorization
+assertions remain failing and are not papered over.
+
+Fresh real isolated MV3 cases 63–84 passed 22/22, including the preexisting
+slow-write/receipt cases, consecutive full-overwrite cases and a new readback
+check that compares page-observed writes with the persisted trace. A background
+test also verifies 5+2 writes across two admissions retain 7 writes and 140 ms,
+not a second copy of the earlier snapshot. These bounded synthetic checks do not
+prove every possible log race or the identity of the installed code. Background
+193/193, state 62/62, and syntax/scoped diff checks passed; the diff check emitted
+CRLF conversion warnings. Dot adapter remains 79/81 with the 500 ms stale model
+and NBSP ambiguity. This turn's real temporary ordinary ChatGPT page exposed a
+unique ProseMirror composer and a same-form enabled Send after synthetic text;
+the text was cleared and tab closed without a submission or candidate extension.
+No current live Dot send, installation, release or Store submission is verified.
+
+## Current Priority: Complete Overwrite Per Round (2026-11-14)
+
+The user clarified that each prompt injection must completely replace the
+composer text. Repeating the same configured prompt in separate intended
+schedule rounds is required; a duplicate-content veto is not the goal. The
+current investigation still targets freezes and failed sends, not attachment
+creation. An uncertain already-dispatched result is distinct from a later
+intentional round and must not be claimed as confirmed.
+
+The user's retained activity file has sequence 46 with 669 DOM writes across
+134 page admissions and zero recorded dispatch attempts; sequence 48 has a
+maximum single DOM write of 44906.4 ms and zero recorded dispatch attempts.
+The retained counters and timings are not a real-site CPU stack, do not prove
+which installed bytes ran, and do not by themselves establish server receipt.
+
+A new actual MV3/official ProseMirror fixture reproduced a specific overwrite
+failure. Before the patch, the 40714-code-unit synthetic prompt was pasted
+while the browser DOM showed all 51 old characters selected but the editor
+model selection was still collapsed at 52. The resulting model retained the old
+draft, the adapter waited ten seconds, and no submission occurred. In the
+uninstalled `adapter.js` candidate, the long-text path now reports the selection
+change to the page, lets the editor process it, reselects if the page changed
+the draft, and checks whether the selected DOM fragment contains the full plain
+draft; Pause and trusted human
+editing during this preparation stop the current attempt. The event is synthetic
+and the 50 ms settling period and DOM state do not establish a universal editor
+model contract. If every page selection event is suppressed without collapsing
+the visible selection, no independent model acknowledgment is available and the
+candidate remains unproven. Do not infer that this fix explains the 44.9-second
+real Dot stall.
+
+Fresh focused results: MV3 cases 64–83 passed 20/20; the short, 40714-unit long,
+hidden-tab and rejected-synthetic-selection cases each sent two identical
+configured prompts after replacing distinct old drafts, with one DOM write and
+one dispatch per round. Changed-draft, paused, trusted-edit, collapsed-selection
+and partial-selection cases also passed. Fast paste 8/8, text-shape plus CDP sampling 6/6,
+FONT 1200-line 1/1, background 192/192 and state 62/62, `npm run check`, and
+support 62/62 passed. Actual temporary ordinary ChatGPT UI accepted and replaced
+3433 synthetic characters without sending; it is not extension or Dot acceptance.
+
+Fresh failures remain: Dot adapter 79/81 (the separate 500 ms stale submission
+model and NBSP receipt ambiguity), model-commit browser fixture sends the stale
+external model, release adapter 74/80, and delayed page-owned paste after manual
+send refills 88799 synthetic characters. These are not fixed by this selection
+patch. The candidate is not installed, published, or verified on a dedicated real
+Dot; full `npm test` was not run. Do not claim the problem or the active goal is
+complete. Preserve the existing WIP and the unpushed c9e5dba commit.
+
+## Current Priority: Diagnose Text Injection Freeze (2026-11-14)
+
+The user explicitly corrected the direction: investigate why extension prompt
+injection freezes the conversation and prevents sending. Normal text delivery
+is preferred; do not deliberately convert prompts into attachments. Dot may
+convert a long paste itself, but its exact behavior and limits need direct
+evidence. The earlier naming request remains relevant only if a file actually
+arises; it is not permission to replace the text-first task with manual or
+extension-created files. Do not operate the original Dot or use real prompts in
+test data. The earlier filename reservation is uninstalled WIP, not a solution.
+
+Fresh evidence: the user's existing activity file (SHA-256
+`86CB71BA65A27FA36153826D739803B81F81E9EAAA6B2243AE91ED4333D21BFD`)
+contains a retained maximum single DOM write of about 44.9 seconds and many
+page admissions, but no CPU stack proving the real Dot mechanism. An isolated
+MV3 real-ProseMirror fixture was instrumented with sampled CDP CPU profiles;
+six shapes passed, with single-line 100k text spending sampled time in
+ProseMirror selection and native `execCommand`. That fixture did not reproduce
+the site's 44.9-second stall and uses untrusted synthetic paste.
+
+A separate fixture faithfully models the observed alternative *possibility*:
+the page immediately or after 500 ms creates an attachment from a paste while
+the text editor stays empty. Before the change the candidate waited 10110 ms,
+performed one paste and zero send attempts, then paused `paste-unconfirmed`.
+The uninstalled candidate now detects a visible composer attachment during
+that wait and pauses with `paste-attachment-unconfirmed`, preserving the chip
+without replay or submission. The same fixtures finish in 47/573 ms, 2/2; the
+new reason survives sanitized logs and exports, diagnostics/i18n 32/32, and
+ignored-paste cases 2/2. This avoids a needless wait and improves diagnosis;
+it does **not** send the attachment, prove its contents or solve real Dot's
+freeze. A delayed page-owned paste after manual send still fails: one late
+write leaves 88799 synthetic characters; the 500 ms stale model still sends
+old text in two separate fixtures. The fast-paste suite initially had two stale
+expectations that a mismatched receipt must time out; updated assertions now
+require an immediate `unknown`, paused job and zero count, with 8/8 passing.
+
+## Historical Named Attachment Investigation (2026-11-14)
+
+In a newly created ordinary temporary ChatGPT chat, the built-in browser opened
+the actual native file picker. One synthetic TXT named
+`agent-continue-2026-11-14T02-52-00-000Z-1.txt` was selected through that picker.
+The picker Open action reported an uncertain foreground-cleanup error, so it was
+not repeated; the page then showed the exact filename and an enabled Send. One
+manual Send produced one user row with that name, and the assistant returned the
+three synthetic file markers in order. The test tab was closed and its local
+file deleted; the temporary-chat service may retain a copy for up to 30 days.
+This proves that one manual ordinary-chat named-file flow worked, not that the
+extension can upload automatically, that Dot supports it, or that file and message
+semantics are equivalent. Earlier failure to locate the picker was a tool-target
+discovery limitation, not evidence that the picker did not exist.
+
+The uninstalled background now reserves `{ordinal, issuedAt}` before a send
+round and includes it in the adapter arguments. It preserves this reservation
+through Pause, unknown result, a known-unsent retry and restart; only a confirmed
+automatic or manual receipt clears it, and a new Start begins from one. Invalid
+stored metadata refuses a page admission. Two initial tests failed because no
+metadata existed; after implementation, the synthetic background suite passes
+191/191 and state passes 62/62. Isolated MV3 case 73 actually stops the worker
+during a pending send, then verifies the paused restored job retains the same
+metadata and no page submission occurs. This is infrastructure only: no filename
+or attachment is created or submitted by this change, and no claim of atomic
+storage under arbitrary failure is made.
+
+The user reports that a `Pasted text.md` attachment remains in the composer and
+is not sent. The supplied screenshot shows that card, a paused extension,
+`paste-unconfirmed`, zero confirmed sends and a visible Send control; it is a
+single image, not a network receipt or proof of the site's internal cause.
+
+The earlier desired delivery was not merely a visible pasted attachment or a manual TXT
+download. When using file delivery, the extension should generate and actually
+submit a user-consented attachment named with a concrete timestamp and the
+prompt's ordinal since this task's Start, not `Pasted text.md`. Preserve prompt
+content, bind the correct conversation, protect existing attachments, confirm
+upload readiness and a new conversation receipt, keep ordinal/attempt state
+across Pause and restart, and never blindly retry an uncertain dispatch. A new
+explicit Start resets the task-scoped ordinal; retries of one unresolved round
+must not appear as confirmed sends. Attachment semantics and disclosure must be
+clear. This requirement supplements rather than replaces the active Windows,
+tunnel, live acceptance and release goals. The current manual export does not
+satisfy it, and the current text-only scheduler may remove pending attachments.
+
+## Manual TXT Draft Fencing (2026-11-14)
+
+The uninstalled popup increments its in-memory content epoch on each draft save
+request. A manual TXT download awaiting the paused-state check now refuses to
+create a file if the user edits and then restores the same draft during that
+check. The synthetic UI regression first observed one unwanted Blob, then passed
+after the change, including malformed state variants. Isolated actual MV3 case
+72 verifies the same edit-and-restore race with no Blob and no submission;
+cases 67–72 pass 6/6. This does not serialize another panel's Start after the
+state read, cancel issued storage writes, implement automatic uploads, or prove
+the installed extension/live Dot behavior. Focused UI and 81 diagnostic, i18n,
+documentation, support and prompt-length tests pass.
+
+Case 71 initially used an asynchronous Playwright `waitForFunction` predicate;
+Playwright treats the returned Promise as truthy before its boolean resolves.
+Two mixed-suite runs failed on that invalid oracle. The test now waits for the
+rendered Running state and reads the actual job; the final cases 67–72 run
+passes. A new built-in temporary chat opened the attachment menu, but a menu
+click did not expose a usable file chooser through the current desktop target;
+zero selected files/chips were observed and no message was sent. Its synthetic
+local file and tab were removed. The attempt does not establish that upload is
+unsupported. No real prompt or original Dot was deliberately used in testing.
+
+## Pause During Start Preparation (2026-11-14)
+
+Continuation: isolated MV3 cases 68–71 now pass 4/4, including a normal popup
+Start with the exact synthetic draft, one alarm and zero immediate submissions.
+The first case-71 run failed because the test treated the visible preparation
+state as a completed Start; the corrected test waits for the actual enabled
+background job rather than weakening the intended assertion. A synthetic sender
+without the extension's identity was also able to invoke tokenless START in the
+test harness; control messages now reject such senders, without asserting an
+externally reachable exploit. Two additional invalid-token reservation tests pass.
+Fresh background-v2 is 185/185, state is 62/62, and focused UI passes; this does
+not establish that Chrome permits the fabricated sender to reach onMessage.
+
+The uninstalled popup now treats an outstanding Start permission request or
+draft save as an activation: it exposes Pause, disables duplicate Start and
+editor controls, and invalidates that same panel's preparation before sending
+Pause or Clear. It asks the background for a single-use reservation before
+awaiting permission or draft persistence. A later Pause, Clear, newer Start or
+worker replacement invalidates the reservation; a delayed reserved Start is
+rejected. Only an identified extension page can create a reservation or change
+the intent version. Legacy tokenless Start remains accepted for compatibility.
+The draft storage operation itself is not cancellable.
+
+The initial synthetic UI regression failed because Pause was hidden during a
+deferred config save. After the change, the focused UI run passes both delayed
+permission and delayed config-save Pause, duplicate Start, and a rejected
+reservation after Pause without unhandled rejection. Isolated actual MV3
+popup/background cases 68–70 pass 3/3 for same-panel Pause, another extension
+page's Pause, and a service worker stopped via its observed CDP version before
+the delayed save is released. The latter two cases first exposed a real late
+Start bug and then passed after the reservation protocol; background-v2 passes
+182/182 and state 62/62. The first same-panel MV3 attempt timed out before the
+save because the fixture had an empty prompt; after a synthetic prompt it passed.
+Early worker-stop attempts failed to establish a stopped worker before using
+the CDP ServiceWorker version event; those attempts are not pass evidence.
+These tests do not prove a hung storage write can be aborted, arbitrary crash
+recovery, or the separate Clear/late-write race. The candidate is not installed
+or published; the independent model counterexample remains red.
+
+## Independent Submission Model Counterexample (2026-11-14)
+
+A new uninstalled real-ProseMirror browser fixture uses the public Tiptap-shaped
+EditorView but submits from a separate page model updated 500 ms after input.
+`node tests/editor-commit-browser-tests.mjs` exits 1: the first four existing
+scenarios pass, then the new test observes one click sending the stale synthetic
+model while `view.state.doc` contains the exact configured prompt. This is a
+real local fixture submission, not evidence that ChatGPT or Dot use that model.
+It shows that DOM equality, EditorView equality, same-turn dispatch, or waiting
+after input alone do not prove what an arbitrary page handler consumes. Do not
+weaken this assertion, claim the release is ready, or count the later mismatch
+receipt as prevention of the initial wrong submission.
+
+In a newly created ordinary temporary ChatGPT conversation, the built-in
+browser filled 3673 synthetic ASCII characters over 161 lines and manually
+clicked Send once. The returned user row contained the first and last markers;
+the assistant subsequently returned both and its Stop control disappeared.
+The fill and immediate read took approximately 2036 ms together. This tests a
+manual UI path, not the candidate extension, Dot, exact bytes, all intermediate
+lines or a freezing threshold. The test tab was closed; the page warned that a
+service-side copy may be retained up to 30 days.
+
+A separate temporary chat attempted to upload one local synthetic TXT using the
+built-in browser upload operation. Two attempts against the observed menu item
+failed because no file chooser was reported; a follow-up page read showed zero
+selected files and attachment chips, and no message was sent. The temporary
+local test file and test tab were removed. This does not establish that Chrome,
+ChatGPT, or an extension cannot upload; it gives no new upload-completion signal.
+The user prompt, original Dot, production extension and local task were not used.
+
+## Manual TXT Candidate (2026-11-14)
+
+The uninstalled popup now offers an explicitly manual TXT download for the
+current editable repeated-prompt draft. The task must appear paused and a fresh
+read-only state check must confirm it is not running; a user-entered positive
+sequence and UTC timestamp form the filename. This does not upload, submit,
+count or persist the sequence. The user must keep the task paused because the
+existing scheduler removes pending attachments. The localized UI and privacy
+documentation explain plaintext local files, service-side upload, potentially
+different attachment semantics and the difference between draft and paused job.
+Unpaired UTF-16 surrogates are rejected rather than silently replaced. A state
+read is not a transactional cross-panel lock; another panel can start afterward.
+
+The isolated HTTP UI fixture verifies actual download bytes, including a 4000
+line synthetic sample (110890 UTF-16 code units, 134890 UTF-8 bytes), language,
+validation, stale state and error handling. Isolated MV3/ProseMirror cases
+64–67 pass 4/4; case 67 intercepts the anchor to inspect the real extension's
+Blob and filename, confirms paused/no submission, and does not prove a browser
+download. Two earlier CDP-attached headless actual-download attempts timed out.
+Background-v2 178/178, state 62/62 and i18n/public-doc/support/length 58/58
+pass; the complete UI suite still fails at the existing late-write-after-Clear
+race. No real prompt was downloaded or uploaded, and no candidate was installed.
+
+## Mismatched Receipt and Attachment Probe (2026-11-14)
+
+The uninstalled adapter now returns `unknown/receipt-mismatch` when a new
+serializable user message observed after dispatch differs from the configured
+prompt. The background pauses, preserves the queue and exports a content-free
+reason through both result channels, including manual-intent uncertainty. A
+new message is not proof of which action created it, and this check occurs
+after dispatch: the synthetic delayed-model test still sends stale text once.
+Fresh synthetic checks: background-v2 178/178, state 62/62, diagnostics/i18n/
+support/public docs 69/69, and isolated MV3/ProseMirror cases 64–66 3/3. Dot
+is 79/81 with stale-model and NBSP failures; release-adapter remains 74/80.
+
+An unintegrated OS-temp prototype and five isolated Chromium tests examine
+in-memory TXT construction, a supplied UTC timestamp/sequence, existing-file
+protection, revoked permission and unconfirmed upload. The change event is
+untrusted and completion is a synthetic callback, not a live-site receipt.
+Valid Unicode and CRLF bytes matched in the sample, but an isolated UTF-16
+surrogate was replaced by U+FFFD by File string conversion; no arbitrary-string
+or original-file byte-fidelity claim is justified. Persistent sequence, upload
+completion, pause/late callbacks, real ChatGPT/Dot automation, UI consent and
+privacy disclosures remain unimplemented. No real prompt or file was used.
+
+## Target-Loss Diagnostics (2026-11-14)
+
+The uninstalled candidate now records a fixed `document-replaced` code and
+duration for an unresolved send interrupted by target closure or navigation;
+the content-free export retains the code. If a confirmed receipt arrives in
+the tested Pause window, the activity text reflects that confirmation and does
+not attach the unknown diagnostic. Two missing-diagnostic regressions went
+RED then GREEN. Fresh synthetic background-v2 is 174/174, background-state
+62/62, diagnostics/i18n/support/public documentation 69/69, and isolated MV3
+ProseMirror cases 64–65 are 2/2. This is not a live-site or full-suite receipt.
+
+## Isolated Transaction Prototype (2026-11-14)
+
+`transactional-state.js` is an unintegrated IndexedDB prototype, not the
+extension's current storage authority. Ten synthetic Chromium tests exercise
+generation and revision fencing, a stale write already queued behind an active
+clear transaction, concurrent same-revision writes, delayed migration, exact
+synthetic text across reload, and atomic failure. The tests use two same-origin
+pages, not an extension service worker or existing user storage. Current popup
+and background still write `chrome.storage.local`; their known late-write after
+Clear regression remains failing. Migration, old issued writes, service-worker
+termination, cross-store task/log semantics, quota and failure recovery require
+separate design and integration before this prototype can claim a product fix.
+
+Fresh isolated MV3/official ProseMirror cases 64–65 pass 2/2: an ambiguous
+NBSP receipt and a replaced document after one submission pause as unknown and
+do not re-dispatch. Invalid case selection now fails instead of printing a
+fictional pass count. Current fresh failures remain Dot 78/80, release-adapter
+74/80, and the UI late-config-write race. Delayed-manual paste independently
+still refills 88799 characters after one trusted manual submission. A previous
+parallel run of that same test timed out after the extension submitted before
+the test's manual click; it is recorded separately, not mistaken for the late
+manual reproduction or for live-site behavior.
+
+## Unknown Submission Pause and Second TXT Probe (2026-11-14)
+
+The uninstalled candidate now pauses terminal unknown submissions rather than
+automatically replaying them at the next interval. Target closure or navigation
+during sending also pauses; a confirmed receipt arriving during the tested
+Pause persistence races updates the corresponding sent/manual count and queue
+once instead of adding an unknown. Unconfirmed manual intent adds one unknown.
+The repeat and queue cases, both result channels, explicit Resume, target-loss
+receipt races and no-send timing diagnostic passed in synthetic fixtures.
+Fresh checks: background-v2 172/172, background-state 62/62, and diagnostics,
+i18n, support and public documentation 69/69. These do not prove crash-atomic
+persistence, late receipts outside the tested window, live pages or cancellation
+of page-owned work; the unresolved red cases below still block release.
+
+A second assistant-created ordinary temporary ChatGPT chat manually uploaded a
+synthetic TXT and returned three markers from its beginning, middle and end.
+The file and test tab were removed locally; the page warned that service-side
+copies may be retained for up to 30 days. A read-only inspection of one blank
+ordinary chat showed a ProseMirror composer, four hidden file inputs and no
+exposed `editor.editor.view` or `pmViewDesc.view`. These observations do not
+establish Dot behavior, automated upload, arbitrary byte fidelity or equivalent
+attachment and message semantics. No user prompt, file or original Dot was used.
+
+## Synthetic Attachment and Stale Model (2026-11-14, Uninstalled WIP)
+
+One self-created ordinary ChatGPT temporary chat accepted a synthetic TXT through
+the manual file chooser. After one short instruction, the assistant returned
+`ORCHID-RIVER-48273`, a marker present only in that file. The local test file was
+deleted and the test tab closed. The page warned that a service-side copy may be
+retained for up to 30 days; local deletion does not prove remote deletion. This
+single result does not establish Dot support, extension-triggered uploads,
+arbitrary payload fidelity, or equivalent message and attachment semantics. No
+user prompt, log or original Dot was used. TXT delivery is not implemented and
+the current text-only sender removes pending attachments.
+
+A new isolated Dot fixture delays its controlled model update by 500 ms while
+the DOM already shows the new text. The candidate actually sent the stale model
+once, then returned unknown; the fresh Dot run passed 78 of 80, with this stale
+model and the existing NBSP receipt case failing. A fresh UI test still shows a
+late config write reviving a cleared prompt. The delayed-manual PM fixture still
+refills 88799 characters after one manual submission. These are synthetic
+counterexamples, not proof of the live site's internal behavior. Fixed waits,
+DOM equality or a paste timeout cannot establish model synchronization or
+cancel page-owned callbacks. No production code was changed, installed or
+released in that test round; the new failing regression is retained.
+
+## Slow Write Guard (2026-11-14 Asia/Shanghai, Uninstalled WIP)
+
+An isolated regression reproduced a slow first DOM write followed by a second
+injection. The current candidate stops further payload writes after a measured
+2-second synchronous DOM write when correction or an unsafe readiness state is
+observed. It preserves the draft, reports `composer-slow-write`, and pauses
+the scheduler rather than readmitting immediately or after the interval. A
+matching ready composer may still submit once; a suspected dispatch or manual
+intent is unknown, not a confirmed no-send. The threshold is an unvalidated
+heuristic, and it cannot interrupt the first blocking synchronous operation.
+
+The latest isolated results are background-v2 158/158, background-state 62/62,
+PM MV3 cases 58–63 6/6, fast-paste 8/8, editor-commit 114/114 and diagnostics
+plus support 47/47. Dot adapter is 78/79 (NBSP receipt remains unknown),
+release-adapter 74/80, UI clear/late-write is failing, and delayed manual paste
+still refills after send. No full suite, real-site acceptance, install or release
+was completed. The TXT attachment proposal is not implemented.
+
+## Current Incident Checkpoint (2026-11-13 UTC)
+
+The latest goal readback is `active`; the earlier `paused` observation is
+historical. No goal status was changed or completion asserted.
+
+The supplied activity (4) export was reread as a 143641-byte, schema-5 file
+with 20 retained deliveries. Sequence 46 records 669 DOM writes, 134 page
+admissions, 15127119.7 ms cumulative DOM write time, 28689.1 ms maximum write,
+zero recorded dispatch attempts, and cancellation. Sequences 47 and 48 record
+186 and 135 writes, with maxima 36134.6 ms and 44906.4 ms. Sixteen other unknown
+deliveries each record a dispatch attempt; do not assert that all messages were
+unsent. Relative clocks and these aggregates do not establish absolute times,
+the actual installed bytes, or the site's internal cause.
+
+The user proposes TXT attachment delivery named with timestamp and submission
+number. Current code removes pending composer attachments; actual isolated MV3
+cases 37 and 38 passed under that existing behavior. A synthetic Chromium file
+input accepted an in-memory File with an untrusted change event; at that earlier
+checkpoint no real ChatGPT/Dot upload had been tested. See the newer single
+ordinary ChatGPT manual result above. No user prompt or file was uploaded or
+sent. The design must separately cover upload
+completion, privacy, quotas, unchanged file bytes, naming, Pause and unknown
+results; the existing text-message confirmation cannot simply be reused.
+
+An earlier incident snapshot recorded three DOM writes totalling about 52.06
+seconds, maximum 19.51 seconds, and zero recorded automated dispatch attempts.
+Chrome readback at that earlier time showed enabled kpjgmkakklpdhjmbfahlkffgkcphebkc at
+3.0.12 and its toolbar state manually paused. No reload, installation, prompt
+change or production-Dot send was performed; the version does not identify its
+runtime bytes.
+
+Local main HEAD is c9e5dba, an accidental agent-created test-only commit; local
+origin/main is 2270e9f. It was not pushed or rewritten. There are 22 tracked WIP
+files plus untracked historical handoffs. Current runtime changes are not in the
+old 2270 package or established as installed. Isolated official ProseMirror MV3
+measurements reproduce slow multiline execCommand and show a faster synthetic
+paste path with exact model text in selected cases. A delayed accepted paste can
+still refill after manual Send; the dedicated synthetic MV3 test fails. A never
+handled paste now has a bounded observation leading to an unconfirmed pause,
+which cannot cancel a page-owned callback. Do not claim real-site resolution.
+
+Selected synthetic checks: background 155/155, state 62/62, editor-commit 114/114,
+diagnostics 23/23 and support 24/24. NBSP receipt comparisons and ambiguity handling
+pass eight targeted tests but Dot has 73/74 passing: native space representation
+becomes unconfirmed after one send. The tested ambiguous case pauses rather than
+automatically replaying; it is not confirmed delivery. Release-adapter has 78 tests,
+72 passing and 6 failing before the two additional ambiguity tests were added.
+Cross-panel UI still fails on a late write after Clear. Fast-paste MV3 passes 8/8,
+shape 6/6 and CR-only 2/2; ignored-paste pause passes 2/2. Delayed manual paste
+remains failing. Independent in-memory tests also show possible late MAIN
+dispatch after cancellation, lost late receipts, a crash between Pause snapshots,
+and storage hangs blocking Pause. These are not real-site acceptance evidence.
+Full regression, final package, real installed candidate, Release and Store
+submission are not complete. Preserve the accidental commit and all WIP; do not
+push, publish or replace the user's installation on this evidence.
+
+## Historical Uncommitted Safety Review (2026-11-11)
+
+Current local HEAD and origin/main are 2270e9f. The working tree has ten
+tracked modifications, including background, popup, diagnostics UI, their tests,
+two Windows Chromium fixtures and the two existing handoff records; historical
+handoffs remain untracked. Preserve all pre-existing work. The latest synthetic
+background suite passes 105/105 and state suite 60/60. UI passed 56/56 before
+new cross-panel stale-prompt and post-clear late-write assertions were added;
+the current UI suite fails. These are not a full suite or live acceptance.
+The existing 2270 package and installed cbob instance
+do not contain the latest runtime changes and are not final release candidates.
+
+Independent isolated review reproduced stale panel writes overwriting newer
+settings and delayed config/template writes reviving cleared content. Startup
+configuration migration now projects legacy defaults on read rather than writing
+an old snapshot. Diagnostic stale-read, failed-clear and pending-write cases have
+local regressions, but failed-clear invalidation is still in memory and is not
+proven across worker restart. A cold-start resumeJob read can block Pause, and
+onStartup can hold the state queue on a slow browser API. A proposed
+direct Pause bypass was withdrawn because a confirmed pause could be overwritten
+by older initialization; do not reinstate it. The Windows fixture cleanup WIP
+has ownership and exceptional-path gaps; 151/151 predates its latest cleanup
+change and must not be treated as current verification. No production-account
+fixture run should occur until isolation and ownership are established.
+
+The latest actual GitHub Release readback remains v3.0.11. Native CI for 2270
+failed on Windows with only an exit-code annotation and inaccessible raw logs;
+the precise cloud cause is unknown. No current final release or new Store
+submission is established. Prior isolated live-send and pre-send Pause evidence
+remains limited to the specific older installed runtime and test conversations.
+
+## Execution Resumed And Repeated-Enter Closure (2026-11-11 Asia/Shanghai)
+
+The owner explicitly continued the same Windows-first delivery goal after the
+read-only handoff intake. This supersedes the prior freeze's current-action and
+goal-state statements, not its sealed archive or historical evidence. At that checkpoint,
+get_goal6ae9e8a9ea64c4b1ecd6e0ec read active; the newer paused readback above
+supersedes it. No goal mutation or completion claim was made. This tool state does not
+by itself establish a withdrawal of the owner's existing project authorization. The reviewed13 public/source
+files were normally pushed as4698bc6;350ebb4 corrects state60/60, not64/64.
+The new2270e9f commit contains only registration EOF fixture fix,3regressions
+and VALIDATION evidence. Actual push, local HEAD/origin-main and public gh refs
+agree on2270e9fe29eeecb291e06703488fe49d6ffd67b0. The two local handoff edits,
+two fixture test edits and untracked handoff material remain outside the commits;
+none was uploaded. The agent made no new installation, tag, Release or Store
+submission. A separately observed installed candidate and limited live evidence
+are recorded below; production VPN/MCP/IDE/research tasks were not modified.
+
+Independent review found that the new MAIN `!event.repeat` exclusion and the
+legacy equivalent could ignore a trusted held Enter that actually submits the
+prepared exact prompt. First keydown can occur before preparation; the repeated
+keydown then sends after preparation. Both paths must stop refilling while the
+new history receipt is delayed. The correction removes only that exclusion;
+trusted origin, scoped editor, modifier, IME/default-prevented and prompt checks
+remain. Repeated Shift+Enter remains an explicit non-send control case.
+
+- RED: Node test-name `trusted repeated Enter` yielded0pass/2fail; actual official
+  ProseMirror/MV3 cases56 MAIN and57 legacy each confirmed one trusted repeated
+  site submission, then failed after30s awaiting SEND_NOW. They were not setup
+  failures or evidence of the owner's unique original incident. Logs in OS temp:
+  agent-continue-repeat-red-unit.log / -red-main.log / -red-legacy.log.
+- GREEN: `node --test tests/editor-commit-tests.mjs`104/104, nofail/skip. Scoped
+  `TEST_PM_CASES=56,57 node tests/prosemirror-keyboard-tests.mjs`2/2. The added
+  path assertion confirms56 exposes MAIN view and57 uses legacy. Local fixtures
+  use delayed800ms history and verify manualCount1/extensionCount0/no refill.
+  They are not live ChatGPT/Dot, foreground-policy or Windows-admin acceptance.
+- Independent read-only spec/quality review of four exact inputs found0Critical/
+  Important and independently reran104/104. Compared with the sealed handoff,
+  editor delta is exactly the removed repeat check; its original seal SHA is
+  71e82f35ce0f69e5e7a14edaa9fba39bdd6ff690beb73c9a02043d41886bab688,
+  current5e59c9825b230020147cd84ed45f51cd789e38ce1d989ea57257070692100f12.
+- Pre-fix current-combination complete `npm test` exited0, including background
+  80/80, state60/60, editor102/102, officialMV3 55/55 and separate browser11/11.
+  Post-fix complete root `npm test` now exits0: editor104/104, background80/80,
+  state60/60, adapter72/72, integration14/14, UI41/41, support59/59, actualMV3
+  57/57 and separate editor browser11/11; codec and Python subprocesses also
+  completed successfully. This run has no TEST_PM_CASES selection. These are
+  full local candidate-suite receipts, not installed or cloud acceptance.
+  OS-temp log agent-continue-20261111-full-npm-after-repeat.log.
+- Full current native `npm --prefix native/desktop-commander test`:285total,
+  281pass/0fail/4explicit skips (Unix core probe plus three Linux process-observer
+  cases). Bootstrap full now exits0:297total/281pass/0fail/16explicit skips.
+  Those skips are the11blocked custom-EXE cases,1blocked fresh-import probe,
+  platform/offline-cache exclusions; no skipped case is passed. Its actual
+  disposable HKCU create-only/Unicode fixtures reported exact-key cleanup;
+  no Chrome native registration or production key was modified. Both
+  Defender opt-ins and TEST_PM_CASES remain unset in the parent/full runs.
+- `node --test tests/hosted-windows-launcher-tests.mjs`:12total,11pass/0fail/1skip
+  (no fresh real-kit input),42058ms. This does not erase failed cloud run
+  42875069957 or prove all three15s timeouts fixed. Existing fixture snapshot
+  repairs the Microsoft-directory ZIP pollution only; cloud reproduction needed.
+- Standard `git diff --check` reports the existing CRLF adapter lines as trailing
+  whitespace. Explicit `git -c core.whitespace=cr-at-eol diff --check` exits0.
+  No repository/global Git configuration changed and no full-file EOL rewrite.
+- Extracted Store ZIP complete actualMV3 suite now passes57/57, exit0 with
+  EXTENSION_ROOT set to OS-temp agent-continue-20261111-extracted-lcxo543s and
+  no TEST_PM_CASES filter; log agent-continue-20261111-extracted-mv3.log. Fresh
+  runtime-only pair has252entries each, CRC clean, verified normalized-source
+  equality (package.py intentionally converts CRLF to LF) and exact extraction.
+  Descriptor is null, so this is not yet the complete setup-linked release pair.
+- Standalone `python -m unittest discover -s tests -p test_*.py -v`206total,
+  161pass/0fail/45explicit skips,89.192s. Includes packaging, combined delivery,
+  readback and workflow source tests; missing pwsh7/platform fixtures are not pass.
+- Earlier in-app ChatGPT login handoff returned human-locked. The owner explicitly
+  authorized takeover and supplied signed-in Dot/GitHub/Store3.0.11 screenshots,
+  then reported no return-control button; screenshots confirm no such button.
+  Do not repeat that unsupported UI instruction. Computer Use identified TRAE
+  Settings/Browser default as System Browser with Chrome connected; changed to
+  Built-in Browser through the real dropdown and verified by owner screenshots.
+  No browser-data clearing, restart, logout or independent ChatGPT-app task change.
+  Before this switch, browser_lock returned native-mode no-op, a numeric tab list
+  exposed another ChatGPT page and one new homepage was opened there (no send or
+  existing-task modification). This is not verified in-app control; do not retain
+  the earlier claim of no external browser action. After the switch, the owner's
+  new /goal continue triggered one tabs read: explicit human-locked refusal again.
+  Stopped browser tools immediately; no channel bypass. Routing/control recovery
+  remains a tool blocker, not missing user permission. No cookies/credentials read
+  or current installed-extension/platform-tools acceptance.
+- gh/winget absent from PATH; bounded existing-install searches found no gh.
+  No package or credential installed/read. GitHub Actions remote log/Release
+  readback and publication still need an authorized CLI plus authentication.
+
+- Fresh source-only preview built using build-windows-preview-kit.py (its
+  `--output` is a directory, not a ZIP filename; corrected the first wrapper's
+  directory-read error, did not weaken a security refusal). Actual nested ZIP
+  agent-continue-20261111-fresh-preview-nwpwodre/agent-continue-windows-preview-kit.zip/
+  agent-continue-windows-preview-kit.zip:665352bytes/351entries,
+  SHA256e28d55c25112ba89b023cf920512235dc2847b609cf8c937c34b748b2b768bc4,
+  CRC clean. With exact AGENT_CONTINUE_HOSTED_PLAN_TEST_KIT, full hosted
+  launcher suite now12pass/0fail/0skip,42942ms. This closes the local real-kit
+  Plan skip only; no real installation/activation or fresh cloud timeout receipt.
+- Existing pinned Node22.23.4 and tunnel0.0.19 official archive bytes found and
+  independently hashed; shared npm cache is2.25GB, above builder768MiB maximum.
+  Do not raise that limit, copy all user cache into a product or mutate it. Next
+  Created OS-temp agent-continue-20261111-lockcache-RCMCTr using cacache's
+  read-by-integrity/put APIs:567 exact Windows lockfile tarballs,41837976bytes,
+  no network or shared-cache writes. Two platform-optional wasm tarballs are
+  absent; npm's normal optional handling remains, with no lockfile edits.
+  Fresh administrator-bundle build completed under OS-temp
+  agent-continue-20261111-fullsetup-qi0b68m7:107072529bytes/24328files,
+  SHA2569f3ca795f8e396eca554f03bdadcd2fbeffa6b103de46a1879825ed99a767ece.
+  stagerPlan=true, protectedFilesVerified=false, activated=false. Its actual
+  administrator-build.log and combined-build.log are retained. No installation,
+  elevation, configuration, registration or daemon activation occurred.
+- The same root's combined/ six-asset closure verifies as v3.0.12, built and
+  combinedBuilt true, deliveryContract combined-public, administrator bundle
+  and stager Plan verified, installed/published false. packages/ holds a paired
+  setup-linked252-entry GitHub/Store candidate; normalized inventories and CRC
+  agree. Extracted-store complete MV3 passes57/57 with no case filter; log
+  agent-continue-20261111-final-combined-mv3.log. Source descriptor null is not
+  the projected descriptor in this pair. README, README.zh-CN, VALIDATION and
+  PRIVACY changed afterward, making this old packages/ pair stale. Its subsequent
+  packages-current-20261111 replacement was verified then and is itself superseded
+  by the corrected packages-main-350ebb4 below; neither older pair is final.
+- npm package's earlier115total/114pass/1fail windows_release_metadata is closed,
+  not the current gate status. Both fresh v3.0.12 and old gitignored v3.0.6 were
+  independently valid; expected-new check at windows-release.mjs:162 correctly
+  rejected reusing old output. The exact old7-file closure was verified, then
+  atomically renamed to D:/Desktop/AgentContinue-Transient-20261111-suKSTb/
+  windows-release-v3.0.6, preserved without deletion. No validator/guard changed.
+  Fresh prepack and actual root tarball/runnable CLI now pass complete package
+  gate115/115,0fail/skip,exit0,82859ms; command-execution log
+  4365e034c041537ad6be8b59babe615a/output.log. Newly generated7 files validate
+  against the original new builder receipt, not a fabricated attestation.
+- Prior public-document/source pair (superseded by main350ebb4 below) was built in
+  packages-current-20261111 under
+  the same fullsetup root: GitHub2839171B/SHA256
+  90a6215422eca4dd701c63abbc4eb4ba59856241f3489228fc4d8c687403f284;
+  Store2832115B/SHA256
+  621f0d0d231b1b47098749544de27645b3914aff2582f2c36c26520164ba0827.
+  All252 members matched the then-current LF-normalized source, manifest key
+  removal and verified setup-entry projection; pair/CRC and exact extraction
+  agree. Complete extracted-store-current-20261111 MV3 now passes57/57, exit0
+  (command09160faf6b6a9948733bd880f6bac2b9). Native-release53/53 and Windows
+  signing-process checks8/8 pass0fail/skip, command8f3760d12a99c14bf861c035f2fcd788.
+  Independent read-only reviewer9ef60f45 completed: both valid generations, fresh
+  generated closure against original receipt, actual115/115 tarball/CLI and all
+  252 normalized pair members/hashes agree. Relevant production validation was
+  not weakened. This is not custom-EXE signing, installation or publication.
+- The owner subsequently explicitly selected TRAE-browseruse-external and again
+  continued the original active goal. External connect succeeded. In isolated
+  temporary test tab500170799, a bounded no-tools/no-files smoke prompt was really
+  sent and ChatGPT replied AC-BROWSER-OK at
+  https://chatgpt.com/c/6af39730-3ea0-83e9-8b06-f455ee3dd0f5?temporary-chat=true.
+  History contained the sent prompt and reply, composer cleared and Stop vanished.
+  A normal Temporary chat explanation blocked the first click; after read-only
+  diagnosis, normal Continue dismissed it and only one successful Send occurred.
+  Resume inspection identified that dialog as floating New chat controls
+  (Restore/Expand/Minimize/Dock), not an unknown security prompt; no click.
+  Do not repeat the smoke or touch the original tab500170790's existing Dot task.
+  External web input/send/reply is proven, not candidate3.0.12 installation,
+  extension scheduling/count/Pause, Dot tools or Windows-admin lifecycle acceptance.
+  Built-in human-lock's internal cause remains unknown; do not invent a button,
+  blame owner consent or present this external result as built-in acceptance.
+  That earlier observation had15tracked WIP on c00499f; current source commits
+  4698bc6/350ebb4 are now pushed, with only the two local handoffs still modified.
+
+- Current external Chrome UI now establishes installed identity: pid50480,
+  window331704, enabled Agent Continue3.0.12, IDkpjgmkakklpdhjmbfahlkffgkcphebkc,
+  Source Unpacked extension, Loaded from [Develop]/agent-continue-main. Despite
+  the same version, LF-normalized background.js/adapter.js/editor-commit.js all
+  differ from the current candidate; setup-entry-release.js is still null. Do
+  not claim the current fix is already deployed. Existing console is Paused,
+  confirmed0, configured prompt3566characters and in-flight cancellation unknown;
+  only observed, never edited/resumed/reloaded. Load unpacked folder chooser was
+  prepared at pid199152/window41422602 with the exact current extracted-store
+  path. Select Folder was NOT clicked and no installation occurred. The later
+  goal-continuation message did not explicitly answer that action-time question;
+  Cancel closed our chooser normally and Chrome extensions page was read back.
+  Do not retain a stale open-modal state. A future installation still requires
+  action-time confirmation. Candidate manifest has no development key; use a separate test
+  instance, preserve old instance/config/tasks and do not auto-grant native/admin.
+- Finite independent continuity review96a944ce covered the five current records,
+  found no substantive contradictions and identified two ambiguous old-package
+  rebuild statements, now clarified. It did not audit all historical semantics.
+
+- Subsequent goal continuation did not install anything. Read-only live-page
+  checks found the current ordinary ChatGPT ProseMirror and existing modern
+  search-unit/message-ids selectors match editor1/user1/assistant1. The assistant
+  has its ID repeated twice; existing first-token key handling covers that shape.
+  No new send or extension dispatch was performed. That earlier Store252-member
+  inspection matched the then-current source/extraction at SHA
+  621f0d0d231b1b47098749544de27645b3914aff2582f2c36c26520164ba0827;
+  main350ebb4's package below supersedes it after the count correction. Both local
+  handoff documents are excluded, so their edits alone do not invalidate a package.
+- Cloud42875069957 original logs remain unavailable; read-only review8419 traced
+  the summarized three Start failures to the test's15000ms spawnSync watchdog,
+  not the production installer's180s/5s bounds. A disposable instrumented launcher
+  copy and the existing synthetic installer template ran ordinary/explicit-key/
+  nonzero-child cases with that same15000ms bound:2666/2544/2786ms, all phases
+  complete and exactly one stub invocation each. Nonzero retained the expected
+  manager_start_unconfirmed receipt. Diagnostic script is OS-temp
+  agent-continue-hosted-stage-diagnostic-20261111.mjs; report/stages are under
+  agent-continue-hosted-stage-20261111-nZAyGS. Original launcher SHA
+  f49d0c65f927625ff1675fb172abd3c9281faed27d087cba67eda62ce69ca1e8 was unchanged.
+  No real installation/connection/elevation/registration or raw key output.
+  Independent reviewe025 found no blocker but correctly limited comparability:
+  instrumented local partial assertions are not a new full12/12 run, cloud-root
+  cause proof or repaired CI. Do not raise watchdogs or blindly retry real Starts.
+
+- Latest external Chrome Computer Use readback of Store item
+  jpioilmpbolfokedaefmbfbjeaahfdkl shows Pending review. Package Information has
+  Draft3.0.11 and Published2.1.0, English default with Chinese available. Upload new
+  package and Submit for review are disabled. The ordinary explanation says
+  "You may not edit or publish an item that is in review." Its OK was normally
+  dismissed. No withdrawal, rollback,3.0.12 upload or new submission occurred;
+  external readback is not an in-app submission receipt. Do not call3.0.11 the
+  currently published Store version or withdraw it merely to unlock an upload.
+- Independent coexistence review7205 completed: distinct extension IDs isolate
+  storage/alarms/ISOLATED state, not the page-wide MAIN
+  Symbol.for('agent-continue.editor-commit.v1') Map. Tokens do not include an
+  extension ID. Old observers are document/editor/page-bound, but this does not
+  confirm cancellation of the old pending dispatch. A new ID is not proof of
+  complete isolation. Use new project-owned test pages only; preserve original
+  prompts/tasks and do not overwrite native registration for a new ID. All prior
+  research agents have returned; none remains in flight.
+
+- A further independent current-record review9032 found no substantive conflict
+  in its five input records. Subsequent evidence opened a new delivery path:
+  official gh2.102.0 portable ZIP checksum and Valid GitHub, Inc. Authenticode
+  were verified under OS-temp agent-continue-gh-portable-20261111-fd1e0e00.
+  No system installation/PATH change/new OAuth/raw-token output occurred.
+  Isolated-config public gh API readback confirms remote main c00499f and latest
+  Release v3.0.11, published2026-11-10T09:04:28Z. Normal gh auth status has no
+  logged-in hosts. Original Windows job130036074423 logs returned403 requiring
+  repository admin; its public check annotation supplies only exit1. No retry or
+  alternate channel bypassed that response. Existing Git authentication passes
+  noninteractive push --dry-run origin main, exit0/Everything up-to-date; that
+  earlier dry-run was not an actual push. Actual main pushes followed as
+  recorded above. release.yml is tag-triggered and uses job GITHUB_TOKEN for
+  gh release create after strict main/source/sidecar/npm/browser gates; an existing
+  Git new-tag push is a possible later release path without new personal OAuth.
+  No tag was pushed or release workflow triggered; real acceptance still gates it.
+- Privacy form was read without editing/saving: single purpose and all seven
+  permission justifications distinguish the extension-bound lifecycle bridge
+  from official-tunnel file/shell/process execution and from installation/OS/chat
+  approvals. The owner's screenshot confirms User activity, Website content and
+  the three limited-use certifications checked; missing UIA toggle values cannot
+  establish other checkbox states. Its policy URL is the project's Pages privacy
+  page. Initial WebFetch returned the older11-10body; after the main push, a normal
+  no-cache curl response's entire privacy-content, HTML-unescaped, matches
+  350ebb4:PRIVACY.md byte-for-byte, including11-11/held-repeated Enter. Policy
+  SHA256683b4ff482b4b04e63d377cef60ff05199a8775508cc127addda9dbed13aa4e3;
+  report privacy-pages-after-main-verification.json under the temp gh root.
+  Hosted-policy content parity is now proven, not a Store submission. No form
+  field was changed, saved or submitted.
+
+- Main350ebb4 replacement pair is now built under packages-main-350ebb4 in the
+  fullsetup root. GitHub ZIP2839170B/SHA256
+  fcdcdf97b9b57a91e5a8a8c0bb2518f8d26b68cf94304428328f51522f5372dd;
+  Store ZIP2832114B/SHA256
+  368cfc56bc3df9d4c909d136fd216c8a6630d854f4d74fea0bed3866e59c3867.
+  packages-main-350ebb4-verification.json confirms252members, pair equality,
+  CRC/exact extraction, tracked members matching commit under declared text/
+  manifest/entry transforms, and derived vendor assets matching the committed
+  188-item reviewed hash inventory. Vendor SOURCE.json retains checkout CRLF;
+  its JSON/LF bytes equal commit. Not all vendor binaries are directly tracked.
+  Extracted-store-main-350ebb4 complete official ProseMirror/MV3 passed57/57,
+  exit0, command9aa6b796613614b2fcfce6db2164ba4f. Its later observed installation
+  is recorded below; the agent did not install it and this package was not published.
+- The retained full npm log and fresh direct runs establish editor104/104,
+  background80/80 and state60/60, not64/64. Node --test interpreted an absolute
+  path with [Develop] as a glob and once found0tests; that is not acceptance.
+  Direct Node absolute-file execution ran all104. Shell cwd also once resolved to
+  System32 despite the requested bracketed path; use absolute files/explicit
+  child-process cwd, not an assumed shell location. No source fix was needed.
+- Extension CI42926200779 on350ebb4 and42925907586 on4698bc6 are completed/success.
+  Pages42925907401 on4698bc6 also succeeded. Native42925907434 on4698bc6 completed
+  failure at2026-11-11T00:05:27Z; macOS/Ubuntu succeeded. Windows job130212190276
+  completed failure at00:05:26Z: step18 hosted launch/preflight succeeded
+  (23:57:45Z–23:59:19Z), step19 guided browser-managed registration/standalone
+  control failed, and later gates were skipped. Public run/check/annotation reads
+  establish failure but only report Process completed with exit code 1; the
+  failing case, stderr and root cause remain unknown. This is not proof of the
+  older15s failure's cause. Original log403 was not bypassed. Read-only watch
+  commande09d2cb9fbf46ef5f0e0f2002ea438c2 ended exit1; no task is in flight.
+  The sole4698bc6..350ebb4 change is VALIDATION.md; native filters did not create
+  a350ebb4 run. Preserve exact-SHA attribution. Current investigation follows
+  tunnel.test.mjs, guided-conpty.py and the loopback preload. Local targeted
+  guided-installer-chromium passes1/1 exit0 (~45s), isolated headless Chromium and
+  loopback only, no production credentials. Browser-managed baseline and controls
+  runs fail at tunnel.test.mjs461 JSON.parse: foreground installer exit0 but only
+  256 receipt characters. Content-free register-stage observation sees10/256-byte
+  chunks, no VT, endsJsonObject=false. A temp socket-method assignment was rejected;
+  its reader proxy corrects that diagnostic-only error. Continuing the same stream
+  after foreground exit observes another103 bytes and a complete358-character
+  receipt, proving local early-return loss, not an installer-operation retry.
+  New commit2270e9fe29eeecb291e06703488fe49d6ffd67b0 fixes only register-stage EOF
+  draining, adds3regressions and updates VALIDATION. Unit RED18/2fail becomes18/18;
+  uninstrumented real browser-managed1/1 and both step19modes2/2 pass exit0.
+  Complete Python209total/164pass/0fail/45explicit skips. Independent9cc9 review
+  found no Critical/Important/Minor and reran18/18. Adjacent guided paired PowerShell
+  and cold CMD modes also pass2/2 exit0, log guided-paired-cmd-after-register-eof.log;
+  fresh documentation/setup-entry tests36/36. Existing deadline,64KiB,
+  strict validation, detached-close and fixture protections remain unchanged.
+  This proves the local cause/fix, not the older cloud's unobserved stderr.
+  Normal push and public gh ref confirm2270e9f HEAD/origin/remote. Read-only watch
+  command1f3f1ff4c4cd7b412533d35ec67e3aaf then ended exit1 from anonymous API rate
+  limit403 at00:37:22Z, not a CI-failure verdict. Last Windows130233530004 was at
+  step13; Ubuntu/macOS success. Subsequent jobs jq quoting failed with function
+  not defined failure/0; Extension then read in_progress. Later read-only evidence
+  at 2026-11-11 09:16 Asia/Shanghai showed Extension42932220247 success and Native
+  still running. Later readback at09:30 found Native42932220167 failure: Ubuntu and
+  macOS success, Windows130233530004 failed at step41 `Verify Chromium startup and
+  native port recovery`. Annotation only says exit1; the job log endpoint returned
+  403, so the precise cloud case/error remains unknown. No Release/tag or Store mutation.
+
+- Independent source inspection found two real-background Chromium fixtures
+  omitted `editor-commit.js` and `delivery-diagnostics.js`. RED fixed-name copy
+  checks failed, then both lists were amended. Startup fixture also had a separate
+  safety risk: the full worker could probe the fixed administrator host. The host
+  is registered under HKLM Chrome64 on this machine; a read-only manifest check
+  found one exact allowed origin without a wildcard. A prior local run occurred
+  before this risk was found; the manifest check limits risk but does not prove
+  whether the lookup was attempted. No production host operation is asserted.
+  The two fixture copies now remap wake/admin/setup and standard device host names
+  to random fixture names; original registration and product code are unchanged.
+  Independent review found no confirmed blocking issue in this scoped diff, while
+  noting fixed-name dependency tests do not ensure future transitive closure and
+  existing exceptional cleanup is not fully proven. Local exact seven-file CI
+  command passed151/151,0fail/skip; a second rerun at that earlier snapshot passed151/151 with
+  Windows browser recovery at30304ms and both administrator Chromium cases.
+  Subsequent fixture cleanup edits and ownership findings supersede that snapshot;
+  those results are not verification of the current working tree.
+  The HKCU Chromium fixture-host prefix readback found0 remaining. Earlier isolated
+  cases passed separately. A proposed exceptional-cleanup helper was independently
+  found incomplete and removed, preserving the existing behavior and known limitation.
+  This is local fixture evidence, not the unavailable cloud error or hosted/admin
+  acceptance. Two test files are uncommitted; do not assume they are on main.
+
+- Independent source/combined-byte review83e35051 returned:62tracked files plus
+  188reviewed vendor-inventory entries cover252ZIP members;21runtime,26bootstrap/
+  installer source and8administrator-side files match main under declared
+  transforms. Combined six hashes match. Original build receipts contain no
+  sourceRevision, so the claim rests on actual byte closure, not a version or
+  stale revision label. Reviewer's offline policy comparison proves its supplied
+  snapshot only; the separate fresh HTTP response above supplies online evidence.
+  Remote publication is separately established by actual push and gh refs, not
+  the reviewer's local origin/main. All reviewers are returned.
+- Chooser pid88704/window36833608 previously held extracted-store-main-350ebb4;
+  the agent never clicked Select Folder or received an explicit answer. Fresh
+  Computer Use now reports that pid not running. Chrome50480/window331704 remains
+  on the old kpjg extension detail, with TeamViewer foreground; no focus/click was
+  taken then. Subsequent real Chrome Details identifies the second instance as
+  cbobmgplbipnobbllnmbaohjmcdncgnp, enabled3.0.12, Unpacked loaded from the exact
+  fullsetup/extracted-store-main-350ebb4 directory. Agent did not install it;
+  installer identity/time is unknown. All252deployed files equal350ZIP; only
+  VALIDATION.md differs from2270ZIP, so every runtime member is byte-identical.
+  This permits runtime acceptance, not a claim the whole latest2270package is
+  installed. Its options page is Not started/Confirmed0/no bound target, before
+  any test configuration. Only this cbob instance then received164-char owned
+  test prompt AC-LIVE-2270-ONE (exact echo, no tools/files), dedicated temporary
+  c/6af39730-3ea0-83e9-8b06-f455ee3dd0f5 target,1minute/confirmed limit1/no immediate
+  first send. Check page found composer without typing/sending. Actual Start is
+  Running/Bound/Tab protection Enabled; the first1min scheduled receipt is now
+  proven. Target visibility hidden, users/assistants1/1→2/2, exactly one test user
+  and exact AC-LIVE-2270-ONE-OK, composer0/busyfalse. Console confirmed1, limit1
+  automatically Paused/Timer not started/Tab protection Not started. No SendNow
+  or manual send of that marker. This is one ordinary ChatGPT runtime background
+  scheduling/count/limit-pause receipt, not Dot/manual-takeover/admin/reopen.
+  Old kpjg/prompt/native/original Dot remain unchanged. Do not retain old chooser
+  as currently prepared. New main's VALIDATION changes invalidate350ebb4
+  as the final package; packages-main-2270e9f built exit0 and verified exact
+  closure:252members/pair/CRC/committed transforms/
+  vendor reviewed inventory/projected entry/exact extraction all agree.
+  GitHub2839443B SHA38d03477f31b0bd140c768b6f898777726aa04eea8091cdd72861174b6bb7a3f;
+  Store2832387B SHA503d166416f7908669728a07b9408082941fe760c9594c9502ae33f21ebbc15f.
+  extracted-store-main-2270e9f complete actual MV3 gate finished57/57 exit0,
+  no TEST_PM_CASES filter, command48322a40a17778ef5c58f01fd41f5f64/log fullsetup
+  root/extracted-main-2270e9f-mv3.log. The complete2270 package was not verified
+  as installed; the limited runtime-equivalent live acceptance is recorded above.
+  Older350and earlier pair remain preserved but are not final uploads.
+  Reobserve actual installed identity before any necessary
+  action-time installation consent. Preserve old prompts/tasks/native binding.
+
+- On the next continuation the prior manual-pause attempt was already at its
+  one-send limit; it does not prove pre-due Pause. A new owned temporary chat
+  c/6af3c276-7a6c-83ea-ad85-35bdcb20096c was set up with one manual no-tools
+  message and exact reply. After a no-send page check, the cbob task started
+  at19:21:50 and was manually paused at19:21:51 (browser clock 2026-11-10 -06:00),
+  one-minute interval, limit1, immediate send off. After the due time passed,
+  only the setup user/reply remained, composer empty, no scheduled marker;
+  console remained Paused, confirmed0, Timer not started and tab protection off.
+  This is a pre-dispatch case, not proof of cancelling an in-flight submission.
+  English→Simplified Chinese→English changed visible Settings labels and was
+  restored to English. The older Chrome PID no longer ran; current observed
+  Chrome was6600/window331358. The preceding process change is not a controlled
+  running-intent close/reopen acceptance.
+
+Next: preserve the observed Extension success and Native step41 failure; investigate
+the unobserved cloud case without bypassing403. Review and verify the uncommitted
+fixture changes before any source publication. The2270e9f pair is verified and its exact
+extracted browser gate finished57/57 exit0. Local step19 EOF regression is closed,
+not cloud/installed acceptance. Preserve deadlines/owned-fixture protections.
+The prior chooser is gone and any necessary new installation still requires an
+explicit action-time answer; reobserve actual loaded identity first. After consent, identify its
+real installation and verify ordinary ChatGPT/Dot scheduler and Windows-admin/
+Pause/Revoke/reopen on project-owned pages. Preserve old prompts/tasks/native
+registration; separate extension IDs are not complete MAIN isolation proof.
+Store upload needs review-lock clearance or separately authorized withdrawal;
+none was requested/executed. GitHub main source push, npm115/115, current pair,
+new2270extraction MV357/57 and hosted policy parity are evidenced independently
+of prior350receipts. Complete2270 installation, full runtime and administrator
+acceptance remain missing; the limited cbob runtime receipts above do exist.
+New Release/tag/upload/download verification and Store submission receipt remain
+missing. Preserve platform approvals, both unset Defender opt-ins and the sealed
+November10 archive; do not upload old ZIPs, restart Linux/EXE work or complete the
+original goal on source/fixture evidence.
+
+## Consolidated Handoff Freeze (2026-11-10, historical bounded turn)
+
+Start with [the consolidated Chinese handoff](handoffs/2026-11-10-PROJECT-HANDOFF.zh-CN.md)
+and [copy-ready colleague instructions](handoffs/COLLEAGUE-PROMPT.zh-CN.md).
+The owner redirected this turn to handoff preparation, not further feature work.
+HEAD remains c00499f on the sole main branch;10 existing files have uncommitted
+follow-up changes. Current read-only handoff verification exits0: background-v2
+80/80 and editor-commit102/102. This does not replace final combined full npm,
+new native CI, installed live-site or release/Store acceptance.
+
+The activity/health/delivery drain follow-ups below now include latest-barrier
+identity checks and bounded health-write coalescing. The editor review's two
+fixes are implemented, with focused RED/GREEN reports; they are not still only
+proposals. The original goal most recently reads usageLimited, not complete,
+not active and not user-paused. No goal status mutation, commit/push, new
+installation, release or Store submission is performed by this handoff freeze.
+
+## Follow-up Sending-Authority Review (2026-11-10)
+
+The c00499f Extension checks run42875070408 completed successfully. Its separate
+Windows native run42875069957 FAILED hosted-launcher preflight: three local stub
+Starts exceeded their15s child-test watchdog, then fixture archive preparation
+tried to include an incidental Microsoft directory as a file. The same command
+passed locally11 tests/1 skipped in41s; this does not erase the CI failure or
+prove its complete cause. Additional fixes below are not covered by that SHA's
+CI. Store was actually inspected in the built-in browser this turn:3.0.11 is
+Pending review, signed in, English default. No review cancellation or new upload.
+
+Legacy activity persistence had a separate blocking defect even after the new
+delivery journal was decoupled. Two new tests failed RED: a log rejection made
+an already committed Start return failure; a never-returning log write retained
+the completed send response and the shared Pause queue. Activity now drains on
+its own bounded queue, with a250ms observation-only limit, fixed degradation
+health, captured event time and clear epochs. Preparation/send waits remain
+unlimited. Background74/74 and state60/60 pass locally, including late-write
+clear/new-record preservation and immediate Start with a pending log read.
+The RED receipt is .artifacts/activity-blocking-red.log; focused GREEN receipt
+is .artifacts/activity-blocking-green.log. This is not proof that log storage
+was the owner's specific live-page failure.
+
+Independent editor review additionally reproduced non-send Enter falsely
+latching manual submission, and same-text remount reusing the old editor's
+prepared marker while omitting notifications needed by the replacement model.
+Those two corrections and real-MV3 regressions are in progress. Do not publish
+the earlier paired3.0.12 bytes as though they contain these follow-up repairs.
+
+The supported browser API explicitly rejected a chrome-extension protocol
+read in this turn. Do not use native GUI, CDP, profile edits or an alternative
+surface to bypass that refusal. This is not absent user consent or a claim
+that the built-in browser is unavailable. Installed extension-button/lifecycle
+proof remains separate from local fixtures and current Store metadata.
+
 ## Active Core Scheduler Repair and Diagnostics (2026-11-10)
 
 The newest owner screenshots report a prepared prompt left unsent, a zero

@@ -1,6 +1,8 @@
 # Capabilities and Roadmap
 
-Updated: 2026-11-02. Baseline: committed v2.2.0 source.
+Updated: 2026-11-02. Baseline: committed v2.2.0 source. The uninstalled later
+source candidate pauses unknown submissions pending user review; see
+[Mandatory Composer Priority](COMPOSER-PRIORITY.md) for that candidate.
 
 This page describes source capabilities, not store approval, publication, or the version installed in a browser. Device-control, setup/onboarding, and native-messaging candidates remain unshipped and outside this baseline; stable v2.2.0 does not request `nativeMessaging`.
 

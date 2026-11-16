@@ -35,6 +35,20 @@ window.fixture = {
 };
 let editor = document.querySelector('#prompt-textarea');
 let send = document.querySelector('[data-testid="send-button"]');
+const logicalText = root => {
+  const blocks = new Set(['DIV', 'P']);
+  const read = node => {
+    if (node.nodeType === Node.TEXT_NODE) return node.data;
+    if (node.nodeName === 'BR') return '\n';
+    const children = [...node.childNodes];
+    if (children.length === 1 && children[0].nodeName === 'BR' && (node === root || blocks.has(node.nodeName))) return '';
+    return children.reduce((text, child, index) => {
+      const boundary = index > 0 && (blocks.has(child.nodeName) || blocks.has(children[index - 1].nodeName));
+      return text + (boundary ? '\n' : '') + read(child);
+    }, '');
+  };
+  return read(root);
+};
 const handleInput = () => {
   fixture.inputEvents++;
   send.disabled = !editor.innerText.trim();
@@ -43,7 +57,7 @@ const handleInput = () => {
 editor.addEventListener('input', handleInput);
 function submitFixtureMessage() {
   fixture.sendClicks++;
-  const text = editor.innerText;
+  const text = logicalText(editor);
   fixture.sentTexts.push(text);
   if (!fixture.acknowledge) return;
   let acknowledged = false;

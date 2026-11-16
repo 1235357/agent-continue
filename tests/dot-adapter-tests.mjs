@@ -1,6 +1,7 @@
 // Synthetic Dot DOM matching observed structural attributes. No real messages,
 // user attachments, signed-in sessions, or live ChatGPT network calls are used.
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -26,6 +27,20 @@ body { font: 16px sans-serif; padding: 20px; } [contenteditable] { min-height: 1
 window.fixture = { checks: 0, sends: 0, stops: 0, inputs: 0, beforeInputs: 0, requiresBeforeInput: false, beforeInputAccepted: false, frameworkReplacements: 0, actions: [], remounts: 0, allowed: true, cancelOnInput: false, cancelOnStop: false, idPlacement: 'both', acknowledgement: 'new', switchIdentityAtCheck: null, whitespaceAtCheck: null, cancelWithWhitespace: false, modifiedDraft: null, clipboardCalls: 0, focusCalls: 0, sentTexts: [] };
 let editor = document.querySelector('[data-composer-markdown]');
 let send = document.querySelector('button[aria-label="Send"]');
+const logicalText = root => {
+  const blocks = new Set(['DIV', 'P']);
+  const read = node => {
+    if (node.nodeType === Node.TEXT_NODE) return node.data;
+    if (node.nodeName === 'BR') return '\\n';
+    const children = [...node.childNodes];
+    if (children.length === 1 && children[0].nodeName === 'BR' && (node === root || blocks.has(node.nodeName))) return '';
+    return children.reduce((text, child, index) => {
+      const boundary = index > 0 && (blocks.has(child.nodeName) || blocks.has(children[index - 1].nodeName));
+      return text + (boundary ? '\\n' : '') + read(child);
+    }, '');
+  };
+  return read(root);
+};
 window.setIdentity = prefix => {
   for (const node of document.querySelectorAll('[data-message-id]')) {
     const parts = node.getAttribute('data-message-id').split('~');
@@ -60,7 +75,7 @@ const onInput = () => {
 const onSend = () => {
   fixture.sends++;
   fixture.actions.push('send');
-  const text = editor.innerText; fixture.sentTexts.push(text); editor.textContent = ''; send.disabled = true;
+  const text = logicalText(editor); fixture.sentTexts.push(text); editor.textContent = ''; send.disabled = true;
   if (fixture.acknowledgement === 'new') appendMessage(text, 'acct~dot~Msg~new-' + fixture.sends);
   if (fixture.acknowledgement === 'clone-old') {
     const old = document.querySelector('article.message-row.self');
@@ -118,6 +133,32 @@ async function scenario(name, callback) {
 }
 
 try {
+  for (const [name, html, editorSelector, buttonSelector, receiptSelector] of [
+    ['Dot', fixture, '[data-composer-markdown]', 'button[aria-label="Send"]', 'article.message-row.self:last-child .message-body'],
+    ['ChatGPT', await fs.readFile(path.join(here, 'fixture.html'), 'utf8'), '#prompt-textarea', '[data-testid="send-button"]', '#history [data-message-author-role="user"]:last-child'],
+  ]) {
+    await scenario(name + ' fixture sends logical text rather than rendered newline artifacts', async ({ page }) => {
+      await page.route('**/*', route => route.fulfill({ status: 200, contentType: 'text/html', body: html }));
+      await page.goto(expectedUrl);
+      for (const [markup, text] of [
+        ['<p>First line</p><p>Second line</p>', 'First line\nSecond line'],
+        ['<p>First line</p><p><br></p><p>Second line</p>', 'First line\n\nSecond line'],
+        ['<p>First line</p><p><br></p>', 'First line\n'],
+      ]) {
+        const state = await page.evaluate(({ markup, editorSelector, buttonSelector, receiptSelector }) => {
+          const editor = document.querySelector(editorSelector);
+          editor.innerHTML = markup;
+          const rendered = editor.innerText;
+          editor.dispatchEvent(new InputEvent('input', { bubbles: true }));
+          document.querySelector(buttonSelector).click();
+          return { rendered, sent: fixture.sentTexts.at(-1), receipt: document.querySelector(receiptSelector)?.innerText };
+        }, { markup, editorSelector, buttonSelector, receiptSelector });
+        assert.notEqual(state.rendered, text);
+        assert.equal(state.sent, text);
+        assert.equal(state.receipt, text);
+      }
+    });
+  }
   await scenario('Equivalent paragraph rendering after fill submits the unchanged draft exactly once', async ({ page, args }) => {
     await page.evaluate(() => {
       const editor = document.querySelector('[data-composer-markdown]');
@@ -135,6 +176,7 @@ try {
     assert.equal(state.presentationChanged, true);
     assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
     assert.equal(state.sends, 1);
+    assert.equal(await page.evaluate(() => fixture.sentTexts[0]), 'Alpha\nBeta');
   });
 
   await scenario('Explicit extension priority replaces existing and later text, and Auto uses one usable Dot button', async ({ page, args }) => {
@@ -167,27 +209,147 @@ try {
     assert.equal(await page.evaluate(() => fixture.sends), 1);
   });
 
-  await scenario('A page that restores other text after every fill still receives the configured prompt exactly once', async ({ page, args }) => {
+  await scenario('A slow continually restored composer never dispatches the wrong draft', async ({ page, args }) => {
     await page.evaluate(() => {
+      let measured = 0;
+      Object.defineProperty(performance, 'now', { configurable: true, value: () => measured });
       const editor = document.querySelector('[data-composer-markdown]');
-      fixture.restores = 0;
       editor.addEventListener('input', () => {
-        setTimeout(() => {
-          if (fixture.sends) return;
-          fixture.restores++;
-          editor.textContent = 'Composer state restored by the page';
-        }, 10);
+        measured += 3000;
+        editor.textContent = 'SYNTHETIC_PAGE_RESTORE';
       });
     });
-    const configured = 'Send this configured text only';
-    const outcome = await page.evaluate(pageAction, {
-      ...args, prompt: configured, runDeadline: Date.now() + 1800,
-    });
-    const state = await page.evaluate(() => ({ restores: fixture.restores, texts: fixture.sentTexts }));
-    assert.ok(state.restores > 0, 'the page must change the text before dispatch');
-    assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
-    assert.deepEqual(state.texts, [configured]);
+    const outcome = await page.evaluate(pageAction, { ...args, prompt: 'SYNTHETIC_SLOW_WRITE' });
+    const observed = await page.evaluate(() => ({ inputs: fixture.inputs, sends: fixture.sends, text: document.querySelector('[data-composer-markdown]').textContent }));
+    assert.equal(outcome.status, 'blocked');
+    assert.equal(outcome.diagnosticCode, 'composer-slow-write');
+    assert.equal(outcome.diagnosticProgress.counters.domWrites, 2);
+    assert.equal(outcome.diagnosticProgress.counters.dispatchAttempts, 0);
+    assert.equal(outcome.diagnosticProgress.timings.maxDomWriteMs, 3000);
+    assert.deepEqual(observed, { inputs: 2, sends: 0, text: 'SYNTHETIC_PAGE_RESTORE' });
   });
+
+  await scenario('A slow matching insertion still sends once when the composer remains ready', async ({ page, args }) => {
+    await page.evaluate(() => {
+      let measured = 0;
+      Object.defineProperty(performance, 'now', { configurable: true, value: () => measured });
+      document.querySelector('[data-composer-markdown]').addEventListener('input', () => { measured += 3000; });
+    });
+    const outcome = await page.evaluate(pageAction, { ...args, prompt: 'SYNTHETIC_SLOW_READY' });
+    const observed = await page.evaluate(() => ({ inputs: fixture.inputs, sends: fixture.sends, texts: fixture.sentTexts }));
+    assert.equal(outcome.status, 'sent');
+    assert.equal(outcome.diagnosticProgress.counters.domWrites, 1);
+    assert.equal(outcome.diagnosticProgress.counters.dispatchAttempts, 1);
+    assert.deepEqual(observed, { inputs: 1, sends: 1, texts: ['SYNTHETIC_SLOW_READY'] });
+  });
+
+  await scenario('A slow write followed by a busy page records a retryable pre-submit result', async ({ page, args }) => {
+    await page.evaluate(() => {
+      let measured = 0;
+      Object.defineProperty(performance, 'now', { configurable: true, value: () => measured });
+      const editor = document.querySelector('[data-composer-markdown]');
+      editor.addEventListener('input', () => {
+        measured += 3000;
+        const indicator = document.createElement('span');
+        indicator.className = 'typing-indicator';
+        indicator.textContent = 'Synthetic busy';
+        document.body.append(indicator);
+      });
+    });
+    const outcome = await page.evaluate(pageAction, { ...args, prompt: 'SYNTHETIC_SLOW_BUSY',
+      waitForIdle: true, persistentDelivery: true });
+    const observed = await page.evaluate(() => ({ inputs: fixture.inputs, sends: fixture.sends }));
+    assert.equal(outcome.status, 'busy');
+    assert.equal(outcome.retryable, true);
+    assert.equal(outcome.diagnosticProgress.counters.domWrites, 1);
+    assert.equal(outcome.diagnosticProgress.counters.dispatchAttempts, 0);
+    assert.deepEqual(observed, { inputs: 1, sends: 0 });
+  });
+
+  await scenario('A slow matching composer without a Send control never dispatches before cancellation', async ({ page, args }) => {
+    await page.evaluate(() => {
+      let measured = 0;
+      Object.defineProperty(performance, 'now', { configurable: true, value: () => measured });
+      const editor = document.querySelector('[data-composer-markdown]');
+      editor.addEventListener('input', () => {
+        measured += 3000;
+        document.querySelector('button[aria-label="Send"]').remove();
+      });
+    });
+    const outcome = await page.evaluate(pageAction, { ...args, prompt: 'SYNTHETIC_SLOW_NO_SEND',
+      sendMethod: 'button', persistentDelivery: true, runDeadline: Date.now() + 1800 });
+    const observed = await page.evaluate(() => ({ inputs: fixture.inputs, sends: fixture.sends }));
+    assert.equal(outcome.status, 'cancelled');
+    assert.notEqual(outcome.retryable, true);
+    assert.equal(outcome.diagnosticProgress.counters.domWrites, 1);
+    assert.equal(outcome.diagnosticProgress.counters.dispatchAttempts, 0);
+    assert.deepEqual(observed, { inputs: 1, sends: 0 });
+  });
+
+  await scenario('A slow write followed by revoked wait is not classified as an error', async ({ page, args }) => {
+    await page.evaluate(() => {
+      let measured = 0;
+      Object.defineProperty(performance, 'now', { configurable: true, value: () => measured });
+      const editor = document.querySelector('[data-composer-markdown]');
+      editor.addEventListener('input', () => { measured += 3000; });
+      chrome.runtime.sendMessage = async message => message.type === 'WAIT_RUN'
+        ? { ok: true, allowed: false } : { ok: true, allowed: true };
+    });
+    const outcome = await page.evaluate(pageAction, { ...args, prompt: 'SYNTHETIC_SLOW_REVOKED',
+      extensionClock: true, persistentDelivery: true });
+    const observed = await page.evaluate(() => ({ inputs: fixture.inputs, sends: fixture.sends }));
+    assert.equal(outcome.status, 'cancelled');
+    assert.notEqual(outcome.retryable, true);
+    assert.equal(outcome.diagnosticProgress.counters.domWrites, 1);
+    assert.equal(outcome.diagnosticProgress.counters.dispatchAttempts, 0);
+    assert.deepEqual(observed, { inputs: 1, sends: 0 });
+  });
+
+  for (const sendMethod of ['button', 'ctrl-enter']) {
+    await scenario('Persistent text restoration is bounded and a later run can send via ' + sendMethod, async ({ page, args }) => {
+      const configured = 'Send this configured text only';
+      await page.evaluate(() => {
+        const editor = document.querySelector('[data-composer-markdown]');
+        fixture.restores = 0;
+        fixture.restorationActive = true;
+        fixture.keyDispatches = 0;
+        editor.addEventListener('input', () => {
+          setTimeout(() => {
+            if (!fixture.restorationActive) return;
+            fixture.restores++;
+            editor.textContent = 'Composer state restored by the page';
+          }, 10);
+        });
+        editor.addEventListener('keydown', event => {
+          if (event.key !== 'Enter' || !event.ctrlKey) return;
+          fixture.keyDispatches++;
+          document.querySelector('button[aria-label="Send"]').click();
+        });
+      });
+      const outcome = await page.evaluate(pageAction, {
+        ...args, prompt: configured, sendMethod, runDeadline: Date.now() + 1800,
+      });
+      await page.waitForTimeout(60);
+      const state = await page.evaluate(() => {
+        fixture.restorationActive = false;
+        return { restores: fixture.restores, inputs: fixture.inputs, sends: fixture.sends, keys: fixture.keyDispatches, texts: [...fixture.sentTexts] };
+      });
+      const next = await page.evaluate(pageAction, {
+        ...args, prompt: configured, sendMethod, runId: 'synthetic-recovered-round', runDeadline: Date.now() + 12_000,
+      });
+      const recovered = await page.evaluate(() => ({ sends: fixture.sends, keys: fixture.keyDispatches, texts: fixture.sentTexts }));
+      const counters = outcome.diagnosticProgress.counters;
+      assert.ok(state.restores > 0, 'the page must repeatedly restore different text');
+      assert.equal(counters.dispatchAttempts, 0, JSON.stringify({ outcome, state }));
+      assert.deepEqual([state.sends, state.keys, state.texts], [0, 0, []], JSON.stringify({ outcome, state }));
+      assert.notEqual(outcome.status, 'sent', JSON.stringify(outcome));
+      assert.equal(next.status, 'sent', JSON.stringify({ next, recovered }));
+      assert.deepEqual(recovered.texts, [configured]);
+      assert.equal(recovered.sends, 1);
+      assert.equal(recovered.keys, sendMethod === 'ctrl-enter' ? 1 : 0);
+      assert.ok(state.inputs <= 2 && counters.domWrites + counters.modelWrites <= 2, JSON.stringify({ outcome, state }));
+    });
+  }
 
   await scenario('Extension priority cannot submit an attachment-only draft', async ({ page, args }) => {
     await page.evaluate(() => {
@@ -297,6 +459,28 @@ try {
     assert.equal(await page.evaluate(() => fixture.beforeInputs), 1);
     assert.equal(await page.evaluate(() => fixture.sends), 1);
   });
+  await scenario('Moving the selection during beforeinput does not append the initial replacement', async ({ page, args }) => {
+    const configured = 'Configured selection replacement';
+    await page.evaluate(() => {
+      const input = document.querySelector('[data-composer-markdown]');
+      input.textContent = 'Existing draft';
+      fixture.selectionMoves = 0;
+      fixture.inputValues = [];
+      input.addEventListener('beforeinput', event => {
+        if (event.inputType !== 'insertText') return;
+        const range = document.createRange();
+        range.selectNodeContents(input); range.collapse(false);
+        const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
+        fixture.selectionMoves++;
+      });
+      input.addEventListener('input', () => fixture.inputValues.push(input.innerText));
+    });
+    const outcome = await page.evaluate(pageAction, { ...args, prompt: configured });
+    const state = await page.evaluate(() => ({ moves: fixture.selectionMoves, values: fixture.inputValues, texts: fixture.sentTexts }));
+    assert.ok(state.moves > 0, 'the beforeinput handler must move the selection');
+    assert.equal(state.values[0], configured, JSON.stringify({ outcome, state }));
+    assert.deepEqual(state.texts, [configured]);
+  });
   await scenario('A framework-handled beforeinput replacement is submitted once without a second insertion', async ({ page, args }) => {
     await page.evaluate(() => {
       fixture.requiresBeforeInput = true;
@@ -339,6 +523,224 @@ try {
     assert.deepEqual(await page.evaluate(() => fixture.sentTexts), [configured]);
     assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
   });
+
+  await scenario('A trusted manual send of opaque editor content prevents further injection', async ({ page, args }) => {
+    const configured = 'Synthetic opaque manual submission';
+    await page.evaluate(() => {
+      const input = document.querySelector('[data-composer-markdown]');
+      fixture.opaqueWrites = 0;
+      fixture.manualSent = false;
+      fixture.trustedManualClick = false;
+      fixture.writesAfterManualSend = 0;
+      fixture.manualGateWaiting = false;
+      let releaseManualGate;
+      const authorize = chrome.runtime.sendMessage;
+      chrome.runtime.sendMessage = async message => {
+        const reply = await authorize(message);
+        if (fixture.opaqueWrites > 0 && !fixture.manualSent && !fixture.manualGateWaiting) {
+          fixture.manualGateWaiting = true;
+          await new Promise(resolve => { releaseManualGate = resolve; });
+        }
+        return reply;
+      };
+      input.addEventListener('beforeinput', () => {
+        if (fixture.manualSent) fixture.writesAfterManualSend++;
+      });
+      input.addEventListener('input', () => {
+        const opaque = document.createElement('section');
+        opaque.textContent = input.innerText;
+        input.replaceChildren(opaque);
+        fixture.opaqueWrites++;
+      });
+      document.querySelector('button[aria-label="Send"]').addEventListener('click', event => {
+        fixture.trustedManualClick = event.isTrusted;
+        fixture.manualSent = true;
+        releaseManualGate();
+      }, { capture: true, once: true });
+    });
+    const pending = page.evaluate(pageAction, { ...args, prompt: configured, runDeadline: Date.now() + 5000 });
+    await page.waitForFunction(() => fixture.manualGateWaiting && !document.querySelector('button[aria-label="Send"]').disabled, null, { polling: 10 });
+    await page.getByRole('button', { name: 'Send' }).click();
+    const outcome = await pending;
+    const state = await page.evaluate(() => ({ trusted: fixture.trustedManualClick, sends: fixture.sends, texts: fixture.sentTexts, writesAfterManualSend: fixture.writesAfterManualSend, draft: document.querySelector('[data-composer-markdown]').innerText }));
+    assert.equal(state.trusted, true, 'the send must be a trusted user click');
+    assert.deepEqual(state.texts, [configured]);
+    assert.equal(state.writesAfterManualSend, 0, JSON.stringify({ outcome, state }));
+    assert.equal(state.sends, 1);
+    assert.equal(state.draft, '');
+  });
+
+  await scenario('A trusted manual submission of different text returns unknown without reinjection or false confirmation', async ({ page, args }) => {
+    const configured = 'Synthetic configured continuation';
+    const humanText = 'A different message submitted by the human';
+    await page.evaluate(() => {
+      const input = document.querySelector('[data-composer-markdown]');
+      fixture.manualSent = false;
+      fixture.manualTrusted = false;
+      fixture.manualGateWaiting = false;
+      fixture.writesAfterManualSend = 0;
+      fixture.extensionClicks = 0;
+      fixture.extensionKeys = 0;
+      let releaseManualGate;
+      const authorize = chrome.runtime.sendMessage;
+      chrome.runtime.sendMessage = async message => {
+        if (message.type === 'MANUAL_SUBMISSION') return { ok: true };
+        const reply = await authorize(message);
+        if (fixture.inputs > 0 && !fixture.manualGateWaiting) {
+          fixture.manualGateWaiting = true;
+          await new Promise(resolve => { releaseManualGate = resolve; });
+        }
+        return reply;
+      };
+      for (const type of ['beforeinput', 'input']) {
+        input.addEventListener(type, () => { if (fixture.manualSent) fixture.writesAfterManualSend++; });
+      }
+      input.addEventListener('keydown', event => {
+        if (fixture.manualSent && event.key === 'Enter' && !event.isTrusted) fixture.extensionKeys++;
+      });
+      document.querySelector('button[aria-label="Send"]').addEventListener('click', event => {
+        if (!event.isTrusted) fixture.extensionClicks++;
+        else {
+          fixture.manualTrusted = true;
+          fixture.manualSent = true;
+          releaseManualGate();
+        }
+      }, { capture: true });
+    });
+    const pending = page.evaluate(pageAction, {
+      ...args, prompt: configured, persistentDelivery: true, unlimitedReadiness: true, runDeadline: Date.now() + 30_000,
+    });
+    await page.waitForFunction(() => fixture.manualGateWaiting && !document.querySelector('button[aria-label="Send"]').disabled, null, { polling: 10, timeout: 5000 });
+    const editor = page.getByRole('textbox', { name: 'Message' });
+    assert.equal(await editor.innerText(), configured);
+    await editor.fill(humanText);
+    await page.getByRole('button', { name: 'Send' }).click();
+    let watchdog;
+    const outcome = await Promise.race([
+      pending,
+      new Promise(resolve => { watchdog = setTimeout(() => resolve({ status: 'test-timeout' }), 8000); }),
+    ]);
+    clearTimeout(watchdog);
+    await page.waitForTimeout(250);
+    const state = await page.evaluate(() => ({
+      trusted: fixture.manualTrusted, sends: fixture.sends, texts: fixture.sentTexts,
+      writes: fixture.writesAfterManualSend, clicks: fixture.extensionClicks, keys: fixture.extensionKeys,
+      draft: document.querySelector('[data-composer-markdown]').innerText,
+      receipt: document.querySelector('article.message-row.self:last-child .message-body')?.innerText,
+    }));
+    assert.equal(state.trusted, true, 'the manual send must be a trusted user click');
+    assert.deepEqual(state.texts, [humanText]);
+    assert.equal(state.receipt, humanText);
+    assert.deepEqual([state.sends, state.writes, state.clicks, state.keys, state.draft], [1, 0, 0, 0, ''], JSON.stringify({ outcome, state }));
+    assert.equal(outcome.status, 'unknown', JSON.stringify({ outcome, state }));
+    assert.equal(outcome.diagnosticProgress.counters.dispatchAttempts, 0, JSON.stringify(outcome));
+  });
+
+  await scenario('A trusted Send feedback click is not a manual submission', async ({ page, args }) => {
+    const configured = 'Synthetic feedback click regression';
+    await page.evaluate(() => {
+      fixture.feedbackTrusted = false;
+      fixture.feedbackClicks = 0;
+      fixture.manualNotifications = 0;
+      fixture.feedbackGateWaiting = false;
+      let releaseFeedbackGate;
+      const authorize = chrome.runtime.sendMessage;
+      chrome.runtime.sendMessage = async message => {
+        if (message.type === 'MANUAL_SUBMISSION') {
+          fixture.manualNotifications++;
+          return { ok: true };
+        }
+        const reply = await authorize(message);
+        if (fixture.inputs > 0 && !fixture.feedbackGateWaiting) {
+          fixture.feedbackGateWaiting = true;
+          await new Promise(resolve => { releaseFeedbackGate = resolve; });
+        }
+        return reply;
+      };
+      const feedback = document.createElement('button');
+      feedback.type = 'button';
+      feedback.setAttribute('aria-label', 'Send feedback');
+      feedback.innerHTML = '<span>Feedback</span>';
+      feedback.addEventListener('click', event => {
+        fixture.feedbackTrusted = event.isTrusted;
+        fixture.feedbackClicks++;
+      });
+      document.querySelector('[data-composer-body]').append(feedback);
+      window.releaseFeedbackGate = () => releaseFeedbackGate();
+    });
+    const pending = page.evaluate(pageAction, { ...args, prompt: configured, runDeadline: Date.now() + 5000 });
+    await page.waitForFunction(() => fixture.feedbackGateWaiting, null, { polling: 10 });
+    await page.getByRole('button', { name: 'Send feedback' }).click();
+    await page.evaluate(() => window.releaseFeedbackGate());
+    const outcome = await pending;
+    const state = await page.evaluate(() => ({ trusted: fixture.feedbackTrusted, clicks: fixture.feedbackClicks, notifications: fixture.manualNotifications, sends: fixture.sends, texts: fixture.sentTexts }));
+    assert.equal(state.trusted, true, 'the feedback click must be trusted');
+    assert.equal(state.clicks, 1);
+    assert.equal(state.notifications, 0, JSON.stringify({ outcome, state }));
+    assert.equal(outcome.status, 'sent', JSON.stringify({ outcome, state }));
+    assert.equal(state.sends, 1);
+    assert.deepEqual(state.texts, [configured]);
+  });
+
+  for (const sendMethod of ['button', 'ctrl-enter']) {
+    await scenario('Unserializable editor content must not dispatch via ' + sendMethod, async ({ page, args }) => {
+      const configured = 'Synthetic opaque editor content';
+      await page.evaluate(() => {
+        const input = document.querySelector('[data-composer-markdown]');
+        fixture.opaqueWrites = 0;
+        fixture.keyDispatches = 0;
+        input.addEventListener('input', () => {
+          const opaque = document.createElement('section');
+          opaque.textContent = input.innerText;
+          input.replaceChildren(opaque);
+          fixture.opaqueWrites++;
+        });
+        input.addEventListener('keydown', event => {
+          if (event.key === 'Enter' && event.ctrlKey) fixture.keyDispatches++;
+        });
+      });
+      const outcome = await page.evaluate(pageAction, { ...args, prompt: configured, sendMethod, runDeadline: Date.now() + 1800 });
+      const state = await page.evaluate(() => ({ opaqueWrites: fixture.opaqueWrites, sends: fixture.sends, keyDispatches: fixture.keyDispatches }));
+      assert.ok(state.opaqueWrites > 0, 'the page must replace the text with unsupported markup');
+      assert.equal(outcome.diagnosticProgress.counters.dispatchAttempts, 0, JSON.stringify({ outcome, state }));
+      assert.deepEqual([state.sends, state.keyDispatches], [0, 0]);
+      assert.notEqual(outcome.status, 'sent');
+    });
+
+    await scenario('Text changed during the final correction must not dispatch via ' + sendMethod, async ({ page, args }) => {
+      const configured = 'Synthetic final correction';
+      await page.evaluate(() => {
+        const input = document.querySelector('[data-composer-markdown]');
+        fixture.finalChanges = 0;
+        fixture.finalAuthorizationTriggered = false;
+        fixture.keyDispatches = 0;
+        const authorize = chrome.runtime.sendMessage;
+        chrome.runtime.sendMessage = async message => {
+          const reply = await authorize(message);
+          if (fixture.checks === 4) {
+            fixture.finalAuthorizationTriggered = true;
+            input.textContent = 'Intervening text before final correction';
+          }
+          return reply;
+        };
+        input.addEventListener('input', () => {
+          if (fixture.checks !== 4) return;
+          input.textContent = 'Changed by the page during final correction';
+          fixture.finalChanges++;
+        });
+        input.addEventListener('keydown', event => {
+          if (event.key === 'Enter' && event.ctrlKey) fixture.keyDispatches++;
+        });
+      });
+      const outcome = await page.evaluate(pageAction, { ...args, prompt: configured, sendMethod, runDeadline: Date.now() + 1800 });
+      const state = await page.evaluate(() => ({ triggered: fixture.finalAuthorizationTriggered, finalChanges: fixture.finalChanges, sends: fixture.sends, keyDispatches: fixture.keyDispatches }));
+      assert.equal(state.triggered, true, 'the fixture must alter text during authorization');
+      assert.equal(state.finalChanges, 1, 'the page must alter the final correction');
+      assert.equal(outcome.diagnosticProgress.counters.dispatchAttempts, 0, JSON.stringify({ outcome, state }));
+      assert.deepEqual([state.sends, state.keyDispatches], [0, 0]);
+      assert.notEqual(outcome.status, 'sent');
+    });
+  }
 
   await scenario('Final replacement commits deferred controlled-input state before submitting', async ({ page, args }) => {
     const configured = 'Configured controlled-model continuation';
@@ -390,12 +792,101 @@ try {
     assert.deepEqual(await page.evaluate(() => fixture.sentTexts), [configured]);
     assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
   });
+
+  await scenario('A slower controlled model must not submit stale text even when the DOM matches', async ({ page, args }) => {
+    const configured = 'SYNTHETIC_CONFIGURED_MODEL';
+    await page.evaluate(() => {
+      const input = document.querySelector('[data-composer-markdown]');
+      fixture.controlledText = 'SYNTHETIC_STALE_MODEL';
+      input.addEventListener('input', () => {
+        const value = input.innerText;
+        setTimeout(() => { fixture.controlledText = value; }, 500);
+      });
+      document.querySelector('button[aria-label="Send"]').addEventListener('click', event => {
+        event.stopImmediatePropagation();
+        fixture.sends++; fixture.sentTexts.push(fixture.controlledText);
+        appendMessage(fixture.controlledText, 'acct~dot~Msg~stale-model');
+        input.textContent = '';
+      }, { capture: true });
+    });
+    const outcome = await page.evaluate(pageAction, { ...args, prompt: configured });
+    const observed = await page.evaluate(() => ({ sends: fixture.sends, texts: fixture.sentTexts }));
+    assert.ok(observed.sends === 0 || (observed.sends === 1 && observed.texts[0] === configured), JSON.stringify({ outcome, observed }));
+  });
+
+  await scenario('A new unrelated receipt after dispatch pauses without replaying an unknown model', async ({ page, args }) => {
+    const configured = 'SYNTHETIC_EXPECTED_MESSAGE';
+    await page.evaluate(() => {
+      document.querySelector('button[aria-label="Send"]').addEventListener('click', event => {
+        event.stopImmediatePropagation();
+        fixture.sends++;
+        fixture.sentTexts.push('SYNTHETIC_STALE_MODEL');
+        appendMessage('SYNTHETIC_STALE_MODEL', 'acct~dot~Msg~mismatch');
+      }, { capture: true });
+    });
+    const outcome = await Promise.race([
+      page.evaluate(pageAction, { ...args, prompt: configured, unlimitedReadiness: true }),
+      new Promise(resolve => setTimeout(() => resolve({ status: 'still-waiting' }), 1500)),
+    ]);
+    assert.equal(outcome.status, 'unknown', JSON.stringify(outcome));
+    assert.equal(outcome.diagnosticCode, 'receipt-mismatch');
+    assert.notEqual(outcome.retryable, true);
+    assert.equal(outcome.diagnosticProgress.counters.dispatchAttempts, 1);
+    assert.deepEqual(await page.evaluate(() => fixture.sentTexts), ['SYNTHETIC_STALE_MODEL']);
+  });
+
+  for (const sendMethod of ['button', 'ctrl-enter']) {
+    await scenario('Final correction must not submit a stale asynchronous model via ' + sendMethod, async ({ page, args }) => {
+      const configured = 'Configured final asynchronous correction';
+      const stale = 'Old controlled-model text';
+      await page.evaluate(stale => {
+        const input = document.querySelector('[data-composer-markdown]');
+        fixture.controlledText = '';
+        fixture.finalCorrections = 0;
+        fixture.finalAuthorizationTriggered = false;
+        input.addEventListener('input', () => {
+          const value = input.innerText;
+          if (fixture.checks === 4) fixture.finalCorrections++;
+          setTimeout(() => { fixture.controlledText = value; }, 100);
+        });
+        const authorize = chrome.runtime.sendMessage;
+        chrome.runtime.sendMessage = async message => {
+          const reply = await authorize(message);
+          if (fixture.checks === 4) {
+            fixture.finalAuthorizationTriggered = true;
+            input.textContent = stale;
+            fixture.controlledText = stale;
+          }
+          return reply;
+        };
+        const submitModel = event => {
+          if (event.type === 'keydown' && (event.key !== 'Enter' || !event.ctrlKey)) return;
+          event.stopImmediatePropagation();
+          event.preventDefault();
+          fixture.sends++;
+          fixture.sentTexts.push(fixture.controlledText);
+          appendMessage(fixture.controlledText, 'acct~dot~Msg~final-model-' + fixture.sends);
+          input.textContent = '';
+        };
+        document.querySelector('button[aria-label="Send"]').addEventListener('click', submitModel, { capture: true });
+        input.addEventListener('keydown', submitModel, { capture: true });
+      }, stale);
+      const outcome = await page.evaluate(pageAction, { ...args, prompt: configured, sendMethod, runDeadline: Date.now() + 1800 });
+      const state = await page.evaluate(() => ({ triggered: fixture.finalAuthorizationTriggered, corrections: fixture.finalCorrections, texts: fixture.sentTexts }));
+      assert.equal(state.triggered, true, 'the fixture must alter the model during authorization');
+      assert.equal(state.corrections, 1, 'the final correction must emit an input event');
+      assert.ok(state.texts.length === 0 || (state.texts.length === 1 && state.texts[0] === configured), JSON.stringify({ outcome, state }));
+      if (state.texts.length === 0) assert.notEqual(outcome.status, 'sent', JSON.stringify(outcome));
+    });
+  }
+
   await scenario('A restoration during settling cannot submit stale delayed-input model text', async ({ page, args }) => {
     const configured = 'Configured delayed-input model continuation';
     await page.evaluate(() => {
       const input = document.querySelector('[data-composer-markdown]');
       fixture.controlledText = '';
       fixture.settlingRestores = 0;
+      fixture.interveningTriggered = false;
       input.addEventListener('input', () => {
         const value = input.innerText;
         setTimeout(() => { fixture.controlledText = value; }, 100);
@@ -405,7 +896,7 @@ try {
         if (message.type === 'WAIT_RUN') {
           await new Promise(resolve => setTimeout(resolve, message.delayMs));
           // Restore after the refill's model commit, before its settling wait returns.
-          if (message.delayMs === 180 && fixture.checks === 3 && !fixture.sends && fixture.settlingRestores < 2) {
+          if (message.delayMs === 180 && fixture.interveningTriggered && !fixture.sends && fixture.settlingRestores < 2) {
             input.textContent = 'Restored delayed-input controlled text';
             fixture.controlledText = input.innerText;
             fixture.settlingRestores++;
@@ -413,7 +904,8 @@ try {
           return { ok: true, allowed: fixture.allowed };
         }
         const reply = await authorize(message);
-        if (fixture.checks === 3) {
+        if (fixture.checks === 3 && !fixture.interveningTriggered) {
+          fixture.interveningTriggered = true;
           input.textContent = 'First intervening delayed-input controlled text';
           fixture.controlledText = input.innerText;
         }
@@ -426,8 +918,9 @@ try {
         input.textContent = '';
       }, { capture: true });
     });
-    const outcome = await page.evaluate(pageAction, { ...args, prompt: configured, extensionClock: true, extensionPriority: false });
-    const state = await page.evaluate(() => ({ restores: fixture.settlingRestores, sends: fixture.sends, texts: fixture.sentTexts }));
+    const outcome = await page.evaluate(pageAction, { ...args, prompt: configured, extensionClock: true, persistentDelivery: true, unlimitedReadiness: true, extensionPriority: false, runDeadline: Date.now() + 45_000 });
+    const state = await page.evaluate(() => ({ triggered: fixture.interveningTriggered, restores: fixture.settlingRestores, sends: fixture.sends, texts: fixture.sentTexts }));
+    assert.equal(state.triggered, true, 'the fixture must alter the model during authorization');
     assert.equal(state.restores, 2, 'both settling boundaries must restore the controlled model');
     assert.deepEqual(state.texts, [configured]);
     assert.equal(state.sends, 1);
@@ -519,6 +1012,7 @@ try {
       const input = document.querySelector('[data-composer-markdown]');
       fixture.controlledText = '';
       fixture.settlingRestores = 0;
+      fixture.interveningTriggered = false;
       input.addEventListener('beforeinput', event => {
         if (event.inputType !== 'insertText') return;
         event.preventDefault(); fixture.beforeInputs++;
@@ -535,7 +1029,7 @@ try {
         if (message.type === 'WAIT_RUN') {
           await new Promise(resolve => setTimeout(resolve, message.delayMs));
           // Only beforeinput's delayed handler can commit this submission model.
-          if (message.delayMs === 180 && fixture.checks === 3 && !fixture.sends && fixture.settlingRestores < 2) {
+          if (message.delayMs === 180 && fixture.interveningTriggered && !fixture.sends && fixture.settlingRestores < 2) {
             input.textContent = 'Restored delayed-beforeinput controlled text';
             fixture.controlledText = input.innerText;
             fixture.settlingRestores++;
@@ -543,7 +1037,8 @@ try {
           return { ok: true, allowed: fixture.allowed };
         }
         const reply = await authorize(message);
-        if (fixture.checks === 3) {
+        if (fixture.checks === 3 && !fixture.interveningTriggered) {
+          fixture.interveningTriggered = true;
           input.textContent = 'First intervening delayed-beforeinput controlled text';
           fixture.controlledText = input.innerText;
         }
@@ -556,13 +1051,75 @@ try {
         input.textContent = '';
       }, { capture: true });
     });
-    const outcome = await page.evaluate(pageAction, { ...args, prompt: configured, extensionClock: true, extensionPriority: false });
-    const state = await page.evaluate(() => ({ restores: fixture.settlingRestores, sends: fixture.sends, texts: fixture.sentTexts }));
+    const outcome = await page.evaluate(pageAction, { ...args, prompt: configured, extensionClock: true, persistentDelivery: true, unlimitedReadiness: true, extensionPriority: false, runDeadline: Date.now() + 45_000 });
+    const state = await page.evaluate(() => ({ triggered: fixture.interveningTriggered, restores: fixture.settlingRestores, sends: fixture.sends, texts: fixture.sentTexts }));
+    assert.equal(state.triggered, true, 'the fixture must alter the model during authorization');
     assert.equal(state.restores, 2, 'both settling boundaries must restore the controlled model');
     assert.deepEqual(state.texts, [configured]);
     assert.equal(state.sends, 1);
     assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
   });
+  for (const model of ['input', 'beforeinput']) {
+    await scenario('Finite mode must not submit a restored delayed-' + model + ' model', async ({ page, args }) => {
+      const configured = 'Finite delayed-' + model + ' model continuation';
+      await page.evaluate(model => {
+        const input = document.querySelector('[data-composer-markdown]');
+        fixture.controlledText = '';
+        fixture.settlingRestores = 0;
+        fixture.interveningTriggered = false;
+        if (model === 'input') {
+          input.addEventListener('input', () => {
+            const value = input.innerText;
+            setTimeout(() => { fixture.controlledText = value; }, 100);
+          });
+        } else {
+          input.addEventListener('beforeinput', event => {
+            if (event.inputType !== 'insertText') return;
+            event.preventDefault();
+            const value = event.data;
+            setTimeout(() => {
+              fixture.controlledText = value;
+              input.textContent = value;
+              input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
+            }, 25);
+          });
+        }
+        const authorize = chrome.runtime.sendMessage;
+        chrome.runtime.sendMessage = async message => {
+          if (message.type === 'WAIT_RUN') {
+            await new Promise(resolve => setTimeout(resolve, message.delayMs));
+            if (message.delayMs === 180 && fixture.interveningTriggered && !fixture.sends && fixture.settlingRestores < 2) {
+              input.textContent = 'Restored finite controlled model';
+              fixture.controlledText = input.innerText;
+              fixture.settlingRestores++;
+            }
+            return { ok: true, allowed: fixture.allowed };
+          }
+          const reply = await authorize(message);
+          if (fixture.checks === 3 && !fixture.interveningTriggered) {
+            fixture.interveningTriggered = true;
+            input.textContent = 'Intervening finite controlled model';
+            fixture.controlledText = input.innerText;
+          }
+          return reply;
+        };
+        document.querySelector('button[aria-label="Send"]').addEventListener('click', event => {
+          event.stopImmediatePropagation();
+          fixture.sends++;
+          fixture.sentTexts.push(fixture.controlledText);
+          appendMessage(fixture.controlledText, 'acct~dot~Msg~finite-model-' + fixture.sends);
+          input.textContent = '';
+        }, { capture: true });
+      }, model);
+      const outcome = await page.evaluate(pageAction, { ...args, prompt: configured, extensionClock: true, persistentDelivery: false, unlimitedReadiness: false, extensionPriority: false });
+      const state = await page.evaluate(() => ({ triggered: fixture.interveningTriggered, restores: fixture.settlingRestores, sends: fixture.sends, texts: fixture.sentTexts }));
+      assert.equal(state.triggered, true, 'the fixture must alter the model during authorization');
+      assert.ok(state.restores > 0, 'the fixture must restore the controlled model during settling');
+      assert.ok(state.sends <= 1, JSON.stringify({ outcome, state }));
+      assert.ok(state.texts.length === 0 || (state.texts.length === 1 && state.texts[0] === configured), JSON.stringify({ outcome, state }));
+      if (state.sends === 0) assert.notEqual(outcome.status, 'sent', JSON.stringify({ outcome, state }));
+    });
+  }
   await scenario('Force mode clicks an explicit Stop once before submitting when Stop replaces Send', async ({ page, args }) => {
     await page.evaluate(() => startWork());
     const outcome = await page.evaluate(pageAction, { ...args, waitForIdle: false });
@@ -661,7 +1218,7 @@ try {
     }, humanDraft);
     const outcome = await page.evaluate(pageAction, { ...args, prompt: configured });
     assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
-    assert.equal(await page.evaluate(() => fixture.sentTexts[0].replace(/\n+/g, '\n')), configured.replace(/\n+/g, '\n'));
+    assert.equal(await page.evaluate(() => fixture.sentTexts[0]), configured);
     assert.equal(await page.evaluate(() => fixture.sends), 1);
   });
   await scenario('Legacy missing blank lines do not veto configured-prompt submission', async ({ page, args }) => {
@@ -675,7 +1232,7 @@ try {
     assert.equal(before, configured, 'The fixture must reproduce the innerText false positive');
     const outcome = await page.evaluate(pageAction, { ...args, prompt: configured });
     assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
-    assert.equal(await page.evaluate(() => fixture.sentTexts[0].replace(/\n+/g, '\n')), configured.replace(/\n+/g, '\n'));
+    assert.equal(await page.evaluate(() => fixture.sentTexts[0]), configured);
     assert.equal(await page.evaluate(() => fixture.sends), 1);
   });
   await scenario('Wait-for-idle controls Agent activity, not ownership of composer text', async ({ page, args }) => {
@@ -802,6 +1359,26 @@ try {
     assert.equal(outcome.status, 'unknown', JSON.stringify(outcome));
     assert.equal(await page.evaluate(() => fixture.sends), 1);
   });
+  for (const [configured, receipt] of [
+    ['First line\n\nSecond line', 'First line\nSecond line'],
+    ['First line\nSecond line', 'First line\n\nSecond line']
+  ]) {
+    await scenario('A new user receipt with different blank lines cannot confirm a send', async ({ page, args }) => {
+      assert.notEqual(configured, receipt);
+      assert.equal(configured.replace(/\n{2,}/g, '\n'), receipt.replace(/\n{2,}/g, '\n'));
+      await page.evaluate(receipt => {
+        fixture.acknowledgement = 'none';
+        document.querySelector('button[aria-label="Send"]').addEventListener('click', () => {
+          appendMessage(receipt, 'acct~dot~Msg~different-blank-lines');
+        }, { once: true });
+      }, receipt);
+      const outcome = await page.evaluate(pageAction, { ...args, prompt: configured, runDeadline: Date.now() + 3000 });
+      const state = await page.evaluate(() => ({ sends: fixture.sends, receipt: document.querySelector('article.message-row.self:last-child .message-body')?.innerText }));
+      assert.equal(state.sends, 1);
+      assert.equal(state.receipt, receipt);
+      assert.equal(outcome.status, 'unknown', JSON.stringify(outcome));
+    });
+  }
   for (const initiallyKeyed of [false, true]) {
     await scenario(`An existing matching row cannot confirm after key hydration (keyed=${initiallyKeyed})`, async ({ page, args }) => {
       await page.evaluate(({ prompt, initiallyKeyed }) => {

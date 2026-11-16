@@ -177,15 +177,14 @@ export function editorCommit(args) {
       // A real user Send takes over this prepared delivery. Never refill the
       // cleared composer while its new history receipt is still being observed.
       const manualIntent = event => {
-        if (!event.isTrusted || !receiptState.prepared || receiptState.dispatched || receiptState.manualSubmission) return;
+        if (!event.isTrusted || !receiptState.counters.modelWrites || receiptState.dispatched || receiptState.manualSubmission) return;
         // A trusted click can occur between a form remount and the queued
         // preparation's rebind. Fence that queued write from the current view.
         const currentBinding = findComposer();
         const currentEditor = currentBinding?.editor;
         const currentComposer = currentBinding?.composer;
         const currentView = currentEditor?.editor?.view;
-        if (!currentView || currentView.dom !== currentEditor || currentView.isDestroyed
-          || logicalText(currentView.state.doc) !== prompt) return;
+        if (!currentView || currentView.dom !== currentEditor || currentView.isDestroyed) return;
         const current = new URL(location.href);
         if (current.origin !== expected.origin || (normalizeUrl(current) !== normalizeUrl(expected)
           && !(isDot && current.pathname.startsWith('/dots/')))
@@ -235,6 +234,10 @@ export function editorCommit(args) {
       if (logicalText(transaction.doc) !== prompt) throw new Error('unsupported-document');
       return transaction;
     };
+    const deferModelWrite = () => {
+      receiptState.modelBackoffMs = Math.min(10_000, Math.max(300, (receiptState.modelBackoffMs || 150) * 2));
+      receiptState.nextModelWriteAt = Date.now() + receiptState.modelBackoffMs;
+    };
     let failure;
     // After preparation, don't restart the framework's delayed activation by
     // redundantly dispatching the same model. Changed text is still replaced.
@@ -243,6 +246,7 @@ export function editorCommit(args) {
       const state = view.state;
       let transaction = prepare(state);
       supported = true;
+      if (receiptState?.nextModelWriteAt > Date.now()) return result('composer-unstable');
       if (view.state !== state) transaction = prepare(view.state);
       failure = guard();
       if (failure) return result(failure);
@@ -265,6 +269,10 @@ export function editorCommit(args) {
     // Page-controlled content changes do not veto the send. Reassert once from
     // the current public model, without another event/settling cycle or a loop.
     if (logicalText(view.state.doc) !== prompt) {
+      if (receiptState && receiptState.counters.modelWrites >= 2) {
+        deferModelWrite();
+        return result('composer-unstable');
+      }
       const correction = prepare(view.state);
       failure = guard();
       if (failure) return result(failure);
@@ -273,6 +281,10 @@ export function editorCommit(args) {
     const committedGuard = () => guard()
       || (logicalText(view.state.doc) !== prompt ? 'model-not-synchronous' : null);
     failure = committedGuard();
+    if (failure === 'model-not-synchronous' && receiptState?.counters.modelWrites >= 2) {
+      deferModelWrite();
+      return result('composer-unstable');
+    }
     if (failure) return result(failure);
     if (phase === 'prepare') {
       if (receiptState) Object.assign(receiptState, {

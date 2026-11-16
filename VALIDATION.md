@@ -1,8 +1,35 @@
 # Validation and Evidence Boundaries
 
-## Version 3.0.12 — Unreleased Candidate, November 11, 2026
+## Version 3.0.14 — Unreleased Candidate, November 15, 2026
 
-The complete current local `npm test` run exited successfully after the
+This candidate starts long text in segments of at most 1,000 UTF-16 units. It
+has not been installed, released or validated on a real ChatGPT or Dot
+conversation. A selected 115-case isolated ProseMirror/MV3 batch passed, including
+slow-write, pause and content-free unreadable-check diagnostics. Background tests
+passed 261/261, check 128+8, support 69/69 and UI 65/65. A separate MV3
+selection passed 28/28 after the later pause and unknown-result changes. The complete `npm test` stopped at five
+finite adapter failures; Dot adapter passed 79/81, including a synthetic stale
+model wrong submission. The 3.0.13 results below are historical; these fixtures
+do not establish real-site acceptance. A synthetic fault-injection counterexample
+still permits an already-issued MAIN operation to run before its deadline after
+Pause persistence fails and cancellation is lost; no real-site occurrence is established.
+
+## Version 3.0.13 — Unreleased Candidate, November 15, 2026
+
+This source candidate has not been installed, released or accepted on a real
+ChatGPT or Dot conversation. The latest whole-suite run stops at five scheduler
+adapter failures. A selected 88-case isolated ProseMirror/MV3 batch passes,
+including paragraph fidelity and stable transformed-text no-dispatch cases.
+The synthetic stale external model still causes a wrong submission. The two
+temporary-decoration recovery cases stop without dispatch and fail their
+expectation of an exact automatic send. Dot adapter tests pass 79/81; one failure
+actually sends a stale synthetic model. These are isolated fixtures, not real
+site acceptance. Prior 3.0.12 results below are historical and do not validate
+3.0.13.
+
+## Version 3.0.12 — Historical Candidate, November 11, 2026
+
+The then-current local `npm test` run exited successfully after the
 held/repeated-Enter manual-takeover correction. It includes editor104/104,
 background80/80, scheduler state60/60, release adapter72/72, integration14/14,
 UI41/41, support59/59, official ProseMirror/MV3 57/57 and separate editor browser
@@ -105,9 +132,9 @@ preparing this update; this does not establish publication of 2.1.0.
 
 Confirmation means a matching new user-message marker appeared in a supported
 page fixture. It does not establish successful model inference, scientific work,
-exactly-once delivery or permanent compatibility with the live website. An
-unknown result is not retried immediately, but the next normal interval can
-attempt another send. Pause and inspect the conversation if necessary.
+exactly-once delivery or permanent compatibility with the live website. The
+current source candidate pauses an unknown result and asks the user to inspect
+the conversation before resuming; this is not a live-site acceptance receipt.
 
 The target must remain executable, signed in and reachable. Background timing,
 tab freezing, network failures, browser policies and site updates can affect

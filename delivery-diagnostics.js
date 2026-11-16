@@ -4,18 +4,18 @@ const METHODS = new Set(['none', 'button', 'enter', 'ctrl-enter']);
 const CHANNELS = new Set(['none', 'execute-script', 'extension-message', 'page-readback']);
 const REASONS = new Set([
   'starting', 'prepared', 'ready', 'waiting-send', 'send-unavailable', 'send-ambiguous',
-  'unsupported-view', 'composer-unavailable', 'composer-changed', 'view-changed', 'not-editable',
+  'unsupported-view', 'composer-unavailable', 'composer-changed', 'composer-unstable', 'composer-slow-write', 'chunk-unconfirmed', 'chunk-attachment', 'chunk-mismatch', 'view-changed', 'not-editable',
   'attachments', 'busy', 'expired', 'page-mismatch', 'target-mismatch', 'invalid-arguments',
   'invalid-method', 'invalid-phase', 'invalid-url', 'empty-payload', 'commit-state-unavailable',
   'model-not-synchronous', 'receipt-unavailable', 'dispatched', 'already-dispatched', 'dispatch-error',
   'commit-error', 'manual-submission', 'cancelled', 'transport-pending', 'transport-rejected',
   'result-missing', 'grant-pending', 'grant-accepted', 'awaiting-receipt', 'receipt-confirmed',
-  'manual-receipt-confirmed', 'document-replaced', 'worker-interrupted', 'diagnostics-write-failed', 'unknown',
+  'manual-receipt-confirmed', 'document-replaced', 'worker-interrupted', 'diagnostics-write-failed', 'paste-unconfirmed', 'paste-attachment-unconfirmed', 'receipt-ambiguous', 'receipt-mismatch', 'unknown',
 ]);
-const COUNTERS = ['pageAdmissions', 'modelWrites', 'domWrites', 'fillCalls', 'readinessChecks',
+const COUNTERS = ['pageAdmissions', 'modelWrites', 'domWrites', 'textChunks', 'slowChunks', 'rejectedChunks', 'chunkRestarts', 'prefixRewriteRestarts', 'chunkSettlementRestarts', 'chunkUnserializableChecks', 'chunkUnserializableRestarts', 'chunkUnserializableRecoveries', 'chunkDifferences', 'insertedBlankSeparators', 'fillCalls', 'readinessChecks',
   'authorizationChecks', 'grantRequests', 'grantReadbacks', 'retiredReadbacks', 'dispatchAttempts',
   'receiptChecks', 'manualIntents', 'attachmentsRemoved', 'transportErrors', 'leaseRenewals', 'documentChanges'];
-const TIMINGS = ['modelWriteMs', 'domWriteMs', 'maxModelWriteMs', 'maxDomWriteMs', 'elapsedMs', 'stageElapsedMs'];
+const TIMINGS = ['modelWriteMs', 'domWriteMs', 'maxModelWriteMs', 'maxDomWriteMs', 'serializationMs', 'maxSerializationMs', 'elapsedMs', 'stageElapsedMs'];
 const OBSERVATIONS = ['hidden', 'sendPresent', 'sendEnabled', 'composerPresent', 'busy', 'manualPending'];
 const uint = value => Number.isSafeInteger(value) && value >= 0;
 const epoch = value => uint(value) && value <= 8_640_000_000_000_000;

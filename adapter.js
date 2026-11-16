@@ -45,10 +45,10 @@ export async function pageAction(args) {
   let stageStartedAt = startedAt;
   const metrics = {
     stage: 'page', reason: 'starting', method: 'none',
-    counters: Object.fromEntries(['pageAdmissions', 'modelWrites', 'domWrites', 'fillCalls', 'readinessChecks',
+    counters: Object.fromEntries(['pageAdmissions', 'modelWrites', 'domWrites', 'textChunks', 'slowChunks', 'rejectedChunks', 'chunkRestarts', 'prefixRewriteRestarts', 'chunkSettlementRestarts', 'chunkUnserializableChecks', 'chunkUnserializableRestarts', 'chunkUnserializableRecoveries', 'chunkDifferences', 'insertedBlankSeparators', 'fillCalls', 'readinessChecks',
       'authorizationChecks', 'grantRequests', 'grantReadbacks', 'retiredReadbacks', 'dispatchAttempts',
       'receiptChecks', 'manualIntents', 'attachmentsRemoved', 'transportErrors', 'leaseRenewals', 'documentChanges'].map(name => [name, name === 'pageAdmissions' ? 1 : 0])),
-    timings: { modelWriteMs: 0, domWriteMs: 0, maxModelWriteMs: 0, maxDomWriteMs: 0, elapsedMs: 0, stageElapsedMs: 0 },
+    timings: { modelWriteMs: 0, domWriteMs: 0, maxModelWriteMs: 0, maxDomWriteMs: 0, serializationMs: 0, maxSerializationMs: 0, elapsedMs: 0, stageElapsedMs: 0 },
     observations: { hidden: false, sendPresent: false, sendEnabled: false, composerPresent: false, busy: false, manualPending: false },
   };
   if (invocation) Object.assign(invocation, { metrics, startedAt, stageStartedAt });
@@ -82,7 +82,7 @@ export async function pageAction(args) {
     }
     revoked = true;
     if (invocation) delete invocation.grantedDeadline;
-    sendResponse({ revoked: true, runId: args.runId, resultToken: args.resultToken });
+    sendResponse({ revoked: true, runId: args.runId, resultToken: args.resultToken, diagnosticProgress: diagnosticProgress() });
     return false;
   };
   if (cancellable) chrome.runtime.onMessage.addListener(cancel);
@@ -193,7 +193,7 @@ export async function pageAction(args) {
   const result = (status, message, diagnosticCode) => {
     metrics.reason = resultReason(status);
     return { status, message,
-    ...(args.persistentDelivery === true && !submitted && !manualPending && ['blocked', 'draft', 'busy', 'error'].includes(status)
+    ...(args.persistentDelivery === true && !['composer-unstable', 'composer-slow-write', 'chunk-unconfirmed', 'chunk-attachment', 'chunk-mismatch'].includes(diagnosticCode) && !submitted && !manualPending && ['blocked', 'draft', 'busy', 'error'].includes(status)
       ? { retryable: true } : {}),
     ...(diagnosticCode ? { diagnosticCode } : {}), identity: identity(),
     ...(['sent', 'manual-sent'].includes(status) ? beforeAssistant : assistantState()) };
@@ -296,21 +296,22 @@ export async function pageAction(args) {
   // Native contenteditable insertion represents line breaks as DIV/P blocks.
   // innerText adds an extra newline for an empty final block. Reconstruct only
   // these plain editing structures; never trim/collapse a human's whitespace.
-  const inlineFormatting = new Set(['A', 'B', 'CODE', 'DEL', 'EM', 'I', 'MARK', 'S', 'SMALL', 'STRONG', 'SUB', 'SUP', 'U']);
-  const plainDraft = (node, allowFormatting = false) => {
+  const inlineFormatting = new Set(['A', 'B', 'CODE', 'DEL', 'EM', 'FONT', 'I', 'MARK', 'S', 'SMALL', 'STRONG', 'SUB', 'SUP', 'U']);
+  const markdownBlocks = new Set(['H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'UL', 'OL', 'LI', 'BLOCKQUOTE', 'PRE']);
+  const serializeDraft = (node, allowFormatting = false, root = editor) => {
     if (node.nodeType === Node.TEXT_NODE) return node.data;
     if (node.nodeType !== Node.ELEMENT_NODE || node.getAttribute('contenteditable') === 'false') return null;
     if (node.tagName === 'BR') return '\n';
-    if (node !== editor && !['DIV', 'P', 'SPAN'].includes(node.tagName) && !(allowFormatting && inlineFormatting.has(node.tagName))) return null;
+    if (node !== root && !['DIV', 'P', 'SPAN'].includes(node.tagName) && !(allowFormatting && (inlineFormatting.has(node.tagName) || markdownBlocks.has(node.tagName)))) return null;
     const children = [...node.childNodes];
-    if (node === editor && children.length === 1 && children[0].nodeName === 'BR') return '';
-    if (node !== editor && ['DIV', 'P'].includes(node.tagName) && children.length === 1 && children[0].nodeName === 'BR') return '';
+    if (node === root && children.length === 1 && children[0].nodeName === 'BR') return '';
+    if (node !== root && (['DIV', 'P'].includes(node.tagName) || (allowFormatting && markdownBlocks.has(node.tagName))) && children.length === 1 && children[0].nodeName === 'BR') return '';
     let value = '';
     let previousBlock = false;
     for (let index = 0; index < children.length; index++) {
       const child = children[index];
-      const block = ['DIV', 'P'].includes(child.nodeName);
-      const part = plainDraft(child, allowFormatting);
+      const block = ['DIV', 'P'].includes(child.nodeName) || (allowFormatting && markdownBlocks.has(child.nodeName) && !['UL', 'OL'].includes(child.nodeName));
+      const part = serializeDraft(child, allowFormatting, root);
       if (part === null) return null;
       if (index > 0 && (block || previousBlock)) value += '\n';
       value += part;
@@ -318,7 +319,16 @@ export async function pageAction(args) {
     }
     return value;
   };
-
+  const plainDraft = (node, allowFormatting = false, root = editor) => {
+    const clock = () => typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const start = clock();
+    try { return serializeDraft(node, allowFormatting, root); }
+    finally {
+      const elapsed = Math.max(0, clock() - start);
+      metrics.timings.serializationMs += elapsed;
+      metrics.timings.maxSerializationMs = Math.max(metrics.timings.maxSerializationMs, elapsed);
+    }
+  };
   // Rendered innerText may change when the same plain content is rewrapped
   // by the page. Compare exact logical text, including whitespace. For rich
   // content we cannot serialize, require the exact markup and visible text.
@@ -373,6 +383,15 @@ export async function pageAction(args) {
   let insertedDraftSnapshot = null;
   let interrupted = false;
   let needsRefill = false;
+  let payloadWriteAttempts = 0;
+  let preparedText = normalizeLineEndings(prompt);
+  const unstableComposer = {};
+  const unconfirmedChunk = {};
+  const chunkAttachment = {};
+  const chunkMismatch = {};
+  const humanEditedDuringSelection = {};
+  const unconfirmedPaste = {};
+  const unconfirmedPasteAttachment = {};
 
   // Reacquire a uniquely scoped editor after same-conversation framework
   // remounts. This never follows a different target or an attempted submission.
@@ -445,10 +464,10 @@ export async function pageAction(args) {
   const normalizeRenderedPayload = value => normalizeLineEndings(value).replace(/\u00a0/g, ' ');
   const payloadMatches = () => {
     if (editor instanceof HTMLTextAreaElement) {
-      return normalizeLineEndings(editor.value) === normalizeLineEndings(prompt);
+      return normalizeLineEndings(editor.value) === preparedText;
     }
     const current = plainDraft(editor, true);
-    return current !== null && normalizeRenderedPayload(current) === normalizeRenderedPayload(prompt);
+    return current !== null && normalizeRenderedPayload(current) === normalizeRenderedPayload(preparedText);
   };
 
   const latchManual = notify => {
@@ -474,7 +493,7 @@ export async function pageAction(args) {
     const target = event.target;
     let submitting = false;
     if (event.type === 'click') {
-      const button = target?.closest?.(sendSelector);
+      const button = target?.closest?.('button[data-testid="send-button"], button[data-testid="composer-submit-button"], button[data-testid="fruitjuice-send-button"], button[aria-label="Send prompt"], button[aria-label="Send message"], button[aria-label="Send"], button[aria-label="发送提示"], button[aria-label="发送消息"], button[aria-label="发送"], button[type="submit"]');
       submitting = !!button && composer.contains(button) && !button.matches?.(stopSelector);
     } else if (event.type === 'submit') {
       submitting = target === composer || (composer.contains(target) && target?.matches?.('form'));
@@ -483,15 +502,23 @@ export async function pageAction(args) {
         && !event.shiftKey && !event.altKey && !event.isComposing && event.keyCode !== 229 && !event.defaultPrevented
         && (!isDot || event.ctrlKey === true || event.metaKey === true);
     }
-    if (!submitting || !samePage() || !sameComposer() || !payloadMatches()) return;
+    if (!submitting || !samePage() || !sameComposer()) return;
     // Capture before the site's trusted handler clears or remounts the composer.
     rememberVisibleHistory();
     beforeAssistant = assistantState();
     latchManual(true);
   };
 
-  const fill = (value, forceReplacement = false) => {
+  const fill = async (value, forceReplacement = false) => {
     mutable();
+    if (value && payloadWriteAttempts >= 2) {
+      if (args.persistentDelivery !== true || args.unlimitedReadiness !== true) throw unstableComposer;
+      await wait(10_000);
+      mutable();
+      if (!await stillAllowed() || !samePage() || !keepComposer() || !editable() || hasAttachment() || busy()) return false;
+      if (!needsRefill && payloadMatches()) return true;
+    }
+    if (value) payloadWriteAttempts++;
     metrics.counters.fillCalls++;
     progress('prepare', 'starting');
     preparationStarted = true;
@@ -566,6 +593,226 @@ export async function pageAction(args) {
       if (beforeInput()) return replace();
       return handledInput().then(handled => handled || (forceReplacement && replace()));
     };
+    let chunkSize = 1000;
+    const insertChunkedPass = async () => {
+      if (!mayWrite()) return false;
+      selectContents();
+      let previousPlainText = plainDraft(editor, true);
+      let humanEdited = false;
+      const observeHuman = event => { if (event.isTrusted) humanEdited = true; };
+      for (const type of ['beforeinput', 'keydown', 'paste']) editor.addEventListener(type, observeHuman, true);
+      try {
+        document.dispatchEvent(new Event('selectionchange'));
+        if (!mayWrite()) return false;
+        await wait(50);
+      } finally {
+        for (const type of ['beforeinput', 'keydown', 'paste']) editor.removeEventListener(type, observeHuman, true);
+      }
+      if (!mayWrite()) return false;
+      if (humanEdited) throw humanEditedDuringSelection;
+      const currentPlainText = plainDraft(editor, true);
+      if (currentPlainText !== previousPlainText) {
+        previousPlainText = currentPlainText;
+        selectContents();
+        document.dispatchEvent(new Event('selectionchange'));
+        if (!mayWrite()) return false;
+      }
+      if (previousPlainText !== '') {
+        const expectedRange = document.createRange();
+        expectedRange.selectNodeContents(editor);
+        if (selection.rangeCount !== 1) throw unstableComposer;
+        const selectedRange = selection.getRangeAt(0);
+        const container = editor.ownerDocument.createElement('div');
+        container.append(selectedRange.cloneContents());
+        if (plainDraft(container, true, container) !== previousPlainText
+          || selectedRange.compareBoundaryPoints(Range.START_TO_START, expectedRange) < 0
+          || selectedRange.compareBoundaryPoints(Range.END_TO_END, expectedRange) > 0) throw unstableComposer;
+      }
+      const logicalValue = normalizeLineEndings(value);
+      let offset = 0;
+      let actualExpected = '';
+      let expectedPrepared = '';
+      let differences = [];
+      const readChunkDraft = () => {
+        const draft = plainDraft(editor, true);
+        if (draft === null) metrics.counters.chunkUnserializableChecks++;
+        return draft;
+      };
+      while (offset < logicalValue.length) {
+        mutable();
+        if (revoked || !samePage() || !sameComposer() || !withinDeadline() || !editable()) return false;
+        if (hasAttachment()) throw chunkAttachment;
+        let end = Math.min(offset + chunkSize, logicalValue.length);
+        if (end < logicalValue.length) {
+          const minimum = offset + Math.floor(chunkSize / 2);
+          const paragraph = logicalValue.lastIndexOf('\n\n', end - 2);
+          const line = logicalValue.lastIndexOf('\n', end - 1);
+          if (paragraph >= minimum) end = paragraph + 2;
+          else if (line >= minimum) end = line + 1;
+        }
+        const prior = logicalValue.charCodeAt(end - 1);
+        const next = logicalValue.charCodeAt(end);
+        if (end < logicalValue.length && prior >= 0xd800 && prior <= 0xdbff && next >= 0xdc00 && next <= 0xdfff)
+          end = end - 1 > offset ? end - 1 : end + 1;
+        const chunk = logicalValue.slice(offset, end);
+        let inputObserved = false;
+        const observeInput = () => { inputObserved = true; };
+        editor.addEventListener('input', observeInput, { capture: true });
+        let accepted;
+        const chunkStarted = performance.now();
+        try { accepted = write('domWrites', () => document.execCommand('insertText', false, chunk)); }
+        finally { editor.removeEventListener('input', observeInput, { capture: true }); }
+        const chunkElapsed = performance.now() - chunkStarted;
+        if (!accepted || !inputObserved) { metrics.counters.rejectedChunks++; throw unconfirmedChunk; }
+        metrics.counters.textChunks++;
+        offset = end;
+        expectedPrepared += chunk;
+        const expected = expectedPrepared;
+        let actual = readChunkDraft();
+        if (actual === null) {
+          if (args.persistentDelivery !== true || args.unlimitedReadiness !== true) {
+            metrics.counters.chunkUnserializableRestarts++;
+            throw chunkMismatch;
+          }
+          let actualChecks = 0;
+          while (actual === null) {
+            if (++actualChecks > 20) {
+              metrics.counters.chunkUnserializableRestarts++;
+              throw chunkMismatch;
+            }
+            await wait(50);
+            mutable();
+            if (revoked || !samePage() || !sameComposer() || !withinDeadline() || !editable()) return false;
+            if (hasAttachment()) throw chunkAttachment;
+            actual = readChunkDraft();
+          }
+          if (normalizeLineEndings(actual) !== expected) {
+            metrics.counters.chunkSettlementRestarts++;
+            throw chunkMismatch;
+          }
+          metrics.counters.chunkUnserializableRecoveries++;
+        }
+        const logicalActual = normalizeLineEndings(actual);
+        if (actualExpected && !logicalActual.startsWith(actualExpected)) {
+          metrics.counters.prefixRewriteRestarts++;
+          throw chunkMismatch;
+        }
+        const different = logicalActual !== expected;
+        if (different) {
+          metrics.counters.chunkDifferences++;
+          differences.push({ offset: end, actual: logicalActual.slice(actualExpected.length) });
+        }
+        actualExpected = logicalActual;
+        if (chunkElapsed >= 2000) {
+          metrics.counters.slowChunks++;
+          chunkSize = Math.min(chunkSize, Math.max(64, Math.floor(chunkSize / 4)));
+        }
+        if (offset < logicalValue.length) {
+          await wait(50);
+          mutable();
+          let settled = readChunkDraft();
+          if (settled === null) {
+            if (args.persistentDelivery !== true || args.unlimitedReadiness !== true) {
+              metrics.counters.chunkUnserializableRestarts++;
+              throw chunkMismatch;
+            }
+            let settledChecks = 0;
+            while (settled === null) {
+              if (++settledChecks > 20) {
+                metrics.counters.chunkUnserializableRestarts++;
+                throw chunkMismatch;
+              }
+              await wait(50);
+              mutable();
+              if (revoked || !samePage() || !sameComposer() || !withinDeadline() || !editable()) return false;
+              if (hasAttachment()) throw chunkAttachment;
+              settled = readChunkDraft();
+            }
+            if (normalizeLineEndings(settled) === actualExpected) metrics.counters.chunkUnserializableRecoveries++;
+          }
+          if (normalizeLineEndings(settled) !== actualExpected) {
+            metrics.counters.chunkSettlementRestarts++;
+            throw chunkMismatch;
+          }
+          const endRange = document.createRange();
+          let lastLeaf = editor;
+          while (lastLeaf.lastChild) {
+            lastLeaf = lastLeaf.lastChild;
+          }
+          if (lastLeaf.nodeType === Node.TEXT_NODE) {
+            endRange.setStart(lastLeaf, lastLeaf.nodeValue.length);
+            endRange.setEnd(lastLeaf, lastLeaf.nodeValue.length);
+          } else {
+            endRange.selectNodeContents(lastLeaf);
+            endRange.collapse(false);
+          }
+          selection.removeAllRanges();
+          selection.addRange(endRange);
+        } else if (different) {
+          await wait(50);
+          mutable();
+          if (!samePage() || !sameComposer() || !withinDeadline() || !editable()) return false;
+          if (hasAttachment()) throw chunkAttachment;
+          let diffChecks = 0;
+          let settled = readChunkDraft();
+          while (settled === null && ++diffChecks <= 20) {
+            await wait(50);
+            mutable();
+            if (!samePage() || !sameComposer() || !withinDeadline() || !editable()) return false;
+            if (hasAttachment()) throw chunkAttachment;
+            settled = readChunkDraft();
+          }
+          if (settled === null) {
+            metrics.counters.chunkUnserializableRestarts++;
+            throw chunkMismatch;
+          }
+          const settledText = normalizeLineEndings(settled);
+          if (settledText === expected) {
+            differences.pop();
+            actualExpected = settledText;
+          } else if (settledText !== logicalActual) {
+            metrics.counters.chunkSettlementRestarts++;
+            throw chunkMismatch;
+          }
+        }
+      }
+      if (!differences.length && actualExpected === expectedPrepared) {
+        preparedText = expectedPrepared;
+        return { status: 'exact' };
+      }
+      if (!actualExpected || !actualExpected.trim()) throw chunkMismatch;
+      return { status: 'different', signature: { items: differences, final: actualExpected } };
+    };
+    const insertChunkedText = async () => {
+      let expectedDifference = null;
+      while (true) {
+        try {
+          const outcome = await insertChunkedPass();
+          if (outcome === false) return false;
+          if (outcome.status === 'exact') return true;
+          if (outcome.status === 'different') {
+            if (expectedDifference && expectedDifference.items.length === outcome.signature.items.length
+                && expectedDifference.final === outcome.signature.final
+                && expectedDifference.items.every((item, index) => item.offset === outcome.signature.items[index].offset
+                  && item.actual === outcome.signature.items[index].actual)) return 'mismatch';
+            expectedDifference = outcome.signature;
+            metrics.counters.chunkRestarts++;
+            await wait(150);
+            if (!await stillAllowed() || !samePage() || !keepComposer() || !editable()) return false;
+            continue;
+          }
+          throw chunkMismatch;
+        }
+        catch (error) {
+          if (![chunkMismatch, unconfirmedChunk].includes(error) || args.persistentDelivery !== true || args.unlimitedReadiness !== true) throw error;
+          metrics.counters.chunkRestarts++;
+          chunkSize = Math.max(1, Math.floor(chunkSize / 2));
+          expectedDifference = null;
+          await wait(150);
+          if (!await stillAllowed() || !samePage() || !keepComposer() || !editable()) return false;
+        }
+      }
+    };
 
     if (editor instanceof HTMLTextAreaElement) {
       const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
@@ -587,10 +834,17 @@ export async function pageAction(args) {
       selection.addRange(range);
     };
     selectContents();
+    const logicalValue = normalizeLineEndings(value);
+    const manyLines = (logicalValue.match(/\n/g) || []).length >= 100;
+    if (value && editor.classList.contains('ProseMirror') && (value.length > 1000 || manyLines)) {
+      const chunked = await insertChunkedText();
+      if (chunked === 'mismatch') throw chunkMismatch;
+      return chunked;
+    }
     return replaceAfter(() => {
       if (!mayWrite()) return false;
       // A beforeinput handler may move the caret. Replace, never append.
-      if (forceReplacement) selectContents();
+      selectContents();
       if (!selection.anchorNode || !editor.contains(selection.anchorNode)) return false;
       let inputObserved = false;
       const observeInput = () => { inputObserved = true; };
@@ -611,7 +865,7 @@ export async function pageAction(args) {
   };
 
   const clearOwnDraft = async () => {
-    if (!manualPending && !submitted && inserted && sameComposer() && samePage() && draftUnchanged(insertedDraftSnapshot)) {
+    if (!manualPending && !submitted && inserted && metrics.timings.maxDomWriteMs < 2000 && sameComposer() && samePage() && draftUnchanged(insertedDraftSnapshot)) {
       const focusAtCleanup = document.activeElement;
       try { await fill(''); } catch {}
       finally {
@@ -663,11 +917,18 @@ export async function pageAction(args) {
       const last = messages.at(-1);
       const lastKey = messageKey(last);
       const modernReceipt = !isDot && last?.getAttribute('data-chatgpt-search-unit-key')?.endsWith(':user');
-      if (last && (!modernReceipt || modernMessageKey(last)) && !beforeMessages.has(last)
-        && (!lastKey || !beforeKeys.has(lastKey)) && (!manualPending || lastKey) && clean(textOf(last)) === clean(prompt)) {
+      const receiptText = last ? plainDraft(last, true, last) : null;
+      const newReceipt = last && (!modernReceipt || modernMessageKey(last)) && !beforeMessages.has(last)
+        && (!lastKey || !beforeKeys.has(lastKey)) && (!manualPending || lastKey);
+      if (newReceipt && receiptText !== null && normalizeLineEndings(receiptText) === (manualPending ? normalizeLineEndings(prompt) : preparedText)) {
         if (manualPending) return result('manual-sent', '已确认手动提交本轮提示词。');
         return result('sent', useKeyboardOnly ? '已通过 Ctrl+Enter 提交，并在会话中确认新消息。' : '已确认发送并在会话中确认新消息。');
       }
+      if (newReceipt && receiptText !== null && normalizeRenderedPayload(receiptText) === normalizeRenderedPayload(manualPending ? prompt : preparedText)) {
+        return result('unknown', '消息回执与提示词存在无法确认的空格差异；已暂停，请检查会话。', 'receipt-ambiguous');
+      }
+      if (manualPending && newReceipt && receiptText !== null) return result('unknown', '手动提交内容与本轮提示词不同；请检查会话。');
+      if (submitted && newReceipt && receiptText !== null) return result('unknown', '新消息与配置的提示词不同；已暂停，请检查会话后再继续。', 'receipt-mismatch');
       try {
         await wait(180);
       } catch (error) {
@@ -773,6 +1034,7 @@ export async function pageAction(args) {
           // Known no-attempt is not an uncertain send. Let the normal readiness
           // retry run, rather than strand a filled composer for a full interval.
           if (commit.reason === 'attachments') return protectedDraft('输入框有附件，本次不提交。');
+          if (commit.reason === 'composer-unstable') return result('blocked', '输入框内容反复变化；稍后再次检查。', 'composer-unstable');
           if (['waiting-send', 'busy'].includes(commit.reason)) return result('busy', '发送控件尚未就绪，稍后自动检查。', 'send-not-ready');
           return result('blocked', '发送控件当前不可用，稍后自动检查。', 'commit-not-dispatched');
         }
@@ -785,11 +1047,13 @@ export async function pageAction(args) {
     const accepted = await fill(prompt);
     mutable();
     progress('readiness', 'prepared');
-    inserted = accepted;
+    const readyPayload = () => payloadMatches();
+    inserted = Boolean(accepted);
     if (accepted && sameComposer()) needsRefill = false;
     insertedDraftSnapshot = snapshotDraft();
     // Even matching DOM may precede a controlled input's model commit.
     await wait(180);
+    mutable();
 
     const findSendButton = (root = composer) => {
       metrics.counters.readinessChecks++;
@@ -898,7 +1162,7 @@ export async function pageAction(args) {
       ? result('blocked', '提交前 Agent 状态变化，稍后重新打断并发送。') : null;
     const stopped = lateStop();
     if (stopped) return stopped;
-    if (needsRefill || !payloadMatches()) {
+    if (needsRefill || !readyPayload()) {
       if (!editable()) return result('blocked', '输入框当前不可用，稍后重试。');
       const filledEditor = editor;
       const filled = await fill(prompt, true);
@@ -907,7 +1171,7 @@ export async function pageAction(args) {
         if (!filled) return result('blocked', '输入框当前不可用，稍后重试。');
         needsRefill = false;
       }
-      inserted = !needsRefill && payloadMatches();
+      inserted = !needsRefill && Boolean(filled);
       insertedDraftSnapshot = inserted ? snapshotDraft() : null;
       // Give the page's controlled input one chance to settle. Waiting again
       // after every rewrite lets a recurring page restore starve submission.
@@ -922,14 +1186,16 @@ export async function pageAction(args) {
 
     // An eventful correction must finish before dispatch: DOM equality alone
     // cannot prove that an asynchronous controlled-input model has updated.
-    if (needsRefill || !payloadMatches()) {
+    if (needsRefill || !readyPayload()) {
       const filled = await fill(prompt, true);
       if (!filled) return result('blocked', '输入框当前不可用，稍后重试。');
+      insertedDraftSnapshot = snapshotDraft();
       await wait(180);
     }
-    if (needsRefill || !payloadMatches()) {
+    if (needsRefill || !readyPayload()) {
       const filled = await fill(prompt, true);
       if (!filled) return result('blocked', '输入框当前不可用，稍后重试。');
+      insertedDraftSnapshot = snapshotDraft();
       await wait(180);
     }
     if (args.extensionClock !== true && !await stillAllowed()) {
@@ -943,16 +1209,17 @@ export async function pageAction(args) {
     if (stopAfterFill) return stopAfterFill;
     // Never silently repaint a rich editor while its submission model differs.
     // Standard synchronous input handlers receive the final replacement too.
-    if (!payloadMatches()) {
-      const finalFill = fill(prompt, true);
-      // Await only an actual asynchronous beforeinput handler. Awaiting a
-      // boolean would let a page microtask undo a synchronous replacement.
-      const accepted = finalFill && typeof finalFill.then === 'function' ? await finalFill : finalFill;
+    if (!readyPayload()) {
+      const accepted = await fill(prompt, true);
       if (!accepted) return result('blocked', '输入框当前不可用，稍后重试。');
+      insertedDraftSnapshot = snapshotDraft();
+      await wait(180);
+      if (!await stillAllowed()) return result('cancelled', '已暂停，本次未提交。');
       if (!samePage() || !withinDeadline() || !sameComposer() || !editable()) return result('blocked', '提交前页面已变化。');
       if (hasAttachment()) return protectedDraft('提交前检测到附件，已保留输入框内容。');
       if (busy() || lateStop()) return result('busy', 'Agent 仍在运行。');
     }
+    if (!readyPayload()) return result('blocked', '输入框内容尚未稳定，稍后自动检查。', 'commit-not-dispatched');
     inserted = true;
     insertedDraftSnapshot = snapshotDraft();
     // The page can replace controls while the final authorization is pending.
@@ -967,8 +1234,10 @@ export async function pageAction(args) {
       if (!samePage() || !keepComposer() || !editable()) return result('blocked', '提交前页面已变化。');
       if (hasAttachment()) return protectedDraft('提交前检测到附件，已保留输入框内容。');
       if (busy() || lateStop()) return result('busy', 'Agent 仍在运行。');
-      if (needsRefill || !payloadMatches()) {
-        if (!await fill(prompt, true)) return result('blocked', '输入框当前不可用，稍后重试。');
+      if (needsRefill || !readyPayload()) {
+        const filled = await fill(prompt, true);
+        if (!filled) return result('blocked', '输入框当前不可用，稍后重试。');
+        insertedDraftSnapshot = snapshotDraft();
         needsRefill = false;
       }
       await wait(150);
@@ -977,10 +1246,10 @@ export async function pageAction(args) {
       if (hasAttachment()) return protectedDraft('提交前检测到附件，已保留输入框内容。');
       if (!editable()) return result('blocked', '输入框当前不可用，稍后重试。');
       if (busy() || lateStop()) return result('busy', 'Agent 仍在运行。');
-      if (needsRefill || !payloadMatches()) {
-        const correction = fill(prompt, true);
-        const accepted = correction && typeof correction.then === 'function' ? await correction : correction;
+      if (needsRefill || !readyPayload()) {
+        const accepted = await fill(prompt, true);
         if (!accepted) return result('blocked', '输入框当前不可用，稍后重试。');
+        insertedDraftSnapshot = snapshotDraft();
         needsRefill = false;
         if (!samePage() || !withinDeadline() || !keepComposer() || !editable()) return result('blocked', '提交前页面已变化。');
         if (hasAttachment()) return protectedDraft('提交前检测到附件，已保留输入框内容。');
@@ -994,6 +1263,7 @@ export async function pageAction(args) {
       sendButton = currentButton?.isConnected && composer.contains(currentButton) ? currentButton : null;
     }
     if (!useKeyboardOnly && (observedSend || sendMethod === 'button') && !sendButton) return result('blocked', '发送按钮已不可用。');
+    if (!readyPayload()) return result('blocked', '输入框内容尚未稳定，稍后自动检查。', 'commit-not-dispatched');
 
     beforeAssistant = assistantState();
     mutable();
@@ -1046,6 +1316,15 @@ export async function pageAction(args) {
       if (revoked) return result('cancelled', '本次执行已取消。');
       return await confirmSubmission();
     }
+    if (revoked && metrics.timings.maxDomWriteMs >= 2000) return result(submitted ? 'unknown' : 'cancelled', '本次执行已取消。');
+    if (error === unstableComposer && metrics.timings.maxDomWriteMs >= 2000) return result('blocked', '输入框写入耗时过长；已暂停，请检查页面后再继续。', 'composer-slow-write');
+    if (error === unconfirmedChunk) return result('blocked', '分段文字写入未被页面接受；已暂停且未点击发送，请检查输入框。', 'chunk-unconfirmed');
+    if (error === chunkAttachment) return result('blocked', '分段输入时页面出现附件；已暂停并保留附件，未点击发送。', 'chunk-attachment');
+    if (error === chunkMismatch) return result('blocked', '分段文字与原文不一致；已暂停且未点击发送，请检查输入框。', 'chunk-mismatch');
+    if (error === unstableComposer) return result('blocked', '输入框内容反复变化；稍后再次检查。', 'composer-unstable');
+    if (error === humanEditedDuringSelection) return result('blocked', '输入框内容反复变化；稍后再次检查。', 'composer-unstable');
+    if (error === unconfirmedPasteAttachment) return result('unknown', '粘贴后页面出现附件；内容尚未确认，已暂停并保留附件，请检查会话。', 'paste-attachment-unconfirmed');
+    if (error === unconfirmedPaste) return result('unknown', '粘贴结果未确认；已暂停，请检查输入框和会话后再继续。', 'paste-unconfirmed');
     return result(submitted ? 'unknown' : 'error', '页面操作未完成，未记录页面内容。');
   } finally {
     await clearOwnDraft();

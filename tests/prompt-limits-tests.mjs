@@ -42,6 +42,23 @@ test('prompt validation still rejects wrong types and empty active payloads with
   }
 });
 
+test('active repeat and queued prompts reject lossy browser text without modifying stored drafts', () => {
+  const invalid = ['A\u0000B', 'A\ud800B', 'A\udc00B'];
+  for (const prompt of invalid) {
+    const repeat = { prompt };
+    assert.equal(readConfig(repeat, { allowEmpty: true }).prompt, prompt);
+    assert.throws(() => readConfig(repeat), /invalid|unsupported|control|text|unicode|无效|控制|文本/i);
+    const queued = { mode: 'queue-once', queue: [{ text: prompt }] };
+    assert.deepEqual(readConfig(queued, { allowEmpty: true }).queue[0].text, prompt);
+    assert.throws(() => readConfig(queued), /invalid|unsupported|control|text|unicode|无效|控制|文本/i);
+    assert.equal(repeat.prompt, prompt);
+    assert.equal(queued.queue[0].text, prompt);
+  }
+  const valid = '中文 🧑🏽‍💻 e\u0301\u2028\u2029\t\n';
+  assert.equal(readConfig({ prompt: valid }).prompt, valid);
+  assert.equal(readConfig({ mode: 'queue-once', queue: [{ text: valid }] }).queue[0].text, valid);
+});
+
 test('interval, send-count, queue-count and stop-marker bounds are unchanged', () => {
   for (const intervalMinutes of [0, 10081, Infinity]) assert.throws(() => readConfig({ prompt: 'x', intervalMinutes }));
   for (const maxSends of [-1, 1000001, 1.5]) assert.throws(() => readConfig({ prompt: 'x', maxSends }));

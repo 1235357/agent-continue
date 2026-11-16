@@ -66,6 +66,13 @@ test('known readiness and no-dispatch diagnostics export no prompt, exception or
   }
 });
 
+test('composer instability diagnostic survives export without private content', async () => {
+  const value = await build([{ at: now, event: 'blocked', message: secret,
+    diagnostic: { code: 'composer-unstable', durationMs: 150, prompt: secret } }]);
+  assert.deepEqual(value.logs[0].diagnostic, { code: 'composer-unstable', durationMs: 150 });
+  assert.equal(JSON.stringify(value).includes(secret), false);
+});
+
 test('timing diagnostics export only bounded numbers, fixed enums and actual booleans', async () => {
   const value = await build([{ at: now, event: 'timing-diagnostics', message: secret,
     diagnostic: { code: 'timing-probe', kind: 'page-timers', status: 'result', durationMs: 1992.4,
@@ -209,7 +216,7 @@ test('console rendering tolerates malformed and inherited event keys without sta
     $: id => { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); },
     document: { createElement: element }, t,
     eventLabels: () => ({ sent: 'Sent' }), getLanguage: () => 'en',
-    deliveryDiagnostics: [], diagnosticHealth: { persistence: 'unknown', writeFailures: 0 }, sanitizeDeliveryDiagnostics,
+    deliveryDiagnostics: [], diagnosticHealth: { persistence: 'unknown', writeFailures: 0 }, diagnosticsReadUnconfirmed: false, sanitizeDeliveryDiagnostics,
   });
   vm.runInContext(renderer + '\nrenderLogs();', context);
   const titles = nodes.get('logList').children.map(row => row.children[1].textContent);

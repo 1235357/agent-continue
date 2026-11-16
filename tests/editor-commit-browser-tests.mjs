@@ -223,6 +223,27 @@ try {
       assert.equal(result.dispatched, true, result.code);
       submittedOnce(await inspect(page), { keyboard: true });
     });
+  await scenario('a synchronized public EditorView cannot authorize a stale independent submission model',
+    { dot: true }, async (page, args) => {
+      await page.evaluate(() => {
+        const control = document.querySelector('#send');
+        let externalModel = 'SYNTHETIC_STALE_SUBMISSION_MODEL';
+        pm.dom.addEventListener('input', () => {
+          const value = pm.state.doc.textBetween(0, pm.state.doc.content.size, '\n', '\n');
+          setTimeout(() => { externalModel = value; }, 500);
+        });
+        control.addEventListener('click', event => {
+          event.stopImmediatePropagation();
+          fixture.submits++;
+          fixture.sentTexts.push(externalModel);
+          fixture.modelAtSubmission = pm.state.doc.textBetween(0, pm.state.doc.content.size, '\n', '\n');
+        }, { capture: true });
+      });
+      const result = await commit(page, args);
+      const observed = await inspect(page);
+      assert.ok(observed.submits === 0 || (observed.submits === 1 && observed.sentTexts[0] === prompt),
+        JSON.stringify({ result, submissions: observed.submits, sent: observed.sentTexts, modelAtSubmission: observed.modelAtSubmission }));
+    });
   await scenario('synchronous input/change model and DOM rewrites get one bounded final correction, not a content veto',
     { rewrite: 'sync' }, async (page, args) => {
       const result = await commit(page, args);
