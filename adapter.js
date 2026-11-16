@@ -298,9 +298,17 @@ export async function pageAction(args) {
   // these plain editing structures; never trim/collapse a human's whitespace.
   const inlineFormatting = new Set(['A', 'B', 'CODE', 'DEL', 'EM', 'FONT', 'I', 'MARK', 'S', 'SMALL', 'STRONG', 'SUB', 'SUP', 'U']);
   const markdownBlocks = new Set(['H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'UL', 'OL', 'LI', 'BLOCKQUOTE', 'PRE']);
+  const decorativeNodes = new Set(['SVG', 'PATH', 'G', 'CIRCLE', 'RECT', 'LINE', 'POLYGON', 'POLYLINE', 'USE', 'IMG', 'WBR']);
   const serializeDraft = (node, allowFormatting = false, root = editor) => {
     if (node.nodeType === Node.TEXT_NODE) return node.data;
-    if (node.nodeType !== Node.ELEMENT_NODE || node.getAttribute('contenteditable') === 'false') return null;
+    if (node.nodeType !== Node.ELEMENT_NODE) return '';
+    if (decorativeNodes.has(node.tagName)) return '';
+    if (node.getAttribute('contenteditable') === 'false') {
+      if (node === root) return null;
+      const text = node.innerText ?? node.textContent ?? '';
+      if (!text.trim()) return '';
+      return text;
+    }
     if (node.tagName === 'BR') return '\n';
     if (node !== root && !['DIV', 'P', 'SPAN'].includes(node.tagName) && !(allowFormatting && (inlineFormatting.has(node.tagName) || markdownBlocks.has(node.tagName)))) return null;
     const children = [...node.childNodes];
@@ -677,8 +685,8 @@ export async function pageAction(args) {
           let actualChecks = 0;
           while (actual === null) {
             if (++actualChecks > 20) {
-              metrics.counters.chunkUnserializableRestarts++;
-              throw chunkMismatch;
+              actual = clean(textOf(editor));
+              break;
             }
             await wait(50);
             mutable();
@@ -719,8 +727,8 @@ export async function pageAction(args) {
             let settledChecks = 0;
             while (settled === null) {
               if (++settledChecks > 20) {
-                metrics.counters.chunkUnserializableRestarts++;
-                throw chunkMismatch;
+                settled = clean(textOf(editor));
+                break;
               }
               await wait(50);
               mutable();
@@ -762,10 +770,7 @@ export async function pageAction(args) {
             if (hasAttachment()) throw chunkAttachment;
             settled = readChunkDraft();
           }
-          if (settled === null) {
-            metrics.counters.chunkUnserializableRestarts++;
-            throw chunkMismatch;
-          }
+          if (settled === null) settled = clean(textOf(editor));
           const settledText = normalizeLineEndings(settled);
           if (settledText === expected) {
             differences.pop();
@@ -785,6 +790,7 @@ export async function pageAction(args) {
     };
     const insertChunkedText = async () => {
       let expectedDifference = null;
+      let restartCount = 0;
       while (true) {
         try {
           const outcome = await insertChunkedPass();
@@ -796,6 +802,7 @@ export async function pageAction(args) {
                 && expectedDifference.items.every((item, index) => item.offset === outcome.signature.items[index].offset
                   && item.actual === outcome.signature.items[index].actual)) return 'mismatch';
             expectedDifference = outcome.signature;
+            if (++restartCount > 2) return 'mismatch';
             metrics.counters.chunkRestarts++;
             await wait(150);
             if (!await stillAllowed() || !samePage() || !keepComposer() || !editable()) return false;
@@ -805,6 +812,7 @@ export async function pageAction(args) {
         }
         catch (error) {
           if (![chunkMismatch, unconfirmedChunk].includes(error) || args.persistentDelivery !== true || args.unlimitedReadiness !== true) throw error;
+          if (++restartCount > 2) return 'mismatch';
           metrics.counters.chunkRestarts++;
           chunkSize = Math.max(1, Math.floor(chunkSize / 2));
           expectedDifference = null;

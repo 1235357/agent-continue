@@ -1,5 +1,11 @@
 # Changelog
 
+## [3.0.17] - 2026-11-16
+
+- Add support for decorative DOM elements (`SVG`, `PATH`, `G`, `IMG`, `WBR`, etc.) and uneditable icon spans in `serializeDraft` (`adapter.js`). Resolves the issue where ChatGPT Dot's auto-decorated Markdown hyperlinks (e.g., GitHub URLs rendered with an inline SVG globe icon) caused draft serialization to return `null`.
+- Add `clean(textOf(editor))` innerText fallback in `insertChunkedPass` when decorative rich-text nodes prevent structural DOM serialization, preventing false-positive `chunkMismatch` exceptions.
+- Cap `insertChunkedText` restart attempts to at most 2 retries, completely eliminating the infinite select-all / delete / re-insert loop.
+
 ## [3.0.15] - 2026-11-16
 
 - Remove artificial 1,000-character cap in editor-commit.js on the MAIN-world
