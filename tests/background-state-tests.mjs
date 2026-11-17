@@ -557,7 +557,7 @@ await scenario('Immediate retryable result before document-change detection cann
     h.state.injections.push(request);
     const args=request.args[0],documentId=request.target.documentIds?.[0] || sender().documentId;
     if(request.func.name==='pageInvocationState') {
-      if(args.runId===original?.runId) { await releaseDetector.promise;oldDetectorReturns++; }
+      if(args.runId===original?.runId && args.resultToken) { await releaseDetector.promise;oldDetectorReturns++; }
       return [{frameId:0,documentId:sender().documentId,result:{state:'running'}}];
     }
     if(request.func.name==='editorCommit') {
@@ -612,6 +612,62 @@ await scenario('Immediate retryable result before document-change detection cann
     releaseDetector.resolve();
     await h.message({type:'PAUSE'});await round;
   }
+});
+
+for(const replaceAfterRead of [false,true]) await scenario(replaceAfterRead
+  ? 'Replacement after same-document retry readback cannot redirect pinned successor authority'
+  : 'Explicit no-dispatch same-document retry retains its document pin and sends once',async()=>{
+  const h=await harness();await h.start({maxSends:1});
+  let replacement=false,original,commits=0,readbacks=0;
+  const oldDocument='synthetic-bound-document';
+  const sender=()=>({...h.sender(),documentId:replacement?'replacement-document':oldDocument});
+  h.chrome.tabs.sendMessage=async(id,message)=>({granted:true,revoked:true,...message});
+  h.chrome.scripting.executeScript=async request=>{
+    h.state.injections.push(request);
+    const args=request.args[0],documentId=request.target.documentIds?.[0] || sender().documentId;
+    if(request.func.name==='pageInvocationState') {
+      if(!args.resultToken && args.runId===original?.runId) {
+        readbacks++;
+        const result=[{frameId:0,documentId:oldDocument,result:{state:'settled'}}];
+        if(replaceAfterRead) replacement=true;
+        return result;
+      }
+      return [{frameId:0,documentId:sender().documentId,result:{state:'running'}}];
+    }
+    if(replacement && documentId===oldDocument) throw new Error('The pinned old document no longer exists');
+    if(request.func.name==='editorCommit') {
+      if(args.phase==='commit') {
+        commits++;
+        return [{frameId:0,documentId,result:{supported:true,dispatched:commits>1,
+          hasSend:true,code:commits===1?'attachments':'dispatched'}}];
+      }
+      return [{frameId:0,documentId,result:{supported:true,dispatched:false,hasSend:true,
+        code:args.phase==='prepare'?'prepared':'ready'}}];
+    }
+    if(args.mode==='send') {
+      original??=args;
+      const committed=await h.message({type:'COMMIT_RUN',runId:args.runId},sender());
+      return [{frameId:0,documentId,result:committed.dispatched?{status:'sent'}:
+        {status:'blocked',retryable:true,diagnosticCode:'commit-not-dispatched',
+          diagnosticProgress:{counters:{dispatchAttempts:0,manualIntents:0}}}}];
+    }
+    return [{frameId:0,documentId,result:{status:'ready'}}];
+  };
+  try {
+    const result=await boundedRecoveryResult(h.message({type:'SEND_NOW'}),'Pinned same-document retry did not settle');
+    const admissions=h.state.injections.filter(item=>item.args[0].mode==='send');
+    assert.equal(readbacks,1);
+    assert.ok(admissions.length>=2);
+    assert.deepEqual(admissions[1].target.documentIds,[oldDocument],'Retry must be injected only into the admitted document');
+    assert.deepEqual(admissions[0].args[0].promptDelivery,admissions[1].args[0].promptDelivery);
+    assert.equal(result.job.enabled,false);
+    assert.equal(commits,replaceAfterRead?1:2);
+    assert.equal(result.job.sentCount,replaceAfterRead?0:1);
+    assert.equal(result.job.unknownCount,replaceAfterRead?1:0);
+    assert.equal(h.state.injections.filter(item=>item.func.name==='editorCommit'
+      && item.target.documentIds?.includes('replacement-document')).length,0);
+    assert.equal(h.state.alarms.size,0);
+  } finally { await h.message({type:'PAUSE'}); }
 });
 
 await scenario('Known pre-submission failures keep retrying without waiting an interval and Pause prevents later admissions',async()=>{

@@ -109,7 +109,12 @@ no-dispatch result after MAIN commit admission but before the replacement probe.
 
 Keep MAIN commit admission monotonic on the logical delivery, not only on a
 pending invocation. Internal no-dispatch correction may keep its reservation;
-an outer retry must not obtain a fresh reservation after that marker is set.
+an outer retry must not obtain authority on another document after that marker
+is set. A same-document explicit no-dispatch reply can recover a late removable
+attachment: retain the admitted document ID, require matching current top-frame
+readback before retry, and pin every successor injection to that document.
+Replacement after the readback cannot redirect the pinned successor. Missing
+document identity or uncertain/attempted dispatch must stop as unknown.
 
 Receipt finalization retains its original sending snapshot as the accounting
 baseline. Recheck shared replacement ambiguity after awaited activity/storage,

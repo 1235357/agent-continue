@@ -721,6 +721,7 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS, tr
     args = { ...args, resultToken };
     redundantResult = new Promise(resolve => {
       pending = { runId: args.runId, resultToken, tabId, url: args.expectedUrl, stage: 'page', leaseRenewals: 0, delivery,
+        ...(delivery?.mainCommitAdmitted ? { documentId: delivery.commitDocumentId } : {}),
         trace: traceEpoch === diagnosticEpoch ? trace : null, diagnosticEpoch: traceEpoch,
         resolve: value => { if (!settled && resultChannel === 'none') resultChannel = 'extension-message'; resolve(value); } };
       pendingPageResults.set(resultToken, pending);
@@ -1370,7 +1371,11 @@ async function commitRun(message, sender) {
           pending.stage = 'dispatch';
           pending.mainCommitPending = true;
           pending.mainCommitAdmitted = true;
-          if (pending.delivery) pending.delivery.mainCommitAdmitted = true;
+          if (pending.delivery) {
+            pending.delivery.mainCommitAdmitted = true;
+            pending.delivery.commitDocumentId ??= permit.documentId;
+            pending.delivery.mainCommitNoDispatch = false;
+          }
           if (pending.delivery?.retired.length) pending.delivery.successorDispatchPossible = true;
         }
         let value;
@@ -1378,6 +1383,7 @@ async function commitRun(message, sender) {
           const frames = await chrome.scripting.executeScript({ target,
             world: 'MAIN', func: editorCommit, args: [{ ...permit.args, phase, requireButton }] });
           value = frames?.find(frame => frame.frameId === 0)?.result;
+          if (pending?.delivery && phase === 'commit') pending.delivery.mainCommitNoDispatch = value?.dispatched === false;
           if (pending && phase === 'commit') pending.mainCommitPending = false;
           if (pending && phase === 'commit' && value?.dispatched === true) pending.dispatched = true;
           if (pending && phase === 'commit' && value?.dispatched !== false && value?.dispatched !== true) pending.commitUncertain = true;
@@ -1683,11 +1689,21 @@ async function runRound(force = false, expectedJobId = null, expectedIntentVersi
     }
   } catch { result = snapshot.runKind === 'reply-check' ? { status: 'error', message: t('回复检查暂不可用，继续等待新回复。') } : { status: 'unknown', message: t('后台页面操作未确认。'), diagnosticCode: 'execution-exception' }; }
   if (snapshot.runKind !== 'send' || result?.retryable !== true || !await runStillCurrent(snapshot)) break;
-  // Internal no-dispatch correction keeps its reservation. An admitted MAIN
-  // commit cannot become a fresh outer reservation, even before the document probe.
+  // Explicit no-dispatch may recover a same-document attachment. Authority
+  // remains pinned even if the page is replaced after this readback.
   if (delivery.mainCommitAdmitted) {
-    result = { status: 'unknown', diagnosticCode: 'commit-not-dispatched' };
-    break;
+    let sameDocument = false;
+    if (delivery.mainCommitNoDispatch && typeof delivery.commitDocumentId === 'string') {
+      try {
+        const frames = await chrome.scripting.executeScript({ target: { tabId: snapshot.tabId },
+          world: 'ISOLATED', func: pageInvocationState, args: [{ runId: snapshot.runId }] });
+        sameDocument = frames?.find(frame => frame.frameId === 0)?.documentId === delivery.commitDocumentId;
+      } catch { }
+    }
+    if (!sameDocument) {
+      result = { status: 'unknown', diagnosticCode: 'commit-not-dispatched' };
+      break;
+    }
   }
   // Only an explicit pre-submission result can start a fresh admission. Retire
   // the old run/commit reservation; uncertain or attempted sends never enter here.
