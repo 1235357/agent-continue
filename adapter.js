@@ -47,7 +47,7 @@ export async function pageAction(args) {
     stage: 'page', reason: 'starting', method: 'none',
     counters: Object.fromEntries(['pageAdmissions', 'modelWrites', 'domWrites', 'textChunks', 'slowChunks', 'rejectedChunks', 'chunkRestarts', 'prefixRewriteRestarts', 'chunkSettlementRestarts', 'chunkUnserializableChecks', 'chunkUnserializableRestarts', 'chunkUnserializableRecoveries', 'chunkDifferences', 'insertedBlankSeparators', 'fillCalls', 'readinessChecks',
       'authorizationChecks', 'grantRequests', 'grantReadbacks', 'retiredReadbacks', 'dispatchAttempts',
-      'receiptChecks', 'manualIntents', 'attachmentsRemoved', 'transportErrors', 'leaseRenewals', 'documentChanges'].map(name => [name, name === 'pageAdmissions' ? 1 : 0])),
+      'receiptChecks', 'manualIntents', 'attachmentsRemoved', 'transportErrors', 'leaseRenewals', 'documentChanges', 'emptyComposerRecoveries'].map(name => [name, name === 'pageAdmissions' ? 1 : 0])),
     timings: { modelWriteMs: 0, domWriteMs: 0, maxModelWriteMs: 0, maxDomWriteMs: 0, serializationMs: 0, maxSerializationMs: 0, elapsedMs: 0, stageElapsedMs: 0 },
     observations: { hidden: false, sendPresent: false, sendEnabled: false, composerPresent: false, busy: false, manualPending: false },
   };
@@ -715,6 +715,9 @@ export async function pageAction(args) {
         editor.addEventListener('input', observeInput, { capture: true });
         let accepted;
         const chunkStarted = performance.now();
+        // Selection settling can collapse or narrow the initial replacement.
+        // Reassert it synchronously; later chunks keep their verified caret.
+        if (offset === 0 && args.persistentDelivery === true) selectContents();
         try { accepted = write('domWrites', () => document.execCommand('insertText', false, chunk)); }
         finally { editor.removeEventListener('input', observeInput, { capture: true }); }
         const chunkElapsed = performance.now() - chunkStarted;
@@ -741,7 +744,9 @@ export async function pageAction(args) {
             if (hasAttachment()) throw chunkAttachment;
             actual = readChunkDraft();
           }
-          if (normalizeLineEndings(actual) !== expected) {
+          if (normalizeLineEndings(actual) === expected) {
+            metrics.counters.chunkUnserializableRecoveries++;
+          } else {
             metrics.counters.chunkSettlementRestarts++;
             if (args.persistentDelivery === true && actual && actual.trim()) {
               actualExpected = normalizeLineEndings(actual);
@@ -1321,6 +1326,18 @@ export async function pageAction(args) {
         break;
       }
       observedSend ||= visibleMatches(sendSelector, composer).length > 0;
+      // A framework clear can leave the known Send disabled indefinitely.
+      // Recover the empty pre-submit draft here, not after the readiness wait.
+      if (args.persistentDelivery === true && args.unlimitedReadiness === true
+        && payloadWriteAttempts > 0 && editable()
+        && !(editor instanceof HTMLTextAreaElement ? editor.value : editor.textContent).trim()) {
+        inserted = Boolean(await fill(prompt, true));
+        metrics.counters.emptyComposerRecoveries++;
+        progress('prepare', 'empty-composer');
+        insertedDraftSnapshot = inserted ? snapshotDraft() : null;
+        await wait(180);
+        continue;
+      }
       if (args.unlimitedReadiness === true && sendMethod === 'auto' && !observedSend) {
         // Auto can use its documented keyboard method only if no Send control
         // exists, not as a timeout fallback from a known disabled control.

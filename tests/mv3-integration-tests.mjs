@@ -376,11 +376,12 @@ try {
   const prioritySend = await call(control, { type: 'SEND_NOW' });
   assert.equal(prioritySend.job.sentCount, 1, prioritySend.job.statusText);
   const priorityProof = await priorityPage.evaluate(() => ({ mutations: fixture.composerMutations, clicks: fixture.sendClicks, keys: fixture.keyboardSends, texts: fixture.sentTexts }));
-  assert.ok(priorityProof.mutations >= 2, 'the page must restore text again after the settling refill');
-  assert.deepEqual({ clicks: priorityProof.clicks, keys: priorityProof.keys, texts: priorityProof.texts }, { clicks: 1, keys: 0, texts: [priorityPrompt] });
+  assert.equal(priorityProof.mutations, 1, 'the page-restored prepared text must be adopted without reinjection');
+  assert.deepEqual({ clicks: priorityProof.clicks, keys: priorityProof.keys, texts: priorityProof.texts },
+    { clicks: 1, keys: 0, texts: ['Synthetic composer mutation before send'] });
   await call(control, { type: 'PAUSE' });
   await priorityPage.close();
-  pass(`Real isolated-world ${label}: repeated composer rewrites cannot starve one confirmed configured send.`);
+  pass(`Real isolated-world ${label}: one page-restored prepared payload is adopted and confirmed without reinjection or a second method.`);
   }
 
   const clockPage = await newTestPage(context);

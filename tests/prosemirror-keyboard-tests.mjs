@@ -337,7 +337,7 @@ try {
   control = await newPage(`chrome-extension://${id}/popup.html?view=full`);
   await control.waitForFunction(() => !document.querySelector('#check').disabled);
 
-  await scenario('Official ProseMirror authorized model commit sends one Ctrl+Enter, with no Send click', async page => {
+  await scenario('Official vanilla ProseMirror fallback sends one Ctrl+Enter event sequence, with no Send click', async page => {
     await start(page, { sendMethod: 'ctrl-enter' });
     const sent = await call({ type: 'SEND_NOW' });
     assert.equal(sent.ok, true, sent.error);
@@ -346,7 +346,8 @@ try {
     assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [1, 0, 1]);
     assert.deepEqual(observed.sentTexts, [prompt]);
     assert.equal(observed.editorEmpty, true);
-    assert.deepEqual(observed.events.filter(event => event.key === 'Enter').map(event => [event.type, event.keyCode, event.ctrlKey, event.trusted]), [['keydown', 13, true, false], ['keyup', 13, true, false]]);
+    assert.deepEqual(observed.events.filter(event => event.key === 'Enter').map(event => [event.type, event.keyCode, event.ctrlKey, event.trusted]),
+      [['keydown', 13, true, false], ['keypress', 13, true, false], ['keyup', 13, true, false]]);
   });
   await scenario('Official ProseMirror explicitly selected button method submits once without keyboard fallback', async page => {
     await start(page, { sendMethod: 'button' });
@@ -539,14 +540,28 @@ try {
       await foreground.close();
     }
   });
-  await scenario('Recurring official ProseMirror model restores cannot starve or alter one authorized submission', async page => {
+  await scenario('A recurring official ProseMirror restore is adopted for one authorized submission without reinjection', async page => {
+    await page.evaluate(() => {
+      fixture.modelWrites = [];
+      const dispatch = pm.dispatch.bind(pm);
+      pm.dispatch = transaction => {
+        if (transaction.docChanged) fixture.modelWrites.push(transaction.doc.textBetween(0, transaction.doc.content.size, '\n'));
+        return dispatch(transaction);
+      };
+    });
     await start(page, { sendMethod: 'button' });
     const sent = await call({ type: 'SEND_NOW' });
     assert.equal(sent.job.sentCount, 1, sent.job.statusText);
+    assert.equal(sent.job.lastResult, 'sent');
+    assert.equal(sent.job.prompt, prompt, 'adoption must not overwrite the configured prompt');
     const observed = await inspect(page);
     assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, 1, 1]);
-    assert.deepEqual(observed.sentTexts, [prompt]);
+    assert.deepEqual(observed.sentTexts, ['PAGE_RESTORED_OTHER_TEXT']);
+    assert.deepEqual(observed.modelWrites, [prompt, 'PAGE_RESTORED_OTHER_TEXT', ''],
+      'prepare once, adopt the page restoration, then clear only through submission');
     assert.equal(observed.restores, 1, 'A real model restore ran after the single input');
+    assert.equal(await page.locator('article.message-row.self').count(), 1);
+    assert.equal(await page.locator('article.message-row.self .message-body').innerText(), 'PAGE_RESTORED_OTHER_TEXT');
     assert.equal(await worker.evaluate(async () => (await chrome.storage.session.get('job')).job.editorCommitRunId != null), true);
   });
   await scenario('A prompt above the retired 100000-character cap traverses the actual hidden MV3 model path intact', async page => {
@@ -825,7 +840,7 @@ try {
     assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, 1, 1]);
     assert.deepEqual(observed.sentTexts, [prompt]);
   });
-  await scenario('Legacy fallback waits for a known Send after final prompt correction rather than choosing keyboard', async page => {
+  await scenario('Legacy fallback adopts restored prepared text and waits for its known Send without keyboard fallback', async page => {
     await page.evaluate(() => {
       document.addEventListener('fixture-late-change', () => {
         pm.dispatch(pm.state.tr.insertText('RESTORED_UNSENT_TEXT', 0, pm.state.doc.content.size));
@@ -851,7 +866,12 @@ try {
     const observed = await inspect(page);
     assert.equal(observed.lateChanges, 1);
     assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, 1, 1]);
-    assert.deepEqual(observed.sentTexts, [prompt]);
+    assert.deepEqual(observed.sentTexts, ['RESTORED_UNSENT_TEXT']);
+    assert.equal(sent.job.lastResult, 'sent');
+    assert.equal(sent.job.prompt, prompt);
+    assert.equal(observed.submissionStates[0].sendDisabled, false);
+    const trace = (await worker.evaluate(async () => (await chrome.storage.local.get('deliveryDiagnostics')).deliveryDiagnostics))?.at(-1);
+    assert.deepEqual([trace.counters.domWrites, trace.counters.fillCalls, trace.counters.dispatchAttempts], [1, 1, 1]);
   });
   await scenario('A receipt arriving after the retired 6.5-second cutoff confirms exactly one submission', async page => {
     await start(page, { sendMethod: 'auto' });
@@ -876,12 +896,18 @@ try {
   for (const mutation of ['text', 'attachment']) {
     await scenario(`Legacy final readiness rechecks a late ${mutation} mutation before any click`, async page => {
       await page.evaluate(mutation => {
+        fixture.readinessPhases = [];
+        document.addEventListener('fixture-readiness-phase', event => fixture.readinessPhases.push(event.detail));
         document.addEventListener('fixture-late-change', () => {
           pm.dispatch(pm.state.tr.insertText('RESTORED_UNSENT_TEXT', 0, pm.state.doc.content.size));
           fixture.lateChanges = (fixture.lateChanges || 0) + 1;
+          document.querySelector('button[aria-label="Send"]').disabled = true;
         });
-        document.addEventListener('fixture-wait-finished', () => {
-          if (!fixture.lateChanges || fixture.finalMutation || !pm.state.doc.textContent.includes('PM_SYNTHETIC_FIRST_PARAGRAPH')) return;
+        document.addEventListener('fixture-wait-finished', event => {
+          if (!fixture.lateChanges || fixture.finalMutation || pm.state.doc.textContent !== 'RESTORED_UNSENT_TEXT') return;
+          fixture.finalReadinessProof = event.detail;
+          fixture.finalMutationPreparedText = pm.state.doc.textContent;
+          fixture.finalMutationBeforeSubmit = fixture.submits === 0;
           fixture.finalMutation = mutation;
           if (mutation === 'text') pm.dispatch(pm.state.tr.insertText('LATE_OTHER_TEXT', 0, pm.state.doc.content.size));
           else {
@@ -897,14 +923,41 @@ try {
       const tabId = await worker.evaluate(async url => (await chrome.tabs.query({})).find(tab => tab.url === url).id, page.url());
       await worker.evaluate(tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => {
         const send = chrome.runtime.sendMessage.bind(chrome.runtime);
-        let changed = false;
+        let phase = 'initial-readiness';
+        let initialReadyScans;
+        const invocation = message => [...(globalThis.__agentContinuePageInvocationsV1?.values() || [])]
+          .find(entry => entry.runId === message.runId && entry.state === 'running');
         chrome.runtime.sendMessage = async message => {
+          const before = invocation(message)?.metrics;
+          const finalWait = message.type === 'WAIT_RUN' && message.renew !== false
+            && phase === 'final-readiness-authorized' && before?.counters.readinessChecks === initialReadyScans + 1;
           const reply = await send(message);
-          if (!changed && message.type === 'CHECK_RUN' && document.querySelector('[contenteditable]').textContent.includes('PM_SYNTHETIC_FIRST_PARAGRAPH')) {
-            changed = true;
+          const metrics = invocation(message)?.metrics;
+          if (message.type === 'CHECK_RUN' || finalWait) document.dispatchEvent(new CustomEvent('fixture-readiness-phase',
+            { detail: { type: message.type, phase, readinessChecks: metrics?.counters.readinessChecks ?? null,
+              sendEnabled: metrics?.observations.sendEnabled ?? null } }));
+          if (phase === 'initial-readiness' && message.type === 'CHECK_RUN'
+            && metrics?.counters.readinessChecks > 0 && metrics.observations.sendEnabled) {
+            // The first enabled-control scan has returned and its loop exited.
+            // Disable Send during the following authorization, so only the
+            // later final readiness loop can observe its eventual activation.
+            phase = 'post-initial-readiness';
+            initialReadyScans = metrics.counters.readinessChecks;
             document.dispatchEvent(new Event('fixture-late-change'));
           }
-          if (message.type === 'WAIT_RUN' && message.delayMs === 150) document.dispatchEvent(new Event('fixture-wait-finished'));
+          else if (phase === 'post-initial-readiness' && message.type === 'CHECK_RUN'
+            && metrics?.counters.readinessChecks === initialReadyScans + 1 && metrics.observations.sendPresent
+            && !metrics.observations.sendEnabled && metrics.counters.dispatchAttempts === 0) {
+            phase = 'final-readiness-authorized';
+          }
+          if (finalWait && metrics?.counters.readinessChecks === initialReadyScans + 1) {
+            phase = 'mutated';
+            document.dispatchEvent(new CustomEvent('fixture-wait-finished', { detail: {
+              stage: metrics.stage, reason: metrics.reason, readinessChecks: metrics.counters.readinessChecks, initialReadyScans,
+              dispatchAttempts: metrics.counters.dispatchAttempts, renew: message.renew !== false,
+              sendDisabled: document.querySelector('button[aria-label="Send"]').disabled,
+            } }));
+          }
           return reply;
         };
       } }), tabId);
@@ -923,11 +976,25 @@ try {
         }
         const sent = await sending;
         const observed = await inspect(page);
-        assert.equal(observed.finalMutation, mutation, 'The intended last-wait mutation actually occurred');
+        assert.equal(observed.finalMutation, mutation, 'The intended last-wait mutation actually occurred: ' + JSON.stringify(observed.readinessPhases));
+        assert.equal(observed.finalMutationPreparedText, 'RESTORED_UNSENT_TEXT');
+        assert.equal(observed.finalMutationBeforeSubmit, true, 'The final mutation must precede any submission');
+        assert.ok(observed.finalReadinessProof.initialReadyScans > 0);
+        assert.deepEqual(observed.finalReadinessProof, { stage: 'readiness', reason: 'waiting-send',
+          readinessChecks: observed.finalReadinessProof.initialReadyScans + 1,
+          initialReadyScans: observed.finalReadinessProof.initialReadyScans, dispatchAttempts: 0, renew: true, sendDisabled: true },
+        'Mutation must follow the final disabled-control scan and authorization, not an observer or initial wait');
         assert.equal(sent.job.sentCount, mutation === 'text' ? 1 : 0, sent.job.statusText);
         assert.equal(sent.job.unknownCount, 0);
         assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, mutation === 'text' ? 1 : 0, mutation === 'text' ? 1 : 0]);
-        assert.deepEqual(observed.sentTexts, mutation === 'text' ? [prompt] : []);
+        assert.deepEqual(observed.sentTexts, mutation === 'text' ? ['LATE_OTHER_TEXT'] : []);
+        assert.deepEqual(observed.submissionPayloads, mutation === 'text' ? [{ text: 'LATE_OTHER_TEXT', attachments: 0, files: 0 }] : []);
+        if (mutation === 'text') {
+          assert.deepEqual(await page.locator('article.message-row.self .message-body').allTextContents(), ['LATE_OTHER_TEXT']);
+          assert.equal(observed.submissionStates[0].sendDisabled, false);
+          const trace = (await worker.evaluate(async () => (await chrome.storage.local.get('deliveryDiagnostics')).deliveryDiagnostics))?.at(-1);
+          assert.deepEqual([trace.counters.domWrites, trace.counters.fillCalls, trace.counters.dispatchAttempts], [1, 1, 1]);
+        }
         if (mutation === 'attachment') assert.equal(await page.locator('[data-testid="attachment"]').count(), 1);
       } finally {
         await call({ type: 'PAUSE' });
@@ -1430,7 +1497,6 @@ try {
       assert.deepEqual([fresh.keyboardCommands, fresh.buttonClicks, fresh.submits], [0, 0, 0]);
       assert.ok((await worker.evaluate(() => reloadRecovery.phases)).every(entry => entry.phase !== 'commit'),
         'The old pre-dispatch run must never enter commit');
-      await worker.evaluate(() => { rejectReloadedPrepare(); delete globalThis.rejectReloadedPrepare; });
       const sent = await Promise.race([sending, new Promise((_, reject) => {
         completionTimer = setTimeout(() => reject(new Error('The same Send now did not recover automatically after same-URL replacement')), 10000);
       })]);
@@ -1454,6 +1520,7 @@ try {
       assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, 1, 1]);
       assert.deepEqual(observed.sentTexts, [prompt]);
       assert.equal(observed.editorEmpty, true);
+      await worker.evaluate(() => { rejectReloadedPrepare(); delete globalThis.rejectReloadedPrepare; });
     } finally {
       clearTimeout(completionTimer);
       await call({ type: 'PAUSE' });
@@ -2232,8 +2299,10 @@ try {
         await worker.evaluate(() => { chrome.tabs.sendMessage = originalRepeatGrant; delete globalThis.originalRepeatGrant; });
       }
     });
-  await scenario('A continuously restored supported MAIN composer retries the same reservation slowly until Pause without dispatching', async page => {
-    const restored = 'PAGE_SYNTHETIC_RESTORED_DRAFT';
+  // Nonempty prepared rewrites can be adopted. A page clearing the model
+  // leaves nothing sendable and must still exercise the slow recovery path.
+  await scenario('A continuously cleared supported MAIN composer retries the same reservation slowly until Pause without dispatching', async page => {
+    const restored = '';
     await page.evaluate(({ prompt, restored }) => {
       pm.dom.editor = { view: pm };
       fixture.extensionModelWrites = 0;
@@ -2325,8 +2394,8 @@ try {
       });
     }
   });
-  await scenario('A finite series of MAIN model rewrites backs off and sends the exact prompt once', async page => {
-    const restored = 'PAGE_SYNTHETIC_FINITE_REWRITE';
+  await scenario('A finite series of MAIN model clears backs off and sends the exact prompt once', async page => {
+    const restored = '';
     const restoreLimit = 3;
     await page.evaluate(({ prompt, restored, restoreLimit }) => {
       pm.dom.editor = { view: pm };
@@ -2400,8 +2469,8 @@ try {
       });
     }
   });
-  await scenario('A final MAIN commit that proves model instability backs off in the same reservation and sends once', async page => {
-    const restored = 'PAGE_SYNTHETIC_FINAL_COMMIT_REWRITE';
+  await scenario('A final MAIN commit that proves model instability after a clear backs off in the same reservation and sends once', async page => {
+    const restored = '';
     const restoreLimit = 3;
     await page.evaluate(({ prompt, restored, restoreLimit }) => {
       pm.dom.editor = { view: pm };
@@ -2496,9 +2565,9 @@ try {
     }
   });
   for (const finite of [false, true]) await scenario(finite
-    ? 'Finite legacy composer restores back off and send the exact prompt once'
-    : 'Continuous legacy composer restores back off until Pause and never submit', async page => {
-    const restored = 'PAGE_SYNTHETIC_LEGACY_RESTORE';
+    ? 'Finite legacy composer clears back off and send the exact prompt once'
+    : 'Continuous legacy composer clears back off until Pause and never submit', async page => {
+    const restored = '';
     const restoreLimit = finite ? 3 : Number.MAX_SAFE_INTEGER;
     await page.evaluate(({ prompt, restored, restoreLimit }) => {
       fixture.legacyWrites = [];
@@ -2602,7 +2671,7 @@ try {
       });
     }
   });
-  await scenario('A measured slow legacy write followed by a changed composer never enters another page admission', async page => {
+  await scenario('A measured slow legacy write adopts the nonempty changed composer without another page admission', async page => {
     const started = await start(page, { sendMethod: 'auto', intervalMinutes: 30 });
     await worker.evaluate(async tabId => {
       globalThis.originalSlowWriteExecute = chrome.scripting.executeScript;
@@ -2639,14 +2708,21 @@ try {
       const outcome = await Promise.race([sending, new Promise(resolve => { timeout = setTimeout(() => resolve(null), 7000); })]);
       assert.ok(outcome, 'A slow changed composer must return without another admission');
       assert.equal(outcome.ok, true, outcome.error);
-      assert.equal(outcome.job.lastDiagnosticCode, 'composer-slow-write');
-      assert.equal(outcome.job.enabled, false);
-      assert.equal(outcome.job.sentCount, 0);
+      assert.equal(outcome.job.lastDiagnosticCode, null);
+      assert.equal(outcome.job.lastResult, 'sent');
+      assert.equal(outcome.job.sentCount, 1);
+      assert.equal(outcome.job.unknownCount, 0);
+      assert.equal(outcome.job.prompt, prompt);
       assert.equal(await worker.evaluate(() => slowWriteAdmissions), 1);
       const observed = await inspect(page);
-      assert.equal(observed.slowRestores, 1);
-      assert.deepEqual([observed.buttonClicks, observed.keyboardCommands, observed.submits], [0, 0, 0]);
-      assert.ok((await page.evaluate(() => pm.state.doc.textContent)).startsWith('SYNTHETIC_RESTORED_AFTER_SLOW_WRITE'));
+      const trace = (await worker.evaluate(async () => (await chrome.storage.local.get('deliveryDiagnostics')).deliveryDiagnostics))?.at(-1);
+      assert.equal(observed.slowRestores, 2);
+      assert.deepEqual([observed.buttonClicks, observed.keyboardCommands, observed.submits], [1, 0, 1]);
+      assert.deepEqual(observed.sentTexts, [prompt.split('\n')[0]], 'Characterize the partial prepared value; do not claim original-payload fidelity');
+      assert.deepEqual(await page.locator('article.message-row.self .message-body').allTextContents(), observed.sentTexts);
+      assert.equal(observed.editorEmpty, true);
+      assert.deepEqual([trace.counters.domWrites, trace.counters.fillCalls, trace.counters.dispatchAttempts], [2, 2, 1]);
+      assert.equal(trace.timings.maxDomWriteMs, 3000);
     } finally {
       clearTimeout(timeout);
       await call({ type: 'PAUSE' });
@@ -2658,7 +2734,7 @@ try {
       });
     }
   });
-  await scenario('An ambiguous receipt pauses the actual MV3 task without replaying a submission', async page => {
+  await scenario('A space-normalized receipt confirms one MV3 submission without another dispatch', async page => {
     const expected = 'MV3_SYNTHETIC\u00a0RECEIPT';
     await start(page, { prompt: expected, sendMethod: 'button', intervalMinutes: 1 });
     await page.evaluate(() => {
@@ -2674,17 +2750,17 @@ try {
     });
     const result = await call({ type: 'SEND_NOW' });
     assert.equal(result.ok, true, result.error);
-    assert.equal(result.job.enabled, false);
-    assert.equal(result.job.lastResult, 'unknown');
-    assert.equal(result.job.lastDiagnosticCode, 'receipt-ambiguous');
-    assert.equal(result.job.sentCount, 0);
-    assert.equal(result.job.unknownCount, 1);
-    assert.equal(result.job.nextAt, null);
-    assert.equal((await call({ type: 'SEND_NOW' })).ok, false);
+    assert.equal(result.job.enabled, true);
+    assert.equal(result.job.lastResult, 'sent');
+    assert.equal(result.job.lastDiagnosticCode, null);
+    assert.equal(result.job.sentCount, 1);
+    assert.equal(result.job.unknownCount, 0);
+    assert.ok(result.job.nextAt > Date.now());
     const observed = await inspect(page);
     assert.deepEqual([observed.buttonClicks, observed.keyboardCommands, observed.submits], [1, 0, 1]);
     assert.deepEqual(observed.sentTexts, [expected]);
-    assert.equal((await worker.evaluate(() => chrome.alarms.getAll())).length, 0);
+    assert.deepEqual(await page.locator('article.message-row.self .message-body').allTextContents(), [expected.replace(/\u00a0/g, ' ')]);
+    assert.equal((await worker.evaluate(() => chrome.alarms.getAll())).length, 1);
   });
   await scenario('A replaced document after dispatch pauses an unknown MV3 submission without replay', async page => {
     await start(page, { sendMethod: 'button', intervalMinutes: 1 });
@@ -2764,6 +2840,8 @@ try {
     await control.locator('#manualTxtNotice').locator('..').locator('summary').click();
     await control.locator('#manualSubmissionSequence').fill('9');
     await control.locator('#exportPromptTxt').click();
+    await control.waitForFunction(() => globalThis.syntheticExportBlob instanceof Blob
+      && typeof globalThis.syntheticExportName === 'string');
     const exported = await control.evaluate(async () => ({ name: globalThis.syntheticExportName,
       bytes: [...new Uint8Array(await globalThis.syntheticExportBlob.arrayBuffer())] }));
     assert.match(exported.name, /^agent-continue-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-9\.txt$/);
@@ -3094,7 +3172,7 @@ try {
         timings: recent.map(trace => trace.timings), writes: recent.map(trace => trace.counters.domWrites) }));
     } finally { if (foreground) await foreground.close(); }
   });
-  await scenario('A rejected selection must leave existing text untouched before long paste', async page => {
+  await scenario('A rejected initial selection is reasserted before long replacement without appending the old draft', async page => {
     const original = 'SYNTHETIC_SELECTION_BLOCKED_DRAFT';
     await page.evaluate(original => {
       fixture.pastes = 0;
@@ -3115,9 +3193,11 @@ try {
     const text = await page.evaluate(() => pm.state.doc.textBetween(0, pm.state.doc.content.size, '\n'));
     assert.equal(observed.collapsedSelection, true);
     assert.equal(observed.pastes, 0);
-    assert.equal(observed.submits, 0);
-    assert.equal(result.job.sentCount, 0);
-    assert.equal(text, original);
+    assert.equal(observed.submits, 1);
+    assert.equal(result.job.sentCount, 1);
+    assert.deepEqual(observed.sentTexts, [overwriteLong]);
+    assert.equal(text, '');
+    assert.ok(!observed.sentTexts[0].includes(original));
   });
   await scenario('An externally changed draft during selection synchronization is still completely replaced', async page => {
     const configured = Array.from({ length: 101 }, (_, index) => `SYNC_SYNTHETIC_LINE_${index}`).join('\n');
@@ -3137,7 +3217,7 @@ try {
     assert.equal(observed.submits, 1);
     assert.equal(observed.sentTexts[0], configured);
   });
-  await scenario('A partial selection is rejected before replacing the entire existing draft', async page => {
+  await scenario('A partial initial selection is reasserted before replacing the entire existing draft', async page => {
     const original = 'SYNTHETIC_PARTIAL_SELECTION_MUST_NOT_REMAIN';
     await page.evaluate(original => {
       fixture.pastes = 0;
@@ -3158,11 +3238,15 @@ try {
     const observed = await inspect(page);
     assert.ok(observed.partialSelections > 0);
     assert.equal(observed.pastes, 0);
-    assert.equal(observed.submits, 0);
-    assert.equal(result.job.sentCount, 0);
-    assert.equal(await page.evaluate(() => pm.state.doc.textContent), original);
+    assert.equal(observed.submits, 1);
+    assert.equal(result.job.sentCount, 1);
+    assert.deepEqual(observed.sentTexts, [overwriteLong]);
+    assert.equal(await page.evaluate(() => pm.state.doc.textContent), '');
+    assert.ok(!observed.sentTexts[0].includes(original));
   });
-  for (const duringPreparation of ['pause', 'user-edit']) await scenario(`${duringPreparation} during selection synchronization prevents stale text injection`, async page => {
+  for (const duringPreparation of ['pause', 'user-edit']) await scenario(duringPreparation === 'pause'
+    ? 'Pause during selection synchronization prevents stale text injection'
+    : 'A trusted draft edit retires its preparation before one fresh configured-prompt submission', async page => {
     await page.evaluate(() => {
       fixture.pastes = 0;
       pm.dom.addEventListener('paste', () => { fixture.pastes++; }, true);
@@ -3183,6 +3267,7 @@ try {
     } }), started.job.tabId);
     const sending = call({ type: 'SEND_NOW' });
     await page.waitForFunction(() => document.documentElement.dataset.selectionPauseHeld === 'true');
+    const heldRunId = (await call({ type: 'GET_STATE' })).job.runId;
     try {
       if (duringPreparation === 'pause') {
         const paused = await call({ type: 'PAUSE' });
@@ -3191,6 +3276,8 @@ try {
         await page.bringToFront();
         await page.locator('[data-composer-markdown]').press('End');
         await page.locator('[data-composer-markdown]').press('X');
+        assert.ok((await page.evaluate(() => pm.state.doc.textContent)).includes('X'), 'The trusted edit must actually reach the composer');
+        assert.equal((await inspect(page)).submits, 0, 'Editing is not a manual Send receipt');
       }
     } finally {
       await worker.evaluate(async tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED',
@@ -3198,16 +3285,24 @@ try {
     }
     const outcome = await sending;
     const observed = await inspect(page);
-    if (duringPreparation === 'pause') assert.equal(outcome.job.enabled, false);
-    assert.equal(outcome.job.sentCount, 0);
     assert.equal(observed.pastes, 0);
-    assert.equal(observed.submits, 0);
     const text = await page.evaluate(() => pm.state.doc.textContent);
-    if (duringPreparation === 'pause') assert.equal(text, 'SYNTHETIC_PAUSE_DRAFT');
-    else assert.ok(text.includes('x') || text.includes('X'));
+    if (duringPreparation === 'pause') {
+      assert.equal(outcome.job.enabled, false);
+      assert.equal(outcome.job.sentCount, 0);
+      assert.equal(observed.submits, 0);
+      assert.equal(text, 'SYNTHETIC_PAUSE_DRAFT');
+    } else {
+      assert.notEqual(outcome.job.runId, heldRunId, 'The edited preparation is not silently reused');
+      assert.equal(outcome.job.sentCount, 1);
+      assert.equal(outcome.job.prompt, overwriteLong);
+      assert.equal(observed.submits, 1);
+      assert.deepEqual(observed.sentTexts, [overwriteLong]);
+      assert.equal(text, '');
+    }
   });
   await scenario('Repeated legacy readbacks retain only actual write totals', async page => {
-    const restored = 'SYNTHETIC_READBACK_RESTORE';
+    const restored = '';
     await page.evaluate(({ prompt, restored }) => {
       fixture.readbackWrites = 0;
       const original = pm.props.dispatchTransaction;
@@ -3235,6 +3330,7 @@ try {
       assert.equal(trace.counters.domWrites, after.readbackWrites);
       assert.equal(trace.counters.fillCalls, after.readbackWrites);
       assert.equal(trace.counters.dispatchAttempts, 0);
+      assert.ok(trace.counters.emptyComposerRecoveries > 0);
       assert.equal((await call({ type: 'GET_STATE' })).job.id, started.job.id);
     } finally {
       await call({ type: 'PAUSE' });
@@ -3273,7 +3369,7 @@ try {
     assert.ok(trace.counters.domWrites > 1);
     assert.equal(trace.counters.textChunks, trace.counters.domWrites);
   });
-  await scenario('Visible matching text with a stale submission model is never sent', async page => {
+  await scenario('A separate stale site submission model remains unconfirmed after one legacy dispatch', async page => {
     await page.evaluate(configured => {
       const state = pm.state;
       const blocks = configured.split('\n').map(line => state.schema.nodes.paragraph.create(null, line ? state.schema.text(line) : null));
@@ -3291,21 +3387,24 @@ try {
     const sending = call({ type: 'SEND_NOW' });
     let timeout;
     try {
-      const outcome = await Promise.race([
-        sending.then(result => ({ result })),
-        new Promise(resolve => { timeout = setTimeout(() => resolve({ timedOut: true }), 3000); }),
-      ]).finally(() => clearTimeout(timeout));
+      await page.waitForFunction(() => fixture.submits === 1, null, {timeout:15000});
       const observed = await inspect(page);
+      const job = (await call({type:'GET_STATE'})).job;
       console.log('STALE MATCHING MODEL ' + JSON.stringify({ pastes: observed.pastes, submissions: observed.submits,
-        submittedExpected: observed.sentTexts[0] === overwriteLong, result: outcome.result?.job?.lastResult }));
-      assert.ok(observed.submits === 0 || (observed.submits === 1 && observed.sentTexts[0] === overwriteLong));
+        submittedExpected: observed.sentTexts[0] === overwriteLong, result: job.lastResult }));
+      assert.deepEqual(observed.sentTexts, ['SYNTHETIC_STALE_SUBMISSION_MODEL']);
+      assert.equal(observed.buttonClicks,0,'The independent handler intercepted the one extension click');
+      assert.equal(job.sentCount,0,'A helper attempt without a new correlated receipt is not success');
+      assert.equal(await page.locator('article.message-row.self').count(),0);
+      await new Promise(resolve=>setTimeout(resolve,500));
+      assert.equal((await inspect(page)).submits,1,'Missing proof must not cause another method or dispatch');
     } finally {
       clearTimeout(timeout);
       await call({ type: 'PAUSE' });
       await sending;
     }
   });
-  await scenario('Opaque content with a rejected selection is never partially overwritten', async page => {
+  await scenario('Opaque old draft content is removed through full replacement after a rejected initial selection', async page => {
     await page.evaluate(() => {
       fixture.opaqueBeforePaste = 0;
       fixture.pastes = 0;
@@ -3331,13 +3430,15 @@ try {
       sentCount: outcome.job?.sentCount, result: outcome.job?.lastResult, diagnostic: outcome.job?.lastDiagnosticCode }));
     assert.equal(outcome.ok, true, outcome.error);
     assert.ok(observed.opaqueBeforePaste >= 2);
-    assert.equal(outcome.job.lastResult, 'blocked');
-    assert.equal(outcome.job.lastDiagnosticCode, 'composer-unstable');
-    assert.equal(outcome.job.sentCount, 0);
-    assert.equal(observed.submits, 0);
+    assert.equal(outcome.job.lastResult, 'sent');
+    assert.equal(outcome.job.lastDiagnosticCode, null);
+    assert.equal(outcome.job.sentCount, 1);
+    assert.equal(observed.submits, 1);
+    assert.deepEqual(observed.sentTexts,[overwriteLong]);
+    assert.ok(!observed.sentTexts[0].includes('SYNTHETIC_OPAQUE_DRAFT'));
     assert.equal(observed.pastes, 0);
   });
-  await scenario('A rewrite after the last selection notification is detected before long paste', async page => {
+  await scenario('A rewrite after the last selection notification can remain pending without a total deadline until Pause', async page => {
     await page.evaluate(({ configured, original }) => {
       fixture.pastes = 0;
       fixture.selectionEvents = 0;
@@ -3377,11 +3478,16 @@ try {
     console.log('SELECTION REWRITE RESULT ' + JSON.stringify({ timedOut: !!outcome.timedOut, events: observed.selectionEvents,
       pastes: observed.pastes, submits: observed.submits, status: outcome.job?.lastResult,
       diagnostic: outcome.job?.lastDiagnosticCode }));
-    assert.notEqual(outcome.timedOut, true);
+    assert.equal(outcome.timedOut, true, 'An observation window is not a product send timeout');
     assert.ok(observed.selectionEvents >= 2);
     assert.equal(observed.submits, 0);
     assert.equal(observed.pastes, 0);
-    assert.equal(outcome.job.sentCount, 0);
+    assert.equal((await call({type:'GET_STATE'})).job.sentCount, 0);
+    const paused = await call({type:'PAUSE'});
+    assert.equal(paused.job.enabled,false);
+    const stopped = await inspect(page);
+    await new Promise(resolve=>setTimeout(resolve,500));
+    assert.equal((await inspect(page)).submits,stopped.submits);
   });
   if (testVanillaPerformance && !testFastPaste) await scenario(`${testFontPerformance || testFontExecPerformance ? 'FONT-wrapped' : 'Vanilla'} ProseMirror long multiline MV3 send performance`, async page => {
     const lines = testFontExecPerformance ? 50 : 1200;
@@ -4528,6 +4634,29 @@ try {
       await sending;
     }
   });
+  async function assertAdoptedPreparedSubmission(page, result, configured, expected, {
+    method = 'button', receiptKey = 'pm-account~pm-dot~new-1', interceptedButton = false,
+  } = {}) {
+    assert.notEqual(expected, configured, 'This case must exercise explicitly changed prepared text');
+    assert.equal(result.ok, true, result.error);
+    assert.equal(result.job.sentCount, 1, result.job.statusText);
+    assert.equal(result.job.unknownCount, 0);
+    assert.equal(result.job.prompt, configured, 'Adoption must not replace the saved job prompt');
+    assert.equal((await call({ type: 'GET_STATE' })).config.prompt, configured);
+    const observed = await inspect(page);
+    assert.deepEqual(observed.sentTexts, [expected], 'Exactly the adopted model must actually be submitted');
+    assert.deepEqual([observed.buttonClicks, observed.keyboardCommands, observed.submits],
+      method === 'button' ? [interceptedButton ? 0 : 1, 0, 1] : [0, 1, 1]);
+    const receipts = await page.locator('#history .message-row.self').evaluateAll(rows => rows.map(row => ({
+      key: row.dataset.messageId, text: row.querySelector('.message-body').textContent,
+    })));
+    assert.deepEqual(receipts, [{ key: receiptKey, text: expected }], 'The local receipt must be new and match the actual adopted submission');
+    const trace = (await worker.evaluate(async () => (await chrome.storage.local.get('deliveryDiagnostics')).deliveryDiagnostics))?.at(-1);
+    assert.equal(trace.state, 'sent');
+    assert.equal(trace.counters.dispatchAttempts, 1);
+    assert.ok(trace.counters.receiptChecks >= 1);
+    return trace;
+  }
   for (const interruption of ['pause', 'manual-send', 'user-edit', 'page-edit'])
     await scenario(`Chunked insertion handles ${interruption} before writing a later segment`, async page => {
       const largePrompt = 'CHUNK_START_' + 'x'.repeat(18000) + '_CHUNK_END';
@@ -4580,9 +4709,8 @@ try {
           if (interruption === 'manual-send') assert.notEqual(afterRelease.sentTexts[0], largePrompt);
         } else {
           assert.ok(afterRelease.insertedInputs > afterInterruption.insertedInputs);
-          assert.equal(afterRelease.submits, 1);
-          assert.equal(result.job.sentCount, 1);
-          assert.deepEqual(afterRelease.sentTexts, [largePrompt]);
+          const adoptedPrefix = interruption === 'user-edit' ? largePrompt.slice(0, 1000) + 'Y' : 'SYNTHETIC_SITE_EDIT';
+          await assertAdoptedPreparedSubmission(page, result, largePrompt, adoptedPrefix + largePrompt.slice(1000));
         }
       } finally {
         await call({ type: 'PAUSE' });
@@ -4590,7 +4718,7 @@ try {
         await sending;
       }
     });
-  for (const supported of [false, true]) await scenario(`Chunked insertion preserves a hidden foreground and records its method for supported=${supported}`, async page => {
+  for (const supported of [false, true]) await scenario(`Long insertion preserves a hidden foreground and records its actual model or chunk method for supported=${supported}`, async page => {
     const largePrompt = 'SYNTHETIC_CHUNKED_DIAGNOSTIC_' + 'z'.repeat(11000) + '_END';
     const foreground = await newPage('https://pm-foreground.invalid/chunked-diagnostic');
     try {
@@ -4613,7 +4741,8 @@ try {
       assert.equal(result.job.sentCount, 1, result.job.statusText);
       assert.deepEqual(observed.sentTexts, [largePrompt]);
       assert.equal(observed.pastes, 0);
-      assert.equal(trace.counters.textChunks, Math.ceil(largePrompt.length / 1000));
+      assert.equal(trace.counters.textChunks, supported ? 0 : Math.ceil(largePrompt.length / 1000));
+      assert.equal(trace.counters.modelWrites, supported ? 1 : 0);
       assert.equal(trace.counters.dispatchAttempts, 1);
       assert.deepEqual(await foreground.evaluate(() => ({ value: document.querySelector('#work').value,
         start: document.querySelector('#work').selectionStart, end: document.querySelector('#work').selectionEnd,
@@ -4637,7 +4766,7 @@ try {
     assert.deepEqual(observed.sentTexts, [largePrompt]);
     assert.equal(trace.counters.chunkRestarts, 1);
   });
-  await scenario('A page-created attachment stops chunked text without a false paste diagnosis', async page => {
+  await scenario('A page-created unremovable attachment holds chunked text until Pause without a false paste diagnosis', async page => {
     const largePrompt = 'SYNTHETIC_ATTACHMENT_DURING_CHUNKS_' + 'q'.repeat(6000);
     await page.evaluate(() => {
       fixture.pastes = 0;
@@ -4652,17 +4781,22 @@ try {
       }, true);
     });
     await start(page, { prompt: largePrompt, sendMethod: 'auto', intervalMinutes: 30 });
-    const result = await call({ type: 'SEND_NOW' });
-    const observed = await inspect(page);
-    const trace = (await worker.evaluate(async () => (await chrome.storage.local.get('deliveryDiagnostics')).deliveryDiagnostics))?.at(-1);
-    assert.equal(result.job.enabled, false);
-    assert.equal(result.job.lastDiagnosticCode, 'chunk-attachment');
-    assert.equal(result.job.sentCount, 0);
-    assert.equal(observed.submits, 0);
-    assert.equal(observed.pastes, 0);
-    assert.equal(trace.reason, 'chunk-attachment');
-    assert.equal(trace.counters.textChunks, 1);
-    assert.equal(await page.locator('[data-testid="attachment"]').count(), 1);
+    const sending = call({ type: 'SEND_NOW' });
+    try {
+      await page.waitForFunction(() => fixture.addedDuringChunk);
+      const observed = await inspect(page);
+      const waiting = (await call({type:'GET_STATE'})).job;
+      assert.equal(waiting.enabled,true);
+      assert.equal(waiting.sentCount,0);
+      assert.deepEqual([observed.submits,observed.pastes],[0,0]);
+      assert.equal(await page.locator('[data-testid="attachment"]').count(), 1);
+      assert.equal((await call({type:'PAUSE'})).job.enabled,false);
+      assert.equal((await sending).job.sentCount,0);
+      const trace = (await worker.evaluate(async () => (await chrome.storage.local.get('deliveryDiagnostics')).deliveryDiagnostics))?.at(-1);
+      assert.equal(trace.counters.textChunks,1);
+      assert.equal(trace.counters.dispatchAttempts,0);
+      assert.notEqual(trace.reason,'paste-attachment-unconfirmed');
+    } finally { await call({type:'PAUSE'}); await sending; }
   });
   await scenario('A background chunked task cannot silently type into another focused editor after a focus change', async page => {
     const largePrompt = 'SYNTHETIC_FOCUS_RACE_' + 'r'.repeat(9000);
@@ -4702,7 +4836,7 @@ try {
       await sending;
     }
   });
-  await scenario('Chunked entry must never submit a stale external model after complete text preparation', async page => {
+  await scenario('A private stale model after complete chunked preparation stays unconfirmed after one dispatch', async page => {
     const largePrompt = 'SYNTHETIC_COMPLETE_' + 'm'.repeat(12000) + '_END';
     await page.evaluate(() => {
       fixture.externalModel = 'SYNTHETIC_STALE_EXTERNAL_MODEL';
@@ -4716,14 +4850,15 @@ try {
     const sending = call({ type: 'SEND_NOW' });
     let timeout;
     try {
-      const outcome = await Promise.race([
-        sending.then(result => ({ result })),
-        new Promise(resolve => { timeout = setTimeout(() => resolve({ timedOut: true }), 4000); }),
-      ]).finally(() => clearTimeout(timeout));
+      await page.waitForFunction(()=>fixture.submits===1,null,{timeout:15000});
       const observed = await inspect(page);
       console.log('CHUNK STALE MODEL RESULT ' + JSON.stringify({ submissions: observed.submits,
-        exact: observed.sentTexts[0] === largePrompt, timedOut: !!outcome.timedOut }));
-      assert.ok(observed.submits === 0 || (observed.submits === 1 && observed.sentTexts[0] === largePrompt));
+        exact: observed.sentTexts[0] === largePrompt }));
+      assert.deepEqual(observed.sentTexts,['SYNTHETIC_STALE_EXTERNAL_MODEL']);
+      assert.equal((await call({type:'GET_STATE'})).job.sentCount,0);
+      assert.equal(await page.locator('#history .message-row.self').count(),0);
+      await new Promise(resolve=>setTimeout(resolve,500));
+      assert.equal((await inspect(page)).submits,1);
     } finally {
       clearTimeout(timeout);
       await call({ type: 'PAUSE' });
@@ -4760,7 +4895,7 @@ try {
       await sending;
     }
   });
-  await scenario('A consistently transformed invisible character pauses without submission', async page => {
+  await scenario('A consistently transformed invisible character is adopted with a matching local receipt', async page => {
     const largePrompt = 'SYNTHETIC_INVISIBLE_' + 't'.repeat(800) + '\u00a0' + 'v'.repeat(3000);
     await page.evaluate(() => {
       const send = document.querySelector('button[aria-label="Send"]');
@@ -4797,17 +4932,11 @@ try {
       const result = outcome.result || await sending;
       const observed = await inspect(page);
       assert.notEqual(outcome.timedOut, true);
-      assert.ok(Number(await page.evaluate(() => document.documentElement.dataset.invisibleChanges)) >= 2);
-      assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, 0, 0]);
-      assert.deepEqual(observed.sentTexts, []);
-      assert.equal(result.job.sentCount, 0);
-      assert.equal(result.job.unknownCount, 0);
-      assert.equal(result.job.enabled, false);
-      assert.equal(result.job.lastDiagnosticCode, 'chunk-mismatch');
-      const trace = (await worker.evaluate(async () => (await chrome.storage.local.get('deliveryDiagnostics')).deliveryDiagnostics))?.at(-1);
+      assert.equal(Number(await page.evaluate(() => document.documentElement.dataset.invisibleChanges)), 1);
+      const trace = await assertAdoptedPreparedSubmission(page, result, largePrompt, largePrompt.replaceAll('\u00a0', ' '),
+        { receiptKey: 'pm-account~pm-dot~visible-difference', interceptedButton: true });
       assert.ok(trace.counters.chunkDifferences > 0);
-      assert.ok(trace.counters.chunkRestarts >= 1);
-      assert.equal(trace.counters.dispatchAttempts, 0);
+      assert.equal(trace.counters.chunkRestarts, 0);
     } finally {
       clearTimeout(timer);
       await call({ type: 'PAUSE' });
@@ -4880,8 +5009,18 @@ try {
       console.log('DENSE BUDGET RESULT ' + JSON.stringify({ supported, timedOut: !!outcome.timedOut,
         calls: budget.calls, maxNewlines: budget.maxNewlines, submissions: observed.submits, sentCount: result.job?.sentCount }));
       assert.notEqual(outcome.timedOut, true);
-      assert.ok(budget.maxNewlines > 16);
-      assert.ok(budget.calls > 1);
+      const trace = (await worker.evaluate(async () => (await chrome.storage.local.get('deliveryDiagnostics')).deliveryDiagnostics))?.at(-1);
+      if (supported) {
+        assert.deepEqual(budget, { calls: 0, maxNewlines: 0 });
+        assert.equal(trace.counters.modelWrites, 1);
+        assert.equal(trace.counters.textChunks, 0);
+      } else {
+        assert.ok(budget.maxNewlines > 16);
+        assert.ok(budget.calls > 1);
+        assert.equal(trace.counters.modelWrites, 0);
+        assert.equal(trace.counters.textChunks, budget.calls);
+      }
+      assert.equal(trace.counters.dispatchAttempts, 1);
       assert.equal(result.job.sentCount, 1, result.job.statusText);
       assert.deepEqual(observed.sentTexts, [largePrompt]);
       assert.deepEqual([observed.buttonClicks, observed.keyboardCommands, observed.submits], [1, 0, 1]);
@@ -5230,7 +5369,7 @@ try {
     assert.deepEqual(observed.sentTexts, [largePrompt]);
     assert.equal(observed.submits, 1);
   });
-  await scenario('A delayed rewrite during a slow chunk is overwritten before the exact submission', async page => {
+  await scenario('A delayed rewrite during a slow chunk is adopted before one submission', async page => {
     const largePrompt = 'SYNTHETIC_DELAYED_SLOW_' + 'n'.repeat(4500);
     const started = await start(page, { prompt: largePrompt, sendMethod: 'auto', intervalMinutes: 30 });
     await page.evaluate(() => {
@@ -5262,12 +5401,10 @@ try {
     }, started.job.tabId);
     assert.equal(observed.delayedRewrite, true);
     assert.ok(calls > 1);
-    assert.equal(result.job.enabled, true);
-    assert.equal(result.job.sentCount, 1);
-    assert.equal(observed.submits, 1);
-    assert.deepEqual(observed.sentTexts, [largePrompt]);
+    await assertAdoptedPreparedSubmission(page, result, largePrompt,
+      'SYNTHETIC_CHANGED_AFTER_SLOW_WRITE' + largePrompt.slice(1000));
   });
-  await scenario('A delayed site rewrite after a slow final chunk cannot submit different text', async page => {
+  await scenario('A delayed site rewrite after a slow final chunk is adopted with a matching local receipt', async page => {
     const largePrompt = 'SYNTHETIC_DELAYED_FINAL_' + 'q'.repeat(1500);
     await page.evaluate(() => {
       let events = 0;
@@ -5299,9 +5436,9 @@ try {
         new Promise(resolve => { timer = setTimeout(() => resolve({ timedOut: true }), 6000); }),
       ]).finally(() => clearTimeout(timer));
       const observed = await inspect(page);
+      assert.notEqual(outcome.timedOut, true);
       assert.equal(observed.finalRewrite, true);
-      assert.ok(observed.submits === 0 || (observed.submits === 1 && observed.sentTexts[0] === largePrompt));
-      if (observed.submits === 1) assert.equal(outcome.result?.job?.sentCount, 1);
+      await assertAdoptedPreparedSubmission(page, outcome.result, largePrompt, 'SYNTHETIC_DELAYED_FINAL_REWRITE');
     } finally {
       clearTimeout(timer);
       await call({ type: 'PAUSE' });
@@ -5513,7 +5650,7 @@ try {
     assert.equal(observed.submits, 1);
     assert.equal(trace.counters.slowChunks, 4);
   });
-  await scenario('A verified slow complete draft is reasserted and sent if the page rewrites it before submission', async page => {
+  await scenario('A verified slow complete draft adopts a page rewrite before one submission', async page => {
     const largePrompt = 'SYNTHETIC_REASSERT_SLOW_' + 'r'.repeat(3500);
     await page.evaluate(expectedLength => {
       fixture.slowRewrite = false;
@@ -5541,9 +5678,7 @@ try {
     const result = await call({ type: 'SEND_NOW' });
     const observed = await inspect(page);
     assert.equal(observed.slowRewrite, true);
-    assert.equal(result.job.sentCount, 1, result.job.statusText);
-    assert.deepEqual(observed.sentTexts, [largePrompt]);
-    assert.equal(observed.submits, 1);
+    await assertAdoptedPreparedSubmission(page, result, largePrompt, 'SYNTHETIC_PAGE_RESET');
   });
   await scenario('One synchronous chunk exceeding a lease reacquires authorization before later chunks', async page => {
     const largePrompt = 'SYNTHETIC_LONG_SINGLE_WRITE_' + 'd'.repeat(5500);
@@ -5616,7 +5751,7 @@ try {
     assert.ok(sizes.every(size => size > 0 && size <= 1000));
     assert.equal(sizes.reduce((sum, size) => sum + size, 0), expected.length);
   });
-  await scenario('A transient page rewrite between chunks is overwritten and the full prompt is delivered', async page => {
+  await scenario('A transient page rewrite between chunks is adopted with the remaining prompt suffix', async page => {
     const largePrompt = 'SYNTHETIC_REWRITE_HEAD_' + 'a'.repeat(8000) + '_TAIL';
     const started = await start(page, { prompt: largePrompt, sendMethod: 'auto', intervalMinutes: 30 });
     await worker.evaluate(async tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => {
@@ -5640,10 +5775,9 @@ try {
       await worker.evaluate(async tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => rewriteGate.release() }), started.job.tabId);
       const outcome = await Promise.race([sending.then(result => ({ result })), new Promise(resolve => { timer = setTimeout(() => resolve({ timedOut: true }), 15000); })]);
       assert.notEqual(outcome.timedOut, true);
-      assert.equal(outcome.result.job.sentCount, 1, outcome.result.job.statusText);
-      assert.deepEqual((await inspect(page)).sentTexts, [largePrompt]);
-      const trace = (await worker.evaluate(async () => (await chrome.storage.local.get('deliveryDiagnostics')).deliveryDiagnostics))?.at(-1);
-      assert.equal(trace.counters.chunkRestarts, 1);
+      const trace = await assertAdoptedPreparedSubmission(page, outcome.result, largePrompt,
+        'SYNTHETIC_INTERRUPTING_PAGE_TEXT' + largePrompt.slice(1000));
+      assert.equal(trace.counters.chunkRestarts, 0);
       assert.equal(JSON.stringify(trace).includes('SYNTHETIC_REWRITE_HEAD_'), false);
     } finally {
       clearTimeout(timer);
@@ -5673,13 +5807,13 @@ try {
     assert.deepEqual(observed.sentTexts, [largePrompt]);
     assert.ok(counts.some(count => count > 16));
   });
-  await scenario('Persistent page rewrites keep retrying without a fixed attempt limit until Pause', async page => {
+  await scenario('Persistent empty page clears keep retrying without a fixed attempt limit until Pause', async page => {
     const largePrompt = 'SYNTHETIC_REPEAT_REWRITE_' + 'r'.repeat(7000);
     await page.evaluate(() => {
       fixture.rewrites = 0;
       pm.dom.addEventListener('input', () => {
         fixture.rewrites++;
-        pm.dispatch(pm.state.tr.insertText('SYNTHETIC_SITE_RESET', 0, pm.state.doc.content.size));
+        pm.dispatch(pm.state.tr.delete(0, pm.state.doc.content.size));
       }, true);
     });
     await start(page, { prompt: largePrompt, sendMethod: 'auto', intervalMinutes: 30 });
@@ -5749,7 +5883,7 @@ try {
       await sending;
     }
   });
-  await scenario('A persistent page normalization pauses without submitting transformed text', async page => {
+  await scenario('A persistent page normalization is adopted with a matching local receipt', async page => {
     const largePrompt = 'SYNTHETIC_NORMALIZED_' + 'n'.repeat(7000);
     const started = await start(page, { prompt: largePrompt, sendMethod: 'button', intervalMinutes: 30 });
     await worker.evaluate(async tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => {
@@ -5763,18 +5897,10 @@ try {
       const outcome = await Promise.race([sending.then(result => ({ result })), new Promise(resolve => { timer = setTimeout(() => resolve({ timedOut: true }), 12000); })]);
       if (outcome.timedOut) await call({ type: 'PAUSE' });
       const result = outcome.result || await sending;
-      const observed = await inspect(page);
       assert.notEqual(outcome.timedOut, true);
-      assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, 0, 0]);
-      assert.deepEqual(observed.sentTexts, []);
-      assert.equal(result.job.sentCount, 0);
-      assert.equal(result.job.unknownCount, 0);
-      assert.equal(result.job.enabled, false);
-      assert.equal(result.job.lastDiagnosticCode, 'chunk-mismatch');
-      const trace = (await worker.evaluate(async () => (await chrome.storage.local.get('deliveryDiagnostics')).deliveryDiagnostics))?.at(-1);
+      const trace = await assertAdoptedPreparedSubmission(page, result, largePrompt, largePrompt.toUpperCase());
       assert.ok(trace.counters.chunkDifferences > 0);
-      assert.ok(trace.counters.chunkRestarts >= 1);
-      assert.equal(trace.counters.dispatchAttempts, 0);
+      assert.equal(trace.counters.chunkRestarts, 0);
     } finally {
       clearTimeout(timer);
       await call({ type: 'PAUSE' });
@@ -5795,7 +5921,7 @@ try {
     const trace = (await worker.evaluate(async () => (await chrome.storage.local.get('deliveryDiagnostics')).deliveryDiagnostics))?.at(-1);
     assert.equal(trace.counters.insertedBlankSeparators, 0);
   });
-  await scenario('A changed editor with consistently transformed text pauses before dispatch', async page => {
+  await scenario('A prepared editor adopts a later nonempty rewrite without changing its saved prompt', async page => {
     const largePrompt = 'SYNTHETIC_CHANGED_TARGET_' + 'c'.repeat(7000);
     const started = await start(page, { prompt: largePrompt, sendMethod: 'button', intervalMinutes: 30 });
     await worker.evaluate(async tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => {
@@ -5805,7 +5931,7 @@ try {
       document.execCommand = (name, ui, value) => originalCommand(name, ui,
         name === 'insertText' && typeof value === 'string' ? value.toUpperCase() : value);
       chrome.runtime.sendMessage = async message => {
-        if (message.type === 'WAIT_RUN' && message.delayMs === 150 && !changedDraftGate.held
+        if (message.type === 'WAIT_RUN' && message.delayMs === 180 && !changedDraftGate.held
             && document.querySelector('[data-composer-markdown]')?.textContent?.length >= 7000) {
           changedDraftGate.held = true;
           document.documentElement.dataset.changedDraftHeld = 'true';
@@ -5825,17 +5951,9 @@ try {
       if (outcome.timedOut) await call({ type: 'PAUSE' });
       const result = outcome.result || await sending;
       assert.notEqual(outcome.timedOut, true);
-      const observed = await inspect(page);
-      assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, 0, 0]);
-      assert.deepEqual(observed.sentTexts, []);
-      assert.equal(result.job.sentCount, 0);
-      assert.equal(result.job.unknownCount, 0);
-      assert.equal(result.job.enabled, false);
-      assert.equal(result.job.lastDiagnosticCode, 'chunk-mismatch');
-      const trace = (await worker.evaluate(async () => (await chrome.storage.local.get('deliveryDiagnostics')).deliveryDiagnostics))?.at(-1);
+      const trace = await assertAdoptedPreparedSubmission(page, result, largePrompt, 'SYNTHETIC_UNRELATED_REPLACEMENT');
       assert.ok(trace.counters.chunkDifferences > 0);
-      assert.ok(trace.counters.chunkRestarts >= 1);
-      assert.equal(trace.counters.dispatchAttempts, 0);
+      assert.equal(trace.counters.chunkRestarts, 0);
     } finally {
       clearTimeout(timer);
       await call({ type: 'PAUSE' });
@@ -5878,21 +5996,24 @@ try {
     await control.locator('#togglePrompt').click();
     await control.locator('#prompt').fill('MV3_SYNTHETIC_SAVED_BEFORE_CLEAR');
     await control.waitForFunction(async () => (await chrome.storage.local.get('config')).config?.prompt === 'MV3_SYNTHETIC_SAVED_BEFORE_CLEAR');
-    await control.locator('#prompt').fill('MV3_SYNTHETIC_PRE_CLEAR_PRIVATE');
     await control.evaluate(() => {
       const actual = chrome.runtime.sendMessage.bind(chrome.runtime);
       chrome.runtime.sendMessage = message => message.type === 'SAVE_DRAFT'
-        ? new Promise((resolve, reject) => { globalThis.releaseClearRaceSave = () => actual(message).then(resolve, reject); })
+        ? new Promise((resolve, reject) => { globalThis.releaseClearRaceSave = () => actual(message).then(response => {
+          resolve(response); return response;
+        }, reject); })
         : actual(message);
     });
+    await control.locator('#prompt').fill('MV3_SYNTHETIC_PRE_CLEAR_PRIVATE');
     await control.waitForFunction(() => typeof globalThis.releaseClearRaceSave === 'function', null, { timeout: 8000 });
     const second = await newPage(`chrome-extension://${new URL(worker.url()).host}/popup.html?view=full`);
     try {
       const cleared = await second.evaluate(() => chrome.runtime.sendMessage({ type: 'CLEAR_DATA' }));
       assert.equal(cleared.ok, true);
       await control.waitForFunction(() => document.querySelector('#check').disabled, null, { timeout: 8000 });
-      await control.evaluate(() => globalThis.releaseClearRaceSave());
-      await control.waitForFunction(() => document.querySelector('#feedback')?.classList.contains('error'), null, { timeout: 8000 });
+      const staleSave = await control.evaluate(() => globalThis.releaseClearRaceSave());
+      assert.equal(staleSave.ok, false, 'Clear must reject the actual delayed save');
+      assert.equal(staleSave.conflict, true, 'The old generation cannot restore the cleared prompt');
       const data = await worker.evaluate(() => chrome.storage.local.get(['config', 'resumeJob']));
       assert.notEqual(data.config?.prompt, 'MV3_SYNTHETIC_PRE_CLEAR_PRIVATE');
       assert.equal(data.resumeJob, undefined);
@@ -5961,8 +6082,12 @@ try {
     const session = await context.newCDPSession(control);
     try {
       const versions = new Map();
+      const restartEvents = [];
       session.on('ServiceWorker.workerVersionUpdated', event => {
-        for (const version of event.versions) versions.set(version.versionId, version);
+        for (const version of event.versions) {
+          versions.set(version.versionId, version);
+          restartEvents.push({ id: version.versionId, status: version.runningStatus });
+        }
       });
       await session.send('ServiceWorker.enable');
       const started = Date.now();
@@ -5970,14 +6095,18 @@ try {
           && Date.now() - started < 5000) await new Promise(resolve => setTimeout(resolve, 50));
       const running = [...versions.values()].find(version => version.scriptURL === worker.url() && version.runningStatus === 'running');
       assert.ok(running);
+      const stopEventStart = restartEvents.length;
       await session.send('ServiceWorker.stopWorker', { versionId: running.versionId });
       const stoppedAt = Date.now();
-      while (versions.get(running.versionId)?.runningStatus !== 'stopped' && Date.now() - stoppedAt < 5000)
+      const stopped = () => restartEvents.slice(stopEventStart).some(item => item.id === running.versionId && item.status === 'stopped');
+      while (!stopped() && Date.now() - stoppedAt < 5000)
         await new Promise(resolve => setTimeout(resolve, 50));
-      assert.equal(versions.get(running.versionId)?.runningStatus, 'stopped');
+      console.log('CLEAR RESTART EVENTS ' + JSON.stringify(restartEvents));
+      assert.equal(stopped(), true, 'The actual worker must stop, even if a subsequent message already restarted it');
       const state = await call({ type: 'GET_STATE' });
       worker = context.serviceWorkers().find(item => item.url().endsWith('/background.js'))
         || await context.waitForEvent('serviceworker', { predicate: item => item.url().endsWith('/background.js'), timeout: 15000 });
+      assert.equal(await worker.evaluate(() => globalThis.testClearMarker), undefined, 'The original worker memory must not survive');
       assert.equal(state.configAvailable, false);
       assert.equal((await call({ type: 'PREPARE_START' })).ok, false);
       assert.equal((await call({ type: 'PAUSE' })).ok, true);
@@ -6142,7 +6271,7 @@ try {
     assert.ok(trace.counters.textChunks > 10);
     assert.equal(trace.counters.dispatchAttempts, 1);
   });
-  await scenario('A rewrite between chunks is detected before the next input', async page => {
+  await scenario('A rewrite between chunks is adopted before the next input without another full selection', async page => {
     const largePrompt = 'SYNTHETIC_REWRITE_ORDER_' + 'a'.repeat(9000);
     const started = await start(page, { prompt: largePrompt, sendMethod: 'button', intervalMinutes: 30 });
     await worker.evaluate(async tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => {
@@ -6186,16 +6315,16 @@ try {
         const frames = await chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => rewriteOrder });
         return frames.find(frame => frame.frameId === 0)?.result;
       }, started.job.tabId);
-      assert.equal(order.nextWasFullSelection, true, 'A changed prefix must be selected before the next insertion');
-      assert.equal(result.job.sentCount, 1);
-      assert.deepEqual((await inspect(page)).sentTexts, [largePrompt]);
+      assert.equal(order.nextWasFullSelection, false, 'An adopted prefix must not trigger another complete replacement');
+      await assertAdoptedPreparedSubmission(page, result, largePrompt,
+        'SYNTHETIC_REPLACED_BETWEEN_CHUNKS' + largePrompt.slice(1000));
     } finally {
       await call({ type: 'PAUSE' });
       await worker.evaluate(async tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => rewriteOrder.release?.() }), started.job.tabId);
       await sending;
     }
   });
-  await scenario('A retained text node rewritten between chunks is detected before the next input', async page => {
+  await scenario('A retained text node rewritten between chunks is adopted before the next input', async page => {
     const largePrompt = 'SYNTHETIC_RETAINED_NODE_' + 'b'.repeat(9000);
     const started = await start(page, { prompt: largePrompt, sendMethod: 'button', intervalMinutes: 30 });
     await worker.evaluate(async tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => {
@@ -6241,16 +6370,16 @@ try {
         const frames = await chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => retainedGate });
         return frames.find(frame => frame.frameId === 0)?.result;
       }, started.job.tabId);
-      assert.equal(gate.nextWasFullSelection, true);
-      assert.equal(result.job.sentCount, 1);
-      assert.deepEqual((await inspect(page)).sentTexts, [largePrompt]);
+      assert.equal(gate.nextWasFullSelection, false);
+      await assertAdoptedPreparedSubmission(page, result, largePrompt,
+        'SYNTHETIC_RETAINED_NODE_CHANGED' + largePrompt.slice(1000));
     } finally {
       await call({ type: 'PAUSE' });
       await worker.evaluate(async tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => retainedGate.release?.() }), started.job.tabId);
       await sending;
     }
   });
-  await scenario('A page rewrite while the next chunk is constructed is never submitted as an accepted transformed draft', async page => {
+  await scenario('A page rewrite while the next chunk is constructed is adopted for one submission', async page => {
     const largePrompt = 'SYNTHETIC_PREWRITE_MUTATION_' + 'c'.repeat(9000);
     const started = await start(page, { prompt: largePrompt, sendMethod: 'button', intervalMinutes: 30 });
     await worker.evaluate(async tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => {
@@ -6269,13 +6398,16 @@ try {
       };
     } }), started.job.tabId);
     const result = await call({ type: 'SEND_NOW' });
-    const observed = await inspect(page);
-    assert.equal(observed.submits, 1);
-    assert.equal(result.job.sentCount, 1);
-    assert.deepEqual(observed.sentTexts, [largePrompt]);
-    const trace = (await worker.evaluate(async () => (await chrome.storage.local.get('deliveryDiagnostics')).deliveryDiagnostics))?.at(-1);
-    assert.equal(trace.counters.prefixRewriteRestarts, 2);
-    assert.ok(trace.counters.chunkRestarts >= 2);
+    const trace = await assertAdoptedPreparedSubmission(page, result, largePrompt,
+      'c'.repeat(1000) + 'SYNTHETIC_PREWRITE_EXTERNAL' + largePrompt.slice(4000));
+    const probe = await worker.evaluate(async tabId => {
+      const frames = await chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => prewrite });
+      return frames.find(frame => frame.frameId === 0)?.result;
+    }, started.job.tabId);
+    assert.equal(probe.fired, true);
+    assert.equal(probe.writes, Math.ceil(largePrompt.length / 1000));
+    assert.equal(trace.counters.prefixRewriteRestarts, 2, 'The legacy-named counter records both detected prefix changes');
+    assert.equal(trace.counters.chunkRestarts, 0);
     const exported = await control.evaluate(async () => {
       const { buildActivityExport } = await import('./activity-export.js');
       const stored = await chrome.storage.local.get(['logs', 'deliveryDiagnostics', 'diagnosticsHealth']);
@@ -6285,7 +6417,7 @@ try {
     assert.equal(JSON.stringify(exported).includes(largePrompt), false);
     assert.equal(JSON.stringify(exported).includes('SYNTHETIC_PREWRITE_EXTERNAL'), false);
   });
-  await scenario('Repeated prefix rewrites remain pausable without a wrong submission', async page => {
+  await scenario('A prefix rewrite is adopted without entering a repeated full-refill cycle', async page => {
     const largePrompt = 'SYNTHETIC_PERSISTENT_PREFIX_' + 'd'.repeat(9000);
     const started = await start(page, { prompt: largePrompt, sendMethod: 'button', intervalMinutes: 30 });
     await worker.evaluate(async tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => {
@@ -6308,20 +6440,18 @@ try {
     } }), started.job.tabId);
     const sending = call({ type: 'SEND_NOW' });
     try {
-      await page.waitForFunction(() => Number(document.documentElement.dataset.prefixRewrites) >= 3, null, { timeout: 12000 });
-      assert.equal((await inspect(page)).submits, 0);
-      const paused = await call({ type: 'PAUSE' });
-      assert.equal(paused.job.enabled, false);
-      assert.equal((await sending).job.sentCount, 0);
-      assert.equal((await inspect(page)).submits, 0);
-      const trace = (await worker.evaluate(async () => (await chrome.storage.local.get('deliveryDiagnostics')).deliveryDiagnostics))?.at(-1);
-      assert.equal(trace.counters.dispatchAttempts, 0);
+      const result = await sending;
+      assert.equal(Number(await page.evaluate(() => document.documentElement.dataset.prefixRewrites)), 1);
+      const trace = await assertAdoptedPreparedSubmission(page, result, largePrompt,
+        'd'.repeat(1000) + 'SYNTHETIC_PERSISTENT_PREFIX_EXTERNAL' + largePrompt.slice(2000));
+      assert.equal(trace.counters.prefixRewriteRestarts, 1);
+      assert.equal(trace.counters.chunkRestarts, 0);
     } finally {
       await call({ type: 'PAUSE' });
       await sending;
     }
   });
-  await scenario('A page moving the caret into an unchanged prefix cannot commit a misplaced chunk', async page => {
+  await scenario('A page moving the caret within the prepared prefix adopts that changed text once', async page => {
     const largePrompt = 'SYNTHETIC_MISPLACED_CHUNK_' + 'e'.repeat(9000);
     const started = await start(page, { prompt: largePrompt, sendMethod: 'button', intervalMinutes: 30 });
     await worker.evaluate(async tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => {
@@ -6344,13 +6474,12 @@ try {
       };
     } }), started.job.tabId);
     const result = await call({ type: 'SEND_NOW' });
-    assert.equal(result.job.sentCount, 1, result.job.statusText);
-    assert.deepEqual((await inspect(page)).sentTexts, [largePrompt]);
-    const trace = (await worker.evaluate(async () => (await chrome.storage.local.get('deliveryDiagnostics')).deliveryDiagnostics))?.at(-1);
+    const trace = await assertAdoptedPreparedSubmission(page, result, largePrompt,
+      largePrompt[0] + 'e'.repeat(2000) + largePrompt.slice(1, -2000));
     assert.equal(trace.counters.prefixRewriteRestarts, 2);
     assert.equal(trace.counters.dispatchAttempts, 1);
   });
-  await scenario('A page rewrite preserving a full prefix cannot hide an earlier misplaced chunk', async page => {
+  await scenario('A page-duplicated prepared prefix is adopted once and remains distinct from exact source delivery', async page => {
     const largePrompt = 'SYNTHETIC_DUPLICATED_PREFIX_' + 'f'.repeat(9000);
     const started = await start(page, { prompt: largePrompt, sendMethod: 'button', intervalMinutes: 30 });
     await worker.evaluate(async tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => {
@@ -6366,14 +6495,17 @@ try {
       };
     } }), started.job.tabId);
     const result = await call({ type: 'SEND_NOW' });
-    const trace = (await worker.evaluate(async () => (await chrome.storage.local.get('deliveryDiagnostics')).deliveryDiagnostics))?.at(-1);
-    assert.equal(result.job.sentCount, 1, result.job.statusText);
-    assert.deepEqual((await inspect(page)).sentTexts, [largePrompt]);
-    assert.equal((await inspect(page)).submits, 1);
+    let expected = '';
+    for (let offset = 0, index = 1; offset < largePrompt.length; offset += 1000, index++) {
+      const chunk = largePrompt.slice(offset, offset + 1000);
+      // The fixture's text-node replacement resets the range to offset zero.
+      expected = index === 2 || index === 4 ? chunk + expected + chunk + expected + chunk : expected + chunk;
+    }
+    const trace = await assertAdoptedPreparedSubmission(page, result, largePrompt, expected);
     assert.ok(trace.counters.chunkDifferences >= 2);
-    assert.ok(trace.counters.chunkRestarts >= 1);
+    assert.equal(trace.counters.chunkRestarts, 0);
   });
-  for (const method of ['button', 'ctrl-enter']) await scenario(`Transient chunk decoration settles before one ${method} submission`, async page => {
+  for (const method of ['button', 'ctrl-enter']) await scenario(`Temporary chunk decoration absorbed into prepared text is adopted for one ${method} submission`, async page => {
     const largePrompt = 'SYNTHETIC_TRANSIENT_CHUNK_' + 'g'.repeat(9000) + '_END';
     const started = await start(page, { prompt: largePrompt, sendMethod: method, intervalMinutes: 30 });
     await worker.evaluate(async tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => {
@@ -6407,14 +6539,18 @@ try {
           originalSpan: [...pm.dom.querySelectorAll('span')].some(node => node.textContent === text) };
       });
       console.log('TRANSIENT CHUNK RESULT ' + JSON.stringify({ method, timedOut: !!outcome.timedOut,
-        writes: probe.writes, restored: probe.restored, submissions: observed.submits, marker }));
+        writes: probe.writes, restored: probe.restored, submissions: observed.submits, marker,
+        messageShape: { length: observed.sentTexts[0]?.length, sourceLength: largePrompt.length,
+          decorationCount: observed.sentTexts[0]?.split('SYNTHETIC_TRANSIENT_DECORATION').length - 1,
+          lineBreaks: observed.sentTexts[0]?.split('\n').length - 1,
+          strippedMatches: observed.sentTexts[0]?.replaceAll('SYNTHETIC_TRANSIENT_DECORATION', '').replaceAll('\n', '') === largePrompt } }));
       assert.ok(probe.writes >= 2);
-      assert.equal(outcome.timedOut, undefined, 'A transient decoration that settles to the intended text must not restart forever');
-      assert.equal(outcome.result.job.sentCount, 1, outcome.result.job.statusText);
-      assert.equal(observed.sentTexts[0] === largePrompt, true, 'The submitted model must equal the full synthetic prompt');
-      assert.deepEqual([observed.buttonClicks, observed.keyboardCommands, observed.submits], method === 'button' ? [1, 0, 1] : [0, 1, 1]);
-      const trace = (await worker.evaluate(async () => (await chrome.storage.local.get('deliveryDiagnostics')).deliveryDiagnostics))?.at(-1);
-      assert.equal(trace.counters.dispatchAttempts, 1);
+      assert.equal(outcome.timedOut, undefined, 'Adopted decoration must not cause repeated full refilling');
+      assert.equal(probe.restored, probe.writes, 'The original temporary spans were actually removed');
+      const chunks = Array.from({ length: Math.ceil(largePrompt.length / 1000) }, (_, index) => largePrompt.slice(index * 1000, (index + 1) * 1000));
+      const expected = chunks.map(chunk => chunk + '\nSYNTHETIC_TRANSIENT_DECORATION').join('');
+      const trace = await assertAdoptedPreparedSubmission(page, outcome.result, largePrompt, expected, { method });
+      assert.equal(trace.counters.chunkRestarts, 0);
     } finally {
       clearTimeout(timer);
       await call({ type: 'PAUSE' });
@@ -6521,9 +6657,9 @@ try {
       await worker.evaluate(() => { chrome.scripting.executeScript = duplicateModelOriginalExecute; });
     }
   });
-  for (const method of ['button', 'ctrl-enter']) await scenario(`Delayed controlled model receives exact long text before ${method}`, async page => {
+  for (const method of ['button', 'ctrl-enter']) await scenario(`A delayed private model can confirm a partial local receipt through ${method} without proving full delivery`, async page => {
     const largePrompt = 'SYNTHETIC_DELAYED_MODEL_' + 'z'.repeat(12000) + '_END';
-    await page.evaluate(() => {
+    await page.evaluate(sourceLength => {
       fixture.externalModel = 'SYNTHETIC_STALE_EXTERNAL_MODEL';
       fixture.externalModelUpdates = 0;
       const original = pm.props.dispatchTransaction;
@@ -6531,12 +6667,14 @@ try {
         original.call(pm, transaction);
         if (transaction.docChanged) {
           const value = pm.state.doc.textBetween(0, pm.state.doc.content.size, '\n');
-          setTimeout(() => { fixture.externalModel = value; fixture.externalModelUpdates++; }, 500);
+          if (value.length < sourceLength) setTimeout(() => { fixture.externalModel = value; fixture.externalModelUpdates++; }, 500);
         }
       } });
       const submitExternal = event => {
         event.stopImmediatePropagation();
         event.preventDefault();
+        fixture.publicModelAtSend = pm.state.doc.textBetween(0, pm.state.doc.content.size, '\n');
+        fixture.externalSendType = event.type;
         fixture.submits++;
         fixture.sentTexts.push(fixture.externalModel);
         const row = document.createElement('article');
@@ -6550,7 +6688,7 @@ try {
       };
       document.querySelector('button[aria-label="Send"]').addEventListener('click', submitExternal, true);
       pm.dom.addEventListener('keydown', event => { if (event.key === 'Enter' && event.ctrlKey) submitExternal(event); }, true);
-    });
+    }, largePrompt.length);
     await start(page, { prompt: largePrompt, sendMethod: method, intervalMinutes: 30 });
     const sending = call({ type: 'SEND_NOW' });
     let timer;
@@ -6563,15 +6701,28 @@ try {
         sentLength: observed.sentTexts[0]?.length, exact: observed.sentTexts[0] === largePrompt }));
       assert.equal(outcome.timedOut, undefined);
       assert.equal(observed.submits, 1);
-      assert.equal(observed.sentTexts[0] === largePrompt, true, 'The submitted model must equal the full synthetic prompt');
+      assert.equal(observed.publicModelAtSend, largePrompt);
+      assert.equal(observed.externalSendType, method === 'button' ? 'click' : 'keydown');
+      assert.ok(observed.externalModelUpdates > 0);
+      assert.ok(observed.sentTexts[0].length > 0 && observed.sentTexts[0].length < largePrompt.length);
+      assert.ok(largePrompt.startsWith(observed.sentTexts[0]), 'The private model must be a previously prepared partial prefix');
+      assert.deepEqual(await page.locator('#history .message-row.self .message-body').allTextContents(), observed.sentTexts);
       assert.equal(outcome.result.job.sentCount, 1, outcome.result.job.statusText);
+      assert.equal(outcome.result.job.unknownCount, 0);
+      assert.equal(outcome.result.job.prompt, largePrompt);
+      assert.equal((await call({ type: 'GET_STATE' })).config.prompt, largePrompt);
+      const trace = (await worker.evaluate(async () => (await chrome.storage.local.get('deliveryDiagnostics')).deliveryDiagnostics))?.at(-1);
+      assert.equal(trace.counters.dispatchAttempts, 1);
+      assert.equal(trace.method, method);
+      await new Promise(resolve => setTimeout(resolve, 600));
+      assert.equal((await inspect(page)).submits, 1, 'A partial local confirmation must not cause reinjection or another submission');
     } finally {
       clearTimeout(timer);
       await call({ type: 'PAUSE' });
       await sending;
     }
   });
-  await scenario('Chunk retries distinguish a changing settled prefix without storing prompt content', async page => {
+  await scenario('Chunk diagnostics retain an adopted changing settled prefix without storing its text', async page => {
     const largePrompt = 'SYNTHETIC_CHANGED_PREFIX_' + 'r'.repeat(7000);
     const started = await start(page, { prompt: largePrompt, sendMethod: 'button', intervalMinutes: 30 });
     await worker.evaluate(async tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => {
@@ -6588,9 +6739,8 @@ try {
       };
     } }), started.job.tabId);
     const result = await call({ type: 'SEND_NOW' });
-    const trace = (await worker.evaluate(async () => (await chrome.storage.local.get('deliveryDiagnostics')).deliveryDiagnostics))?.at(-1);
-    assert.equal(result.job.sentCount, 1, result.job.statusText);
-    assert.equal((await inspect(page)).sentTexts[0] === largePrompt, true);
+    const trace = await assertAdoptedPreparedSubmission(page, result, largePrompt,
+      'SYNTHETIC_EXTERNAL_REPLACEMENT' + largePrompt.slice(1000));
     assert.ok(trace.counters.chunkSettlementRestarts >= 1);
     assert.equal(trace.counters.dispatchAttempts, 1);
     const exported = await control.evaluate(async () => {
@@ -6617,17 +6767,11 @@ try {
         if (message.type === 'WAIT_RUN' && message.delayMs === 50 && opaqueChunk.writes === 1 && !opaqueChunk.injected) {
           opaqueChunk.injected = true;
           const editor = document.querySelector('[data-composer-markdown]');
-          const descriptor = Object.getOwnPropertyDescriptor(Node.prototype, 'childNodes');
-          let forced = false;
+          const node = document.createElement('canvas');
+          node.textContent = 'SYNTHETIC_OPAQUE_CONTENT';
           Object.defineProperty(editor, 'childNodes', { configurable: true, get() {
-            if (!forced) {
-              forced = true;
-              const node = document.createElement('span');
-              node.setAttribute('contenteditable', 'false');
-              node.textContent = 'SYNTHETIC_OPAQUE_CONTENT';
-              return [node];
-            }
-            return descriptor.get.call(this);
+            opaqueChunk.reads = (opaqueChunk.reads || 0) + 1;
+            return [node];
           } });
           setTimeout(() => { Reflect.deleteProperty(editor, 'childNodes'); }, 50);
         }
@@ -6649,7 +6793,7 @@ try {
       await sending;
     }
   });
-  for (const method of ['button', 'ctrl-enter']) await scenario(`A page accepting shorter chunks recovers before ${method}`, async page => {
+  for (const method of ['button', 'ctrl-enter']) await scenario(`A page rewriting accepted large chunks adopts its final prepared text through ${method}`, async page => {
     const largePrompt = 'SYNTHETIC_SHORTER_CHUNKS_' + 's'.repeat(9000) + '_END';
     const started = await start(page, { prompt: largePrompt, sendMethod: method, intervalMinutes: 30 });
     await worker.evaluate(async tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => {
@@ -6682,11 +6826,12 @@ try {
       }, started.job.tabId);
       console.log('SHORT CHUNK RECOVERY ' + JSON.stringify({ method, timedOut: !!outcome.timedOut,
         large: probe.largeWrites, small: probe.smallWrites, submissions: observed.submits }));
-      assert.equal(outcome.timedOut, undefined, 'Repeated large-chunk restoration must not prevent trying shorter chunks');
-      assert.ok(probe.largeWrites >= 1 && probe.smallWrites >= 1);
-      assert.equal(observed.sentTexts[0] === largePrompt, true);
-      assert.equal(observed.submits, 1);
-      assert.equal(outcome.result.job.sentCount, 1, outcome.result.job.statusText);
+      assert.equal(outcome.timedOut, undefined, 'Nonempty restored text must not cause a full-refill loop');
+      assert.equal(probe.largeWrites, Math.floor(largePrompt.length / 1000));
+      assert.equal(probe.smallWrites, 1);
+      const trace = await assertAdoptedPreparedSubmission(page, outcome.result, largePrompt,
+        'SYNTHETIC_OVERSIZED_SEGMENT_RESTORED' + largePrompt.slice(9000), { method });
+      assert.equal(trace.counters.chunkRestarts, 0);
     } finally {
       clearTimeout(timer);
       await call({ type: 'PAUSE' });
@@ -6810,8 +6955,7 @@ try {
       await worker.evaluate(async tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => finalSettleGate.release() }), started.job.tabId);
       if (action === 'change') {
         const result = await sending;
-        assert.equal(result.job.sentCount, 1, result.job.statusText);
-        assert.equal((await inspect(page)).sentTexts[0] === largePrompt, true);
+        await assertAdoptedPreparedSubmission(page, result, largePrompt, 'SYNTHETIC_NEW_DRAFT');
       } else {
         await new Promise(resolve => setTimeout(resolve, 400));
         assert.equal((await inspect(page)).submits, 0);
@@ -6897,8 +7041,7 @@ try {
           Object.defineProperty(editor, 'childNodes', { configurable: true, get() {
             if (!forced) {
               forced = true;
-              const node = document.createElement('span');
-              node.setAttribute('contenteditable', 'false');
+              const node = document.createElement('canvas');
               node.textContent = 'SYNTHETIC_FINAL_OPAQUE_CONTENT';
               return [node];
             }
@@ -6917,7 +7060,9 @@ try {
       assert.equal(result.job.sentCount, 1, result.job.statusText);
       assert.equal((await inspect(page)).sentTexts[0] === largePrompt, true);
       const trace = (await worker.evaluate(async () => (await chrome.storage.local.get('deliveryDiagnostics')).deliveryDiagnostics))?.at(-1);
-      assert.ok(trace.counters.chunkUnserializableRestarts >= 1);
+      assert.ok(trace.counters.chunkUnserializableChecks >= 1);
+      assert.equal(trace.counters.chunkUnserializableRestarts, 0, 'A transient final read must wait without rewriting the prompt');
+      assert.equal(trace.counters.chunkRestarts, 0);
       assert.equal(trace.counters.dispatchAttempts, 1);
     } finally {
       await call({ type: 'PAUSE' });
@@ -6952,8 +7097,7 @@ try {
             if (!forced) {
               forced = true;
               transientUnserializable.invalidReads++;
-              const node = document.createElement('span');
-              node.setAttribute('contenteditable', 'false');
+              const node = document.createElement('canvas');
               node.textContent = 'SYNTHETIC_TRANSIENT_OPAQUE_CONTENT';
               return [node];
             }
@@ -7015,8 +7159,7 @@ try {
           Object.defineProperty(editor, 'childNodes', { configurable: true, get() {
             if (mode === 'persistent' || unreadableBoundary.invalidReads === 0) {
               unreadableBoundary.invalidReads++;
-              const node = document.createElement('span');
-              node.setAttribute('contenteditable', 'false');
+              const node = document.createElement('canvas');
               return [node];
             }
             return descriptor.get.call(this);
@@ -7045,9 +7188,8 @@ try {
       await worker.evaluate(async tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => unreadableBoundary.release() }), started.job.tabId);
       if (scenarioMode === 'mutated') {
         const result = await sending;
-        const observed = await inspect(page);
-        assert.equal(result.job.sentCount, 1, result.job.statusText);
-        assert.equal(observed.sentTexts[0] === largePrompt, true);
+        await assertAdoptedPreparedSubmission(page, result, largePrompt,
+          'SYNTHETIC_INTERVENING_CHANGE' + largePrompt.slice(1000));
       } else {
         await new Promise(resolve => setTimeout(resolve, 350));
         assert.equal((await inspect(page)).submits, 0);
@@ -7140,8 +7282,7 @@ try {
             if (!forced) {
               forced = true;
               postwriteTransient.invalidReads++;
-              const node = document.createElement('span');
-              node.setAttribute('contenteditable', 'false');
+              const node = document.createElement('canvas');
               return [node];
             }
             return descriptor.get.call(this);
@@ -7188,8 +7329,7 @@ try {
           Object.defineProperty(editor, 'childNodes', { configurable: true, get() {
             if (action === 'persistent' || postwriteBoundary.invalidReads === 0) {
               postwriteBoundary.invalidReads++;
-              const node = document.createElement('span');
-              node.setAttribute('contenteditable', 'false');
+              const node = document.createElement('canvas');
               return [node];
             }
             return descriptor.get.call(this);
@@ -7215,8 +7355,8 @@ try {
       await worker.evaluate(async tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => postwriteBoundary.release() }), started.job.tabId);
       if (action === 'changed') {
         const result = await sending;
-        assert.equal(result.job.sentCount, 1, result.job.statusText);
-        assert.equal((await inspect(page)).sentTexts[0] === largePrompt, true);
+        await assertAdoptedPreparedSubmission(page, result, largePrompt,
+          'SYNTHETIC_POSTWRITE_CHANGED' + largePrompt.slice(1000));
       } else {
         await new Promise(resolve => setTimeout(resolve, 350));
         assert.equal((await inspect(page)).submits, 0);
@@ -7253,7 +7393,7 @@ try {
     assert.equal(observed.submits, 1);
     assert.equal(observed.sentTexts[0] === largePrompt, true, 'Automatically inserted segment separators must not modify the user prompt');
   });
-  for (const method of ['button', 'ctrl-enter']) await scenario(`Repeated transformed text is never submitted through ${method}`, async page => {
+  for (const method of ['button', 'ctrl-enter']) await scenario(`Repeated transformed text is adopted exactly once through ${method}`, async page => {
     const largePrompt = 'SYNTHETIC_REPEATED_CORRUPTION_' + 'c'.repeat(7000);
     const started = await start(page, { prompt: largePrompt, sendMethod: method, intervalMinutes: 30 });
     await worker.evaluate(async tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => {
@@ -7270,14 +7410,8 @@ try {
       const observed = await inspect(page);
       console.log('TRANSFORMED DELIVERY RESULT ' + JSON.stringify({ method, timedOut: !!outcome.timedOut,
         submissions: observed.submits, sentCount: result.job.sentCount }));
-      assert.equal(observed.submits, 0);
-      assert.equal(result.job.sentCount, 0);
-      assert.deepEqual(observed.sentTexts, []);
       assert.notEqual(outcome.timedOut, true);
-      assert.equal(result.job.enabled, false);
-      assert.equal(result.job.lastDiagnosticCode, 'chunk-mismatch');
-      const trace = (await worker.evaluate(async () => (await chrome.storage.local.get('deliveryDiagnostics')).deliveryDiagnostics))?.at(-1);
-      assert.equal(trace.counters.dispatchAttempts, 0);
+      const trace = await assertAdoptedPreparedSubmission(page, result, largePrompt, largePrompt.toUpperCase(), { method });
       assert.ok(trace.counters.chunkDifferences > 0);
     } finally {
       clearTimeout(timer);
@@ -7448,8 +7582,7 @@ try {
         const editor = document.querySelector('[data-composer-markdown]');
         Object.defineProperty(editor, 'childNodes', { configurable: true, get() {
           unreadableRetryCount.invalidReads++;
-          const node = document.createElement('span');
-          node.setAttribute('contenteditable', 'false');
+          const node = document.createElement('canvas');
           return [node];
         } });
       };
@@ -7536,8 +7669,7 @@ try {
         Object.defineProperty(editor, 'childNodes', { configurable: true, get() {
           if (!pauseUnreadable.invalidReads) {
             pauseUnreadable.invalidReads++;
-            const node = document.createElement('span');
-            node.setAttribute('contenteditable', 'false');
+            const node = document.createElement('canvas');
             return [node];
           }
           return descriptor.get.call(this);
@@ -7700,7 +7832,7 @@ try {
       await session.detach();
     }
   });
-  await scenario('Six synthetic chunks with two slow writes followed by a trusted manual partial submission remain unknown without automatic dispatch', async page => {
+  await scenario('Six synthetic chunks followed by a trusted manual partial receipt stop injection and count only manual confirmation', async page => {
     const largePrompt = 'SYNTHETIC_SIX_SLOW_MANUAL_' + 's'.repeat(9000) + '_END';
     await page.evaluate(() => {
       fixture.manualTrusted = 0;
@@ -7763,11 +7895,15 @@ try {
       const final = await inspect(page);
       const trace = (await worker.evaluate(async () => (await chrome.storage.local.get('deliveryDiagnostics')).deliveryDiagnostics))?.at(-1);
       assert.equal(result.job.sentCount, 0);
-      assert.equal(result.job.manualSentCount || 0, 0);
-      assert.equal(result.job.unknownCount, 1);
-      assert.equal(result.job.lastResult, 'unknown');
-      assert.equal(result.job.enabled, false);
-      assert.equal(trace.state, 'unknown');
+      assert.equal(result.job.manualSentCount, 1);
+      assert.equal(result.job.unknownCount, 0);
+      assert.equal(result.job.lastResult, 'manual-sent');
+      assert.equal(result.job.enabled, true);
+      assert.ok(result.job.nextAt > Date.now());
+      assert.equal(result.job.prompt, largePrompt, 'A manual partial receipt must not replace the saved source');
+      assert.equal((await call({ type: 'GET_STATE' })).config.prompt, largePrompt);
+      assert.deepEqual(await page.locator('#history .message-row.self .message-body').allTextContents(), [partial]);
+      assert.equal(trace.state, 'manual-sent');
       assert.equal(trace.counters.manualIntents, 1);
       assert.equal(trace.counters.dispatchAttempts, 0);
       assert.equal(trace.counters.textChunks, 6);
@@ -7786,7 +7922,7 @@ try {
       await sending;
     }
   });
-  for (const method of ['button', 'ctrl-enter']) await scenario(`Short MAIN independent stale model must not be submitted via ${method}`, async page => {
+  for (const method of ['button', 'ctrl-enter']) await scenario(`A short MAIN independent stale model remains a mismatched single attempt via ${method}`, async page => {
     const configured = 'SHORT_SYNTHETIC_PROMPT';
     const stale = 'OLD_SYNTHETIC_MODEL';
     await page.evaluate(stale => {
@@ -7845,7 +7981,25 @@ try {
       assert.equal(observed.externalSubmission.model, configured);
       assert.equal(observed.externalSubmission.dom, configured);
       assert.equal(observed.externalSubmission.updates, 0);
-      assert.deepEqual(observed.sentTexts, [configured], 'The independent send model must not submit stale text');
+      assert.deepEqual(observed.sentTexts, [stale], 'Record the independent stale model; public model readiness does not prove private synchronization');
+      const outcome = await sending;
+      assert.equal(outcome.job.enabled, false);
+      assert.equal(outcome.job.lastResult, 'unknown');
+      assert.equal(outcome.job.lastDiagnosticCode, 'receipt-mismatch');
+      assert.equal(outcome.job.sentCount, 0);
+      assert.equal(outcome.job.unknownCount, 1);
+      assert.equal(outcome.job.prompt, configured);
+      assert.deepEqual(await page.locator('#history .message-row.self .message-body').allTextContents(), [stale]);
+      assert.equal(commits.filter(entry => entry.phase === 'commit').length, 1);
+      assert.equal((await worker.evaluate(() => chrome.alarms.getAll())).length, 0);
+      const trace = (await worker.evaluate(async () => (await chrome.storage.local.get('deliveryDiagnostics')).deliveryDiagnostics))?.at(-1);
+      assert.equal(trace.state, 'unknown');
+      assert.equal(trace.reason, 'receipt-mismatch');
+      assert.equal(trace.counters.dispatchAttempts, 1);
+      assert.equal(trace.counters.modelWrites, 1);
+      assert.equal(trace.method, method);
+      await new Promise(resolve => setTimeout(resolve, 500));
+      assert.equal((await inspect(page)).submits, 1, 'A mismatched receipt must not cause another submission');
     } finally {
       await call({ type: 'PAUSE' });
       if (sending) await sending;

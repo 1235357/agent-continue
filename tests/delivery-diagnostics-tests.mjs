@@ -7,7 +7,7 @@ const now = Date.UTC(2026, 10, 10, 12);
 const secret = 'SYNTHETIC_PRIVATE https://example.invalid/private C:\\private\\prompt.txt';
 const counterNames = ['pageAdmissions', 'modelWrites', 'domWrites', 'textChunks', 'slowChunks', 'rejectedChunks', 'chunkRestarts', 'prefixRewriteRestarts', 'chunkSettlementRestarts', 'chunkUnserializableChecks', 'chunkUnserializableRestarts', 'chunkUnserializableRecoveries', 'chunkDifferences', 'insertedBlankSeparators', 'fillCalls', 'readinessChecks',
   'authorizationChecks', 'grantRequests', 'grantReadbacks', 'retiredReadbacks', 'dispatchAttempts',
-  'receiptChecks', 'manualIntents', 'attachmentsRemoved', 'transportErrors', 'leaseRenewals', 'documentChanges'];
+  'receiptChecks', 'manualIntents', 'attachmentsRemoved', 'transportErrors', 'leaseRenewals', 'documentChanges', 'emptyComposerRecoveries'];
 const timingNames = ['modelWriteMs', 'domWriteMs', 'maxModelWriteMs', 'maxDomWriteMs', 'serializationMs', 'maxSerializationMs', 'elapsedMs', 'stageElapsedMs'];
 const observationNames = ['hidden', 'sendPresent', 'sendEnabled', 'composerPresent', 'busy', 'manualPending'];
 const reasons = ['starting', 'prepared', 'ready', 'waiting-send', 'send-unavailable', 'send-ambiguous',
@@ -19,6 +19,18 @@ const reasons = ['starting', 'prepared', 'ready', 'waiting-send', 'send-unavaila
   'grant-pending', 'grant-accepted', 'awaiting-receipt', 'receipt-confirmed', 'manual-receipt-confirmed',
   'document-replaced', 'worker-interrupted', 'diagnostics-write-failed', 'unknown'];
 const exportActivity = extra => buildActivityExport({ extensionVersion: '3.0.12', now, ...extra });
+
+test('empty composer recovery is exported as fixed counters without draft content', () => {
+  const trace = updateDeliveryTrace(createDeliveryTrace(1, now), {
+    stage: 'prepare', reason: 'empty-composer', counters: { emptyComposerRecoveries: 3 },
+    prompt: secret, draft: secret,
+  }, now + 100);
+  const exported = exportActivity({ deliveries: [trace] });
+  assert.equal(trace.reason, 'empty-composer');
+  assert.equal(trace.counters.emptyComposerRecoveries, 3);
+  assert.ok(JSON.stringify(exported).includes('emptyComposerRecoveries'));
+  assert.equal(JSON.stringify(exported).includes(secret), false);
+});
 
 test('new traces have a complete bounded typed shape and use a supplied clock', () => {
   const trace = createDeliveryTrace(1, now);

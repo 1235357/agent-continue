@@ -568,6 +568,9 @@ try {
     assert.equal(state.writesAfterManualSend, 0, JSON.stringify({ outcome, state }));
     assert.equal(state.sends, 1);
     assert.equal(state.draft, '');
+    assert.equal(outcome.diagnosticProgress.counters.dispatchAttempts, 0, 'a trusted manual send owns the attempt');
+    assert.equal(outcome.diagnosticProgress.counters.manualIntents, 1);
+    assert.equal(outcome.diagnosticProgress.counters.fillCalls, 1, 'manual takeover must not reinject the prompt');
   });
 
   await scenario('A trusted manual submission of different text returns unknown without reinjection or false confirmation', async ({ page, args }) => {
@@ -683,7 +686,7 @@ try {
   });
 
   for (const sendMethod of ['button', 'ctrl-enter']) {
-    await scenario('Unserializable editor content must not dispatch via ' + sendMethod, async ({ page, args }) => {
+    await scenario('Opaque markup with readable text permits one fallback attempt via ' + sendMethod, async ({ page, args }) => {
       const configured = 'Synthetic opaque editor content';
       await page.evaluate(() => {
         const input = document.querySelector('[data-composer-markdown]');
@@ -700,11 +703,20 @@ try {
         });
       });
       const outcome = await page.evaluate(pageAction, { ...args, prompt: configured, sendMethod, runDeadline: Date.now() + 1800 });
-      const state = await page.evaluate(() => ({ opaqueWrites: fixture.opaqueWrites, sends: fixture.sends, keyDispatches: fixture.keyDispatches }));
-      assert.ok(state.opaqueWrites > 0, 'the page must replace the text with unsupported markup');
-      assert.equal(outcome.diagnosticProgress.counters.dispatchAttempts, 0, JSON.stringify({ outcome, state }));
-      assert.deepEqual([state.sends, state.keyDispatches], [0, 0]);
-      assert.notEqual(outcome.status, 'sent');
+      const state = await page.evaluate(() => ({ opaqueWrites: fixture.opaqueWrites, sends: fixture.sends,
+        keyDispatches: fixture.keyDispatches, texts: fixture.sentTexts, draft: document.querySelector('[data-composer-markdown]').innerText }));
+      const counters = outcome.diagnosticProgress.counters;
+      assert.equal(state.opaqueWrites, 1, 'readable unsupported markup must not cause repeated insertion');
+      assert.deepEqual([counters.domWrites, counters.fillCalls, counters.dispatchAttempts], [1, 1, 1], JSON.stringify({ outcome, state }));
+      assert.notEqual(outcome.retryable, true);
+      if (sendMethod === 'button') {
+        assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
+        assert.deepEqual([state.sends, state.keyDispatches, state.texts, state.draft], [1, 0, [configured], '']);
+      } else {
+        // This fixture observes Ctrl+Enter but has no handler that submits it.
+        assert.equal(outcome.status, 'unknown', JSON.stringify(outcome));
+        assert.deepEqual([state.sends, state.keyDispatches, state.texts, state.draft], [0, 1, [], configured]);
+      }
     });
 
     await scenario('Text changed during the final correction must not dispatch via ' + sendMethod, async ({ page, args }) => {
@@ -793,25 +805,36 @@ try {
     assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
   });
 
-  await scenario('A slower controlled model must not submit stale text even when the DOM matches', async ({ page, args }) => {
+  await scenario('A 500ms private model dispatches stale text once and remains receipt-mismatch, not successful delivery', async ({ page, args }) => {
     const configured = 'SYNTHETIC_CONFIGURED_MODEL';
     await page.evaluate(() => {
       const input = document.querySelector('[data-composer-markdown]');
       fixture.controlledText = 'SYNTHETIC_STALE_MODEL';
       input.addEventListener('input', () => {
         const value = input.innerText;
-        setTimeout(() => { fixture.controlledText = value; }, 500);
+        fixture.modelCommit = new Promise(resolve => setTimeout(() => {
+          fixture.controlledText = value;
+          resolve();
+        }, 500));
       });
       document.querySelector('button[aria-label="Send"]').addEventListener('click', event => {
         event.stopImmediatePropagation();
+        fixture.publicTextAtSubmit = input.innerText;
         fixture.sends++; fixture.sentTexts.push(fixture.controlledText);
         appendMessage(fixture.controlledText, 'acct~dot~Msg~stale-model');
         input.textContent = '';
       }, { capture: true });
     });
     const outcome = await page.evaluate(pageAction, { ...args, prompt: configured });
-    const observed = await page.evaluate(() => ({ sends: fixture.sends, texts: fixture.sentTexts }));
-    assert.ok(observed.sends === 0 || (observed.sends === 1 && observed.texts[0] === configured), JSON.stringify({ outcome, observed }));
+    await page.evaluate(() => fixture.modelCommit);
+    const observed = await page.evaluate(() => ({ inputs: fixture.inputs, sends: fixture.sends,
+      texts: fixture.sentTexts, publicText: fixture.publicTextAtSubmit, eventualModel: fixture.controlledText }));
+    assert.deepEqual(observed, { inputs: 1, sends: 1, texts: ['SYNTHETIC_STALE_MODEL'], publicText: configured, eventualModel: configured });
+    assert.equal(outcome.status, 'unknown', JSON.stringify(outcome));
+    assert.equal(outcome.diagnosticCode, 'receipt-mismatch');
+    assert.notEqual(outcome.retryable, true);
+    assert.deepEqual([outcome.diagnosticProgress.counters.domWrites, outcome.diagnosticProgress.counters.fillCalls,
+      outcome.diagnosticProgress.counters.dispatchAttempts], [1, 1, 1]);
   });
 
   await scenario('A new unrelated receipt after dispatch pauses without replaying an unknown model', async ({ page, args }) => {
@@ -880,51 +903,64 @@ try {
     });
   }
 
-  await scenario('A restoration during settling cannot submit stale delayed-input model text', async ({ page, args }) => {
+  await scenario('Delayed-input restorations after model settlement and at authorization are adopted once without reinjection', async ({ page, args }) => {
     const configured = 'Configured delayed-input model continuation';
     await page.evaluate(() => {
       const input = document.querySelector('[data-composer-markdown]');
       fixture.controlledText = '';
-      fixture.settlingRestores = 0;
-      fixture.interveningTriggered = false;
+      fixture.restorationPhase = 'waiting-input';
+      fixture.restorationPhases = [];
       input.addEventListener('input', () => {
         const value = input.innerText;
-        setTimeout(() => { fixture.controlledText = value; }, 100);
+        setTimeout(() => {
+          fixture.controlledText = value;
+          fixture.restorationPhase = 'model-committed';
+          fixture.restorationPhases.push('model-committed');
+        }, 100);
       });
       const authorize = chrome.runtime.sendMessage;
       chrome.runtime.sendMessage = async message => {
         if (message.type === 'WAIT_RUN') {
           await new Promise(resolve => setTimeout(resolve, message.delayMs));
-          // Restore after the refill's model commit, before its settling wait returns.
-          if (message.delayMs === 180 && fixture.interveningTriggered && !fixture.sends && fixture.settlingRestores < 2) {
-            input.textContent = 'Restored delayed-input controlled text';
-            fixture.controlledText = input.innerText;
-            fixture.settlingRestores++;
-          }
           return { ok: true, allowed: fixture.allowed };
         }
         const reply = await authorize(message);
-        if (fixture.checks === 3 && !fixture.interveningTriggered) {
-          fixture.interveningTriggered = true;
-          input.textContent = 'First intervening delayed-input controlled text';
+        if (fixture.restorationPhase === 'model-committed') {
+          input.textContent = 'Settling-restored delayed-input controlled text';
           fixture.controlledText = input.innerText;
+          fixture.restorationPhase = 'settling-restored';
+          fixture.restorationPhases.push('settling-restored');
+        } else if (fixture.restorationPhase === 'settling-restored') {
+          input.textContent = 'Authorization-restored delayed-input controlled text';
+          fixture.controlledText = input.innerText;
+          fixture.restorationPhase = 'authorization-restored';
+          fixture.restorationPhases.push('authorization-restored');
         }
         return reply;
       };
       document.querySelector('button[aria-label="Send"]').addEventListener('click', event => {
         event.stopImmediatePropagation();
+        fixture.publicTextAtSubmit = input.innerText;
+        fixture.restorationPhases.push('submit');
         fixture.sends++; fixture.sentTexts.push(fixture.controlledText);
         appendMessage(fixture.controlledText, 'acct~dot~Msg~delayed-input-' + fixture.sends);
         input.textContent = '';
       }, { capture: true });
     });
     const outcome = await page.evaluate(pageAction, { ...args, prompt: configured, extensionClock: true, persistentDelivery: true, unlimitedReadiness: true, extensionPriority: false, runDeadline: Date.now() + 45_000 });
-    const state = await page.evaluate(() => ({ triggered: fixture.interveningTriggered, restores: fixture.settlingRestores, sends: fixture.sends, texts: fixture.sentTexts }));
-    assert.equal(state.triggered, true, 'the fixture must alter the model during authorization');
-    assert.equal(state.restores, 2, 'both settling boundaries must restore the controlled model');
-    assert.deepEqual(state.texts, [configured]);
+    const state = await page.evaluate(() => ({ phases: fixture.restorationPhases, inputs: fixture.inputs,
+      publicText: fixture.publicTextAtSubmit, sends: fixture.sends, texts: fixture.sentTexts,
+      draft: document.querySelector('[data-composer-markdown]').innerText }));
+    assert.deepEqual(state.phases, ['model-committed', 'settling-restored', 'authorization-restored', 'submit']);
+    assert.deepEqual(state.texts, ['Authorization-restored delayed-input controlled text']);
+    assert.equal(state.publicText, state.texts[0], 'the adopted DOM and submission model must agree');
+    assert.notEqual(state.texts[0], configured, 'confirmation is for adopted prepared text, not exact configured delivery');
+    assert.equal(state.inputs, 1);
+    assert.equal(state.draft, '');
     assert.equal(state.sends, 1);
     assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
+    assert.deepEqual([outcome.diagnosticProgress.counters.domWrites, outcome.diagnosticProgress.counters.fillCalls,
+      outcome.diagnosticProgress.counters.dispatchAttempts], [1, 1, 1]);
   });
 
   await scenario('Priority overwrites a framework-restored different draft before the one send', async ({ page, args }) => {
@@ -1006,13 +1042,13 @@ try {
     assert.deepEqual(await page.evaluate(() => [fixture.beforeInputs, fixture.frameworkReplacements, fixture.inputs, fixture.sends]), [1, 1, 1, 1]);
     assert.equal(await page.evaluate(() => fixture.sentTexts[0]), prompt);
   });
-  await scenario('A restoration during settling awaits the cancelled-beforeinput model commit', async ({ page, args }) => {
+  await scenario('Cancelled-beforeinput restorations after model settlement and at authorization are adopted once without reinjection', async ({ page, args }) => {
     const configured = 'Configured delayed-beforeinput model continuation';
     await page.evaluate(() => {
       const input = document.querySelector('[data-composer-markdown]');
       fixture.controlledText = '';
-      fixture.settlingRestores = 0;
-      fixture.interveningTriggered = false;
+      fixture.restorationPhase = 'waiting-input';
+      fixture.restorationPhases = [];
       input.addEventListener('beforeinput', event => {
         if (event.inputType !== 'insertText') return;
         event.preventDefault(); fixture.beforeInputs++;
@@ -1022,42 +1058,53 @@ try {
           fixture.controlledText = value;
           input.textContent = value;
           input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
+          fixture.restorationPhase = 'model-committed';
+          fixture.restorationPhases.push('model-committed');
         }, 25);
       });
       const authorize = chrome.runtime.sendMessage;
       chrome.runtime.sendMessage = async message => {
         if (message.type === 'WAIT_RUN') {
           await new Promise(resolve => setTimeout(resolve, message.delayMs));
-          // Only beforeinput's delayed handler can commit this submission model.
-          if (message.delayMs === 180 && fixture.interveningTriggered && !fixture.sends && fixture.settlingRestores < 2) {
-            input.textContent = 'Restored delayed-beforeinput controlled text';
-            fixture.controlledText = input.innerText;
-            fixture.settlingRestores++;
-          }
           return { ok: true, allowed: fixture.allowed };
         }
         const reply = await authorize(message);
-        if (fixture.checks === 3 && !fixture.interveningTriggered) {
-          fixture.interveningTriggered = true;
-          input.textContent = 'First intervening delayed-beforeinput controlled text';
+        if (fixture.restorationPhase === 'model-committed') {
+          input.textContent = 'Settling-restored delayed-beforeinput controlled text';
           fixture.controlledText = input.innerText;
+          fixture.restorationPhase = 'settling-restored';
+          fixture.restorationPhases.push('settling-restored');
+        } else if (fixture.restorationPhase === 'settling-restored') {
+          input.textContent = 'Authorization-restored delayed-beforeinput controlled text';
+          fixture.controlledText = input.innerText;
+          fixture.restorationPhase = 'authorization-restored';
+          fixture.restorationPhases.push('authorization-restored');
         }
         return reply;
       };
       document.querySelector('button[aria-label="Send"]').addEventListener('click', event => {
         event.stopImmediatePropagation();
+        fixture.publicTextAtSubmit = input.innerText;
+        fixture.restorationPhases.push('submit');
         fixture.sends++; fixture.sentTexts.push(fixture.controlledText);
         appendMessage(fixture.controlledText, 'acct~dot~Msg~delayed-beforeinput-' + fixture.sends);
         input.textContent = '';
       }, { capture: true });
     });
     const outcome = await page.evaluate(pageAction, { ...args, prompt: configured, extensionClock: true, persistentDelivery: true, unlimitedReadiness: true, extensionPriority: false, runDeadline: Date.now() + 45_000 });
-    const state = await page.evaluate(() => ({ triggered: fixture.interveningTriggered, restores: fixture.settlingRestores, sends: fixture.sends, texts: fixture.sentTexts }));
-    assert.equal(state.triggered, true, 'the fixture must alter the model during authorization');
-    assert.equal(state.restores, 2, 'both settling boundaries must restore the controlled model');
-    assert.deepEqual(state.texts, [configured]);
+    const state = await page.evaluate(() => ({ phases: fixture.restorationPhases, inputs: fixture.inputs,
+      beforeInputs: fixture.beforeInputs, replacements: fixture.frameworkReplacements, publicText: fixture.publicTextAtSubmit,
+      sends: fixture.sends, texts: fixture.sentTexts, draft: document.querySelector('[data-composer-markdown]').innerText }));
+    assert.deepEqual(state.phases, ['model-committed', 'settling-restored', 'authorization-restored', 'submit']);
+    assert.deepEqual(state.texts, ['Authorization-restored delayed-beforeinput controlled text']);
+    assert.equal(state.publicText, state.texts[0], 'the adopted DOM and submission model must agree');
+    assert.notEqual(state.texts[0], configured, 'confirmation is for adopted prepared text, not exact configured delivery');
+    assert.deepEqual([state.inputs, state.beforeInputs, state.replacements], [1, 1, 1]);
+    assert.equal(state.draft, '');
     assert.equal(state.sends, 1);
     assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
+    assert.deepEqual([outcome.diagnosticProgress.counters.domWrites, outcome.diagnosticProgress.counters.fillCalls,
+      outcome.diagnosticProgress.counters.dispatchAttempts], [0, 1, 1]);
   });
   for (const model of ['input', 'beforeinput']) {
     await scenario('Finite mode must not submit a restored delayed-' + model + ' model', async ({ page, args }) => {
