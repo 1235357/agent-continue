@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,8 +13,9 @@ const stager = fileURLToPath(new URL('../scripts/Stage-WindowsAdministratorBundl
 const digest = value => createHash('sha256').update(value).digest('hex');
 const consent = 'accept-one-native-administrator-acceptance';
 
-function invoke({ action = 'Plan', consentValue, sourceHash = digest(readFileSync(stager)), archiveHash, probeId } = {}) {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'ac-admin-accept-launcher-'));
+function invoke({ action = 'Plan', consentValue, sourceHash = digest(readFileSync(stager)), archiveHash, probeId,
+  tempParent = os.tmpdir() } = {}) {
+  const dir = mkdtempSync(path.join(realpathSync.native(tempParent), 'ac-admin-accept-launcher-'));
   try {
     const payload = 'immutable archive hash fixture, not a candidate ZIP';
     const archive = path.join(dir, 'candidate.zip');
@@ -41,6 +42,18 @@ function invoke({ action = 'Plan', consentValue, sourceHash = digest(readFileSyn
 
 test('Plan only verifies pins; it does not request UAC or claim acceptance', windowsOnly, () => {
   assert.deepEqual(invoke(), { status: 'pins-verified', exit: 0 });
+});
+
+test('temporary parent aliases are canonicalized before Plan and Inspect', windowsOnly, () => {
+  const parent = realpathSync.native(os.tmpdir());
+  // Extended paths remain aliases even when the volume does not generate 8.3 names.
+  const alias = path.toNamespacedPath(parent);
+  assert.notEqual(alias, parent);
+  assert.equal(realpathSync.native(alias), parent);
+  for (const [action, expected] of [['Plan', 'pins-verified'], ['Inspect', 'inspection-complete']]) {
+    const { status, exit } = invoke({ action, tempParent: alias });
+    assert.deepEqual({ status, exit }, { status: expected, exit: 0 });
+  }
 });
 
 test('existing installation verification requires its own consent and stable receipt ID before UAC', windowsOnly, () => {
