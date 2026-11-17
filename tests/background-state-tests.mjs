@@ -447,6 +447,173 @@ await scenario(timing==='none'
 });
 }
 
+async function boundedRecoveryResult(promise,description) {
+  let timer;
+  try {
+    return await Promise.race([promise,new Promise((_,reject)=>{
+      timer=setTimeout(()=>reject(new Error(description)),7000);
+    })]);
+  } finally { clearTimeout(timer); }
+}
+
+for(const area of ['session','local']) {
+await scenario(`Late retired manual receipt during held ${area} receipt-finalization write stays unknown`,async()=>{
+  const h=await harness();await h.start({mode:'queue-loop',queue:[{text:'FIRST'},{text:'SECOND'}]});
+  const oldPage=deferred(),oldPrepare=deferred(),writeEntered=deferred(),releaseWrite=deferred();
+  let replacement=false,original,oldCommit,lateReceipt,held=false;
+  const oldSender={...h.sender(),documentId:'synthetic-bound-document'};
+  const sender=()=>({...h.sender(),documentId:replacement?'replacement-document':'synthetic-bound-document'});
+  h.chrome.tabs.sendMessage=async(id,message)=>({granted:true,revoked:true,...message});
+  h.chrome.scripting.executeScript=async request=>{
+    h.state.injections.push(request);
+    const documentId=request.target.documentIds?.[0] || sender().documentId;
+    const args=request.args[0];
+    if(request.func.name==='pageInvocationState')
+      return [{frameId:0,documentId:sender().documentId,result:{state:'running'}}];
+    if(request.func.name==='editorCommit') {
+      if(args.phase==='prepare' && documentId==='synthetic-bound-document') await oldPrepare.promise;
+      return [{frameId:0,documentId,result:{supported:true,dispatched:args.phase==='commit',hasSend:true,
+        code:args.phase==='prepare'?'prepared':args.phase==='observe'?'ready':'dispatched'}}];
+    }
+    if(args.mode==='send') {
+      if(!replacement) { original=args;return oldPage.promise; }
+      const commit=await h.message({type:'COMMIT_RUN',runId:args.runId},sender());
+      assert.equal(commit.dispatched,true,'The successor commit must precede the late retired receipt');
+      return [{frameId:0,documentId,result:{status:'sent'}}];
+    }
+    return [{frameId:0,documentId,result:{status:'ready'}}];
+  };
+  const write=h.chrome.storage[area].set;
+  h.chrome.storage[area].set=async value=>{
+    const job=area==='session'?value.job:value.resumeJob;
+    if(!held && job?.phase==='idle' && job.sentCount===1 && job.runId!==original?.runId) {
+      held=true;writeEntered.resolve(copy(job));
+      await releaseWrite.promise;
+    }
+    return write(value);
+  };
+  const round=h.message({type:'SEND_NOW'});
+  let roundSettled=false;
+  void round.then(()=>{roundSettled=true;});
+  try {
+    await until(()=>original);
+    oldCommit=h.message({type:'COMMIT_RUN',runId:original.runId},oldSender);
+    await until(()=>h.state.injections.some(item=>item.func.name==='editorCommit' && item.args[0].phase==='prepare'));
+    replacement=true;
+    const provisional=await boundedRecoveryResult(writeEntered.promise,'Successor receipt accounting did not reach the held write');
+    assert.equal(roundSettled,false,'Receipt accounting must still be awaiting the exact held write');
+    assert.equal(h.state[area][area==='session'?'job':'resumeJob'].phase,'sending',
+      'The held storage area must not have acknowledged the provisional idle snapshot');
+    const receipt={type:'PAGE_RESULT',runId:original.runId,resultToken:original.resultToken,result:{status:'manual-sent'}};
+    lateReceipt=h.message(receipt,oldSender);
+    let receiptSettled=false;
+    void lateReceipt.then(()=>{receiptSettled=true;});
+    // The evidence handler latches before queuing accounting behind the held write.
+    await delay(0);
+    assert.equal(receiptSettled,false,'Retired evidence accounting must be queued behind the held successor write');
+    releaseWrite.resolve();
+    const result=await boundedRecoveryResult(round,'Ambiguous receipt finalization did not settle');
+    const receiptReply=await boundedRecoveryResult(lateReceipt,'Retired receipt accounting did not settle');
+    const admissions=h.state.injections.filter(item=>item.args[0].mode==='send');
+    const commits=h.state.injections.filter(item=>item.func.name==='editorCommit' && item.args[0].phase==='commit');
+    assert.equal(admissions.length,2);
+    assert.notEqual(admissions[0].args[0].runId,admissions[1].args[0].runId);
+    assert.deepEqual(admissions[0].args[0].promptDelivery,admissions[1].args[0].promptDelivery);
+    assert.equal(provisional.runId,admissions[1].args[0].runId);
+    assert.equal(commits.length,1,'No further MAIN commit may follow the ambiguous receipts');
+    assert.deepEqual(commits[0].target.documentIds,['replacement-document']);
+    await until(()=>h.state.local.deliveryDiagnostics?.some(item=>item.state!=='running'));
+    const trace=h.state.local.deliveryDiagnostics.at(-1);
+    const summary=job=>({enabled:job.enabled,phase:job.phase,sentCount:job.sentCount,
+      manualSentCount:job.manualSentCount||0,unknownCount:job.unknownCount,queueIndex:job.queueIndex,
+      ordinal:job.promptDelivery?.ordinal,lastResult:job.lastResult});
+    console.log('EVIDENCE '+JSON.stringify({case:`held ${area} receipt-finalization`,receiptReply,
+      response:summary(result.job),session:summary(h.state.session.job),local:summary(h.state.local.resumeJob),traceState:trace.state}));
+    const expected={enabled:false,phase:'idle',sentCount:0,manualSentCount:0,unknownCount:1,
+      queueIndex:0,ordinal:original.promptDelivery.ordinal,lastResult:'unknown'};
+    for(const job of [result.job,h.state.session.job,h.state.local.resumeJob])
+      assert.deepEqual(summary(job),expected,'Late retired evidence must reconcile from the original uncounted sending baseline');
+    assert.equal(trace.state,'unknown','An ambiguous round must not persist a false successful terminal delivery trace');
+    assert.equal(h.state.alarms.size,0);
+    assert.equal((await h.message(receipt,oldSender)).ok,false,'A duplicate retired receipt cannot count another result');
+    assert.equal(h.state.session.job.unknownCount,1);
+  } finally {
+    releaseWrite.resolve();
+    await h.message({type:'PAUSE'});
+    oldPrepare.resolve();oldPage.resolve([{frameId:0,result:{status:'cancelled'}}]);
+    if(oldCommit) assert.equal((await oldCommit).code,'cancelled','The held old prepare must never obtain MAIN commit authority');
+    await round;if(lateReceipt) await lateReceipt;
+  }
+});
+}
+
+await scenario('Immediate retryable result before document-change detection cannot replay an admitted old MAIN commit',async()=>{
+  const h=await harness();await h.start({maxSends:1});
+  const queuedCommit=deferred(),releaseDetector=deferred();
+  let replacement=false,original,commitReply,oldDetectorReturns=0;
+  const sender=()=>({...h.sender(),documentId:replacement?'replacement-document':'synthetic-bound-document'});
+  h.chrome.tabs.sendMessage=async(id,message)=>({granted:true,revoked:true,...message});
+  h.chrome.scripting.executeScript=async request=>{
+    h.state.injections.push(request);
+    const args=request.args[0],documentId=request.target.documentIds?.[0] || sender().documentId;
+    if(request.func.name==='pageInvocationState') {
+      if(args.runId===original?.runId) { await releaseDetector.promise;oldDetectorReturns++; }
+      return [{frameId:0,documentId:sender().documentId,result:{state:'running'}}];
+    }
+    if(request.func.name==='editorCommit') {
+      if(args.phase==='commit' && documentId==='synthetic-bound-document')
+        return [{frameId:0,documentId,result:await queuedCommit.promise}];
+      return [{frameId:0,documentId,result:{supported:true,dispatched:args.phase==='commit',hasSend:true,
+        code:args.phase==='prepare'?'prepared':args.phase==='observe'?'ready':'dispatched'}}];
+    }
+    if(args.mode==='send') {
+      const first=!original;
+      if(first) original=args;
+      const committed=await h.message({type:'COMMIT_RUN',runId:args.runId},sender());
+      if(first) {
+        commitReply=committed;
+        assert.equal(oldDetectorReturns,0,'The retryable page result must beat every old-document replacement observation');
+        return [{frameId:0,documentId,result:{status:'blocked',retryable:true,diagnosticCode:'commit-not-dispatched',
+          diagnosticProgress:{counters:{dispatchAttempts:0,manualIntents:0}}}}];
+      }
+      return [{frameId:0,documentId,result:{status:committed.dispatched?'sent':'unknown'}}];
+    }
+    return [{frameId:0,documentId,result:{status:'ready'}}];
+  };
+  const round=h.message({type:'SEND_NOW'});
+  try {
+    await until(()=>h.state.injections.some(item=>item.func.name==='editorCommit' && item.args[0].phase==='commit'));
+    assert.equal(h.state.session.job.editorCommitRunId,original.runId);
+    replacement=true;
+    queuedCommit.resolve({supported:true,dispatched:false,code:'send-ambiguous'});
+    const result=await boundedRecoveryResult(round,'The immediate retryable result did not settle');
+    const admissions=h.state.injections.filter(item=>item.args[0].mode==='send');
+    const commits=h.state.injections.filter(item=>item.func.name==='editorCommit' && item.args[0].phase==='commit');
+    console.log('EVIDENCE '+JSON.stringify({case:'immediate retryable result before document-change detection',commitReply,
+      admissions:admissions.length,commitDocuments:commits.map(item=>item.target.documentIds),
+      enabled:result.job.enabled,sentCount:result.job.sentCount,unknownCount:result.job.unknownCount}));
+    assert.equal(oldDetectorReturns,0,'No document-change detector may settle before the no-replay decision');
+    assert.equal(admissions.length,1,'An admitted old MAIN commit must fence outer retry even when the page immediately returns retryable zero counters');
+    assert.equal(commits.length,1);
+    assert.deepEqual(commits[0].target.documentIds,['synthetic-bound-document']);
+    for(const job of [result.job,h.state.session.job,h.state.local.resumeJob]) {
+      assert.equal(job.enabled,false);
+      assert.equal(job.phase,'idle');
+      assert.equal(job.sentCount,0);
+      assert.equal(job.manualSentCount||0,0);
+      assert.equal(job.unknownCount,1);
+      assert.deepEqual(job.promptDelivery,original.promptDelivery,'Unknown admission must preserve the original ordinal');
+    }
+    assert.equal(h.state.alarms.size,0);
+    await until(()=>h.state.local.deliveryDiagnostics?.some(item=>item.state!=='running'));
+    assert.equal(h.state.local.deliveryDiagnostics.at(-1).state,'unknown','A fenced admission cannot report trace success');
+  } finally {
+    queuedCommit.resolve({supported:true,dispatched:false,code:'send-ambiguous'});
+    releaseDetector.resolve();
+    await h.message({type:'PAUSE'});await round;
+  }
+});
+
 await scenario('Known pre-submission failures keep retrying without waiting an interval and Pause prevents later admissions',async()=>{
   const h=await harness();await h.start();let sends=0;
   h.pageResult=async args=>args.mode==='send'?(++sends,{status:'blocked',retryable:true,message:'Synthetic remount',diagnosticProgress:{counters:{dispatchAttempts:0,manualIntents:0}}}):{status:'ready'};

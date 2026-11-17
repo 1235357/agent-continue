@@ -902,7 +902,7 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS, tr
     const diagnosticCode = (value.status === 'draft' && value.diagnosticCode === 'existing-draft')
       || (value.status === 'busy' && value.diagnosticCode === 'send-not-ready')
       || (value.status === 'blocked' && ['commit-not-dispatched', 'composer-unstable', 'composer-slow-write', 'chunk-unconfirmed', 'chunk-attachment', 'chunk-mismatch'].includes(value.diagnosticCode))
-      || (value.status === 'unknown' && ['paste-unconfirmed', 'paste-attachment-unconfirmed', 'receipt-ambiguous', 'receipt-mismatch'].includes(value.diagnosticCode)) ? value.diagnosticCode : null;
+      || (value.status === 'unknown' && ['paste-unconfirmed', 'paste-attachment-unconfirmed', 'receipt-ambiguous', 'receipt-mismatch', 'document-replaced'].includes(value.diagnosticCode)) ? value.diagnosticCode : null;
     const dispatchAttempts = value.diagnosticProgress?.counters?.dispatchAttempts;
     return { status: value.status, message: String(value.message || '').slice(0, 300), identity: typeof value.identity === 'string' ? value.identity.slice(0, 500) : null, assistantToken: typeof value.assistantToken === 'string' ? value.assistantToken.slice(0, 500) : null, assistantCount: Number(value.assistantCount) || 0, diagnosticCode, executionDiagnostic: executionDiagnostic(), manualSubmission,
       dispatched: pending?.dispatched === true || pending?.commitUncertain === true || Number.isSafeInteger(dispatchAttempts) && dispatchAttempts > 0,
@@ -929,6 +929,8 @@ async function receivePageResult(message, sender) {
     || normalizeUrl(sender.url || sender.tab?.url) !== pending.url
     || !message.result || !RESULT_STATUSES.has(message.result.status) || (pending.closed && !pending.receiptFailed && !pending.pauseWriting)) return { ok: false };
   const confirmed = ['sent', 'manual-sent'].includes(message.result.status);
+  const receiptResult = () => pending.delivery?.ambiguousRecovery
+    ? { status: 'unknown', diagnosticCode: 'document-replaced' } : pending.confirmedReceipt ?? message.result;
   if (pending.retiredForReplacement) {
     const progress = message.result.diagnosticProgress;
     if (progress?.observations?.manualPending === true || progress?.counters?.manualIntents > 0) {
@@ -954,7 +956,7 @@ async function receivePageResult(message, sender) {
         pending.receiptAccounted = true;
         pending.partialPauseJob = null;
         pending.partialPauseObserved = null;
-        pending.resolve(pending.confirmedReceipt);
+        pending.resolve(receiptResult());
         return { ok: true };
       } catch (error) {
         pending.receiptFailed = true;
@@ -966,15 +968,20 @@ async function receivePageResult(message, sender) {
       && JSON.stringify(job) === JSON.stringify(pending.partialReceiptJob)) {
       try {
         await setJob(job);
+        if (pending.delivery?.ambiguousRecovery && pending.receiptBaselineJob) {
+          await pauseLocked(pending.receiptBaselineJob, t('提交结果未确认；已暂停，请检查会话后再继续。'),
+            'unconfirmed', { code: 'document-replaced' });
+        }
         pending.receiptAccounted = true;
         pending.partialReceiptJob = null;
-        pending.resolve(pending.confirmedReceipt);
+        pending.resolve(receiptResult());
         return { ok: true };
       } catch (error) { pending.receiptFailed = true; throw error; }
     }
     if (!evidenceMatchesJob(pending, job)) return { ok: false };
     if (confirmed) {
       const value = pending.confirmedReceipt;
+      pending.receiptBaselineJob ??= job;
       pending.accountingReceipt = true;
       try {
         if (pending.delivery?.ambiguousRecovery) {
@@ -985,7 +992,7 @@ async function receivePageResult(message, sender) {
           assistantToken: typeof value.assistantToken === 'string' ? value.assistantToken.slice(0, 500) : null,
           assistantCount: Number(value.assistantCount) || 0,
           manualSubmission: pending.manualSubmission === true || value.diagnosticProgress?.observations?.manualPending === true,
-        });
+        }, pending.delivery);
         pending.receiptAccounted = true;
         if (pending.retiredForReplacement && job.runId !== pending.runId) {
           for (const next of pendingPageResults.values()) {
@@ -1002,7 +1009,7 @@ async function receivePageResult(message, sender) {
         throw error;
       } finally { pending.accountingReceipt = false; }
     }
-    pending.resolve(message.result);
+    pending.resolve(receiptResult());
     return { ok: true };
   });
   return accounting.catch(error => {
@@ -1363,6 +1370,7 @@ async function commitRun(message, sender) {
           pending.stage = 'dispatch';
           pending.mainCommitPending = true;
           pending.mainCommitAdmitted = true;
+          if (pending.delivery) pending.delivery.mainCommitAdmitted = true;
           if (pending.delivery?.retired.length) pending.delivery.successorDispatchPossible = true;
         }
         let value;
@@ -1503,12 +1511,19 @@ async function resolveTarget(snapshot) {
   }
   return { tab };
 }
-async function finishRound(snapshot, result) {
-  return transact(() => finishRoundLocked(snapshot, result));
+async function finishRound(snapshot, result, delivery = null) {
+  return transact(() => finishRoundLocked(snapshot, result, delivery));
 }
-async function finishRoundLocked(snapshot, result) {
+async function finishRoundLocked(snapshot, result, delivery = null) {
     const current = await getJob();
     if (!current || current.id !== snapshot.id || current.runId !== snapshot.runId || !current.enabled || current.phase !== 'sending') return { ok: true, job: current };
+    const confirmed = ['sent', 'manual-sent'].includes(result.status);
+    // Validated old-document evidence can arrive while receipt persistence
+    // yields. Reconcile from the pre-count snapshot, never from provisional idle counts.
+    const ambiguous = () => confirmed && delivery?.ambiguousRecovery === true;
+    const pauseAmbiguous = async () => ({ ok: true, job: await pauseLocked(current,
+      t('提交结果未确认；已暂停，请检查会话后再继续。'), 'unconfirmed', { code: 'document-replaced' }) });
+    if (ambiguous()) return pauseAmbiguous();
     const now = Date.now();
     const manualUnconfirmed = (current.manualSubmissionPending || result.manualSubmission) && result.status !== 'manual-sent';
     const job = { ...current, phase: 'idle', runKind: null, runDeadline: null, needsAttention: false };
@@ -1552,8 +1567,14 @@ async function finishRoundLocked(snapshot, result) {
       else job.manualSentCount = (job.manualSentCount || 0) + 1;
       job.promptDelivery = null;
       if (job.mode !== 'repeat') job.queueIndex += 1;
-      if (job.maxSends > 0 && job.sentCount + (job.manualSentCount || 0) >= job.maxSends) return { ok: true, job: await pauseLocked(job, t`已确认发送 ${job.sentCount + (job.manualSentCount || 0)} 次，达到你设置的上限。`, 'limit-reached') };
-      if (job.mode === 'queue-once' && job.queueIndex >= job.queue.length) return { ok: true, job: await pauseLocked(job, t('队列已全部发送，按单次队列设置结束。'), 'queue-complete') };
+      if (job.maxSends > 0 && job.sentCount + (job.manualSentCount || 0) >= job.maxSends) {
+        const paused = await pauseLocked(job, t`已确认发送 ${job.sentCount + (job.manualSentCount || 0)} 次，达到你设置的上限。`, 'limit-reached');
+        return ambiguous() ? pauseAmbiguous() : { ok: true, job: paused };
+      }
+      if (job.mode === 'queue-once' && job.queueIndex >= job.queue.length) {
+        const paused = await pauseLocked(job, t('队列已全部发送，按单次队列设置结束。'), 'queue-complete');
+        return ambiguous() ? pauseAmbiguous() : { ok: true, job: paused };
+      }
       if (job.mode === 'queue-loop') job.queueIndex %= job.queue.length;
       job.awaitingReply = job.scheduleMode === 'after-reply';
       job.assistantToken = result.assistantToken;
@@ -1589,9 +1610,13 @@ async function finishRoundLocked(snapshot, result) {
     }
     job.lastResult = result.status;
     job.lastDiagnosticCode = result.diagnosticCode ?? null;
+    if (ambiguous()) return pauseAmbiguous();
     await setJob(job);
+    if (ambiguous()) return pauseAmbiguous();
     await syncAlarm(job);
+    if (ambiguous()) return pauseAmbiguous();
     await updateBadge(job);
+    if (ambiguous()) return pauseAmbiguous();
     return { ok: true, job };
 }
 async function runRound(force = false, expectedJobId = null, expectedIntentVersion = null) {
@@ -1658,6 +1683,12 @@ async function runRound(force = false, expectedJobId = null, expectedIntentVersi
     }
   } catch { result = snapshot.runKind === 'reply-check' ? { status: 'error', message: t('回复检查暂不可用，继续等待新回复。') } : { status: 'unknown', message: t('后台页面操作未确认。'), diagnosticCode: 'execution-exception' }; }
   if (snapshot.runKind !== 'send' || result?.retryable !== true || !await runStillCurrent(snapshot)) break;
+  // Internal no-dispatch correction keeps its reservation. An admitted MAIN
+  // commit cannot become a fresh outer reservation, even before the document probe.
+  if (delivery.mainCommitAdmitted) {
+    result = { status: 'unknown', diagnosticCode: 'commit-not-dispatched' };
+    break;
+  }
   // Only an explicit pre-submission result can start a fresh admission. Retire
   // the old run/commit reservation; uncertain or attempted sends never enter here.
   await new Promise(resolve => setTimeout(resolve, 1000));
@@ -1694,9 +1725,9 @@ async function runRound(force = false, expectedJobId = null, expectedIntentVersi
     reason: result?.status === 'sent' ? 'receipt-confirmed' : result?.status === 'manual-sent' ? 'manual-receipt-confirmed'
       : result?.status === 'cancelled' ? 'cancelled'
       : result?.status === 'blocked' && ['composer-slow-write', 'chunk-unconfirmed', 'chunk-attachment', 'chunk-mismatch'].includes(result?.diagnosticCode) ? result.diagnosticCode
-      : result?.status === 'unknown' && ['paste-unconfirmed', 'paste-attachment-unconfirmed', 'receipt-ambiguous', 'receipt-mismatch', 'composer-slow-write'].includes(result?.diagnosticCode) ? result.diagnosticCode : undefined,
+      : result?.status === 'unknown' && ['paste-unconfirmed', 'paste-attachment-unconfirmed', 'receipt-ambiguous', 'receipt-mismatch', 'composer-slow-write', 'document-replaced'].includes(result?.diagnosticCode) ? result.diagnosticCode : undefined,
   }, Date.now()), traceEpoch);
-  try { return await finishRound(snapshot, result); }
+  try { return await finishRound(snapshot, result, delivery); }
   finally {
     for (const [key, pending] of pendingPageResults) {
       if (pending.runId === snapshot.runId || pending.delivery === delivery && pending.retiredForReplacement) {
