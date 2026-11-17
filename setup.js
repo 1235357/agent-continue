@@ -191,6 +191,11 @@ const catalog = {
   '安装后检查': 'Post-install check',
   '我已运行，检测': 'I ran it — check now',
   '尚未检测。': 'Not checked yet.',
+  '浏览器管理安装尚未验证。请在设备页核对所选账户；浏览器权限不代表桥接已安装。': 'Browser-managed installation is not verified. Check the selected account in Devices; browser permission does not verify bridge installation.',
+  '独立管理器桥接诊断': 'Standalone bridge diagnostics',
+  '此检查仅查询 com.agentcontinue.device_control，不验证浏览器管理的当前账户或管理员桥接，也不会连接设备。': 'This checks only com.agentcontinue.device_control, not the browser-managed current-account or administrator bridge. It does not connect a device.',
+  '检测独立桥接': 'Check standalone bridge',
+  '打开独立管理器设备页': 'Open standalone Devices',
   '需要在已安装的扩展中检测。': 'Checking requires an installed extension.',
   '正在检测安装状态…': 'Checking installation status…',
   '未获得本机桥接权限。请在设备页授权后再检查。': 'Local bridge permission is not granted. Grant it in Devices, then check again.',
@@ -254,6 +259,7 @@ const ADMINISTRATOR_SETUP_FEEDBACK = Object.freeze({
   cancelled: '本页自动连接意图已取消；已提交的操作仍可能完成。可在设备页检查状态或暂停。',
   'permission-denied': '未获得浏览器本机通信权限；未复制命令或请求连接。',
 });
+// This diagnostic belongs only to the legacy standalone device_control host.
 let detecting = false;
 let probeGeneration = 0;
 let hostStartable = false;
@@ -467,6 +473,9 @@ function renderInstall() {
   $('installConsent').checked = installConsent;
   const administrator = windowsAccessScope === 'administrator';
   $('windowsAccessScope').value = windowsAccessScope;
+  for (const id of ['openBrowserManagedDevices', 'windowsSetupDevices']) {
+    $(id).setAttribute('href', 'devices.html?mode=browser-managed&account=' + (administrator ? 'administrator' : 'current'));
+  }
   $('windowsAccessField').hidden = installOs !== 'windows';
   $('setupRisk').textContent = t(installOs !== 'windows'
     ? '授权后，MCP 可按系统账户权限修改文件、执行命令和控制进程。管理员或 root 权限仍需系统批准。'
@@ -509,7 +518,9 @@ function renderInstall() {
   $('windowsInstallCheck').hidden = installOs !== 'windows';
   $('managementSection').hidden = installOs !== 'windows';
   $('installDetection').textContent = ['connecting', 'requested'].includes(administratorState?.state)
-    ? t('安装已验证；连接就绪尚未确认。ChatGPT 和 Dot 仍需分别授权。') : detectionText();
+    ? t('安装已验证；连接就绪尚未确认。ChatGPT 和 Dot 仍需分别授权。')
+    : t('浏览器管理安装尚未验证。请在设备页核对所选账户；浏览器权限不代表桥接已安装。');
+  $('legacyInstallDetection').textContent = legacyDetectionText();
   $('detectInstall').disabled = detecting;
   $('managementRegistered').textContent = t(detection === 'registered' ? '已注册' :
     detection === 'host-missing' ? '未检测到 host' : '未知');
@@ -517,7 +528,7 @@ function renderInstall() {
   $('managementConnection').textContent = t({ unknown: '未知', ready: '就绪（本机运行时）', disconnected: '已断开' }[connection]);
 }
 
-function detectionText() {
+function legacyDetectionText() {
   if (detecting) return t('正在检测安装状态…');
   if (detection === 'registered') return t('检测结果：已注册。');
   if (detection === 'host-missing') return t('检测结果：未检测到 host。');

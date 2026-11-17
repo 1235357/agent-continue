@@ -156,14 +156,15 @@ async function createFixture(options = {}) {
     if (nativeStatus) {
       const reply = async (host, request) => {
         mock.nativeCalls.push({ host, request: clone(request) });
+        const nativeMode = mock.bridgeAvailability ? mock.bridgeAvailability[host] ?? 'host-absent' : mock.nativeMode;
+        if (nativeMode === 'host-absent') throw new Error('Specified native messaging host not found.');
         if (!mock.granted || host !== 'com.agentcontinue.device_control' ||
           request.action !== 'status' || request.version !== 1) return forbid('invalid native status call')();
         const value = { ...request, ok: true, state: { connection: 'ready', paused: false } };
-        if (mock.nativeMode === 'defer') return new Promise(resolve => { mock.finishNative = () => resolve(value); });
-        if (mock.nativeMode === 'wrong-id') return { ...value, id: 'different-request' };
-        if (mock.nativeMode === 'host-absent') throw new Error('Specified native messaging host not found.');
-        if (mock.nativeMode === 'rejected') return { ...request, ok: false };
-        if (mock.nativeMode === 'transport') throw new Error('SYNTHETIC_PRIVATE_TRANSPORT');
+        if (nativeMode === 'defer') return new Promise(resolve => { mock.finishNative = () => resolve(value); });
+        if (nativeMode === 'wrong-id') return { ...value, id: 'different-request' };
+        if (nativeMode === 'rejected') return { ...request, ok: false };
+        if (nativeMode === 'transport') throw new Error('SYNTHETIC_PRIVATE_TRANSPORT');
         return value;
       };
       runtime.sendNativeMessage = reply;
@@ -410,8 +411,8 @@ async function assertPrimarySetupFlow(page) {
   assert.equal(await status.count(), 1, 'there is one current result, not a stale duplicate');
   assert.equal(await status.getAttribute('role'), 'status');
   assert.equal(await status.getAttribute('aria-live'), 'polite');
-  assert.equal(await page.locator('#detectInstall').getAttribute('aria-controls'), 'installDetection');
-  assert.equal(await page.locator('#detectInstall').getAttribute('aria-describedby'), 'installDetection');
+  assert.equal(await page.locator('#detectInstall').getAttribute('aria-controls'), 'legacyInstallDetection');
+  assert.equal(await page.locator('#detectInstall').getAttribute('aria-describedby'), 'legacyInstallDetection');
   assert.notEqual((await status.textContent()).trim(), '', 'the result has an honest initial state');
   const text = await page.locator('#installSection').innerText();
   assert.doesNotMatch(text, /tunnel ID|key-file path|runtime-key|REGISTER|ACPAIR1|YOUR_TUNNEL_ID|--setup-request|隧道 ID|密钥文件路径/i,
@@ -576,11 +577,138 @@ async function probeQueuedCloseRace() {
   pass('trusted keyboard/pointer close-reopen paths preserve fresh review state and fresh-consent export reachability');
 }
 
+async function probeBridgeScopeIsolation() {
+  const failures = [];
+  for (const uiLanguage of ['en', 'zh_CN']) for (const width of [1100, 320]) {
+    for (const legacyMode of ['ready', 'host-absent']) {
+      const name = `${uiLanguage} ${width} legacy ${legacyMode}`;
+      try {
+        await withFixture({ uiLanguage, granted: true, nativeStatus: true, currentSetupMode: 'missing',
+          setupMode: 'automatic', viewport: { width, height: 820 } }, async fixture => {
+          const { page } = fixture;
+          await page.evaluate(mode => {
+            __setupMock.nativeMode = mode;
+          }, legacyMode);
+          const initialResult = await page.locator('#installDetection').textContent();
+          await openDetails(page, 'windowsInstallCheck');
+          await page.locator('#detectInstall').click();
+          await page.waitForFunction(() => !document.querySelector('#detectInstall').disabled);
+          assert.equal(await page.locator('#installDetection').textContent(), initialResult,
+            'a responsive or absent standalone host cannot verify or invalidate unchecked browser-managed installation');
+          const legacyResult = await page.locator('#legacyInstallDetection').textContent();
+          assert.match(legacyResult, uiLanguage === 'en'
+            ? legacyMode === 'ready' ? /registered/ : /host not detected/
+            : legacyMode === 'ready' ? /已注册/ : /未检测到 host/);
+          assert.match(await page.locator('#windowsInstallCheck').innerText(), /com\.agentcontinue\.device_control/);
+          assert.equal(await page.locator('#detectInstall').getAttribute('aria-controls'), 'legacyInstallDetection');
+          assert.equal(await page.locator('#detectInstall').getAttribute('aria-describedby'), 'legacyInstallDetection');
+          await openDetails(page, 'setupAdvanced');
+          assert.equal(await page.locator('#browser-permission').textContent(), uiLanguage === 'en' ? 'Granted' : '已授权');
+          await page.locator('#setupAdvanced > summary').click();
+          for (const [scope, account] of [['current-account', 'current'], ['administrator', 'administrator'], ['current-account', 'current']]) {
+            await page.locator('#windowsAccessScope').selectOption(scope);
+            assert.equal(await page.locator('#installDetection').textContent(), initialResult,
+              'switching accounts without an installation receipt must not reuse a legacy verdict');
+            for (const id of ['openBrowserManagedDevices', 'windowsSetupDevices']) {
+              assert.equal(await page.locator('#' + id).getAttribute('href'), `devices.html?mode=browser-managed&account=${account}`);
+            }
+            await layout(page, 'light');
+            if (uiLanguage === 'en' && legacyMode === 'ready' && scope !== 'current-account') {
+              await capture(page, `bridge-scope-${width}-administrator.png`, false);
+            }
+          }
+          await openDetails(page, 'setupAdvanced');
+          assert.equal(await page.locator('#browser-permission').textContent(), uiLanguage === 'en' ? 'Granted' : '已授权');
+          const calls = await page.evaluate(() => ({
+            hosts: __setupMock.nativeCalls.map(call => call.host),
+            actions: __setupMock.nativeCalls.map(call => call.request.action),
+            permissions: __setupMock.permissionRequests,
+            setup: __setupMock.setupMessages,
+            writes: __setupMock.writes,
+          }));
+          assert.deepEqual(calls, { hosts: ['com.agentcontinue.device_control'], actions: ['status'], permissions: [], setup: [],
+            writes: [{ installConsent: false }, { installConsent: false }] },
+            'diagnostics and scope navigation never grant permission, start, install, Connect or Reconnect');
+          await page.locator('#setupAdvanced > summary').click();
+          if (uiLanguage === 'en' && legacyMode === 'ready') await capture(page, `bridge-scope-${width}-current.png`, false);
+        });
+        pass(`${name}: standalone diagnostics never change browser-managed proof, account links or Granted permission`);
+      } catch (error) {
+        failures.push(error);
+        console.error('FAIL bridge scope ' + name + ': ' + error.message);
+      }
+    }
+  }
+  if (failures.length) throw new AggregateError(failures, 'Bridge diagnostic scope isolation failed');
+}
+
+async function probeBridgeProofIsolation() {
+  for (const uiLanguage of ['en', 'zh_CN']) for (const legacyMode of ['ready', 'host-absent']) {
+    await withFixture({ uiLanguage, granted: true, nativeStatus: true, clipboardMode: 'allowed',
+      currentSetupMode: 'missing', setupMode: 'automatic' }, async ({ page }) => {
+      const baseline = await page.locator('#installDetection').textContent();
+      await page.locator('#installConsent').check();
+      await page.locator('#copyWindowsBrowserPowerShell').click();
+      await page.waitForFunction(() => /unconfirmed|未确认/.test(document.getElementById('installFeedback').textContent));
+      assert.equal(await page.locator('#installDetection').textContent(), baseline,
+        'an absent current-account worker response cannot establish installation');
+      await page.locator('#windowsAccessScope').selectOption('administrator');
+      await page.locator('#installConsent').check();
+      await page.evaluate(mode => {
+        __setupMock.nativeMode = mode;
+        __setupMock.deferSetupObserve = true;
+        __setupMock.deferSetupConnect = true;
+      }, legacyMode);
+      await page.locator('#copyWindowsBrowserPowerShell').click();
+      await page.waitForFunction(() => typeof __setupMock.finishSetupObserve === 'function');
+      for (const phase of ['pending', 'connecting', 'requested']) {
+        if (phase === 'connecting') {
+          await page.evaluate(() => __setupMock.finishSetupObserve());
+          await page.waitForFunction(() => typeof __setupMock.finishSetupConnect === 'function');
+        }
+        if (phase === 'requested') {
+          await page.evaluate(() => __setupMock.finishSetupConnect());
+          await page.waitForFunction(() => /Connection requested|已请求连接/.test(document.getElementById('installFeedback').textContent));
+        }
+        const proof = await page.locator('#installDetection').textContent();
+        if (phase === 'pending') assert.equal(proof, baseline);
+        else assert.match(proof, uiLanguage === 'en' ? /Installation verified.*unconfirmed/ : /安装已验证.*未确认/);
+        const before = await page.evaluate(() => ({ messages: __setupMock.setupMessages, permissions: __setupMock.permissionRequests }));
+        await openDetails(page, 'windowsInstallCheck');
+        await page.locator('#detectInstall').click();
+        await page.waitForFunction(() => !document.querySelector('#detectInstall').disabled);
+        assert.equal(await page.locator('#installDetection').textContent(), proof,
+          'standalone diagnostics cannot alter ' + phase + ' selected-account proof');
+        assert.match(await page.locator('#legacyInstallDetection').textContent(), uiLanguage === 'en'
+          ? legacyMode === 'ready' ? /registered/ : /host not detected/
+          : legacyMode === 'ready' ? /已注册/ : /未检测到 host/);
+        assert.deepEqual(await page.evaluate(() => ({ messages: __setupMock.setupMessages, permissions: __setupMock.permissionRequests })), before,
+          'a diagnostic click must not begin, observe, connect, cancel or request permission');
+      }
+      assert.equal(await page.evaluate(() => __setupMock.setupMessages.filter(value => value.type.endsWith('CONNECT_V1')).length), 1);
+      assert.equal(await page.evaluate(() => __setupMock.setupMessages.filter(value => value.type.endsWith('CONNECT_V1'))[0].scope), undefined,
+        'only the administrator installation can request a connection');
+      assert.deepEqual(await page.evaluate(() => __setupMock.nativeCalls.map(call => call.host)),
+        Array(3).fill('com.agentcontinue.device_control'));
+      await page.locator('#windowsAccessScope').selectOption('current-account');
+      assert.equal(await page.locator('#installDetection').textContent(), baseline,
+        'the missing current-account installation must not inherit verified administrator proof');
+      pass(`${uiLanguage} legacy ${legacyMode}: diagnostics preserve pending and verified administrator proof; missing current-account stays unverified`);
+    });
+  }
+}
+
 try {
-  if (process.env.SETUP_RACE_PROBE_ONLY === '1') {
+  if (process.env.SETUP_BRIDGE_SCOPE_ONLY === '1') {
+    await probeBridgeScopeIsolation();
+    await probeBridgeProofIsolation();
+    console.log(`Setup bridge scope: ${checks}/${checks} checks passed (synthetic browser only).`);
+  } else if (process.env.SETUP_RACE_PROBE_ONLY === '1') {
     await probeQueuedCloseRace();
     console.log(`Setup race probe: ${checks}/${checks} checks passed (synthetic browser only).`);
   } else {
+  await probeBridgeScopeIsolation();
+  await probeBridgeProofIsolation();
   for (const backToStandard of [false, true]) {
     await withFixture({ installConsent: true, deferConsentRead: true }, async ({ page }) => {
       await page.locator('#windowsAccessScope').selectOption('administrator');
@@ -781,7 +909,9 @@ try {
           const verified = language === 'en'
             ? 'Installation verified; connection readiness is unconfirmed. Authorize ChatGPT and Dot separately.'
             : '安装已验证；连接就绪尚未确认。ChatGPT 和 Dot 仍需分别授权。';
-          const unchecked = language === 'en' ? 'Not checked yet.' : '尚未检测。';
+          const unchecked = language === 'en'
+            ? 'Browser-managed installation is not verified. Check the selected account in Devices; browser permission does not verify bridge installation.'
+            : '浏览器管理安装尚未验证。请在设备页核对所选账户；浏览器权限不代表桥接已安装。';
           assert.equal(await page.locator('#installDetection').textContent(), connectState === 'submitted' ? verified : unchecked,
             'only connecting/requested can show this installation proof, including after a language rerender');
           assert.equal(await page.locator('#managementConnection').textContent(), language === 'en' ? 'Unknown' : '未知');
@@ -1013,6 +1143,7 @@ try {
   }
   pass('existing request, chat, Windows handoff and resource deep links open without granting, exporting or installing');
   await withFixture({ granted: true, nativeStatus: true }, async ({ page }) => {
+    const primaryResult = await page.locator('#installDetection').textContent();
     await page.locator('#windowsInstallCheck summary').click();
     const read = selector => page.locator(selector).textContent();
     const check = async () => {
@@ -1042,14 +1173,15 @@ try {
     assert.equal(await page.evaluate(() => __setupMock.nativeCalls.length), 7);
     await check();
     assert.equal(await page.evaluate(() => __setupMock.nativeCalls.length), 7);
-    assert.match(await read('#installDetection'), /permission.*Devices/i);
+    assert.match(await read('#legacyInstallDetection'), /permission.*Devices/i);
+    assert.equal(await read('#installDetection'), primaryResult, 'legacy permission loss cannot become browser-managed installation proof');
     await page.locator('#windowsInstallCheck summary').click();
     assert.equal(await page.locator('#installDetection').isVisible(), true, 'the current result survives collapsing diagnostics');
     assert.equal(await page.evaluate(() => __setupMock.nativeCalls.length), 7, 'collapsing diagnostics never probes');
     await openDetails(page, 'setupAdvanced');
     await page.locator('#installOsLinux').click();
     assert.equal(await page.locator('#detectInstall').isVisible(), false);
-    pass('Windows post-install status correlates native responses, clears stale state and never probes without permission');
+    pass('standalone diagnostics correlate native responses, clear stale state and never change browser-managed proof or probe without permission');
   });
   for (const shell of ['browserPowerShell', 'browserCmd']) await withFixture({ clipboardMode: 'allowed' }, async fixture => {
     const { page } = fixture;
@@ -1060,7 +1192,7 @@ try {
     assert.equal(await browserCommandElement.textContent(), '', 'consent is required');
     assert.equal(await existingDevice.isVisible(), true, 'existing devices do not need install consent');
     assert.equal(await existingDevice.innerText(), 'Already installed? Open Devices');
-    assert.equal(await existingDevice.getAttribute('href'), 'devices.html?mode=browser-managed');
+    assert.equal(await existingDevice.getAttribute('href'), 'devices.html?mode=browser-managed&account=current');
     await page.locator('#installConsent').check();
     assert.equal(await browserCommandElement.isVisible(), false, 'command preview is advanced, not required for copying');
     assert.equal(await standalone.locator('#windowsGuidedCommand').isVisible(), false);

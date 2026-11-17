@@ -37,7 +37,7 @@
             <ol id="windowsSetupSteps">
               <li><strong data-i18n="准备源码与隧道。">Prepare the source and tunnel.</strong> <span data-i18n="仅限全新安装：命令自动下载并核验本版本的安装源码。准备官方隧道 ID 和本机密钥文件路径；无需预先下载或解压安装包。">Fresh installations only: the command downloads and verifies this exact version of the setup source. Prepare the official tunnel ID and local key-file path; no manual bundle download or extraction is needed.</span> <a href="#hosted-prepare-title" data-i18n="准备隧道 ID 和运行密钥文件">Prepare the tunnel ID and runtime-key file</a></li>
               <li><strong data-i18n="在 PowerShell 中运行。">Run in PowerShell.</strong> <span id="windowsRunGuidance" data-i18n="粘贴命令并输入隧道 ID 和密钥文件路径，再输入 REGISTER。安装器保留暂停状态；本页同意仍有效时另行请求一次连接。不要粘贴密钥内容。">Paste the command, enter the tunnel ID and key-file path, then type REGISTER. The installer leaves the device paused; this page separately requests one connection while consent remains valid. Never paste the key itself.</span></li>
-              <li><strong data-i18n="确认连接状态。">Confirm connection state.</strong> <span id="windowsConnectGuidance" data-i18n="全新安装验证后，本页请求一次连接；请求不代表就绪。请在设备页核对状态，ChatGPT 和 Dot 仍需分别授权。">After fresh installation is verified, this page requests one connection; a request does not mean ready. Check status in Devices and authorize ChatGPT and Dot separately.</span> <a href="devices.html?mode=browser-managed" data-i18n="打开浏览器管理的 Windows 设备">Open browser-managed Windows device</a> · <a href="#chat-connection-title" data-i18n="连接 ChatGPT 和 Dot">Connect ChatGPT and Dot</a></li>
+              <li><strong data-i18n="确认连接状态。">Confirm connection state.</strong> <span id="windowsConnectGuidance" data-i18n="全新安装验证后，本页请求一次连接；请求不代表就绪。请在设备页核对状态，ChatGPT 和 Dot 仍需分别授权。">After fresh installation is verified, this page requests one connection; a request does not mean ready. Check status in Devices and authorize ChatGPT and Dot separately.</span> <a id="windowsSetupDevices" href="devices.html?mode=browser-managed" data-i18n="打开浏览器管理的 Windows 设备">Open browser-managed Windows device</a> · <a href="#chat-connection-title" data-i18n="连接 ChatGPT 和 Dot">Connect ChatGPT and Dot</a></li>
             </ol>
             <pre class="handoff-command install-command" tabindex="0"><code id="windowsBrowserPowerShell"></code></pre>
             <p data-i18n="从已审阅并解压的源码包目录运行安装命令。不安装 AgentContinue EXE；仅浏览器管理模式注册 Chrome 主机。">Run the install command from the reviewed, extracted source bundle. No Agent Continue EXE is installed; only browser-managed mode registers its Chrome host.</p>
@@ -104,12 +104,18 @@ node .\bin.mjs manager-control --install-dir "$env:LOCALAPPDATA\AgentContinue" -
         </details>
       </div>
       <details id="windowsInstallCheck">
-        <summary data-i18n="仅限既有 Chrome 桥接">Existing Chrome bridge only</summary>
-        <h3 data-i18n="安装后检查">Post-install check</h3>
+        <summary data-i18n="独立管理器桥接诊断">Standalone bridge diagnostics</summary>
+        <p data-i18n="此检查仅查询 com.agentcontinue.device_control，不验证浏览器管理的当前账户或管理员桥接，也不会连接设备。">This checks only com.agentcontinue.device_control, not the browser-managed current-account or administrator bridge. It does not connect a device.</p>
+        <p id="legacyInstallDetection" class="feedback" role="status" aria-live="polite"></p>
         <div class="actions">
-          <button id="detectInstall" type="button" aria-controls="installDetection" aria-describedby="installDetection" data-i18n="我已运行，检测">I ran it — check now</button>
-          <a href="devices.html#access-title" data-i18n="打开本机控制与浏览器授权">Open local controls and browser authorization</a>
+          <button id="detectInstall" type="button" aria-controls="legacyInstallDetection" aria-describedby="legacyInstallDetection" data-i18n="检测独立桥接">Check standalone bridge</button>
+          <a href="devices.html" data-i18n="打开独立管理器设备页">Open standalone Devices</a>
         </div>
+        <dl class="status-grid">
+          <dt data-i18n="本机注册状态">Local registration</dt><dd id="managementRegistered">Unknown</dd>
+          <dt data-i18n="主机可启动">Host startable</dt><dd id="managementHost">Unknown</dd>
+          <dt data-i18n="连接状态">Connection</dt><dd id="managementConnection">Unknown</dd>
+        </dl>
       </details>
     </section>
     <details id="setupAdvanced" class="advanced">
@@ -264,11 +270,6 @@ node .\bin.mjs manager-control --install-dir "$env:LOCALAPPDATA\AgentContinue" -
         <pre class="handoff-command install-command" tabindex="0"><code>.\install.ps1 -DeviceAction status -OperationId '&lt;operation ID&gt;'
 .\install.ps1 -DeviceAction disconnect-and-pause -Consent accept-control</code></pre>
         <iframe id="localControlFrame" title="Agent Continue local transport" sandbox="allow-scripts allow-same-origin" referrerpolicy="no-referrer" hidden></iframe>
-      <dl class="status-grid">
-        <dt data-i18n="本机注册状态">Local registration</dt><dd id="managementRegistered">Unknown</dd>
-        <dt data-i18n="主机可启动">Host startable</dt><dd id="managementHost">Unknown</dd>
-        <dt data-i18n="连接状态">Connection</dt><dd id="managementConnection">Unknown</dd>
-      </dl>
       </details>
     </section>
     <details id="setupResources" class="advanced">

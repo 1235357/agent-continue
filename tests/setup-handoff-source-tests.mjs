@@ -15,6 +15,9 @@ async function page() {
     if (id !== 'download') assert.ok(html.includes('id="' + id + '"'), 'Unknown setup element: ' + id);
     if (!nodes.has(id)) nodes.set(id, {
       value: '', checked: false, open: false, hidden: /Handoff(?:Link)?$/.test(id), textContent: '',
+      attributes: new Map(),
+      setAttribute(name, value) { this.attributes.set(name, String(value)); },
+      getAttribute(name) { return this.attributes.get(name) ?? null; },
       addEventListener: (name, callback) => handlers.set(id + ':' + name, callback),
       close() { this.open = false; handlers.get(id + ':close')?.(); },
       showModal() { this.open = true; },
@@ -46,6 +49,20 @@ test('default test:setup includes the setup handoff source and VM suite', () => 
   const metadata = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   assert.match(metadata.scripts['test:setup'], /\bnode\s+--test\s+(?:[^&\r\n]+\s+)?tests\/setup-handoff-source-tests\.mjs\b/,
     'Default test:setup must execute the setup handoff source and VM suite');
+});
+
+test('browser-managed Devices links follow the selected account without native calls', async () => {
+  const fixture = await page();
+  for (const [scope, account] of [['current-account', 'current'], ['administrator', 'administrator'], ['current-account', 'current']]) {
+    fixture.node('windowsAccessScope').value = scope;
+    await fixture.emit('windowsAccessScope', 'change', { target: fixture.node('windowsAccessScope') });
+    for (const id of ['openBrowserManagedDevices', 'windowsSetupDevices']) {
+      assert.equal(fixture.node(id).getAttribute('href'), 'devices.html?mode=browser-managed&account=' + account);
+    }
+  }
+  assert.equal(fixture.effects.nativeCalls, 0);
+  assert.equal(fixture.effects.permissionRequests, 0);
+  assert.deepEqual(fixture.effects.exports, []);
 });
 
 test('remote Linux exposes its own source-plan handoff without a local bridge', async () => {
