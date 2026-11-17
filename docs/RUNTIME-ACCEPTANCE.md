@@ -1,12 +1,23 @@
 # Runtime Acceptance Pre-Check (read-only)
 
+## Current Checkpoint (2026-11-17)
+
+The new item 3.0.22 is now Published - public and its public Store page is
+accessible, including the owner's GitHub and LinkedIn profile links. This
+supersedes the older draft/pending-review statements below. The public package
+does not include unversioned source fixes on main or prove current-build
+Windows tool/Pause/Revoke/reopen acceptance. See the current checklist in
+[Windows recovery checkpoint](WINDOWS-RECOVERY-20261117.md).
+
 ## Candidate 3.0.22 (2026-11-16)
 
-The current source candidate has not been installed, released, submitted to the
-Store or accepted on a live ChatGPT or Dot conversation. This version-only update
-does not turn the historical observations below into current-candidate receipts.
-See the validation record for the unresolved synthetic wrong-submission and
-regression failures.
+Fresh continuation evidence supersedes the former blanket "not installed or
+released" statement: GitHub v3.0.22 is public, the new Store item contains a
+3.0.22 draft, and the owner's schema 5 export reports 3.0.22 with local sent
+events. See [the continuation record](CONTINUATION-20261116.md). These facts do
+not establish exact full-payload live delivery or current-build Windows tool,
+Pause, Revoke and reopen acceptance. Historical native receipts below retain
+their original artifact scope. Fresh baseline `npm test` still fails.
 
 ## Manual TXT Candidate (2026-11-14)
 

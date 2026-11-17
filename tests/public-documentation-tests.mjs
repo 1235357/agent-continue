@@ -130,3 +130,19 @@ test('bootstrap documentation makes command-only setup primary and retires custo
   assert.doesNotMatch(text, /Add `-PrepareNative`|add \*\*both\*\* `-PrepareNative -RegisterNative`/);
   assert.doesNotMatch(text, /The package also includes `Build-NativeLauncher\.ps1`/);
 });
+
+test('composer guidance discloses prepared-text adoption rather than a retired mismatch stop', () => {
+  const priority = read('docs/COMPOSER-PRIORITY.md');
+  assert.match(priority, /persistent delivery.*adopt/is);
+  assert.match(priority, /approximate.*partial/is);
+  assert.match(priority, /does not rewrite the saved prompt/i);
+  assert.doesNotMatch(priority, /candidate pauses with `chunk-mismatch`/);
+  const english = read('README.md');
+  const chinese = read('README.zh-CN.md');
+  assert.match(english, /prepared composer text.*adopt/is);
+  assert.match(english, /approximate.*partial/is);
+  assert.doesNotMatch(english, /two complete chunked passes.*pauses without dispatching/i);
+  assert.ok(chinese.includes('采用准备后的输入框文字'));
+  assert.ok(chinese.includes('近似或部分匹配'));
+  assert.ok(!chinese.includes('两次完整分段均出现相同可见差异时，当前候选会暂停而不提交'));
+});

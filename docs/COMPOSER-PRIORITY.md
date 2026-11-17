@@ -1,10 +1,13 @@
 # Mandatory Composer Priority
 
-Every SEND, whether scheduled or requested with **Send once now**, owns the
-bound conversation's unsent composer text and uses the configured prompt.
-Existing text is replaced, not preserved or appended. If the composer changes
-while the prompt is prepared, the candidate reasserts it and continues subject
-to the guards below. A continually changing page can prevent completion.
+Every SEND, whether scheduled or requested with **Send once now**, initially
+owns the bound conversation's unsent composer text and prepares the configured
+prompt. Existing text is replaced, not preserved or appended. During persistent
+delivery, the candidate may adopt nonempty readable prepared composer text after
+website changes or normalization instead of continually reasserting the source.
+This intentionally prioritizes continued dispatch over exact original-text
+fidelity and does not rewrite the saved prompt. The guards below remain; a
+frozen or inaccessible page can still prevent completion.
 If the page replaces the editor or the entire composer, the extension reacquires
 the unique composer inside the same verified conversation and refills it before
 dispatch. A detached document can be replaced through a fresh, background-owned
@@ -13,24 +16,33 @@ the candidate pauses rather than replaying the attempt. Readiness preparation co
 without a fixed total waiting deadline while the job remains authorized. The
 event adapter uses bounded per-pass settling, rechecks authorization afterward, and
 delivers a final replacement through input events, not a silent DOM repaint.
-For short text in a selected editor exposing Tiptap's documented `dom.editor.view`
-owner, a fixed MAIN-world helper can apply a ProseMirror transaction and attempt
-submission. Long or many-line text uses the event adapter: its initial source
-segment is at most 1,000 UTF-16 units and prefers paragraph or line boundaries;
+For a selected editor exposing Tiptap's documented `dom.editor.view` owner,
+a fixed MAIN-world helper can apply a ProseMirror transaction and attempt
+submission, including for long or many-line text. When that supported owner is
+unavailable, the event adapter handles long text in initial source segments of
+at most 1,000 UTF-16 units and prefers paragraph or line boundaries;
 slow writes and rejected or mismatched chunks reduce the segment size on retry,
 without splitting a Unicode surrogate pair. Segment boundaries do not intentionally
 add newlines, including splits inside a line. The saved source is unchanged, but
 CR and CRLF are normalized to LF in the prepared text. The adapter
 does not intentionally create an attachment. If a segment is rejected or differs,
-it retries a full replacement; prior text must remain a prefix after each write.
+it can retry a full replacement; prior text is compared after each write.
 A final-segment difference is rechecked after a short authorized wait; if it
 settles exactly to the prepared text, no second full selection is necessary.
-When two complete passes have the same differences at the same chunk boundaries
-and the same final text, the candidate pauses with `chunk-mismatch` and does not
-dispatch that changed text. Stable corruption and site normalization cannot be
-universally distinguished from DOM observations alone. A synthetic decoration
-can become part of the editor model before its original node is removed; in that
-case the current candidate stops instead of recovering automatically.
+During persistent delivery, a completed pass with nonempty readable final text
+can be adopted immediately rather than requiring two matching passes or
+reinjecting it. Finite nonpersistent invocations retain bounded correction and
+can still reject an unresolved mismatch. Site normalization and corruption
+cannot be universally distinguished from public DOM/model observations.
+The first persistent chunk reasserts the full replacement selection immediately
+before writing, so a collapsed or narrowed initial selection is not permission
+to append the old draft. If a framework clears the prepared legacy composer
+while its known Send remains disabled, the pre-submit readiness loop can refill
+it using the existing authorization checks and backoff. This does not create
+another submission mechanism or a total wait deadline.
+The content-free `emptyComposerRecoveries` counter counts completed recovery
+calls, including a call returning false; it is not a successful-write or
+confirmed-send count. Older logs lack this field and must not be read as zero.
 The content-free `rejectedChunks` counter records calls that did not report both
 acceptance and an input event; it does not establish why the page rejected them.
 `prefixRewriteRestarts` counts detected changes to an already verified prefix;
@@ -59,6 +71,9 @@ a page-supplied command or payload. Run identifiers are never injected into MAIN
 Only an explicit unsupported-view result before mutation allows event fallback;
 an uncertain or attempted model submission does not. A helper attempt alone is
 not a delivery receipt. The isolated adapter must still see a new user message.
+Its approximate text matcher includes partial matches against prepared text or
+the configured prompt. A local confirmed-send count therefore does not prove
+that the complete original prompt was delivered or accepted by the service.
 
 The task controls display this notice in English or Simplified Chinese:
 

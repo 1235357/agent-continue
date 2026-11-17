@@ -1,10 +1,32 @@
 # Validation and Evidence Boundaries
 
+## Current Continuation, November 17, 2026
+
+The new Store item 3.0.22 is publicly published and its live listing is accessible.
+This is the previously submitted package, not the current unversioned fixes.
+Main `37edbb25` fixes late replacement receipts during accounting and prevents
+an outer retry after admitted MAIN authority. Three added regressions fail on
+the prior commit; current safety passed 102 state, 355 v2 and 217 Node cases
+plus source guards. The document-pinned follow-up passed 104 state cases,
+48 focused cancellation/restart cases and 23 authorization browser cases.
+Final-source check and support passed. The latest unfiltered npm process was
+interrupted without a final exit result; its earlier groups passed, but it must
+not be reported as a complete npm command pass. The remaining default
+ProseMirror suite passed in two same-source partitions, 66/66 and 135/135;
+editor-commit browser passed 14/14. No installed acceptance is established.
+See `docs/WINDOWS-RECOVERY-20261117.md` for exact logs and scope.
+
 ## Version 3.0.22 — Release Candidate, November 16, 2026
 
-This candidate starts long text in segments of at most 1,000 UTF-16 units. It
-has not been installed, released or validated on a real ChatGPT or Dot
-conversation. A selected 115-case isolated ProseMirror/MV3 batch passed, including
+Fresh continuation: GitHub v3.0.22 is public, a new Store item contains a 3.0.22
+draft, and the owner's diagnostic export reports 3.0.22 with local sent events.
+Complete-payload live delivery and current-build Windows lifecycle acceptance
+are not established. Baseline `npm test` now reports 11 failures in its safety
+test group; later stages do not execute. See the current working-tree record
+`docs/CONTINUATION-20261116.md`. The following fixture results predate that rerun.
+
+This candidate starts long text in segments of at most 1,000 UTF-16 units.
+A selected 115-case isolated ProseMirror/MV3 batch passed, including
 slow-write, pause and content-free unreadable-check diagnostics. Background tests
 passed 261/261, check 128+8, support 69/69 and UI 65/65. A separate MV3
 selection passed 28/28 after the later pause and unknown-result changes. The complete `npm test` stopped at five
