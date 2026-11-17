@@ -1,5 +1,36 @@
 # Windows First-Install and Recovery Checkpoint
 
+## Latest Verified Evidence
+
+- Exact source `d640fe84ce6173f7effe4519b4d5b1bb804250fb`: the complete hosted
+  [Extension checks](https://github.com/1235357/agent-continue/actions/runs/44163347836)
+  passed, including headed `npm test` and the packaging checks. This is a
+  cloud pass, not a final exit for the earlier interrupted local invocation.
+- The same source passed the manual
+  [Verify Windows delivery](https://github.com/1235357/agent-continue/actions/runs/44164261660)
+  run on a disposable Windows runner. Artifact archives `14364034071` and
+  `14363899124` matched GitHub's SHA-256 metadata; all six downloaded files
+  matched the setup receipt, and the administrator ZIP also matched the
+  ordinary-token smoke receipt. The source receipt identifies the exact commit
+  and run. Rebuilding
+  the setup closure from canonical Git-LF source with that administrator ZIP
+  reproduced all six hashes. Administrator ZIP SHA-256:
+  `cbfa40e863430a442474bb7ee1e1d401af907bf189b07b8d84674450602a365a`.
+  Local evidence: `.artifacts/windows-recovery-d640fe8-ci-44164261660/`.
+- This candidate still reports version 3.0.22. Its six build assets have not
+  been published to `v3.0.22`; a local build receipt is not proof that their
+  release URLs resolve. Do not replace the old public artifacts or point the
+  installed extension to unverified URLs. The offline development preview has
+  no generated public setup entry and is not a Store upload. Canonical-source
+  npm packaging checks passed 11/11, including packing and inspecting the
+  actual tarball against the verified six-file input; no publishing occurred.
+- The official Chrome controller is now discoverable for the existing Chrome
+  profile, superseding the earlier missing-transport observation. It lists the
+  existing Extensions tab but returns `Chrome internal tab ... cannot be
+  claimed` for it. No Reload, additional authorization, install, or restart
+  was performed. An existing HTTPS session or a Chrome inventory entry does
+  not prove access to `chrome://extensions/` or `chrome-extension://`.
+
 ## Current Delivery Checklist
 
 - Complete: source fixes through `e5b1dd3647c587f05c2f5b398bf3e37628108a60`
@@ -41,14 +72,12 @@ Public URL: https://chromewebstore.google.com/detail/agent-continue-background/j
 The earlier pending-status screenshot remains historical:
 `.artifacts/windows-recovery-store-status-20261117.png`.
 
-The current browser tool inventory exposes the in-app browser, which was used
-to read that authenticated Store page. A fresh Chrome selection returns
-`Browser is not available: chrome`; earlier read-only diagnostics reported
-Chrome running and its OpenAI native-host manifest correct, but the configured
-control extension's version directory is absent in the selected Default
-profile. This is a bounded current transport observation, not a claim that
-Chrome is unavailable, that every profile lacks the extension, or that
-extension pages are illegal. No native-host repair or alternate-channel bypass.
+The in-app browser was used to read the authenticated Store page. Before the
+latest Chrome connection was detected, a Chrome selection returned
+`Browser is not available: chrome`. Earlier Default-profile file observations
+are historical and did not cover other profiles. The active limitation is
+the controller's readback above, not an unavailable browser or missing user
+consent. No native-host repair or alternate-channel bypass was attempted.
 
 ## Problem
 
@@ -61,9 +90,12 @@ strict whole-payload matching is not a new release gate.
 
 ## Next Exact Actions
 
-1. Restore the documented Chrome browser-control connection in this chat,
-   then observe the developer extension's Reload. The configured repository
-   path is known; no reinstall or parallel old task should be started.
+1. Observe Reload of the existing unpacked development extension
+   `kpjgmkakklpdhjmbfahlkffgkcphebkc` from its configured repository directory.
+   The Chrome connection is present, but the management tab cannot be claimed.
+   The owner can use the card's Reload icon when that extension has no active
+   send; do not switch to a different browser-control channel, reinstall, or
+   reload the Store item. Recheck the exact loaded instance before live tests.
 2. Reinspect standard and administrator hosts independently. A later Node
    process exists in the old protected runtime directory; do not infer quiescence
    from earlier missing/unobserved receipts or overwrite its binding blindly.

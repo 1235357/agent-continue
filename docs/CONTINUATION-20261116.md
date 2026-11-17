@@ -2,12 +2,14 @@
 
 ## Latest Windows Continuation (2026-11-17 UTC)
 
-Current source is `main` / `666b006`, not the original 3.0.22 release snapshot.
+Verified source is `main` / `d640fe8`, not the original 3.0.22 release snapshot.
 It includes `37edbb25` late-receipt accounting, `11b4207` document-pinned
 no-dispatch retry and `cb839d7` empty-draft/initial-selection recovery.
 The canonical Git-LF Windows six-asset closure, matching extension pair and npm
-tarball are built locally; clean package tests passed 115/115 and temporary
-native IPC passed 12/12. Fresh Store readback: new 3.0.22 and original 3.0.20
+tarball were first built and checked on the earlier `e5b1dd3` source. Current
+`d640fe8` passed the complete cloud extension CI and a fresh Windows runner
+build; the downloaded six-asset closure was verified against the exact source
+and rebuilt with identical digests. Fresh Store readback: 3.0.22 and 3.0.20
 are both Published - public; the new public page and profile links were read.
 This supersedes the earlier pending-review observation below.
 See the recovery checklist for actual
@@ -17,10 +19,10 @@ The full Windows-first goal is now active again. This supersedes the historical
 paused-goal statements below. See [the Windows recovery checkpoint](WINDOWS-RECOVERY-20261117.md)
 for live read-only inventory, native registration and Setup UI fixes, test
 results and the remaining package/lifecycle acceptance gates. The in-app
-browser currently works; Chrome selection returns unavailable.
-Extension pages are legitimate, but the explicit automation protocol restriction
-was not bypassed. The owner requests refresh of the existing development
-installation, not repeated installation; no Reload click is claimed yet.
+browser works and Chrome's controller is now connected, but the existing
+`chrome://extensions/` tab cannot be claimed by it. The owner requests refresh
+of the existing development installation, not repeated installation; no Reload
+click is claimed and no alternate channel was used to bypass the restriction.
 
 New native/setup fixes are scoped source changes, separate from permissive
 3.0.22 sender behavior and the submitted Store package. The older strict

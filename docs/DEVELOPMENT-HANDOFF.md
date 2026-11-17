@@ -1,25 +1,29 @@
 # Agent Continue Development Handoff
 
-## Reacquired Status (2026-11-16)
+## Reacquired Status (2026-11-17)
 
 Latest continuation: [Windows recovery checkpoint](WINDOWS-RECOVERY-20261117.md).
 Use its current delivery checklist before older dated observations below.
-Canonical Git-LF Windows/admin/extension/npm candidates now build as one
-verified asset set; the clean npm delivery tests passed 115/115. The new Store
-item 3.0.22 and original item 3.0.20 are both Published - public (fresh
+The exact `d640fe8` source passed complete cloud extension checks and an
+independent Windows runner build. The downloaded six-asset setup closure was
+verified and locally rebuilt byte-for-byte using the same administrator ZIP.
+The new Store item 3.0.22 and original item 3.0.20 are both Published - public (fresh
 2026-11-17 readback). The public 3.0.22 listing is accessible and includes the
 owner's GitHub and LinkedIn profiles. Neither item was modified in this continuation.
 The full goal is active. Source fixes now isolate standalone diagnostics from
 browser-managed account proof and reject stale manifest evidence after registry
-reads. The in-app browser is currently connected and HTTPS-tested; Chrome
-selection returns unavailable. No extension-page Reload or current-build
-native lifecycle acceptance is claimed.
+reads. The in-app browser is connected and HTTPS-tested. The Chrome controller
+is now connected, but it rejects claiming the existing Extensions management
+tab. No extension-page Reload or current-build native lifecycle acceptance is
+claimed.
 The previously submitted Store package and public 3.0.22 binaries were not replaced.
 
-Sender fixes are now pushed through `666b006` on the sole remote `main`.
+Sender fixes through `cb839d7` are included in verified `d640fe8` on the sole
+remote `main`.
 Final-source default ProseMirror checks passed in partitions 66/66 and 135/135;
 the full npm command was interrupted without a final exit and is not a whole
-command pass. Required current installed Windows acceptance remains open.
+command pass. The separately completed headed cloud invocation passed.
+Required current installed Windows acceptance remains open.
 
 The active development goal resumed from `main` / `a27de6e` / extension
 3.0.22. See [the current continuation record](CONTINUATION-20261116.md) for
