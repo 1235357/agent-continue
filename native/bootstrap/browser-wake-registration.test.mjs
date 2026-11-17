@@ -905,6 +905,43 @@ test('missing wrapper with an unverifiable interpreter remains an observation, n
     assert.equal(result.mutationPerformed, false);
   });
 
+test('exact browser install inspection rejects a nonlocal root before filesystem access',
+  { skip: process.platform !== 'win32' }, async () => {
+    const installDir = 'relative-install-fixture', original = fs.lstatSync;
+    let reads = 0;
+    fs.lstatSync = (file, ...args) => {
+      if (file !== installDir) return original(file, ...args);
+      reads++;
+      throw Object.assign(new Error('fixture must not read this path'), { code: 'ENOENT' });
+    };
+    try {
+      const observed = await browserWake.inspectExistingBrowserWake({ installDir, extensionId });
+      assert.equal(reads, 0);
+      assert.equal(observed.status, 'existing-incompatible');
+      assert.equal(observed.reason, 'invalid-root');
+      assert.equal(observed.mutationPerformed, false);
+    } finally { fs.lstatSync = original; }
+  });
+
+test('exact browser install inspection separates a missing root from another extension binding',
+  { skip: process.platform !== 'win32' }, async t => {
+    const f = fixture(t);
+    const installDir = path.join(f.root, 'absent');
+    const absent = await browserWake.inspectExistingBrowserWake({ installDir, extensionId });
+    assert.equal(absent.status, 'existing-absent');
+    assert.equal(fs.existsSync(installDir), false);
+    const binding = JSON.stringify({ format: 'agent-continue-native-binding', version: 1,
+      extensionId: 'b'.repeat(32), stateRoot: path.join(f.root, 'state') }) + '\n';
+    const bindingPath = path.join(f.app, 'device-native-binding.json');
+    fs.writeFileSync(bindingPath, binding);
+    const other = await browserWake.inspectExistingBrowserWake({ installDir: f.root, extensionId });
+    assert.equal(other.status, 'existing-incompatible');
+    assert.equal(other.reason, 'extension-mismatch');
+    assert.equal(other.devicesUrl, null);
+    assert.equal(other.mutationPerformed, false);
+    assert.equal(fs.readFileSync(bindingPath, 'utf8'), binding);
+  });
+
 test('browser install status CLI is closed and read-only', async t => {
   const f = fixture(t);
   fs.copyFileSync(new URL('./bin.mjs', import.meta.url), path.join(f.root, 'bin.mjs'));

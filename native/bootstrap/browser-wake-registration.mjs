@@ -334,14 +334,15 @@ export async function inspectExistingBrowserWake({ installDir, extensionId }, { 
   if (typeof extensionId !== 'string' || !/^[a-p]{32}$/.test(extensionId)) fail('invalid_arguments');
   const result = (status, reason) => existingResult(extensionId, status, reason);
   try {
+    installDir = resolveLocalPath(installDir);
     const root = fs.lstatSync(installDir, { bigint: true });
     if (!root.isDirectory() || root.isSymbolicLink()) return result('existing-incompatible', 'invalid-root');
   } catch (error) {
+    if (error.message === 'invalid_install_path') return result('existing-incompatible', 'invalid-root');
     if (error.code === 'ENOENT') return result('existing-absent', 'missing-root');
     return result(['EACCES', 'EPERM'].includes(error.code) ? 'existing-denied' : 'existing-unconfirmed', 'root-unreadable');
   }
   try {
-    installDir = resolveLocalPath(installDir);
     const root = assertDirectory(installDir), app = path.join(installDir, 'app');
     const binding = snapshot(path.join(app, 'device-native-binding.json'));
     const record = JSON.parse(new TextDecoder('utf8', { fatal: true }).decode(binding.bytes));

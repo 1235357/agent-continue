@@ -14,7 +14,7 @@ verified administrator installer, using one consent and Windows elevation.
   .\install.ps1 -InstallLocal -BrowserManaged -Consent accept-install -PromptForConnection -ExtensionId <32 chars>
   .\install.ps1 -Administrator -Apply -Consent accept-administrator-browser-installation -PromptForConnection -ExtensionId <32 chars>
   .\install.ps1 -DeviceAction installer-status        # observes the original connection attempt
-  .\install.ps1 -DeviceAction browser-installer-status # read-only browser bridge inspection
+  .\install.ps1 -DeviceAction browser-installer-status -ExtensionId <32 chars> # read-only, exact Chrome identity
   .\install.ps1 -DeviceAction browser -Consent accept-control  # temporary local controls
   .\install.ps1 -DeviceAction register-browser-wake -ExtensionId <32 chars> -Consent accept-browser-wake
   .\install.ps1 -Uninstall                            # local-only dry-run removal plan
@@ -984,7 +984,9 @@ try {
         $PayloadBase = Get-DefaultPayloadBase
     }
     # `irm ... | iex` cannot pass parameters; accept the documented env fallback.
-    if (-not $ExtensionId -and $env:AGENT_CONTINUE_EXTENSION_ID) { $ExtensionId = $env:AGENT_CONTINUE_EXTENSION_ID }
+    if (-not $ExtensionId -and $env:AGENT_CONTINUE_EXTENSION_ID -and $DeviceAction -cne 'browser-installer-status') {
+        $ExtensionId = $env:AGENT_CONTINUE_EXTENSION_ID
+    }
     if ($Administrator) {
         # Reuse release acquisition/integrity checks, but the administrator ZIP
         # supplies its own pinned Node and never invokes the legacy launcher.
@@ -1011,6 +1013,9 @@ try {
             $SetupRequest -or $TunnelId -or $RuntimeKeyFile -or
             ($DeviceAction -ceq 'browser-installer-status' -and $Consent) -or
             ($OperationId -and ($DeviceAction -cin @('start', 'installer-status', 'browser-installer-status', 'browser', 'register-browser-wake') -or $OperationId -cnotmatch '\A[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z'))) { throw 'invalid_manager_arguments' }
+        if ($DeviceAction -ceq 'browser-installer-status' -and
+            $PSBoundParameters.ContainsKey('ExtensionId') -and
+            $ExtensionId -cnotmatch '\A[a-p]{32}\z') { throw 'invalid_extension_id' }
         if ($DeviceAction -ceq 'register-browser-wake') {
             if ($Consent -cne 'accept-browser-wake') { throw 'consent_required' }
             if ($ExtensionId -cnotmatch '\A[a-p]{32}\z') { throw 'invalid_extension_id' }
@@ -1038,6 +1043,7 @@ try {
             @('manager-status', '--install-dir', $InstallDir)
         } elseif ($DeviceAction -ceq 'browser-installer-status') {
             @('browser-install-status', '--install-dir', $InstallDir)
+            if ($ExtensionId) { @('--extension-id', $ExtensionId) }
         } elseif ($DeviceAction -ceq 'browser') {
             @('manager-browser', '--install-dir', $InstallDir, '--consent', $Consent)
         } elseif ($DeviceAction -ceq 'register-browser-wake') {

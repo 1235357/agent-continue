@@ -52,16 +52,18 @@ Check that the ID printed in the terminal matches the one in Setup. Enter the tu
 Setup reuses compatible Node.js or downloads and verifies official portable Node.js for the current user after consent. It does not use an Agent Continue EXE/MSI installer or request elevation. If policy blocks the command, stop and check with your administrator rather than bypassing it. Use this mode for a fresh install; do not run the standalone setup for the same installation.
 
 If browser-managed setup is interrupted, do not delete the directory or run the
-installer again. From the same `WindowsSetup` folder, inspect the original root:
+installer again. From the same `WindowsSetup` folder, inspect the original root
+and supply the extension ID shown in Setup (replace `EXTENSION_ID`):
 
 ```powershell
-.\install.ps1 -DeviceAction browser-installer-status -InstallDir "$env:LOCALAPPDATA\AgentContinue"
+.\install.ps1 -DeviceAction browser-installer-status -InstallDir "$env:LOCALAPPDATA\AgentContinue" -ExtensionId 'EXTENSION_ID'
 ```
 
-The read-only result separates verified configuration, exact bridge files and
-registry observations. `registration: "matched"` plus `bundle: "verified"`
-establishes the inspected bridge registration, not that a browser has launched
-it or that a chat is authorized. `absent`, `conflict` and `unconfirmed` are
+`existing-matched` means the verified installation belongs to that exact
+extension, not that a browser has launched it or a chat is authorized. An older
+extension yields `existing-incompatible` with `extension-mismatch`. Omitting
+`-ExtensionId` preserves the general diagnostic but cannot establish a match
+to your selected extension. Absence, conflict and an inconclusive read are
 different states; a query error must not be treated as absence. This command
 does not connect, repair, replay or uninstall anything. The standalone
 `installer-status` below observes a different, first-connect operation and is
@@ -144,6 +146,6 @@ inspect browser-wake registration. To pause from the original `WindowsSetup` fol
 4. 到设备页授权本机控制桥，检查状态，再手动连接一次。后续重新打开 Chrome 可自动恢复已启用的连接；“断开并暂停”会保留。独立管理是备选模式，使用 `CONNECT` 和可选的 `PAIR`，不要与浏览器管理混用。
 5. 早期独立测试通过了普通 ChatGPT 的读文件、带操作 ID 的写入防重和只输出文本的终端调用；这不证明当前浏览器管理预览、管理员控制、自己的设备或 Dot 已通过验收。官方隧道用于指定组织与工作区的私有连接，不是公开 ChatGPT 插件发布渠道。当前托管请求期限为 120 秒，包含排队时间；长任务应有限等待后查询同一进程或操作回执，超时不能当作任务已停止或重新执行的依据。
 6. 如果私有插件列出“Start Process (Exact Arguments)”，需要逐字执行时，从已审阅的命令、Shell 路径和超时在本机生成摘要，再用该工具提交。摘要不匹配时本次不执行；普通终端工具不受此约束，摘要也不替代权限确认。
-7. 浏览器管理模式安装中断时，在原 `WindowsSetup` 目录使用 `-DeviceAction browser-installer-status` 只读检查原安装路径。配置、桥接文件与注册分别报告；`matched` 与 `verified` 同时成立也不证明浏览器启动或对话授权。`absent`、`conflict`、`unconfirmed` 不能混同。独立管理器的 `installer-status` 检查的是首次连接操作，不能替代此检查。两者都不应触发重试或重装。
+7. 浏览器管理模式安装中断时，在原 `WindowsSetup` 目录运行 Setup 页面生成的 `-DeviceAction browser-installer-status` 命令，其中 `-ExtensionId` 必须对应当前扩展。`existing-matched` 不证明浏览器启动或对话授权；旧扩展绑定会报告 `extension-mismatch`。不要把冲突或未知当作未安装。独立管理器的 `installer-status` 检查的是首次连接操作，不能替代此检查。两者都不应触发重试或重装。
 8. 当前浏览器控制桥仅支持已验证的 CMD 安全 ASCII 应用与 Node 路径，部分合法 Windows 用户路径不受支持；Node 版本符合也不等于架构与 npm 可用。浏览器管理模式的完整移除尚未交付，旧卸载命令仅生成计划。不要通过删除或覆盖结果不明的安装绕过限制。
 9. 若检查命令使用了不同的 Node，结果会单独报告 `interpreter: "mismatch"` 与 `configuration: "not-verified"`，不把原桥接误判为损坏。可用 `-NodePath` 指定原安装使用的解释器再检查；检查器不会自动执行从安装文件中推导出的解释器。`registryComplete: false` 会保留不可读或变化中的注册项状态，即使另一个注册项已证实冲突。

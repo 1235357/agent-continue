@@ -1317,7 +1317,8 @@ try {
     assert.equal(await page.locator('#windowsBrowserCmd').textContent(), browserCommand(extensionId, 'current-account', 'browserCmd'));
     await page.locator('#windowsBrowserRecovery > summary').click();
     const browserInstallStatus = await page.locator('#windowsBrowserInstallerStatusCommand').innerText();
-    assert.match(browserInstallStatus, /^\.\\install\.ps1 -DeviceAction browser-installer-status -InstallDir /);
+    assert.equal(browserInstallStatus,
+      `.\\install.ps1 -DeviceAction browser-installer-status -InstallDir "$env:LOCALAPPDATA\\AgentContinue" -ExtensionId '${extensionId}'`);
     assert.doesNotMatch(browserInstallStatus, /accept-control|accept-install|OperationId|RuntimeKeyFile/);
     assert.match(await page.locator('#windowsBrowserRecoveryHelp').innerText(), /read-only.*does not connect.*not proof/i);
     assert.equal(await page.locator('#windowsSourceInstall input,#windowsSourceInstall textarea').count(), 0);

@@ -495,7 +495,11 @@ function renderInstall() {
       '管理员路径使用单独校验的安装包及其固定版本的便携 Node，不使用当前账户的 Node 补装流程。'],
   ]) $(id).textContent = t(administrator ? administratorKey : standardKey);
   $('windowsStandaloneInstall').hidden = administrator;
-  $('windowsBrowserRecovery').hidden = administrator;
+  const browserRecoveryId = plan?.os === 'windows' ? plan.extensionId : null;
+  $('windowsBrowserRecovery').hidden = administrator || !browserRecoveryId;
+  $('windowsBrowserInstallerStatusCommand').textContent = browserRecoveryId && !administrator
+    ? `.\\install.ps1 -DeviceAction browser-installer-status -InstallDir "$env:LOCALAPPDATA\\AgentContinue" -ExtensionId '${browserRecoveryId}'`
+    : '';
   $('otherInstallPlan').hidden = installOs === 'windows';
   $('installConsentLabel').hidden = installOs !== 'windows';
   $('windowsExistingDevice').hidden = installOs !== 'windows';

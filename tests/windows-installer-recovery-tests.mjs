@@ -518,6 +518,34 @@ exit $LASTEXITCODE`, 'browser-status');
   assert.equal(fs.existsSync(path.join(root, 'local')), false);
 });
 
+test('browser-managed installer observation pins a supplied Chrome extension ID', windows, async t => {
+  const root = fixture(t), copy = path.join(root, 'install.ps1'), target = path.join(root, 'must-not-install');
+  const extensionId = 'b'.repeat(32);
+  fs.copyFileSync(installer, copy);
+  fs.writeFileSync(path.join(root, 'bin.mjs'), 'console.log(JSON.stringify(process.argv.slice(2)));\n');
+  pinFixtureEntry(root);
+  const result = await runPowerShell(t, root, `
+& ${quote(copy)} -DeviceAction browser-installer-status -InstallDir ${quote(target)} -NodePath ${quote(process.execPath)} -ExtensionId ${quote(extensionId)}
+exit $LASTEXITCODE`, 'browser-status-pinned');
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, '');
+  assert.deepEqual(JSON.parse(result.stdout), ['browser-install-status', '--install-dir', target, '--extension-id', extensionId]);
+  assert.equal(fs.existsSync(target), false);
+});
+
+test('browser-managed installer observation rejects an invalid extension ID before Node dispatch', windows, async t => {
+  const root = fixture(t), copy = path.join(root, 'install.ps1');
+  fs.copyFileSync(installer, copy);
+  fs.writeFileSync(path.join(root, 'bin.mjs'), 'console.log("unexpected-node-dispatch");\n');
+  pinFixtureEntry(root);
+  const result = await runPowerShell(t, root, `
+& ${quote(copy)} -DeviceAction browser-installer-status -NodePath ${quote(process.execPath)} -ExtensionId 'invalid-id'
+exit $LASTEXITCODE`, 'browser-status-invalid-id');
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, '');
+  assert.equal(result.stderr.trim(), 'agent_continue_install_failed: invalid_extension_id');
+});
+
 for (const flags of ['-OperationId aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', '-Apply', '-Consent accept-control']) {
   test(`browser-managed installer observation refuses ${flags.split(' ')[0]} before Node dispatch`, windows, async t => {
     const root = fixture(t), copy = path.join(root, 'install.ps1');

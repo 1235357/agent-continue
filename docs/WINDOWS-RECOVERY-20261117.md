@@ -2,6 +2,19 @@
 
 ## Latest Verified Evidence
 
+- Follow-up installer diagnostics bind the current Setup extension ID to
+  the exact read-only current-account inspection. A different extension is
+  not a successful match, invalid IDs are refused before starting Node, and
+  nonlocal roots are refused before probing the supplied path. The legacy
+  invocation without an ID remains a general registration diagnostic.
+  Setup (including browser UI 78/78 and isolated extension loopback),
+  installer and registration tests (84/84), and source checks passed.
+- The unmodified verified administrator bundle below was inspected on the
+  actual Windows machine without elevation: `candidateFootprint: not-observed`,
+  `browserRegistration: other-or-conflicting-registration`. No UAC request,
+  activation, installation, registration write, or tunnel start occurred.
+  The distinct older registered host must not be replaced based on this check.
+
 - Exact source `d640fe84ce6173f7effe4519b4d5b1bb804250fb`: the complete hosted
   [Extension checks](https://github.com/1235357/agent-continue/actions/runs/44163347836)
   passed, including headed `npm test` and the packaging checks. This is a
