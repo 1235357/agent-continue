@@ -5,6 +5,7 @@ import importlib.util
 import json
 from pathlib import Path
 import re
+import shlex
 import stat
 import tempfile
 import unittest
@@ -337,11 +338,27 @@ class WindowsReleaseWorkflowTests(unittest.TestCase):
     def test_public_windows_extension_and_npm_use_verified_combined_delivery(self):
         release = job(self.source, "release")
         package = step(release, "Package the loadable extension")
-        self.assertIn("scripts/package.py --windows-release", package)
+        command = next(line.strip() for line in package.splitlines()
+                       if line.strip().startswith("python3 scripts/package.py "))
+        self.assertEqual(shlex.split(command), [
+            "python3", "scripts/package.py", "--windows-release",
+            "--setup-release-dir", "dist/native-setup",
+            "--setup-release-receipt", "dist/build-receipts/agent-continue-setup-build-receipt.json",
+        ])
         self.assertNotIn("scripts/package.py --store", package)
+        download = step(release, "Download the original Windows build receipt")
+        for text in ("uses: actions/download-artifact@v4", "name: agent-continue-windows-build-receipt",
+                     "path: dist/build-receipts"):
+            self.assertIn(text, download)
+        for option in ("run-id:", "repository:", "merge-multiple:", "pattern:"):
+            self.assertNotIn(option, download)
+        for name in ("Download verified Windows sidecars", "Download the original Windows build receipt",
+                     "Verify downloaded Windows sidecar closure"):
+            self.assertLess(release.index("- name: " + name), release.index("- name: Package the loadable extension"))
         npm = step(release, "Build matching npm CLI archive")
         self.assertIn("AGENT_CONTINUE_WINDOWS_RELEASE_DIR", npm)
         self.assertIn("dist/native-setup", npm)
+        self.assertIn("AGENT_CONTINUE_WINDOWS_RELEASE_RECEIPT: ${{ github.workspace }}/dist/build-receipts/agent-continue-setup-build-receipt.json", npm)
         self.assertLess(release.index("Verify downloaded Windows sidecar closure"),
                         release.index("Verify actual npm delivery package"))
 

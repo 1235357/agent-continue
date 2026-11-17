@@ -1,4 +1,5 @@
 """Offline release archive regression tests; no browser or private inputs."""
+import hashlib
 import importlib.util
 import io
 import json
@@ -31,6 +32,8 @@ class PackageTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         cache = {}
         names = set(package.RUNTIME_FILES) | set(package.SOURCE_FILES) | set(PUBLIC_DOCS)
+        names.update({"scripts/prepare-npm-payload.mjs", "native/bootstrap/build-package.mjs",
+                      "native/bootstrap/windows-release.mjs"})
         names |= package.verified_vendor_files(ROOT, cache)
         for name in names:
             destination = self.root / name
@@ -45,6 +48,9 @@ class PackageTests(unittest.TestCase):
         stable["content_security_policy"]["extension_pages"] = stable["content_security_policy"]["extension_pages"].split("; frame-src")[0]
         stable.pop("key", None)
         self.manifest_path.write_text(json.dumps(stable), encoding="utf-8")
+        verifier_root = patch.object(package, "ROOT", self.root)
+        verifier_root.start()
+        self.addCleanup(verifier_root.stop)
 
     def test_archive_layouts_and_manifest_resources(self):
         for source in (False, True):
@@ -232,7 +238,197 @@ class PackageTests(unittest.TestCase):
             "Optional nativeMessaging; selected-account file/shell/process access.\n"
             "Separate OS/platform grants, official transport, Pause and Revoke.\n",
             encoding="utf-8")
+        self.setup_inputs = self.synthetic_setup_closure(version)
         return manifest
+
+    def synthetic_setup_closure(self, version):
+        # Data-only fixtures exercise the real verifier. These opaque synthetic
+        # ZIPs/receipts are not evidence of a builder, Plan, signing or installation.
+        directory = self.root / "synthetic-sidecars"
+        directory.mkdir(exist_ok=True)
+        assets = {}
+        for name in ("agent-continue-setup.zip", "agent-continue-windows-administrator-x64.zip"):
+            with zipfile.ZipFile(directory / name, "w") as archive:
+                archive.writestr("SYNTHETIC.txt", "Not a deployable Windows runtime.\n")
+            assets[name] = hashlib.sha256((directory / name).read_bytes()).hexdigest()
+        sources = {"Stage-WindowsAdministratorBundle.ps1": b"# Synthetic stager; never executed.\n"}
+        assets.update({name: hashlib.sha256(data).hexdigest() for name, data in sources.items()})
+        sources["install-administrator.ps1"] = (
+            f"$script:acReleaseTag = 'v{version}'\n"
+            f"$script:acAdministratorBundleSha256 = '{assets['agent-continue-windows-administrator-x64.zip']}'\n"
+            f"$script:acAdministratorStagerSha256 = '{assets['Stage-WindowsAdministratorBundle.ps1']}'\n"
+        ).encode("ascii")
+        assets["install-administrator.ps1"] = hashlib.sha256(sources["install-administrator.ps1"]).hexdigest()
+        sources["install.ps1"] = (
+            f"$script:acReleaseTag = 'v{version}'\n"
+            f"$script:acAdministratorInstallerSha256 = '{assets['install-administrator.ps1']}'\n"
+        ).encode("ascii")
+        assets["install.ps1"] = hashlib.sha256(sources["install.ps1"]).hexdigest()
+        sums = dict(assets, **{"bin.mjs": "a" * 64, "payload-manifest.json": "b" * 64})
+        sources["SHA256SUMS.txt"] = "".join(f"{digest}  {name}\n" for name, digest in sorted(sums.items())).encode("ascii")
+        assets["SHA256SUMS.txt"] = hashlib.sha256(sources["SHA256SUMS.txt"]).hexdigest()
+        for name, data in sources.items():
+            (directory / name).write_bytes(data)
+        receipt = {
+            "testOnly": "Synthetic closure, not an actual builder or stager Plan result",
+            "built": True, "combinedBuilt": True, "deliveryContract": "combined-public",
+            "administratorBundleVerified": True, "administratorStagerPlan": True,
+            "installed": False, "published": False, "releaseTag": f"v{version}",
+            "sha256": assets["agent-continue-setup.zip"],
+            "administratorBundleSha256": assets["agent-continue-windows-administrator-x64.zip"],
+            "assets": assets,
+        }
+        receipt_path = self.root / "synthetic-build-receipt.json"
+        receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+        return {"setup_release_dir": directory, "setup_release_receipt": receipt_path}
+
+    def assert_setup_refusal_preserves_outputs(self, options):
+        original = (self.root / "setup-entry-release.js").read_bytes()
+        self.refusal_case = getattr(self, "refusal_case", 0) + 1
+        fresh = self.root / f"fresh-output-{self.refusal_case}"
+        existing = self.root / f"existing-output-{self.refusal_case}"
+        existing.mkdir()
+        outputs = {f"agent-continue-3.0.0{suffix}.zip": f"Previous {suffix or 'GitHub'} build".encode()
+                   for suffix in ("", "-store", "-source")}
+        outputs["unrelated.txt"] = b"Preserve unrelated output"
+        for name, data in outputs.items():
+            (existing / name).write_bytes(data)
+        for destination in (fresh, existing):
+            with self.subTest(destination=destination), \
+                    patch.object(package, "stage_archive", wraps=package.stage_archive) as stage, \
+                    patch.object(package.os, "replace", wraps=package.os.replace) as replace:
+                with self.assertRaisesRegex(package.PackageError, "combined.*setup|setup.*verified"):
+                    package.package_release(self.root, windows_release=True, include_source=True,
+                                            source_revision="a1" * 20, output_directory=destination, **options)
+                stage.assert_not_called()
+                replace.assert_not_called()
+            self.assertFalse(fresh.exists())
+            self.assertEqual({p.name: p.read_bytes() for p in existing.iterdir()}, outputs)
+            self.assertEqual((self.root / "setup-entry-release.js").read_bytes(), original)
+            self.assertFalse((self.root / "dist").exists())
+
+    def test_windows_release_requires_both_combined_setup_inputs_before_output(self):
+        self.prepare_windows_release()
+        for options in ({}, {"setup_release_dir": self.setup_inputs["setup_release_dir"]},
+                        {"setup_release_receipt": self.setup_inputs["setup_release_receipt"]}):
+            with self.subTest(options=options):
+                self.assert_setup_refusal_preserves_outputs(options)
+
+    def test_windows_release_cli_requires_explicit_closure_arguments(self):
+        self.prepare_windows_release()
+        for flags in ([], ["--setup-release-dir", str(self.setup_inputs["setup_release_dir"])],
+                      ["--setup-release-receipt", str(self.setup_inputs["setup_release_receipt"])]):
+            with self.subTest(flags=flags), \
+                    patch("sys.argv", ["package.py", "--windows-release", *flags]), \
+                    patch("sys.stderr", new_callable=io.StringIO) as errors, \
+                    patch("sys.stdout", new_callable=io.StringIO) as output:
+                with self.assertRaises(SystemExit) as exit_status:
+                    package.main()
+                self.assertEqual(exit_status.exception.code, 1)
+                self.assertIn("combined setup", errors.getvalue())
+                self.assertEqual(output.getvalue(), "")
+                self.assertFalse((self.root / "dist").exists())
+
+    def test_windows_release_rejects_invalid_or_wrong_version_builder_receipts_before_output(self):
+        self.prepare_windows_release()
+        receipt_path = self.setup_inputs["setup_release_receipt"]
+        valid = json.loads(receipt_path.read_bytes())
+        changes = (
+            {"built": False}, {"combinedBuilt": False}, {"deliveryContract": "source-only"},
+            {"administratorBundleVerified": False}, {"administratorStagerPlan": False},
+            {"installed": True}, {"published": True}, {"releaseTag": "v9.9.9"},
+            {"sha256": "0" * 64}, {"administratorBundleSha256": "0" * 64},
+            {"assets": {}},
+        )
+        for data in (b"not-json", b"{}", b"null", b"[]", *(json.dumps(dict(valid, **c)).encode() for c in changes)):
+            receipt_path.write_bytes(data)
+            with self.subTest(receipt=data):
+                self.assert_setup_refusal_preserves_outputs(self.setup_inputs)
+        receipt_path.unlink()
+        self.assert_setup_refusal_preserves_outputs(self.setup_inputs)
+
+    def test_windows_release_checks_every_setup_asset_before_output(self):
+        self.prepare_windows_release()
+        directory = self.setup_inputs["setup_release_dir"]
+        for asset in sorted(directory.iterdir()):
+            original = asset.read_bytes()
+            try:
+                for data in (None, original + b"tampered"):
+                    if data is None:
+                        asset.unlink()
+                    else:
+                        asset.write_bytes(data)
+                    with self.subTest(asset=asset.name, missing=data is None):
+                        self.assert_setup_refusal_preserves_outputs(self.setup_inputs)
+            finally:
+                asset.write_bytes(original)
+
+    def test_windows_release_rejects_receipt_and_setup_pin_mismatches_before_output(self):
+        self.prepare_windows_release()
+        directory = self.setup_inputs["setup_release_dir"]
+        receipt_path = self.setup_inputs["setup_release_receipt"]
+        valid = json.loads(receipt_path.read_bytes())
+        original = {entry.name: entry.read_bytes() for entry in directory.iterdir()}
+        cases = [
+            ("install.ps1", b"v3.0.0", b"v9.9.9"),
+            ("install-administrator.ps1", b"v3.0.0", b"v9.9.9"),
+            ("install.ps1", valid["assets"]["install-administrator.ps1"].encode(), b"0" * 64),
+            ("install-administrator.ps1", valid["assets"]["agent-continue-windows-administrator-x64.zip"].encode(), b"0" * 64),
+            ("install-administrator.ps1", valid["assets"]["Stage-WindowsAdministratorBundle.ps1"].encode(), b"0" * 64),
+        ]
+        for name, before, after in cases:
+            try:
+                changed = dict(original)
+                self.assertEqual(changed[name].count(before), 1)
+                changed[name] = changed[name].replace(before, after)
+                if name == "install-administrator.ps1":
+                    changed["install.ps1"] = changed["install.ps1"].replace(
+                        valid["assets"][name].encode(), hashlib.sha256(changed[name]).hexdigest().encode())
+                assets = {asset: hashlib.sha256(data).hexdigest() for asset, data in changed.items()
+                          if asset != "SHA256SUMS.txt"}
+                sums = dict(assets, **{"bin.mjs": "a" * 64, "payload-manifest.json": "b" * 64})
+                changed["SHA256SUMS.txt"] = "".join(f"{digest}  {asset}\n" for asset, digest in sorted(sums.items())).encode("ascii")
+                assets["SHA256SUMS.txt"] = hashlib.sha256(changed["SHA256SUMS.txt"]).hexdigest()
+                for asset, data in changed.items():
+                    (directory / asset).write_bytes(data)
+                receipt = dict(valid, assets=assets)
+                receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+                with self.subTest(asset=name, pin=before):
+                    self.assertEqual(receipt["sha256"], assets["agent-continue-setup.zip"])
+                    self.assertEqual(receipt["administratorBundleSha256"], assets["agent-continue-windows-administrator-x64.zip"])
+                    check = package.subprocess.run([
+                        "node", "--input-type=module", "-e",
+                        "import fs from 'node:fs';import{pathToFileURL}from'node:url';"
+                        "const api=await import(pathToFileURL(process.argv[1]));"
+                        "const receipt=JSON.parse(fs.readFileSync(process.argv[3],'utf8'));"
+                        "try{api.validateWindowsRelease(process.argv[2],api.metadataFromBuildReceipt(receipt,'3.0.0'));"
+                        "console.log('accepted')}catch(error){console.log(error.message)}",
+                        str(self.root / "native/bootstrap/windows-release.mjs"), str(directory), str(receipt_path)],
+                        capture_output=True, timeout=45, check=False)
+                    self.assertEqual(check.returncode, 0, check.stderr)
+                    self.assertEqual(check.stdout.strip(), b"windows_release_pin",
+                                     "All checksums must match; only the targeted embedded pin is invalid")
+                    self.assert_setup_refusal_preserves_outputs(self.setup_inputs)
+            finally:
+                for asset, data in original.items():
+                    (directory / asset).write_bytes(data)
+                receipt_path.write_text(json.dumps(valid), encoding="utf-8")
+        sums = directory / "SHA256SUMS.txt"
+        invalid = original["SHA256SUMS.txt"].replace(valid["assets"]["install.ps1"].encode(), b"0" * 64)
+        sums.write_bytes(invalid)
+        receipt_path.write_text(json.dumps(dict(valid, assets=dict(valid["assets"], **{
+            "SHA256SUMS.txt": hashlib.sha256(invalid).hexdigest()}))), encoding="utf-8")
+        self.assert_setup_refusal_preserves_outputs(self.setup_inputs)
+
+    def test_windows_release_rejects_a_projection_for_another_version_before_output(self):
+        self.prepare_windows_release()
+        descriptor = {"format": "agent-continue-windows-setup-entry", "version": 1,
+                      "releaseTag": "v9.9.9", "entryUrl": package.SOURCE_REPOSITORY + "/releases/download/v9.9.9/install.ps1",
+                      "entrySha256": "a" * 64, "sumsSha256": "b" * 64}
+        result = type("Result", (), {"returncode": 0, "stderr": b"", "stdout": json.dumps(descriptor).encode()})()
+        with patch.object(package.shutil, "which", return_value="node"), \
+                patch.object(package.subprocess, "run", return_value=result):
+            self.assert_setup_refusal_preserves_outputs(self.setup_inputs)
 
     def test_windows_release_builds_and_verifies_both_layouts_from_one_snapshot(self):
         manifest = self.prepare_windows_release()
@@ -245,7 +441,7 @@ class PackageTests(unittest.TestCase):
             verify_pair(github, store, version)
 
         with patch.object(package, "verify_distribution_pair", side_effect=checked_pair) as verify:
-            output = package.package_release(self.root, windows_release=True)
+            output = package.package_release(self.root, windows_release=True, **self.setup_inputs)
         store = output.with_name("agent-continue-3.0.0-store.zip")
         self.assertEqual(output.name, "agent-continue-3.0.0.zip")
         verify.assert_called_once()
@@ -265,28 +461,30 @@ class PackageTests(unittest.TestCase):
 
     def test_windows_release_store_selector_still_builds_verified_pair(self):
         self.prepare_windows_release()
-        output = package.package_release(self.root, windows_release=True, store=True)
+        output = package.package_release(self.root, windows_release=True, store=True, **self.setup_inputs)
         self.assertEqual(output.name, "agent-continue-3.0.0-store.zip")
         package.verify_distribution_pair(output.with_name("agent-continue-3.0.0.zip"), output, "3.0.0")
 
     def test_setup_entry_projection_is_identical_in_both_archives_without_source_writes(self):
         self.prepare_windows_release()
         original = (self.root / "setup-entry-release.js").read_bytes()
+        receipt = json.loads(self.setup_inputs["setup_release_receipt"].read_bytes())
         descriptor = {"format": "agent-continue-windows-setup-entry", "version": 1,
                       "releaseTag": "v3.0.0", "entryUrl": package.SOURCE_REPOSITORY + "/releases/download/v3.0.0/install.ps1",
-                      "entrySha256": "a" * 64, "sumsSha256": "b" * 64}
-        result = type("Result", (), {"returncode": 0, "stderr": b"", "stdout": json.dumps(descriptor).encode()})()
-        with patch.object(package.shutil, "which", return_value="node"), \
-                patch.object(package.subprocess, "run", return_value=result) as run:
-            github = package.package_release(self.root, windows_release=True,
-                setup_release_dir=self.root / "sidecars", setup_release_receipt=self.root / "receipt.json")
+                      "entrySha256": receipt["assets"]["install.ps1"],
+                      "sumsSha256": receipt["assets"]["SHA256SUMS.txt"]}
+        with patch.object(package.subprocess, "run", wraps=package.subprocess.run) as run:
+            github = package.package_release(self.root, windows_release=True, **self.setup_inputs)
         self.assertIn("--setup-entry-json", run.call_args.args[0])
         self.assertEqual(run.call_args.kwargs["timeout"], 45)
+        run.assert_called_once()
         with zipfile.ZipFile(github) as archive, zipfile.ZipFile(github.with_name("agent-continue-3.0.0-store.zip")) as store:
             projected = archive.read("AgentContinue/setup-entry-release.js")
             self.assertEqual(projected, store.read("setup-entry-release.js"))
-            self.assertIn(b"Object.freeze", projected)
-            self.assertIn(descriptor["entrySha256"].encode(), projected)
+            self.assertTrue(projected.startswith(b"export const SETUP_ENTRY_RELEASE = Object.freeze("))
+            self.assertEqual(json.loads(projected.split(b"Object.freeze(", 1)[1].removesuffix(b");\n")), descriptor)
+            for name, field in (("install.ps1", "entrySha256"), ("SHA256SUMS.txt", "sumsSha256")):
+                self.assertEqual(descriptor[field], hashlib.sha256((self.setup_inputs["setup_release_dir"] / name).read_bytes()).hexdigest())
         self.assertEqual((self.root / "setup-entry-release.js").read_bytes(), original)
 
     def test_setup_entry_projection_refuses_invalid_child_results_and_incomplete_options(self):
@@ -307,12 +505,12 @@ class PackageTests(unittest.TestCase):
         for version in ("0.9.0", "2.1.9", "2.2.0", "2.2.1", "02.2.2", "2.2.65536"):
             self.prepare_windows_release(version)
             with self.subTest(version=version), self.assertRaisesRegex(package.PackageError, "version|identity"):
-                package.package_release(self.root, windows_release=True, output_directory=output_dir)
+                package.package_release(self.root, windows_release=True, output_directory=output_dir, **self.setup_inputs)
             self.assertEqual(list(output_dir.iterdir()), [scheduler])
             self.assertEqual(scheduler.read_bytes(), b"existing scheduler artifact")
         for version in ("2.2.2", "2.10.0", "3.0.0"):
             self.prepare_windows_release(version)
-            output = package.package_release(self.root, windows_release=True, output_directory=output_dir)
+            output = package.package_release(self.root, windows_release=True, output_directory=output_dir, **self.setup_inputs)
             self.assertEqual(output.name, f"agent-continue-{version}.zip")
 
     def test_public_and_preview_modes_are_mutually_exclusive(self):
@@ -330,7 +528,7 @@ class PackageTests(unittest.TestCase):
         for label in ("3.0.0 Windows device preview", "3.0.0 WINDOWS CANDIDATE"):
             self.manifest_path.write_text(json.dumps(dict(manifest, version_name=label)), encoding="utf-8")
             with self.subTest(label=label), self.assertRaisesRegex(package.PackageError, "preview|candidate"):
-                package.package_release(self.root, windows_release=True)
+                package.package_release(self.root, windows_release=True, **self.setup_inputs)
         self.assertFalse((self.root / "dist").exists())
 
     def test_windows_release_rejects_unreviewed_native_and_loopback_scope(self):
@@ -356,7 +554,7 @@ class PackageTests(unittest.TestCase):
         for index, changed in enumerate(mutations):
             self.manifest_path.write_text(json.dumps(changed), encoding="utf-8")
             with self.subTest(index=index), self.assertRaisesRegex(package.PackageError, "optional|scope|CSP|nativeMessaging"):
-                package.package_release(self.root, windows_release=True)
+                package.package_release(self.root, windows_release=True, **self.setup_inputs)
         self.assertFalse((self.root / "dist").exists())
 
     def test_required_native_permission_cannot_bypass_explicit_mode(self):
@@ -384,13 +582,13 @@ class PackageTests(unittest.TestCase):
             try:
                 target.write_bytes(invalid)
                 with self.subTest(name=name), self.assertRaisesRegex(package.PackageError, message):
-                    package.package_release(self.root, windows_release=True)
+                    package.package_release(self.root, windows_release=True, **self.setup_inputs)
                 self.assertFalse((self.root / "dist").exists())
             finally:
                 target.write_bytes(original)
         (self.root / "PRIVACY.md").unlink()
         with self.assertRaisesRegex(package.PackageError, "PRIVACY.md"):
-            package.package_release(self.root, windows_release=True)
+            package.package_release(self.root, windows_release=True, **self.setup_inputs)
         self.assertFalse((self.root / "dist").exists())
 
     def test_windows_source_is_extension_scoped_and_pins_full_reproduction_repository(self):
@@ -402,7 +600,7 @@ class PackageTests(unittest.TestCase):
         (self.root / "native/bootstrap/unreviewed.mjs").write_text("never read", encoding="utf-8")
         with patch.object(package, "read_public", wraps=package.read_public) as read:
             output = package.package_release(self.root, windows_release=True, include_source=True,
-                                             source_revision=revision)
+                                             source_revision=revision, **self.setup_inputs)
         self.assertEqual(output.name, "agent-continue-3.0.0-source.zip")
         self.assertFalse(any(call.args[1].endswith(("secret.mjs", "unreviewed.mjs"))
                              for call in read.call_args_list))
@@ -425,13 +623,15 @@ class PackageTests(unittest.TestCase):
         for revision in (None, "main", "v3.0.0", "abc123", "../private", "g" * 40):
             with self.subTest(revision=revision), self.assertRaisesRegex(package.PackageError, "source.*revision|commit"):
                 package.package_release(self.root, windows_release=True, include_source=True,
-                                        source_revision=revision)
+                                        source_revision=revision, **self.setup_inputs)
         self.assertFalse((self.root / "dist").exists())
 
     def test_windows_release_cli_reports_both_local_archives_not_publication(self):
         self.prepare_windows_release()
         with patch.object(package, "ROOT", self.root), \
-                patch("sys.argv", ["package.py", "--windows-release"]), \
+                patch("sys.argv", ["package.py", "--windows-release",
+                                   "--setup-release-dir", str(self.setup_inputs["setup_release_dir"]),
+                                   "--setup-release-receipt", str(self.setup_inputs["setup_release_receipt"])]), \
                 patch("sys.stdout", new_callable=io.StringIO) as output:
             package.main()
         lines = output.getvalue().splitlines()
@@ -446,7 +646,7 @@ class PackageTests(unittest.TestCase):
         github.write_bytes(b"previous local build")
         (output_dir / "agent-continue-3.0.0-store.zip").mkdir()
         with self.assertRaisesRegex(package.PackageError, "non-file"):
-            package.package_release(self.root, windows_release=True, output_directory=output_dir)
+            package.package_release(self.root, windows_release=True, output_directory=output_dir, **self.setup_inputs)
         self.assertEqual(github.read_bytes(), b"previous local build")
 
     def test_windows_release_rejects_unsafe_permission_and_label_shapes(self):
@@ -464,7 +664,7 @@ class PackageTests(unittest.TestCase):
         for change in changes:
             self.manifest_path.write_text(json.dumps(dict(manifest, **change)), encoding="utf-8")
             with self.subTest(change=change), self.assertRaisesRegex(package.PackageError, "scope|optional|version_name"):
-                package.package_release(self.root, windows_release=True)
+                package.package_release(self.root, windows_release=True, **self.setup_inputs)
         self.assertFalse((self.root / "dist").exists())
 
     def test_pair_verification_failure_preserves_outputs_and_removes_staging(self):
@@ -477,7 +677,7 @@ class PackageTests(unittest.TestCase):
             output.write_bytes(b"previous local build")
         with patch.object(package, "verify_distribution_pair", side_effect=package.PackageError("pair rejected")):
             with self.assertRaisesRegex(package.PackageError, "pair rejected"):
-                package.package_release(self.root, windows_release=True, output_directory=output_dir)
+                package.package_release(self.root, windows_release=True, output_directory=output_dir, **self.setup_inputs)
         self.assertEqual(set(output_dir.iterdir()), set(outputs))
         self.assertTrue(all(output.read_bytes() == b"previous local build" for output in outputs))
         self.assertFalse((self.root / "dist").exists())
@@ -485,12 +685,12 @@ class PackageTests(unittest.TestCase):
     def test_windows_release_pair_is_deterministic_across_line_endings(self):
         self.prepare_windows_release()
         output_dir = self.root / "isolated"
-        github = package.package_release(self.root, windows_release=True, output_directory=output_dir)
+        github = package.package_release(self.root, windows_release=True, output_directory=output_dir, **self.setup_inputs)
         store = github.with_name("agent-continue-3.0.0-store.zip")
         before = (github.read_bytes(), store.read_bytes())
         target = self.root / "popup.js"
         target.write_bytes(target.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
-        package.package_release(self.root, windows_release=True, output_directory=output_dir)
+        package.package_release(self.root, windows_release=True, output_directory=output_dir, **self.setup_inputs)
         self.assertEqual(before, (github.read_bytes(), store.read_bytes()))
         self.assertFalse((self.root / "dist").exists())
 
@@ -499,7 +699,7 @@ class PackageTests(unittest.TestCase):
         with patch.object(package, "RUNTIME_FILES", tuple(
                 name for name in package.RUNTIME_FILES if name != "content.js")):
             with self.assertRaisesRegex(package.PackageError, "content.js"):
-                package.package_release(self.root, windows_release=True)
+                package.package_release(self.root, windows_release=True, **self.setup_inputs)
         self.assertFalse((self.root / "dist").exists())
 
     def test_windows_release_manifest_cannot_borrow_source_only_members(self):
@@ -508,14 +708,16 @@ class PackageTests(unittest.TestCase):
         self.manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
         with self.assertRaisesRegex(package.PackageError, "browser-control.mjs"):
             package.package_release(self.root, windows_release=True, include_source=True,
-                                    source_revision="a1" * 20)
+                                    source_revision="a1" * 20, **self.setup_inputs)
         self.assertFalse((self.root / "dist").exists())
 
     def test_windows_release_source_cli_forwards_pin_and_lists_all_three_outputs(self):
         self.prepare_windows_release()
         revision = "a1" * 20
         with patch.object(package, "ROOT", self.root), \
-                patch("sys.argv", ["package.py", "--windows-release", "--source", "--source-revision", revision]), \
+                patch("sys.argv", ["package.py", "--windows-release", "--source", "--source-revision", revision,
+                                   "--setup-release-dir", str(self.setup_inputs["setup_release_dir"]),
+                                   "--setup-release-receipt", str(self.setup_inputs["setup_release_receipt"])]), \
                 patch("sys.stdout", new_callable=io.StringIO) as output:
             package.main()
         self.assertEqual({Path(line).name for line in output.getvalue().splitlines()}, {
@@ -528,7 +730,7 @@ class PackageTests(unittest.TestCase):
         for options in ({"source_revision": "a1" * 20},
                         {"include_source": True, "store": True, "source_revision": "a1" * 20}):
             with self.subTest(options=options), self.assertRaises(package.PackageError):
-                package.package_release(self.root, windows_release=True, **options)
+                package.package_release(self.root, windows_release=True, **options, **self.setup_inputs)
         self.assertFalse((self.root / "dist").exists())
 
 

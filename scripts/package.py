@@ -341,7 +341,7 @@ def project_setup_entry(directory, receipt, version):
 def package_release(root, include_source=False, store=False, output_directory=None, *,
                     windows_preview=False, windows_release=False, source_revision=None,
                     setup_release_dir=None, setup_release_receipt=None):
-    """Return the requested ZIP; public Windows mode always builds a verified runtime pair.
+    """Return the requested ZIP; public Windows mode requires a verified setup closure.
 
     With --source, the additional GitHub source ZIP is extension-scoped; the
     runtime GitHub/Store pair remains free of development-only members.
@@ -360,15 +360,17 @@ def package_release(root, include_source=False, store=False, output_directory=No
         raise PackageError("The project root must be a regular directory, not a symlink.")
     cache = {}
     version = validate_release(root, cache)
+    manifest = read_json(root, "manifest.json", cache)
+    if windows_release:
+        validate_windows_release(manifest, version)
+        if setup_release_dir is None or setup_release_receipt is None:
+            raise PackageError("Both combined setup release inputs are required for --windows-release.")
     if (setup_release_dir is None) != (setup_release_receipt is None):
         raise PackageError("Both combined setup release inputs are required.")
     if setup_release_dir is not None:
         if not (windows_release or windows_preview):
             raise PackageError("Setup entry projection requires an explicit Windows package mode.")
         cache["setup-entry-release.js"] = project_setup_entry(setup_release_dir, setup_release_receipt, version)
-    manifest = read_json(root, "manifest.json", cache)
-    if windows_release:
-        validate_windows_release(manifest, version)
     device_candidate = (
         "nativeMessaging" in manifest.get("optional_permissions", [])
         or "nativeMessaging" in manifest.get("permissions", [])
@@ -491,7 +493,7 @@ def main():
     parser.add_argument("--store", action="store_true", help="Build a separate Chrome Store ZIP with manifest.json at its root")
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--windows-preview", action="store_true", help="Build the unpacked Windows device preview (not a Store ZIP)")
-    modes.add_argument("--windows-release", action="store_true", help="Build and verify paired public Windows GitHub/Store ZIPs locally; does not publish")
+    modes.add_argument("--windows-release", action="store_true", help="Build verified public Windows GitHub/Store ZIPs; requires both setup release inputs; does not publish")
     parser.add_argument("--source-revision", help="Reviewed full repository commit (40 lowercase hex characters); required for Windows --source")
     parser.add_argument("--setup-release-dir", type=Path, help="Completed combined Windows setup asset directory")
     parser.add_argument("--setup-release-receipt", type=Path, help="Matching completed combined build receipt")
