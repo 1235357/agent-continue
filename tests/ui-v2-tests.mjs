@@ -236,7 +236,135 @@ async function capture(page, name) {
   if (screenshots) { await fs.mkdir(screenshots, { recursive: true }); await page.screenshot({ path: path.join(screenshots, name), fullPage: true }); }
 }
 
+async function assertLateDraftReplies() {
+  const failures = [];
+  for (const outcome of ['success', 'conflict', 'rejection']) {
+    const clearing = await createPage({ full: true }); const { page } = clearing;
+    try {
+      await page.evaluate(outcome => {
+        __uiMock.deferConfigSave = outcome === 'conflict';
+        const send = chrome.runtime.sendMessage;
+        chrome.runtime.sendMessage = async message => {
+          // Hold the completed reply independently of the pre-write delay.
+          const hold = message.type === 'SAVE_DRAFT' && !__uiMock.draftReplyHeld;
+          if (hold) __uiMock.draftReplyHeld = true;
+          const response = await send(message);
+          if (hold) {
+            __uiMock.heldDraftResponse = structuredClone(response);
+            await new Promise(resolve => { __uiMock.finishDraftReply = resolve; });
+            if (outcome === 'rejection') throw new Error('Synthetic late save rejection');
+          }
+          return response;
+        };
+      }, outcome);
+      await page.locator('#interval').fill('31');
+      await page.waitForFunction(outcome => typeof __uiMock[outcome === 'conflict' ? 'finishConfigSave' : 'finishDraftReply'] === 'function', outcome);
+      await page.locator('#tab-settings').click();
+      await page.locator('#clearData').click(); await page.locator('#confirmClear').click();
+      await page.waitForFunction(() => __uiMock.config === null && !document.querySelector('#check').disabled);
+      const clearFeedback = await page.locator('#feedback').textContent();
+      assert.equal(await page.locator('#feedback').evaluate(element => element.classList.contains('error')), false);
+      if (outcome === 'conflict') {
+        await page.evaluate(() => { __uiMock.deferConfigSave = false; __uiMock.finishConfigSave(); });
+        await page.waitForFunction(() => typeof __uiMock.finishDraftReply === 'function');
+        const fresh = { ...structuredClone(original), prompt: 'SYNTHETIC-AFTER-CLEAR\n  Preserve spaces.\n', intervalMinutes: 37 };
+        await page.evaluate(async ({ config, base }) => {
+          const response = await chrome.runtime.sendMessage({ type: 'SAVE_DRAFT', generation: __uiMock.draftGeneration,
+            revision: __uiMock.draftRevision, base, config });
+          if (!response.ok) throw new Error('Synthetic post-clear save failed');
+        }, { config: fresh, base: structuredClone(DEFAULT_CONFIG) });
+        await page.locator('#tab-logs').click();
+        await page.waitForFunction(() => __uiMock.requests.filter(request => request.type === 'GET_STATE').length >= 3);
+        await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        assert.equal(await page.evaluate(() => __uiMock.heldDraftResponse.draftRevision), 0);
+        assert.equal(await page.evaluate(() => __uiMock.draftRevision), 1);
+      }
+      assert.equal(await page.evaluate(() => __uiMock.heldDraftResponse.ok), outcome !== 'conflict');
+      await page.evaluate(async () => {
+        __uiMock.finishDraftReply();
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      });
+      if (outcome !== 'conflict') {
+        assert.equal(await page.locator('#feedback').textContent(), clearFeedback,
+          'a pre-clear save reply must not replace successful Clear feedback with a save failure');
+        assert.equal(await page.evaluate(() => __uiMock.config), null);
+        assert.equal(await page.evaluate(() => __uiMock.configWrites.length), 1, 'only the pre-clear save committed');
+      } else {
+        await page.locator('#tab-task').click();
+        await page.locator('#interval').fill('43');
+        await page.waitForFunction(() => __uiMock.requests.filter(request => request.type === 'SAVE_DRAFT').length === 3);
+        assert.equal(await page.evaluate(() => __uiMock.requests.filter(request => request.type === 'SAVE_DRAFT').at(-1).revision), 1,
+          'an old-generation conflict reply must not rewind the refreshed post-clear revision');
+        await page.waitForFunction(() => __uiMock.config.intervalMinutes === 43);
+        assert.equal(await page.evaluate(() => __uiMock.config.prompt), 'SYNTHETIC-AFTER-CLEAR\n  Preserve spaces.\n');
+      }
+      assert.equal(await page.locator('#targetSelect').inputValue(), '41', 'Clear does not retarget the panel');
+      assert.equal(await page.evaluate(() => __uiMock.job), null);
+      assert.equal(await page.evaluate(() => __uiMock.requests.some(request => ['START', 'RESUME', 'SEND_NOW'].includes(request.type))), false);
+      assert.deepEqual(clearing.errors, []);
+      pass(`Clear Data: a late ${outcome} save reply cannot corrupt post-clear state.`);
+    } catch (error) { failures.push(error); }
+    finally { await clearing.context.close(); }
+  }
+  if (failures.length) throw new AggregateError(failures, 'Late draft reply failures');
+  {
+    const editing = await createPage({ full: true }); const { page } = editing;
+    try {
+      await page.evaluate(() => {
+        const schedule = window.setTimeout.bind(window);
+        window.setTimeout = (callback, delay, ...args) => schedule(delay === 180 ? (...values) => {
+          callback(...values);
+          __uiMock.draftDebounces = (__uiMock.draftDebounces || 0) + 1;
+        } : callback, delay, ...args);
+        const send = chrome.runtime.sendMessage;
+        chrome.runtime.sendMessage = async message => {
+          const hold = message.type === 'SAVE_DRAFT' && !__uiMock.draftReplyHeld;
+          if (hold) __uiMock.draftReplyHeld = true;
+          const response = await send(message);
+          if (hold) await new Promise(resolve => { __uiMock.finishDraftReply = resolve; });
+          return response;
+        };
+      });
+      await page.locator('#interval').fill('31');
+      await page.waitForFunction(() => typeof __uiMock.finishDraftReply === 'function');
+      await page.locator('#interval').fill('43');
+      await page.waitForFunction(() => __uiMock.draftDebounces === 2);
+      await page.evaluate(() => __uiMock.finishDraftReply());
+      await page.waitForFunction(() => __uiMock.config.intervalMinutes === 43);
+      assert.equal(await page.evaluate(() => __uiMock.draftRevision), 2);
+      assert.deepEqual(await page.evaluate(() => __uiMock.config), { ...original, intervalMinutes: 43 });
+      assert.equal(await page.evaluate(() => __uiMock.job.enabled), false);
+      assert.deepEqual(editing.errors, []);
+      pass('Config replies: same-generation queued edits still save with the latest revision.');
+    } finally { await editing.context.close(); }
+  }
+  {
+    const editing = await createPage({ full: true }); const { page } = editing;
+    try {
+      await page.evaluate(() => {
+        const send = chrome.runtime.sendMessage;
+        chrome.runtime.sendMessage = message => message.type === 'SAVE_DRAFT'
+          ? Promise.reject(new Error('Synthetic save failure')) : send(message);
+      });
+      await page.locator('#interval').fill('31');
+      await page.waitForFunction(() => document.querySelector('#feedback').classList.contains('error'));
+      assert.equal(await page.locator('#feedback').textContent(), 'Local save failed. Check extension storage.');
+      assert.deepEqual(await page.evaluate(() => __uiMock.config), original);
+      assert.deepEqual(await page.evaluate(() => __uiMock.configWrites), []);
+      assert.equal(await page.evaluate(() => __uiMock.job.enabled), false);
+      assert.deepEqual(editing.errors, []);
+      pass('Config replies: a current-generation save failure remains visible without changing stored data.');
+    } finally { await editing.context.close(); }
+  }
+}
+
 try {
+  await assertLateDraftReplies();
+  if (process.env.TEST_CLEAR_CONFIG_REPLY_ONLY === '1') {
+    console.log(`\n${checks.length}/${checks.length} UI/config checks passed.`);
+    await browser.close();
+    process.exit(0);
+  }
   for (const uiLanguage of ['en', 'zh_CN']) {
     const manual = await createPage({ full: true, uiLanguage }); const { page } = manual;
     try {
@@ -837,7 +965,7 @@ try {
       await page.locator('#tab-logs').click();
       await page.locator('.help-card summary').click();
       const waitingHelp = await page.locator('.help-card p').first().innerText();
-      assert.match(waitingHelp, language === 'en' ? /final outcome is unknown.*pauses automatically/ : /终态未知时，任务会自动暂停/);
+      assert.match(waitingHelp, language === 'en' ? /When a send round ends with an unknown result, the task pauses automatically, whether or not a dispatch was recorded; unknown does not mean the server rejected it\./ : /终态未知时，任务会自动暂停/);
       assert.match(waitingHelp, language === 'en' ? /Check the target conversation.*Resume may resend/ : /先检查目标会话.*继续可能重发/);
       await page.locator('.help-card summary').click();
       assert.equal(await page.locator('#prompt').getAttribute('placeholder'), language === 'en' ? 'Enter the complete prompt to repeat...' : '输入需要重复发送的完整提示词…');

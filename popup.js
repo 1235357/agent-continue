@@ -171,15 +171,18 @@ async function persistDraftNow() {
   const work = draftSaveQueue.then(async () => {
     if (!loaded || pendingAction === 'CLEAR_DATA' || epoch !== contentEpoch || !persistedDraft)
       throw new Error(t('本机保存失败，请检查扩展存储空间。'));
-    const response = await request({ type: 'SAVE_DRAFT', generation: draftGeneration, revision: draftRevision,
+    const generation = draftGeneration;
+    const response = await request({ type: 'SAVE_DRAFT', generation, revision: draftRevision,
       base: clone(persistedDraft), config: snapshot });
+    if (!loaded || pendingAction === 'CLEAR_DATA' || generation !== draftGeneration)
+      throw new Error(t('本机保存失败，请检查扩展存储空间。'));
     if (!response?.ok) {
-      if (response?.conflict && response.draftGeneration === draftGeneration && Number.isSafeInteger(response.draftRevision)) {
+      if (response?.conflict && response.draftGeneration === generation && Number.isSafeInteger(response.draftRevision)) {
         draftRevision = response.draftRevision;
       }
       throw new Error(t('本机保存失败，请检查扩展存储空间。'));
     }
-    if (!loaded || pendingAction === 'CLEAR_DATA' || response.draftGeneration !== draftGeneration)
+    if (response.draftGeneration !== generation)
       throw new Error(t('本机保存失败，请检查扩展存储空间。'));
     draftRevision = response.draftRevision;
     persistedDraft = snapshot;
@@ -188,11 +191,13 @@ async function persistDraftNow() {
   await work;
 }
 function saveDraft() {
-  contentEpoch++;
+  const epoch = ++contentEpoch;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     saveTimer = null;
-    persistDraftNow().catch(() => tell(t('本机保存失败，请检查扩展存储空间。'), true));
+    persistDraftNow().catch(() => {
+      if (epoch === contentEpoch) tell(t('本机保存失败，请检查扩展存储空间。'), true);
+    });
   }, 180);
 }
 function onConfigurationInput() {
