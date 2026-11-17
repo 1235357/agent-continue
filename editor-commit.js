@@ -1,7 +1,7 @@
 // Candidate only. The caller authorizes immediately before MAIN-world injection
 // and owns integration, receipts, and cross-call deduplication. No async gap is
 // permitted between the model transaction and the single submission attempt.
-// Args: { expectedUrl, targetIdentity?, prompt, sendMethod?, deadline, phase? }.
+// Args: { expectedUrl, targetIdentity?, prompt, sendMethod?, deadline, phase?, persistentDelivery? }.
 // prepare writes without submitting; observe is read-only; commit is atomic.
 // deadline is an absolute Date.now() deadline, not a runtime permission check.
 export function editorCommit(args) {
@@ -239,10 +239,22 @@ export function editorCommit(args) {
       receiptState.nextModelWriteAt = Date.now() + receiptState.modelBackoffMs;
     };
     let failure;
+    let preparationApplied = samePreparedBinding;
+    let preparedPayload = prompt;
+    const adoptPreparedModel = () => {
+      if (args.persistentDelivery !== true || !preparationApplied) return false;
+      const current = logicalText(view.state.doc);
+      if (!current.trim()) return false;
+      preparedPayload = current;
+      return true;
+    };
     // After preparation, don't restart the framework's delayed activation by
-    // redundantly dispatching the same model. Changed text is still replaced.
+    // redundantly dispatching the same model. Persistent delivery adopts its
+    // changed nonempty model only after a real preparation of this binding.
     const repeatsPreparedModel = phase === 'prepare' && samePreparedBinding;
-    if ((!repeatsPreparedModel && args.phase !== 'commit') || logicalText(view.state.doc) !== prompt) {
+    const retainsPreparedModel = args.persistentDelivery === true && samePreparedBinding
+      && logicalText(view.state.doc).trim();
+    if (!retainsPreparedModel && ((!repeatsPreparedModel && args.phase !== 'commit') || logicalText(view.state.doc) !== prompt)) {
       const state = view.state;
       let transaction = prepare(state);
       supported = true;
@@ -250,7 +262,11 @@ export function editorCommit(args) {
       if (view.state !== state) transaction = prepare(view.state);
       failure = guard();
       if (failure) return result(failure);
+      const beforeWrite = view.state;
+      const beforeText = logicalText(beforeWrite.doc);
       writeModel(transaction);
+      const writtenText = logicalText(view.state.doc);
+      preparationApplied ||= writtenText === prompt || (view.state !== beforeWrite && writtenText !== beforeText);
       failure = guard();
       if (failure) return result(failure);
       if (args.phase !== 'commit') {
@@ -268,7 +284,7 @@ export function editorCommit(args) {
 
     // Page-controlled content changes do not veto the send. Reassert once from
     // the current public model, without another event/settling cycle or a loop.
-    if (logicalText(view.state.doc) !== prompt) {
+    if (logicalText(view.state.doc) !== prompt && !adoptPreparedModel()) {
       if (receiptState && receiptState.counters.modelWrites >= 2) {
         deferModelWrite();
         return result('composer-unstable');
@@ -279,7 +295,7 @@ export function editorCommit(args) {
       writeModel(correction);
     }
     const committedGuard = () => guard()
-      || (logicalText(view.state.doc) !== prompt ? 'model-not-synchronous' : null);
+      || (logicalText(view.state.doc) !== preparedPayload ? 'model-not-synchronous' : null);
     failure = committedGuard();
     if (failure === 'model-not-synchronous' && receiptState?.counters.modelWrites >= 2) {
       deferModelWrite();

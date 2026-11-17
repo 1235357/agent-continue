@@ -25,6 +25,9 @@ function fixture(options = {}) {
   let editors = [];
 
   class Element {
+    nodeType = 1;
+    nodeName = 'DIV';
+    tagName = 'DIV';
     isConnected = true;
     disabled = false;
     readOnly = false;
@@ -32,6 +35,9 @@ function fixture(options = {}) {
     parentElement = null;
     style = { display: 'block', visibility: 'visible', opacity: '1' };
     attributes = {};
+    get childNodes() {
+      return typeof this.innerText === 'string' ? [{ nodeType: 3, nodeName: '#text', data: this.innerText }] : [];
+    }
     getAttribute(name) { return this.attributes[name] ?? null; }
     getClientRects() { return [{}]; }
     contains(element) { return element === this; }
@@ -66,7 +72,8 @@ function fixture(options = {}) {
   editor.attributes.contenteditable = 'true';
   for (const property of ['innerHTML', 'innerText', 'textContent']) {
     Object.defineProperty(editor, property, {
-      get: () => options.renderedText ?? options.draft ?? 'old unsent text',
+      get: () => typeof options.renderedText === 'function' ? options.renderedText(state)
+        : options.renderedText ?? options.draft ?? 'old unsent text',
       set() { metrics.rawWrites++; throw new Error('No direct editor DOM writes'); },
     });
   }
@@ -210,6 +217,7 @@ function fixture(options = {}) {
     preventDefault() { if (this.cancelable) this.defaultPrevented = true; }
   }
   const globals = {
+    Node: { TEXT_NODE: 3, ELEMENT_NODE: 1 },
     document, location, URL, Date: { now: () => now }, performance: { now: () => now }, Element,
     Event: SyntheticEvent, KeyboardEvent: SyntheticEvent,
     HTMLInputElement: class {}, HTMLTextAreaElement: class {},
@@ -469,6 +477,121 @@ test('DOM-only success without synchronous EditorView state update exhausts one 
   assert.equal(h.state.metrics.transactions, 2);
   noDispatch(h);
 });
+
+for (const dot of [false, true]) {
+  test(`persistent MAIN adopts changed prepared model once without rewriting it (dot=${dot})`, () => {
+    const adopted = 'SYNTHETIC adopted prepared text\nsecond line';
+    const h = fixture({ dot, onCommit(state) { state.setText(adopted); } });
+    const token = randomUUID(), args = { persistentDelivery: true, receiptBoundaryToken: token };
+    let boundary;
+    h.state.document.addEventListener('agent-continue-receipt-' + token, event => {
+      boundary = h.state.view.state.doc.lines.join('\n');
+      event.preventDefault();
+    });
+    assert.equal(h.run({ ...args, phase: 'prepare' }).code, 'prepared');
+    h.state.setText(adopted + '\nchanged while waiting');
+    assert.equal(h.run({ ...args, phase: 'prepare' }).code, 'prepared');
+    assert.equal(h.run({ ...args, phase: 'observe' }).code, 'ready');
+    assert.equal(h.run({ ...args, phase: 'commit' }).dispatched, true);
+    assert.equal(h.run({ ...args, phase: 'commit' }).code, 'already-dispatched');
+    assert.equal(h.state.metrics.transactions, 1);
+    assert.equal(h.state.metrics.clicks, 1);
+    assert.equal(boundary, adopted + '\nchanged while waiting');
+    assert.deepEqual(h.state.metrics.sent, [boundary]);
+  });
+
+  test(`persistent MAIN never adopts an untouched draft after an ignored initial write (dot=${dot})`, () => {
+    const h = fixture({ dot, ignoreTransaction: true });
+    assert.equal(h.run({ persistentDelivery: true, receiptBoundaryToken: randomUUID(), phase: 'prepare' }).dispatched, false);
+    noDispatch(h);
+    assert.equal(h.state.view.state.doc.lines.join('\n'), 'old unsent text');
+  });
+
+  test(`persistent MAIN replacing state alone cannot prove an ignored write was applied (dot=${dot})`, () => {
+    const h = fixture({ dot, ignoreTransaction: true, onCommit(state) { state.setText('old unsent text'); } });
+    assert.equal(h.run({ persistentDelivery: true, receiptBoundaryToken: randomUUID(), phase: 'prepare' }).code, 'composer-unstable');
+    noDispatch(h);
+    assert.equal(h.state.metrics.transactions, 2);
+  });
+
+  test(`persistent MAIN empty restoration remains unsubmitted without an unbounded write loop (dot=${dot})`, () => {
+    const h = fixture({ dot, onCommit(state) { state.setText(''); } });
+    const args = { persistentDelivery: true, receiptBoundaryToken: randomUUID() };
+    for (const phase of ['prepare', 'prepare', 'commit']) {
+      assert.equal(h.run({ ...args, phase }).dispatched, false);
+    }
+    assert.equal(h.state.view.state.doc.lines.join('\n'), '');
+    assert.equal(h.state.metrics.transactions, 2);
+    noDispatch(h);
+  });
+
+  for (const guard of [...(dot ? ['identity'] : []), 'pause-deadline', 'attachment', 'manual']) {
+    test(`persistent MAIN adopted preparation still respects ${guard} (dot=${dot})`, () => {
+      const h = fixture({ dot });
+      const args = { persistentDelivery: true, receiptBoundaryToken: randomUUID() };
+      assert.equal(h.run({ ...args, phase: 'prepare' }).code, 'prepared');
+      h.state.setText('SYNTHETIC adopted prepared content');
+      if (guard === 'identity') h.state.setIdentity('another~dot~message');
+      if (guard === 'pause-deadline') h.state.setTime(1000);
+      if (guard === 'attachment') h.state.addAttachment();
+      if (guard === 'manual') {
+        const send = h.state.buttons[0];
+        send.closest = selector => selector.includes('send-button') ? send : null;
+        h.state.emit('click', { target: send });
+        h.state.setText('');
+      }
+      const outcome = h.run({ ...args, phase: 'commit' });
+      assert.equal(outcome.dispatched, false);
+      if (guard === 'manual') assert.equal(outcome.code, 'manual-submission');
+      assert.equal(h.state.metrics.transactions, 1);
+      noDispatch(h);
+    });
+  }
+
+  test(`persistent MAIN refuses model mutation after the receipt boundary without dispatch (dot=${dot})`, () => {
+    const h = fixture({ dot });
+    const token = randomUUID(), args = { persistentDelivery: true, receiptBoundaryToken: token };
+    assert.equal(h.run({ ...args, phase: 'prepare' }).code, 'prepared');
+    h.state.setText('SYNTHETIC adopted before boundary');
+    h.state.document.addEventListener('agent-continue-receipt-' + token, event => {
+      event.preventDefault();
+      h.state.setText('SYNTHETIC changed after boundary');
+    });
+    assert.equal(h.run({ ...args, phase: 'commit' }).dispatched, false);
+    noDispatch(h);
+    assert.equal(h.state.metrics.transactions, 1);
+  });
+
+  test(`persistent MAIN adopted text is confirmed through the original isolated receipt boundary (dot=${dot})`, async () => {
+    const adopted = 'SYNTHETIC adopted prepared payload\nwith a second line';
+    let h, workerFailure;
+    h = fixture({ dot, renderedText: state => state.view.state.doc.lines.join('\n'),
+      onCommit(state) { state.setText(adopted); },
+      onClick(state) { state.addUserMessage(state.metrics.sent.at(-1), 'account~dot~adopted-new-user'); },
+      runtime: { async sendMessage(message) {
+        if (message.type === 'CHECK_RUN') return { ok: true, allowed: true };
+        if (message.type === 'WAIT_RUN') { h.state.advanceTime(message.delayMs); return { ok: true, allowed: true }; }
+        if (['PAGE_RESULT', 'MANUAL_SUBMISSION'].includes(message.type)) return { ok: true };
+        assert.equal(message.type, 'COMMIT_RUN');
+        const args = { persistentDelivery: true, receiptBoundaryToken: message.receiptBoundaryToken, deadline: 10000 };
+        try {
+          assert.equal(h.run({ ...args, phase: 'prepare' }).code, 'prepared');
+          assert.equal(h.run({ ...args, phase: 'observe' }).code, 'ready');
+          const committed = h.run({ ...args, phase: 'commit' });
+          assert.equal(committed.dispatched, true, JSON.stringify(committed));
+        } catch (error) { workerFailure = error; throw error; }
+        return { ok: true, supported: true, dispatched: true };
+      } } });
+    const outcome = await h.action({ persistentDelivery: true });
+    assert.ifError(workerFailure);
+    assert.equal(outcome.status, 'sent', JSON.stringify({ outcome, sent: h.state.metrics.sent }));
+    assert.equal(h.state.metrics.transactions, 1);
+    assert.equal(h.state.metrics.clicks, 1);
+    assert.deepEqual(h.state.metrics.sent, [adopted]);
+    assert.equal(h.state.listenerCount(), 0);
+    assert.equal(JSON.stringify(outcome.diagnosticProgress).includes('SYNTHETIC'), false);
+  });
+}
 
 for (const [dot, sendMethod, ctrl, clicks] of [
   [false, 'auto', false, 0], [true, 'auto', true, 0],

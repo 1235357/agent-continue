@@ -194,6 +194,34 @@ function submittedOnce(observed, { keyboard = false } = {}) {
 
 try {
   await launchBrowser();
+  for (const dot of [false, true]) await scenario(`persistent ${dot ? 'Dot' : 'ordinary'} delivery adopts a delayed real model restoration without another write`,
+    { dot, rewrite: 'microtask' }, async (page, args) => {
+      const token = '11111111-1111-4111-8111-111111111111';
+      const persistent = { ...args, persistentDelivery: true, receiptBoundaryToken: token };
+      await page.evaluate(token => {
+        document.addEventListener('agent-continue-receipt-' + token, event => {
+          fixture.boundaryText = pm.state.doc.textBetween(0, pm.state.doc.content.size, '\n', '\n');
+          event.preventDefault();
+        });
+      }, token);
+      assert.equal((await commit(page, { ...persistent, phase: 'prepare' })).code, 'prepared');
+      await page.waitForFunction(() => fixture.resets === 1);
+      const before = await inspect(page);
+      assert.equal(before.model, 'PAGE_CONTROLLED_RESET');
+      assert.equal((await commit(page, { ...persistent, phase: 'prepare' })).code, 'prepared');
+      assert.equal((await commit(page, { ...persistent, phase: 'observe' })).code, 'ready');
+      assert.equal((await commit(page, { ...persistent, phase: 'commit' })).dispatched, true);
+      assert.equal((await commit(page, { ...persistent, phase: 'commit' })).code, 'already-dispatched');
+      const observed = await inspect(page);
+      assert.equal(observed.updates, before.updates, 'No extension model rewrite after delayed restoration');
+      assert.equal(observed.inputs, 1);
+      assert.equal(observed.resets, 1);
+      assert.equal(observed.clicks, 1);
+      assert.equal(observed.submits, 1);
+      assert.equal(observed.boundaryText, before.model);
+      assert.deepEqual(observed.sentTexts, [before.model]);
+      assert.deepEqual(observed.sentDOMTexts, [before.model]);
+    });
   await scenario('recurring per-input microtask resets cannot replace the single submitted configured model/DOM',
     { rewrite: 'microtask' }, async (page, args) => {
       for (let i = 0; i < 3; i++) await page.evaluate(() => pm.dom.dispatchEvent(new Event('input', { bubbles: true })));
@@ -223,7 +251,7 @@ try {
       assert.equal(result.dispatched, true, result.code);
       submittedOnce(await inspect(page), { keyboard: true });
     });
-  await scenario('a synchronized public EditorView cannot authorize a stale independent submission model',
+  await scenario('public model dispatch is attempt evidence, not proof of a private asynchronous submission model',
     { dot: true }, async (page, args) => {
       await page.evaluate(() => {
         const control = document.querySelector('#send');
@@ -234,6 +262,7 @@ try {
         });
         control.addEventListener('click', event => {
           event.stopImmediatePropagation();
+          fixture.privateModelClicks = (fixture.privateModelClicks || 0) + 1;
           fixture.submits++;
           fixture.sentTexts.push(externalModel);
           fixture.modelAtSubmission = pm.state.doc.textBetween(0, pm.state.doc.content.size, '\n', '\n');
@@ -241,8 +270,16 @@ try {
       });
       const result = await commit(page, args);
       const observed = await inspect(page);
-      assert.ok(observed.submits === 0 || (observed.submits === 1 && observed.sentTexts[0] === prompt),
-        JSON.stringify({ result, submissions: observed.submits, sent: observed.sentTexts, modelAtSubmission: observed.modelAtSubmission }));
+      // A separately retained private closure is not observable through this
+      // public EditorView. Preserve the counterexample; never call it a receipt.
+      assert.deepEqual(result, { supported: true, dispatched: true, method: 'button', code: 'dispatched' });
+      assert.equal(observed.submits, 1);
+      assert.equal(observed.privateModelClicks, 1);
+      assert.equal(observed.clicks, 0, 'The private capture handler stops the normal button listener');
+      assert.equal(observed.modelAtSubmission, prompt);
+      assert.deepEqual(observed.sentTexts, ['SYNTHETIC_STALE_SUBMISSION_MODEL']);
+      assert.equal(Object.hasOwn(result, 'receiptConfirmed'), false);
+      assert.equal(Object.hasOwn(result, 'accepted'), false);
     });
   await scenario('synchronous input/change model and DOM rewrites get one bounded final correction, not a content veto',
     { rewrite: 'sync' }, async (page, args) => {

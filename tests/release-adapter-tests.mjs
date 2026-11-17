@@ -9,8 +9,9 @@ test('send implementation has no content-change veto or refill-count abort', () 
   assert.doesNotMatch(source, /changedDraft|composer-changed|填写后检测到内容变化|重新填写后检测到内容变化|refills === 2/);
 });
 
-test('finite readiness bounds writes while repeated restoration never settles', async () => {
+test('finite readiness bounds writes when synchronous input handlers reject every correction', async () => {
   let restores = 0;
+  let corrections = 0;
   const h = fixture({ authorizeWait: (state, message) => {
     if (message.delayMs === 180 && state.clicks === 0) {
       restores++;
@@ -18,12 +19,24 @@ test('finite readiness bounds writes while repeated restoration never settles', 
     }
     return true;
   }, args: { extensionClock: true, extensionPriority: true } });
+  const dispatch = h.state.editor.dispatchEvent.bind(h.state.editor);
+  h.state.editor.dispatchEvent = event => {
+    const allowed = dispatch(event);
+    // Reject the final same-stack correction too, not only writes followed by a wait.
+    if (event.type === 'input' && event.data) {
+      corrections++;
+      restores++;
+      h.state.editor.value = 'SYNTHETIC_RESTORED_DRAFT';
+    }
+    return allowed;
+  };
   const outcome = await h.run();
   assert.equal(outcome.status, 'blocked');
   assert.equal(outcome.diagnosticProgress.counters.dispatchAttempts, 0);
   assert.equal(h.state.clicks, 0);
   assert.ok(restores >= 2);
-  assert.ok(outcome.diagnosticProgress.counters.domWrites <= 2);
+  assert.equal(corrections, 5);
+  assert.equal(outcome.diagnosticProgress.counters.domWrites, 6, 'Five corrections and one own-draft cleanup');
 });
 
 function receipt(value, key) {
@@ -361,7 +374,7 @@ for (const [prompt, observed] of [
   ['continue\u00a0fixture', 'continue fixture'],
   ['continue fixture', 'continue\u00a0fixture'],
 ]) {
-  test(`manual handoff cannot confirm an NBSP versus space receipt (${JSON.stringify(prompt)})`, async () => {
+  test(`manual handoff confirms an NBSP versus space receipt without replay (${JSON.stringify(prompt)})`, async () => {
     const h = fixture({ disabledSend: true, args: { prompt, persistentDelivery: true } });
     let writesAtManual;
     h.state.schedule(60, () => {
@@ -375,7 +388,7 @@ for (const [prompt, observed] of [
     assert.equal(h.state.stops, 0);
     assert.equal(h.state.writes, writesAtManual);
     assert.notEqual(outcome.retryable, true);
-    assert.equal(outcome.status, 'unknown');
+    assert.equal(outcome.status, 'manual-sent');
   });
 }
 
@@ -399,6 +412,27 @@ test('manual handoff accepts the MAIN no-dispatch manualSubmission protocol', as
   assert.equal(h.state.clicks, 0);
   assert.notEqual(outcome.retryable, true);
   assert.equal(outcome.diagnosticProgress.counters.dispatchAttempts, 0);
+});
+
+test('persistent MAIN receipt boundary binds changed prepared text without raw diagnostics', async () => {
+  const adopted = 'SYNTHETIC_ADOPTED_BOUNDARY_PAYLOAD';
+  const h = fixture({ args: { modelCommit: true, persistentDelivery: true }, commit: state => {
+    state.editor.value = adopted;
+    state.editor.childNodes = [{ nodeType: 3, nodeName: '#text', data: adopted }];
+    state.emit('agent-continue-receipt-00000000-0000-0000-0000-000000000001', {
+      target: state.editor, preventDefault() {},
+    });
+    state.addUser(adopted, 'main-adopted-boundary-user');
+    state.editor.value = '';
+    return { ok: true, supported: true, dispatched: true };
+  } });
+  const outcome = await h.run();
+  assert.equal(outcome.status, 'sent');
+  assert.equal(outcome.diagnosticProgress.counters.fillCalls, 0);
+  assert.equal(outcome.diagnosticProgress.counters.dispatchAttempts, 1);
+  assert.equal(h.state.clicks, 0, 'The isolated adapter must not add a fallback click');
+  assert.notEqual(outcome.retryable, true);
+  assert.equal(JSON.stringify(outcome.diagnosticProgress).includes(adopted), false);
 });
 
 test('manual handoff MAIN reply and later receipt boundary cannot absorb the manual row', async () => {
@@ -518,10 +552,12 @@ test('repeated composer rewrites do not create an unbounded input transaction lo
       return true;
     },
   });
-  assert.equal((await h.run()).status, 'sent');
+  const outcome = await h.run();
+  assert.equal(outcome.status, 'sent');
   assert.equal(changes, 3, 'settling is bounded even when every wait restores text');
   assert.deepEqual(h.state.sentTexts, ['continue fixture']);
   assert.equal(h.state.clicks, 1);
+  assert.equal(outcome.diagnosticProgress.counters.domWrites, 5, 'Initial fill plus four bounded corrections');
 });
 
 test('a pause observed during replacement settling prevents the one dispatch', async () => {
@@ -604,7 +640,7 @@ for (const [prompt, observed] of [
   ['continue\u00a0fixture', 'continue fixture'],
   ['continue fixture', 'continue\u00a0fixture'],
 ]) {
-  test(`scheduled send cannot confirm an NBSP versus space receipt (${JSON.stringify(prompt)})`, async () => {
+  test(`scheduled send confirms an NBSP versus space receipt without replay (${JSON.stringify(prompt)})`, async () => {
     const f = fixture({ args: { prompt }, acceptDelay: Infinity, onSubmit: state => {
       state.addUser(observed, 'different-user');
       state.editor.value = '';
@@ -614,7 +650,7 @@ for (const [prompt, observed] of [
     assert.equal(f.state.clicks, 1);
     assert.equal(f.state.keys, 0);
     assert.notEqual(outcome.retryable, true);
-    assert.equal(outcome.status, 'unknown');
+    assert.equal(outcome.status, 'sent');
   });
 }
 
@@ -622,7 +658,7 @@ for (const [prompt, observed] of [
   ['SYNTHETIC\u00a0RECEIPT', 'SYNTHETIC RECEIPT'],
   ['SYNTHETIC RECEIPT', 'SYNTHETIC\u00a0RECEIPT'],
 ]) {
-  test(`scheduled NBSP/space ambiguous receipt has a non-replay diagnostic (${JSON.stringify(prompt)})`, async () => {
+  test(`scheduled NBSP/space normalized receipt is counted without replay (${JSON.stringify(prompt)})`, async () => {
     const f = fixture({ args: { prompt, persistentDelivery: true }, acceptDelay: Infinity, onSubmit: state => {
       state.addUser(observed, 'ambiguous-user');
       state.editor.value = '';
@@ -631,9 +667,9 @@ for (const [prompt, observed] of [
     assert.deepEqual(f.state.sentTexts, [prompt]);
     assert.equal(f.state.clicks, 1);
     assert.equal(f.state.keys, 0);
-    assert.equal(outcome.status, 'unknown');
+    assert.equal(outcome.status, 'sent');
     assert.notEqual(outcome.retryable, true);
-    assert.equal(outcome.diagnosticCode, 'receipt-ambiguous');
+    assert.equal(outcome.diagnosticCode, undefined);
     assert.equal(JSON.stringify(outcome.diagnosticProgress).includes('SYNTHETIC'), false);
   });
 }
@@ -785,6 +821,33 @@ test('priority replaces repeated text changes once without an authorization refi
   assert.equal(f.state.clicks, 1);
   assert.equal(f.state.keys, 0);
 });
+
+for (const [eventType, status] of [['beforeinput', 'unknown'], ['input', 'manual-sent']]) {
+  test(`legacy final textarea correction yields to manual submission during ${eventType}`, async () => {
+    const f = fixture({ authorize: state => {
+      if (state.checks === 3 || state.checks === 4) state.editor.value = `revision ${state.checks}`;
+      return { ok: true, allowed: true };
+    } });
+    const dispatch = f.state.editor.dispatchEvent.bind(f.state.editor);
+    let writesAtManual;
+    f.state.editor.dispatchEvent = event => {
+      if (event.type === eventType && f.state.checks === 4 && writesAtManual === undefined) {
+        f.state.manualSubmit();
+        writesAtManual = f.state.writes;
+      }
+      return dispatch(event);
+    };
+    const outcome = await f.run();
+    assert.equal(outcome.status, status);
+    assert.equal(outcome.diagnosticProgress.counters.manualIntents, 1);
+    assert.equal(outcome.diagnosticProgress.counters.dispatchAttempts, 0);
+    assert.equal(f.state.clicks, 0);
+    assert.equal(f.state.keys, 0);
+    assert.equal(f.state.stops, 0);
+    assert.equal(f.state.writes, writesAtManual);
+    assert.notEqual(outcome.retryable, true);
+  });
+}
 
 for (const [guard, status] of [['pause', 'cancelled'], ['attachment', 'draft'], ['identity loss', 'cancelled']]) {
   for (const check of [2, 3, 4]) {

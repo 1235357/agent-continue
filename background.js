@@ -1222,6 +1222,7 @@ async function commitRun(message, sender) {
     return { tabId: job.tabId, documentId: sender.documentId, version, args: {
       expectedUrl: job.url, targetIdentity: job.targetIdentity,
       prompt: currentPrompt(job), sendMethod: job.sendMethod ?? 'auto', deadline: job.runDeadline,
+      persistentDelivery: true,
       receiptBoundaryToken: message.receiptBoundaryToken,
     } };
   });

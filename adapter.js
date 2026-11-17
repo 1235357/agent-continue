@@ -551,15 +551,23 @@ export async function pageAction(args) {
     latchManual(true);
   };
 
+  const finiteLegacyTextarea = () => args.persistentDelivery !== true && args.unlimitedReadiness !== true
+    && editor instanceof HTMLTextAreaElement;
   const fill = async (value, forceReplacement = false) => {
     mutable();
-    if (value && payloadWriteAttempts >= 2) {
+    if (value && payloadWriteAttempts >= 2 && !finiteLegacyTextarea()) {
       if (args.persistentDelivery !== true || args.unlimitedReadiness !== true) throw unstableComposer;
       await wait(10_000);
       mutable();
       if (!await stillAllowed() || !samePage() || !keepComposer() || !editable() || hasAttachment() || busy()) return false;
       if (!needsRefill && payloadMatches()) return true;
     }
+    return fillNow(value, forceReplacement);
+  };
+  const fillNow = (value, forceReplacement) => {
+    mutable();
+    // Initial fill, three settling corrections, and one final synchronous correction.
+    if (value && finiteLegacyTextarea() && payloadWriteAttempts >= 5) throw unstableComposer;
     if (value) payloadWriteAttempts++;
     metrics.counters.fillCalls++;
     progress('prepare', 'starting');
@@ -943,18 +951,19 @@ export async function pageAction(args) {
     const logicalValue = normalizeLineEndings(value);
     const manyLines = (logicalValue.match(/\n/g) || []).length >= 100;
     if (value && editor.classList.contains('ProseMirror') && (value.length > 1000 || manyLines)) {
-      const chunked = await insertChunkedText();
-      if (chunked === 'mismatch') {
-        if (args.persistentDelivery === true) {
-          const currentDraft = plainDraft(editor, true) ?? clean(textOf(editor));
-          if (currentDraft && currentDraft.trim()) {
-            preparedText = normalizeLineEndings(currentDraft);
-            return true;
+      return insertChunkedText().then(chunked => {
+        if (chunked === 'mismatch') {
+          if (args.persistentDelivery === true) {
+            const currentDraft = plainDraft(editor, true) ?? clean(textOf(editor));
+            if (currentDraft && currentDraft.trim()) {
+              preparedText = normalizeLineEndings(currentDraft);
+              return true;
+            }
           }
+          throw chunkMismatch;
         }
-        throw chunkMismatch;
-      }
-      return chunked;
+        return chunked;
+      });
     }
     return replaceAfter(() => {
       if (!mayWrite()) return false;
@@ -1147,6 +1156,11 @@ export async function pageAction(args) {
         beforeAssistant = assistantState();
         receiptBoundarySeen = true;
         extensionBoundary = true;
+        // Bind adopted content only at the validated synchronous dispatch boundary.
+        if (args.persistentDelivery === true) {
+          const current = plainDraft(editor, true) ?? textOf(editor);
+          if (current && current.trim()) preparedText = normalizeLineEndings(current);
+        }
         event.preventDefault();
       };
       document.addEventListener(receiptEvent, captureReceiptBoundary, true);
@@ -1402,11 +1416,16 @@ export async function pageAction(args) {
     // Never silently repaint a rich editor while its submission model differs.
     // Standard synchronous input handlers receive the final replacement too.
     if (!readyPayload()) {
-      const accepted = await fill(prompt, true);
+      const correction = finiteLegacyTextarea() ? fillNow(prompt, true) : fill(prompt, true);
+      const synchronousCorrection = !correction || typeof correction.then !== 'function';
+      const accepted = synchronousCorrection ? correction : await correction;
       if (!accepted) return result('blocked', '输入框当前不可用，稍后重试。');
+      if (synchronousCorrection) mutable();
       insertedDraftSnapshot = snapshotDraft();
-      await wait(180);
-      if (!await stillAllowed()) return result('cancelled', '已暂停，本次未提交。');
+      if (!synchronousCorrection) {
+        await wait(180);
+        if (!await stillAllowed()) return result('cancelled', '已暂停，本次未提交。');
+      }
       if (!samePage() || !withinDeadline() || !sameComposer() || !editable()) return result('blocked', '提交前页面已变化。');
       if (hasAttachment()) return protectedDraft('提交前检测到附件，已保留输入框内容。');
       if (busy() || lateStop()) return result('busy', 'Agent 仍在运行。');

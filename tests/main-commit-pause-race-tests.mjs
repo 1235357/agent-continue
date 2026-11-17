@@ -82,6 +82,7 @@ for (const boundaryMode of ['synthetically-accept-after-revocation', 'reject-aft
       await until(() => order.includes('main-commit-issued'), 'issued MAIN commit');
       assert.equal(page.state.metrics.clicks, 0);
       assert.ok(observedArgs.deadline > Date.now());
+      assert.equal(observedArgs.persistentDelivery, true, 'the authorized worker forwards persistent delivery to MAIN');
       deadline = h.state.session.job.runDeadline;
       assert.equal(observedArgs.deadline, deadline);
       paused = await h.message({ type: 'PAUSE' });
