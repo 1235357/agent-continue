@@ -308,6 +308,261 @@ test('browser install inspection keeps conflicts and unknown registry reads dist
     }
   });
 
+test('registration issue identifies stable missing HKCU manifests without repair or owner claims',
+  { skip: process.platform !== 'win32' }, t => {
+    for (const leafOnly of [false, true]) {
+      const f = fixture(t), parent = path.join(f.root, 'old-install', 'app', 'browser-wake');
+      if (leafOnly) fs.mkdirSync(parent, { recursive: true });
+      const missing = path.join(parent, 'host.json');
+      f.values.set('32:HKCU', missing);
+      f.values.set('64:HKCU', missing);
+      const result = withoutFilesystemMutations(() => browserWake.inspectPublishedBrowserWake({
+        app: f.app, binding: f.binding, node: process.execPath, registry: f.registry }));
+      assert.equal(result.registrationIssue, 'registered-manifest-missing');
+      assert.equal(result.registration, 'conflict');
+      assert.equal(result.registryComplete, true);
+      assert.equal(result.registered, null);
+      assert.equal(result.runtime, 'not-observed');
+      assert.equal(result.mutationPerformed, false);
+      assert.equal(f.calls.length, 0);
+      assert.equal(fs.existsSync(missing), false);
+      assert.doesNotMatch(JSON.stringify(result), /old-install|owner.*idle|repairAllowed/);
+      assert.throws(() => publishBrowserWake({ app: f.app, binding: f.binding,
+        node: process.execPath, registry: f.registry }), /browser_wake_registry_conflict/);
+    }
+  });
+
+test('registration issue distinguishes denied and indeterminate reads from missing manifests',
+  { skip: process.platform !== 'win32' }, t => {
+    for (const code of ['EACCES', 'EPERM', 'EIO']) {
+      const f = fixture(t), parent = path.join(f.root, 'old-install');
+      fs.mkdirSync(parent);
+      const target = path.join(parent, 'host.json');
+      f.values.set('32:HKCU', target);
+      const original = fs.lstatSync;
+      fs.lstatSync = function(file, ...args) {
+        if (file === target) throw Object.assign(Error('private read detail'), { code });
+        return original.call(this, file, ...args);
+      };
+      let result;
+      try {
+        result = withoutFilesystemMutations(() => browserWake.inspectPublishedBrowserWake({
+          app: f.app, binding: f.binding, node: process.execPath, registry: f.registry }));
+      } finally { fs.lstatSync = original; }
+      assert.equal(result.registrationIssue, code === 'EIO'
+        ? 'registered-manifest-unconfirmed' : 'registered-manifest-inaccessible');
+      assert.equal(result.registration, 'conflict');
+      assert.equal(result.registered, null);
+      assert.equal(f.calls.length, 0);
+      assert.doesNotMatch(JSON.stringify(result), /private read detail|old-install/);
+    }
+  });
+
+test('registration issue refuses reparse, non-file and noncanonical paths even with missing children',
+  { skip: process.platform !== 'win32' }, t => {
+    for (const kind of ['junction', 'directory', 'non-directory', 'relative', 'alias', 'unc', 'null']) {
+      const f = fixture(t), directory = path.join(f.root, 'foreign');
+      fs.mkdirSync(directory);
+      let target = path.join(directory, 'host.json');
+      if (kind === 'junction') {
+        const alias = path.join(f.root, 'foreign-alias');
+        fs.symlinkSync(directory, alias, 'junction');
+        target = path.join(alias, 'host.json');
+      }
+      if (kind === 'directory') fs.mkdirSync(target);
+      if (kind === 'non-directory') { fs.writeFileSync(target, 'inert'); target = path.join(target, 'child.json'); }
+      if (kind === 'relative') target = 'host.json';
+      if (kind === 'alias') target = directory + '\\..\\foreign\\host.json';
+      if (kind === 'unc') target = '\\\\server\\private\\host.json';
+      if (kind === 'null') target = null;
+      f.values.set('32:HKCU', target);
+      const result = withoutFilesystemMutations(() => browserWake.inspectPublishedBrowserWake({
+        app: f.app, binding: f.binding, node: process.execPath, registry: f.registry }));
+      assert.equal(result.registrationIssue, 'registered-manifest-unsafe', kind);
+      assert.equal(result.registration, 'conflict');
+      assert.equal(result.registered, null);
+      assert.equal(f.calls.length, 0);
+    }
+  });
+
+test('registration issue preserves intact foreign conflict and rejects cross-view disagreement',
+  { skip: process.platform !== 'win32' }, t => {
+    for (const kind of ['intact', 'different-hkcu', 'hklm']) {
+      const f = fixture(t), target = path.join(f.root, 'foreign.json');
+      if (kind === 'intact') fs.writeFileSync(target, 'not read or executed by inspection');
+      f.values.set('32:HKCU', target);
+      if (kind === 'different-hkcu') f.values.set('64:HKCU', path.join(f.root, 'other-missing.json'));
+      if (kind === 'hklm') f.values.set('64:HKLM', target);
+      const result = withoutFilesystemMutations(() => browserWake.inspectPublishedBrowserWake({
+        app: f.app, binding: f.binding, node: process.execPath, registry: f.registry }));
+      assert.equal(result.registrationIssue, kind === 'intact' ? undefined : 'registry-view-conflict');
+      assert.equal(result.registration, 'conflict');
+      assert.equal(result.registryComplete, true);
+      assert.equal(f.calls.length, 0);
+      assert.equal(f.values.get('32:HKCU'), target);
+    }
+  });
+
+test('registration issue notices changing literal pointers even when both classify as conflict',
+  { skip: process.platform !== 'win32' }, t => {
+    const f = fixture(t), inspect = f.registry.inspect;
+    let reads = 0;
+    f.values.set('32:HKCU', path.join(f.root, 'first-missing.json'));
+    f.registry.inspect = plan => {
+      if (++reads === 5) f.values.set('32:HKCU', path.join(f.root, 'second-missing.json'));
+      return inspect(plan);
+    };
+    const result = withoutFilesystemMutations(() => browserWake.inspectPublishedBrowserWake({
+      app: f.app, binding: f.binding, node: process.execPath, registry: f.registry }));
+    assert.equal(result.registrationIssue, 'registration-changing');
+    assert.equal(result.registration, 'conflict');
+    assert.equal(result.registryComplete, false);
+    assert.equal(reads, 8);
+    assert.equal(f.calls.length, 0);
+  });
+
+test('registration issue never reports a stable absence when the target appears during inspection',
+  { skip: process.platform !== 'win32' }, t => {
+    const f = fixture(t), target = path.join(f.root, 'foreign.json');
+    fs.writeFileSync(target, 'inert manifest fixture');
+    f.values.set('32:HKCU', target);
+    const original = fs.lstatSync;
+    let reads = 0;
+    fs.lstatSync = function(file, ...args) {
+      if (file === target && ++reads === 1) throw Object.assign(Error('missing once'), { code: 'ENOENT' });
+      return original.call(this, file, ...args);
+    };
+    let result;
+    try {
+      result = withoutFilesystemMutations(() => browserWake.inspectPublishedBrowserWake({
+        app: f.app, binding: f.binding, node: process.execPath, registry: f.registry }));
+    } finally { fs.lstatSync = original; }
+    assert.equal(result.registrationIssue, 'registered-manifest-changing');
+    assert.equal(result.registration, 'conflict');
+    assert.equal(result.registered, null);
+    assert.equal(f.calls.length, 0);
+  });
+
+test('registration issue gives uncertain registry reads precedence over a missing target',
+  { skip: process.platform !== 'win32' }, t => {
+    const f = fixture(t), inspect = f.registry.inspect;
+    f.values.set('32:HKCU', path.join(f.root, 'missing.json'));
+    f.registry.inspect = plan => {
+      if (plan.hive === 'HKLM' && plan.view === '64') throw Error('unreadable registry');
+      return inspect(plan);
+    };
+    const result = withoutFilesystemMutations(() => browserWake.inspectPublishedBrowserWake({
+      app: f.app, binding: f.binding, node: process.execPath, registry: f.registry }));
+    assert.equal(result.registrationIssue, 'registration-unconfirmed');
+    assert.equal(result.registryComplete, false);
+    assert.equal(result.registered, null);
+    assert.equal(f.calls.length, 0);
+  });
+
+test('registration issue fences missing-target ancestor identity changes',
+  { skip: process.platform !== 'win32' }, t => {
+    const f = fixture(t), parent = path.join(f.root, 'foreign');
+    fs.mkdirSync(parent);
+    f.values.set('32:HKCU', path.join(parent, 'missing.json'));
+    const original = fs.lstatSync;
+    let reads = 0;
+    fs.lstatSync = function(file, ...args) {
+      const info = original.call(this, file, ...args);
+      if (file === parent && ++reads > 2) {
+        return Object.assign(Object.create(Object.getPrototypeOf(info)), info, { ino: info.ino + 1n });
+      }
+      return info;
+    };
+    let result;
+    try {
+      result = withoutFilesystemMutations(() => browserWake.inspectPublishedBrowserWake({
+        app: f.app, binding: f.binding, node: process.execPath, registry: f.registry }));
+    } finally { fs.lstatSync = original; }
+    assert.equal(result.registrationIssue, 'registered-manifest-changing');
+    assert.equal(result.registered, null);
+    assert.equal(f.calls.length, 0);
+  });
+
+test('registration issue prevents a matched bundle becoming registered after a late permission change',
+  { skip: process.platform !== 'win32' }, t => {
+    const f = fixture(t);
+    publishBrowserWake({ app: f.app, binding: f.binding, node: process.execPath, registry: f.registry });
+    const manifest = path.join(f.app, 'browser-wake', 'host.json'), original = fs.lstatSync;
+    let reads = 0;
+    fs.lstatSync = function(file, ...args) {
+      if (file === manifest && ++reads >= 7) throw Object.assign(Error('late denial'), { code: 'EACCES' });
+      return original.call(this, file, ...args);
+    };
+    let result;
+    try {
+      result = browserWake.inspectPublishedBrowserWake({
+        app: f.app, binding: f.binding, node: process.execPath, registry: f.registry });
+    } finally { fs.lstatSync = original; }
+    assert.equal(result.registrationIssue, 'registered-manifest-changing', JSON.stringify({ reads, result }));
+    assert.equal(result.registration, 'matched');
+    assert.equal(result.bundle, 'verified');
+    assert.equal(result.registered, null);
+    assert.equal(f.calls.length, 1);
+  });
+
+test('browser install inspection revalidates manifest evidence after the second registry snapshot',
+  { skip: process.platform !== 'win32' }, t => {
+    for (const change of ['deleted', 'replaced', 'denied']) {
+      const f = fixture(t);
+      publishBrowserWake({ app: f.app, binding: f.binding, node: process.execPath, registry: f.registry });
+      const manifest = path.join(f.app, 'browser-wake', 'host.json');
+      const inspect = f.registry.inspect, lstat = fs.lstatSync;
+      let reads = 0, deny = false;
+      f.registry.inspect = plan => {
+        if (++reads === 5) {
+          if (change === 'deleted') fs.unlinkSync(manifest);
+          if (change === 'replaced') {
+            fs.unlinkSync(manifest);
+            fs.writeFileSync(manifest, 'changed fixture manifest');
+          }
+          if (change === 'denied') deny = true;
+        }
+        return inspect(plan);
+      };
+      fs.lstatSync = function(file, ...args) {
+        if (deny && file === manifest) throw Object.assign(Error('late registry-window denial'), { code: 'EACCES' });
+        return lstat.call(this, file, ...args);
+      };
+      let result;
+      try {
+        result = browserWake.inspectPublishedBrowserWake({ app: f.app, binding: f.binding,
+          node: process.execPath, registry: f.registry });
+      } finally { fs.lstatSync = lstat; }
+      assert.equal(reads, 8);
+      assert.equal(result.bundle, 'conflict', change);
+      assert.equal(result.registered, null, change);
+      assert.equal(result.registrationIssue, 'registered-manifest-changing', change);
+      assert.equal(result.registration, 'matched');
+      assert.equal(result.runtime, 'not-observed');
+      assert.equal(result.mutationPerformed, false);
+      assert.equal(f.calls.length, 1, 'inspection must not publish another registration');
+    }
+  });
+
+test('registration issue detects a foreign missing manifest appearing during the second registry snapshot',
+  { skip: process.platform !== 'win32' }, t => {
+    const f = fixture(t), target = path.join(f.root, 'foreign.json'), inspect = f.registry.inspect;
+    f.values.set('32:HKCU', target);
+    let reads = 0;
+    f.registry.inspect = plan => {
+      if (++reads === 5) fs.writeFileSync(target, 'inert fixture manifest');
+      return inspect(plan);
+    };
+    const result = browserWake.inspectPublishedBrowserWake({ app: f.app, binding: f.binding,
+      node: process.execPath, registry: f.registry });
+    assert.equal(reads, 8);
+    assert.equal(result.registrationIssue, 'registered-manifest-changing');
+    assert.equal(result.registered, null);
+    assert.equal(result.registration, 'conflict');
+    assert.equal(result.mutationPerformed, false);
+    assert.equal(f.calls.length, 0);
+  });
+
 test('browser install inspection never accepts an owned pointer without exact bundle bytes',
   { skip: process.platform !== 'win32' }, t => {
     for (const kind of ['changed', 'missing']) {

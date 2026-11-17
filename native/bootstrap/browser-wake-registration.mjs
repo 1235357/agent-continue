@@ -130,6 +130,41 @@ export function publishBrowserWake({ app, binding, node, registry }) {
     registered: true, launchVerified: false, activated: false, chatAuthorizationVerified: false };
 }
 
+function inspectRegisteredManifest(file) {
+  if (!safeLocalPath(file)) return { status: 'unsafe' };
+  const root = path.parse(file).root, components = ['', ...file.slice(root.length).split(path.sep)];
+  const observed = [];
+  const identity = (info, last) => [info.dev, info.ino,
+    ...(last ? [info.size, info.mtimeNs, info.ctimeNs] : [])].join(':');
+  const finish = status => {
+    for (const entry of observed) {
+      try {
+        const current = fs.lstatSync(entry.file, { bigint: true });
+        if (current.isSymbolicLink() || identity(current, entry.last) !== entry.identity ||
+            (entry.last ? !current.isFile() || current.nlink !== 1n : !current.isDirectory())) {
+          return { status: 'changing' };
+        }
+      } catch { return { status: 'changing' }; }
+    }
+    return { status, identity: observed.map(entry => entry.identity).join('/') };
+  };
+  let current = root;
+  for (let index = 0; index < components.length; index++) {
+    current = path.join(current, components[index]);
+    const last = index === components.length - 1;
+    let info;
+    try { info = fs.lstatSync(current, { bigint: true }); }
+    catch (error) {
+      return finish(error.code === 'ENOENT' && index > 0 ? 'missing'
+        : ['EACCES', 'EPERM'].includes(error.code) ? 'inaccessible' : 'unconfirmed');
+    }
+    if (info.isSymbolicLink() || info.ino === 0n ||
+        (last ? !info.isFile() || info.nlink !== 1n : !info.isDirectory())) return finish('unsafe');
+    observed.push({ file: current, last, identity: identity(info, last) });
+  }
+  return finish('present');
+}
+
 export function inspectPublishedBrowserWake({ app, binding, node, registry }) {
   const layout = browserWakeLayout({ app, binding, node });
   let appIdentity;
@@ -154,23 +189,39 @@ export function inspectPublishedBrowserWake({ app, binding, node, registry }) {
     return layout.views.map(view => {
       try {
         const entry = registry.inspect(view);
-        if (!entry || typeof entry.present !== 'boolean') return 'unconfirmed';
-        if (!entry.present) return 'absent';
-        return view.hive === 'HKCU' && entry.value === layout.manifest ? 'owned' : 'conflict';
-      } catch { return 'unconfirmed'; }
+        if (!entry || typeof entry.present !== 'boolean') return { state: 'unconfirmed' };
+        if (!entry.present) return { state: 'absent' };
+        const value = typeof entry.value === 'string' ? entry.value : null;
+        return { state: view.hive === 'HKCU' && value === layout.manifest ? 'owned' : 'conflict', value };
+      } catch { return { state: 'unconfirmed' }; }
     });
   };
   const before = inspectBundle();
-  const first = inspectRegistry(), second = inspectRegistry(), slots = [...first, ...second];
-  const registryComplete = !slots.includes('unconfirmed') && first.every((state, index) => state === second[index]);
+  const first = inspectRegistry(), present = first.filter(entry => Object.hasOwn(entry, 'value'));
+  const viewConflict = first.some((entry, index) => Object.hasOwn(entry, 'value') && layout.views[index].hive !== 'HKCU') ||
+    present.some(entry => entry.value !== present[0].value);
+  // Missing bytes are only a diagnostic, never previous ownership, idle state or repair consent.
+  const target = present.length && !viewConflict ? present[0].value : undefined;
+  const manifestBefore = target !== undefined ? inspectRegisteredManifest(target) : null;
+  const second = inspectRegistry(), slots = [...first, ...second].map(entry => entry.state);
+  // Registry reads can outlive the files they name; refresh filesystem proof afterwards.
+  const after = inspectBundle();
+  const manifestAfter = target !== undefined ? inspectRegisteredManifest(target) : null;
+  const registryComplete = !slots.includes('unconfirmed') && first.every((entry, index) =>
+    entry.state === second[index].state && entry.value === second[index].value);
   const registration = slots.includes('conflict') ? 'conflict' : !registryComplete ? 'unconfirmed'
     : slots.includes('owned') ? 'matched' : 'absent';
-  const after = inspectBundle();
+  const registrationIssue = slots.includes('unconfirmed') ? 'registration-unconfirmed'
+    : !registryComplete ? 'registration-changing'
+    : viewConflict ? 'registry-view-conflict'
+    : manifestBefore && (manifestBefore.status !== manifestAfter.status || manifestBefore.identity !== manifestAfter.identity)
+      ? 'registered-manifest-changing'
+    : manifestAfter && manifestAfter.status !== 'present' ? 'registered-manifest-' + manifestAfter.status : null;
   assertOwner();
   const bundle = before === after ? after : 'conflict';
   return { registration, registryComplete, bundle,
-    registered: registration === 'matched' && bundle === 'verified' ? true : registration === 'absent' ? false : null,
-    runtime: 'not-observed', mutationPerformed: false };
+    registered: registration === 'matched' && bundle === 'verified' && !registrationIssue ? true : registration === 'absent' ? false : null,
+    runtime: 'not-observed', mutationPerformed: false, ...(registrationIssue ? { registrationIssue } : {}) };
 }
 
 function recordedWakeNode(app, binding) {
