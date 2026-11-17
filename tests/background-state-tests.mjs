@@ -340,6 +340,113 @@ await scenario('Observed manual submission with a lost notification before docum
   }
 });
 
+for(const [timing,evidence] of [
+  ['none','none'], ...['sleep','write'].flatMap(timing=>['receipt','manual','pause'].map(evidence=>[timing,evidence])),
+  ['prepare','receipt'], ['prepare','manual'], ['commit','receipt'],
+]) {
+await scenario(timing==='none'
+  ? 'A replaced document during held MAIN preparation retires the old permit before retrying the same delivery'
+  : `Replacement recovery honors old ${evidence} during successor ${timing} without replay`,async()=>{
+  const h=await harness();await h.start({maxSends:1});
+  const oldPage=deferred(),prepare=deferred(),nextPhase=deferred();let replacement=false;
+  let injectEvidence;
+  const sender=()=>({...h.sender(),documentId:replacement?'replacement-document':'synthetic-bound-document'});
+  h.chrome.tabs.sendMessage=async(id,message)=>({granted:true,...message});
+  h.chrome.scripting.executeScript=async request=>{
+    h.state.injections.push(request);
+    const documentId=request.target.documentIds?.[0] || sender().documentId;
+    if(request.func.name==='pageInvocationState') return [{frameId:0,documentId:sender().documentId,result:{state:'running'}}];
+    if(request.func.name==='editorCommit') {
+      const phase=request.args[0].phase;
+      if(phase==='prepare' && documentId==='synthetic-bound-document') await prepare.promise;
+      if(documentId==='replacement-document' && timing===phase && !followup) {
+        injectEvidence();
+        await nextPhase.promise;
+      }
+      return [{frameId:0,documentId,result:{supported:true,dispatched:phase==='commit',hasSend:true,
+        code:phase==='prepare'?'prepared':phase==='observe'?'ready':'dispatched'}}];
+    }
+    if(request.args[0].mode==='send') {
+      if(!replacement) return oldPage.promise;
+      const commit=await h.message({type:'COMMIT_RUN',runId:request.args[0].runId},sender());
+      if(timing==='prepare' || timing==='commit') return [{frameId:0,documentId,result:{status:'cancelled'}}];
+      assert.equal(commit.dispatched,true,'The fresh document must obtain its own MAIN commit');
+      return [{frameId:0,documentId,result:{status:'sent'}}];
+    }
+    return [{frameId:0,documentId,result:{status:'ready'}}];
+  };
+  const round=h.message({type:'SEND_NOW'});let oldCommit,followup,timeout;
+  try {
+    await until(()=>h.state.injections.some(item=>item.args[0].mode==='send'));
+    const original=h.state.injections.find(item=>item.args[0].mode==='send').args[0];
+    const oldSender=sender();
+    oldCommit=h.message({type:'COMMIT_RUN',runId:original.runId},oldSender);
+    await until(()=>h.state.injections.some(item=>item.func.name==='editorCommit' && item.args[0].phase==='prepare'));
+    injectEvidence=()=> {
+      const ids={runId:original.runId,resultToken:original.resultToken};
+      followup=evidence==='receipt'?h.message({type:'PAGE_RESULT',...ids,result:{status:'manual-sent'}},oldSender)
+        : evidence==='manual'?h.message({type:'MANUAL_SUBMISSION',...ids},oldSender)
+        : h.message({type:'PAUSE'});
+    };
+    if(timing==='write') {
+      const write=h.chrome.storage.session.set;
+      h.chrome.storage.session.set=async value=>{
+        if(!followup && value.job?.phase==='sending' && value.job.runId!==original.runId) {
+          // Enter the successor transaction after it has queued the write but
+          // before session/local storage has acknowledged it. Do not await a
+          // message whose accounting is queued behind this write.
+          injectEvidence();
+          await delay(20);
+        }
+        return write(value);
+      };
+    }
+    replacement=true;
+    let denied=false;
+    for(let i=0;i<250 && !denied;i++) {
+      denied=!(await h.message({type:'CHECK_RUN',runId:original.runId},oldSender)).allowed;
+      if(!denied) await delay(10);
+    }
+    assert.equal(denied,true,'Retirement must fence the original document before the retry delay finishes');
+    assert.equal(h.state.session.job.phase,'sending','A proven pre-submit replacement must not terminate the delivery');
+    assert.equal(h.state.session.job.runId,original.runId,'The old permit must already be denied while the replacement transaction is pending');
+    if(timing==='sleep') injectEvidence();
+    const result=await Promise.race([round,new Promise((_,reject)=>{
+      timeout=setTimeout(()=>reject(new Error('The replacement round did not settle')),6000);
+    })]);
+    prepare.resolve();
+    assert.equal((await oldCommit).code,'cancelled','A late prepare return must not reach MAIN commit');
+    const admissions=h.state.injections.filter(item=>item.args[0].mode==='send');
+    const commits=h.state.injections.filter(item=>item.func.name==='editorCommit' && item.args[0].phase==='commit');
+    if(evidence!=='none') {
+      assert.ok(followup,'The test must actually deliver the racing event');
+      assert.equal((await followup).ok,true);
+      assert.equal(admissions.length,['prepare','commit'].includes(timing)?2:1);
+      assert.equal(commits.length,timing==='commit'?1:0);
+      assert.equal(result.job.enabled,false);
+      assert.equal(result.job.sentCount,0);
+      assert.equal(result.job.manualSentCount||0,evidence==='receipt' && timing!=='commit'?1:0);
+      assert.equal(result.job.unknownCount,evidence==='manual' || timing==='commit'?1:0);
+      return;
+    }
+    assert.equal(admissions.length,2);
+    assert.notEqual(admissions[0].args[0].runId,admissions[1].args[0].runId);
+    assert.notEqual(admissions[0].args[0].resultToken,admissions[1].args[0].resultToken);
+    assert.deepEqual(admissions[0].args[0].promptDelivery,admissions[1].args[0].promptDelivery);
+    assert.equal(commits.length,1);
+    assert.deepEqual(commits[0].target.documentIds,['replacement-document']);
+    assert.equal(result.job.sentCount,1);
+    assert.equal(result.job.unknownCount,0);
+    assert.equal(result.job.prompt,'Continue mock task.');
+  } finally {
+    clearTimeout(timeout);
+    await h.message({type:'PAUSE'});
+    prepare.resolve();nextPhase.resolve();oldPage.resolve([{frameId:0,result:{status:'unknown'}}]);
+    await oldCommit;await round;
+  }
+});
+}
+
 await scenario('Known pre-submission failures keep retrying without waiting an interval and Pause prevents later admissions',async()=>{
   const h=await harness();await h.start();let sends=0;
   h.pageResult=async args=>args.mode==='send'?(++sends,{status:'blocked',retryable:true,message:'Synthetic remount',diagnosticProgress:{counters:{dispatchAttempts:0,manualIntents:0}}}):{status:'ready'};
@@ -460,36 +567,52 @@ await scenario('Read-only busy reply checks may be scheduled again without any s
   }
 });
 
-await scenario('Document replacement after a known submission remains unknown and pauses',async()=>{
+for(const outcome of ['dispatched','queued','not-dispatched','fallback']) {
+await scenario(`Document replacement after ${outcome} remains unknown and pauses`,async()=>{
   const h=await harness();await h.start();const gate=deferred();let replacement=false;
+  const queued=deferred();
   h.chrome.tabs.sendMessage=async(id,message)=>({granted:true,...message});
   h.chrome.scripting.executeScript=async request=>{
     h.state.injections.push(request);
     if(request.func.name==='pageInvocationState') return [{frameId:0,documentId:replacement?'replacement-document':'synthetic-bound-document',result:{state:'absent'}}];
-    if(request.func.name==='editorCommit') return [{frameId:0,documentId:'synthetic-bound-document',result:{supported:true,dispatched:request.args[0].phase==='commit',
-      code:request.args[0].phase==='prepare'?'prepared':request.args[0].phase==='observe'?'ready':'dispatched',hasSend:true}}];
+    if(request.func.name==='editorCommit') {
+      const phase=request.args[0].phase;
+      let result={supported:true,dispatched:phase==='commit',code:phase==='prepare'?'prepared':phase==='observe'?'ready':'dispatched',hasSend:true};
+      if(phase==='prepare' && outcome==='fallback') result={supported:false,dispatched:false,code:'unsupported-view'};
+      if(phase==='commit' && outcome==='not-dispatched') result={supported:true,dispatched:false,code:'send-ambiguous'};
+      if(phase==='commit' && outcome==='queued') result=await queued.promise;
+      return [{frameId:0,documentId:'synthetic-bound-document',result}];
+    }
     return [{frameId:0,result:request.args[0].mode==='send'?await gate.promise:{status:'ready'}}];
   };
   const round=h.message({type:'SEND_NOW'});
-  await until(()=>h.state.injections.some(item=>item.args[0].mode==='send'));
-  const args=h.state.injections.find(item=>item.args[0].mode==='send').args[0];
-  assert.equal((await h.message({type:'COMMIT_RUN',runId:args.runId},h.sender())).dispatched,true);
-  replacement=true;
-  let completed=false;round.then(()=>{completed=true;});
-  for(let i=0;i<150 && !completed;i++) await delay(20);
-  const observed=completed;
-  if(!completed) await h.message({type:'PAUSE'});
-  await round;
-  assert.equal(observed,true);
-  assert.equal(h.state.session.job.sentCount,0);
-  assert.equal(h.state.session.job.unknownCount,1,'Replacement cannot prove whether the previous submission succeeded');
-  assert.equal(h.state.session.job.enabled,false);
-  assert.equal(h.state.session.job.nextAt,null);
-  assert.equal(h.state.local.resumeJob.enabled,false);
-  assert.equal(h.state.injections.filter(item=>item.func.name==='editorCommit' && item.args[0].phase==='commit').length,1);
-  gate.resolve({status:'sent'});
-  await h.message({type:'PAUSE'});
+  let commit;
+  try {
+    await until(()=>h.state.injections.some(item=>item.args[0].mode==='send'));
+    const args=h.state.injections.find(item=>item.args[0].mode==='send').args[0];
+    commit=h.message({type:'COMMIT_RUN',runId:args.runId},h.sender());
+    if(outcome==='queued') await until(()=>h.state.injections.some(item=>item.func.name==='editorCommit' && item.args[0].phase==='commit'));
+    else assert.equal((await commit).dispatched,outcome==='dispatched');
+    replacement=true;
+    let completed=false;round.then(()=>{completed=true;});
+    for(let i=0;i<200 && !completed;i++) await delay(20);
+    assert.equal(completed,true);
+    await round;
+    assert.equal(h.state.session.job.sentCount,0);
+    assert.equal(h.state.session.job.unknownCount,1,'Replacement cannot prove whether the previous submission succeeded');
+    assert.equal(h.state.session.job.enabled,false);
+    assert.equal(h.state.session.job.nextAt,null);
+    assert.equal(h.state.local.resumeJob.enabled,false);
+    assert.equal(h.state.injections.filter(item=>item.args[0].mode==='send').length,1);
+    assert.equal(h.state.injections.filter(item=>item.func.name==='editorCommit' && item.args[0].phase==='commit').length,outcome==='fallback'?0:1);
+  } finally {
+    queued.resolve({supported:true,dispatched:false,code:'send-ambiguous'});
+    await h.message({type:'PAUSE'});
+    gate.resolve({status:'sent'});
+    await commit;await round;
+  }
 });
+}
 
 await scenario('An injection API rejection cannot discard a later valid same-invocation receipt',async()=>{
   const h=await harness();await h.start();h.pageResult=async()=>{throw new Error('PRIVATE_SENTINEL');};

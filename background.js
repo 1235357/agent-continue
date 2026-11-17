@@ -515,19 +515,40 @@ async function restoreDiscard(job) {
     return tab?.autoDiscardable === job.originalAutoDiscardable;
   } catch { return false; }
 }
+function hasDeliveryEvidence(delivery) {
+  return Boolean(delivery?.retired.some(item => item.manualSubmission || item.confirmedReceipt
+    || item.dispatched || item.commitUncertain));
+}
+function deliveryIntentCurrent(delivery) {
+  return !delivery || (delivery.version === intentVersion && pendingStopIntents === 0 && failedStopVersion !== intentVersion);
+}
+function pendingRunAllowed(pending) {
+  if (!pending?.delivery?.retired.length) return true;
+  return !pending.retiredForReplacement && deliveryIntentCurrent(pending.delivery) && !hasDeliveryEvidence(pending.delivery);
+}
+function evidenceMatchesJob(pending, job) {
+  // Only retired documents can route validated evidence to a successor.
+  const runId = pending.retiredForReplacement ? pending.delivery.runId : pending.runId;
+  return job?.enabled && job.phase === 'sending' && job.runId === runId
+    && job.tabId === pending.tabId && job.url === pending.url;
+}
 async function pauseLocked(job, message, event = 'paused', diagnostic = null, interruptedTarget = false) {
   if (!job) { await syncAlarm(null); await syncPower(null); await updateBadge(null); return null; }
   if (job.phase === 'sending' && typeof job.runId === 'string') revokedRuns.add(job.runId);
-  const pendingForRun = [...pendingPageResults.values()].filter(pending => pending.runId === job.runId);
+  const pendingForRun = [...pendingPageResults.values()].filter(pending => pending.runId === job.runId
+    || pending.retiredForReplacement && evidenceMatchesJob(pending, job));
+  const activePending = pendingForRun.filter(pending => !pending.retiredForReplacement);
+  const ambiguousRecovery = () => job.phase === 'sending' && pendingForRun.some(pending => pending.delivery?.ambiguousRecovery);
   for (const pending of pendingForRun) { pending.closed = true; pending.pauseWriting = true; }
   let receipt;
   let manualUnconfirmed;
-  let dispatchUnconfirmed = pendingForRun.some(pending => pending.mainCommitPending === true
+  let dispatchUnconfirmed = job.phase === 'sending' && pendingForRun.some(pending => pending.mainCommitPending === true
     || pending.dispatched === true || pending.commitUncertain === true);
   let submissionFenceUntil = null;
   const pausedRunId = token();
   const makePaused = () => {
-    receipt = job.enabled && job.phase === 'sending' ? pendingForRun.find(pending => pending.confirmedReceipt && !pending.receiptAccounted) : null;
+    receipt = job.enabled && job.phase === 'sending' && !ambiguousRecovery()
+      ? pendingForRun.find(pending => pending.confirmedReceipt && !pending.receiptAccounted) : null;
     const paused = { ...job, enabled: false, runId: pausedRunId, runDeadline: null, phase: 'idle', nextAt: null, statusText: message, discardProtection: 'paused', systemAwake: false, needsAttention: event === 'unconfirmed' || diagnostic?.code === 'composer-slow-write' };
     manualUnconfirmed = job.enabled && job.phase === 'sending'
       && (job.manualSubmissionPending || pendingForRun.some(pending => pending.manualSubmission || pending.confirmedReceipt?.diagnosticProgress?.observations?.manualPending))
@@ -544,7 +565,7 @@ async function pauseLocked(job, message, event = 'paused', diagnostic = null, in
       paused.statusText = t('手动提交结果未确认；已暂停，请检查会话后再继续。');
       paused.manualSubmissionPending = false;
     }
-    if (dispatchUnconfirmed && !receipt && !manualUnconfirmed) {
+    if ((dispatchUnconfirmed || ambiguousRecovery()) && !receipt && !manualUnconfirmed) {
       if (!interruptedTarget) paused.unknownCount = (paused.unknownCount || 0) + 1;
       paused.lastResult = 'unknown';
       paused.awaitingReply = false;
@@ -588,7 +609,7 @@ async function pauseLocked(job, message, event = 'paused', diagnostic = null, in
   };
   try {
     if (job.enabled && job.phase === 'sending' && job.runKind !== 'reply-check'
-        && pendingForRun.length && Number.isFinite(job.runDeadline) && job.runDeadline > Date.now()) {
+        && activePending.length && Number.isFinite(job.runDeadline) && job.runDeadline > Date.now()) {
       submissionFenceUntil = Math.max(Number.isFinite(job.submissionFenceUntil) ? job.submissionFenceUntil : 0, job.runDeadline);
       paused = makePaused();
     }
@@ -684,7 +705,7 @@ function assertSupportedTab(tab, expectedUrl = null) {
   if (!tab || !Number.isInteger(tab.id) || !validateTarget(tab.url)) throw fail(t('请选择 chatgpt.com 的 Your dot 页面或已有会话；首页与共享页面不支持。'));
   if (expectedUrl && normalizeUrl(tab.url) !== expectedUrl) throw fail(t('目标标签页已切换到其他会话；原任务会等待原地址重新打开。'));
 }
-async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS, trace = null, traceEpoch = diagnosticEpoch) {
+async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS, trace = null, traceEpoch = diagnosticEpoch, delivery = null) {
   let timer;
   let recoveryTimer;
   let watchdogExpired = false;
@@ -699,7 +720,7 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS, tr
   if (resultToken) {
     args = { ...args, resultToken };
     redundantResult = new Promise(resolve => {
-      pending = { runId: args.runId, resultToken, tabId, url: args.expectedUrl, stage: 'page', leaseRenewals: 0,
+      pending = { runId: args.runId, resultToken, tabId, url: args.expectedUrl, stage: 'page', leaseRenewals: 0, delivery,
         trace: traceEpoch === diagnosticEpoch ? trace : null, diagnosticEpoch: traceEpoch,
         resolve: value => { if (!settled && resultChannel === 'none') resultChannel = 'extension-message'; resolve(value); } };
       pendingPageResults.set(resultToken, pending);
@@ -710,6 +731,7 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS, tr
   try {
     const executionTarget = () => ({ tabId, ...(pending?.documentId ? { documentIds: [pending.documentId] } : {}) });
     const runScript = async (world) => {
+      if (!pendingRunAllowed(pending)) return { status: 'cancelled' };
       deliveryCounter(pending, 'pageAdmissions');
       const res = await chrome.scripting.executeScript({
         target: executionTarget(),
@@ -745,7 +767,7 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS, tr
         // A lost injection return must not discard the same invocation's receipt.
         return redundantResult;
       }
-      if (pending && ['sent', 'manual-sent'].includes(value?.status)) {
+      if (pending && (['sent', 'manual-sent'].includes(value?.status) || pending.retiredForReplacement)) {
         void receivePageResult({ runId: pending.runId, resultToken, result: value },
           { id: chrome.runtime.id, tab: { id: tabId, url: pending.url }, frameId: 0, documentId: pending.documentId, url: pending.url }).catch(() => undefined);
         return redundantResult;
@@ -771,11 +793,21 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS, tr
             pending.confirmedReceipt ??= translatePageResult(frame.result.result);
           }
           const latest = await transact(getJob);
-          if (settled || !latest?.enabled || latest.phase !== 'sending' || latest.runId !== args.runId
+          if (settled || !pendingRunAllowed(pending) || !latest?.enabled || latest.phase !== 'sending' || latest.runId !== args.runId
             || latest.tabId !== tabId || latest.url !== args.expectedUrl) return;
           if (pending.documentId && frame.documentId && pending.documentId !== frame.documentId) {
             deliveryCounter(pending, 'documentChanges');
             deliveryProgress(pending, { reason: 'document-replaced' });
+            if (delivery && deliveryIntentCurrent(delivery) && pending.ownsModelStages && !pending.mainCommitAdmitted && !pending.manualSubmission
+              && !latest.manualSubmissionPending && !pending.confirmedReceipt && !pending.dispatched && !pending.commitUncertain) {
+              // Keep old evidence routable, but deny every old authorization.
+              pending.retiredForReplacement = true;
+              delivery.retired.push(pending);
+              pending.resolve({ status: 'blocked', diagnosticCode: 'commit-not-dispatched', retryable: true,
+                diagnosticProgress: { counters: { dispatchAttempts: 0, manualIntents: 0 } } });
+              wakeRunWaiters(pending.runId);
+              return;
+            }
             pending.resolve({ status: 'unknown', message: t('\u9875\u9762\u672a\u8fd4\u56de\u53ef\u786e\u8ba4\u7684\u7ed3\u679c\u3002') });
             return;
           }
@@ -886,7 +918,7 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS, tr
       if (trace) Object.assign(trace, pending.trace);
       void persistDeliveryTrace(pending.trace, pending.diagnosticEpoch);
     }
-    if (resultToken && !pending?.confirmedReceipt) pendingPageResults.delete(resultToken);
+    if (resultToken && !pending?.confirmedReceipt && !pending?.retiredForReplacement) pendingPageResults.delete(resultToken);
   }
 }
 async function receivePageResult(message, sender) {
@@ -897,11 +929,19 @@ async function receivePageResult(message, sender) {
     || normalizeUrl(sender.url || sender.tab?.url) !== pending.url
     || !message.result || !RESULT_STATUSES.has(message.result.status) || (pending.closed && !pending.receiptFailed && !pending.pauseWriting)) return { ok: false };
   const confirmed = ['sent', 'manual-sent'].includes(message.result.status);
+  if (pending.retiredForReplacement) {
+    const progress = message.result.diagnosticProgress;
+    if (progress?.observations?.manualPending === true || progress?.counters?.manualIntents > 0) {
+      if (!confirmed) return receiveManualSubmission(message, sender);
+      pending.manualSubmission = true;
+    }
+  }
   const duplicate = confirmed && Boolean(pending.receiptReceived);
   if (confirmed) {
     if (pending.confirmedReceipt && pending.confirmedReceipt.status !== message.result.status) return { ok: false };
     pending.confirmedReceipt ??= translatePageResult(message.result);
     pending.receiptReceived = true;
+    if (pending.retiredForReplacement && pending.delivery.successorDispatchPossible) pending.delivery.ambiguousRecovery = true;
   }
   const accounting = transact(async () => {
     if (pending.receiptAccounted) return { ok: !duplicate };
@@ -922,7 +962,7 @@ async function receivePageResult(message, sender) {
         throw error;
       }
     }
-    if (pending.partialReceiptJob && job?.id === pending.partialReceiptJob.id && job.runId === pending.runId
+    if (pending.partialReceiptJob && job?.id === pending.partialReceiptJob.id && job.runId === pending.partialReceiptJob.runId
       && JSON.stringify(job) === JSON.stringify(pending.partialReceiptJob)) {
       try {
         await setJob(job);
@@ -932,13 +972,14 @@ async function receivePageResult(message, sender) {
         return { ok: true };
       } catch (error) { pending.receiptFailed = true; throw error; }
     }
-    if (!job?.enabled || job.phase !== 'sending' || job.runId !== pending.runId
-      || job.tabId !== pending.tabId || job.url !== pending.url) return { ok: false };
+    if (!evidenceMatchesJob(pending, job)) return { ok: false };
     if (confirmed) {
       const value = pending.confirmedReceipt;
       pending.accountingReceipt = true;
       try {
-        await finishRoundLocked(job, {
+        if (pending.delivery?.ambiguousRecovery) {
+          await pauseLocked(job, t('提交结果未确认；已暂停，请检查会话后再继续。'), 'unconfirmed', { code: 'document-replaced' });
+        } else await finishRoundLocked(job, {
           status: value.status,
           identity: typeof value.identity === 'string' ? value.identity.slice(0, 500) : null,
           assistantToken: typeof value.assistantToken === 'string' ? value.assistantToken.slice(0, 500) : null,
@@ -946,6 +987,12 @@ async function receivePageResult(message, sender) {
           manualSubmission: pending.manualSubmission === true || value.diagnosticProgress?.observations?.manualPending === true,
         });
         pending.receiptAccounted = true;
+        if (pending.retiredForReplacement && job.runId !== pending.runId) {
+          for (const next of pendingPageResults.values()) {
+            if (next.runId === job.runId) next.resolve(pending.delivery.ambiguousRecovery
+              ? { status: 'unknown' } : pending.confirmedReceipt);
+          }
+        }
       } catch (error) {
         pending.receiptFailed = true;
         try {
@@ -982,14 +1029,19 @@ async function receiveManualSubmission(message, sender) {
     || (pending.documentId && sender.documentId !== pending.documentId)
     || normalizeUrl(sender.url || sender.tab?.url) !== pending.url || (pending.closed && !pending.pauseWriting)) return { ok: false };
   pending.manualSubmission = true;
+  if (pending.retiredForReplacement && pending.delivery.successorDispatchPossible) pending.delivery.ambiguousRecovery = true;
   pending.stage = 'receipt';
   deliveryProgress(pending, { reason: 'manual-submission', observations: { manualPending: true } });
   return transact(async () => {
     if (pending.manualPauseAccounted) return { ok: true };
     const job = await getJob();
-    if (!job?.enabled || job.phase !== 'sending' || job.runId !== pending.runId
-      || job.tabId !== pending.tabId || job.url !== pending.url) return { ok: false };
+    if (!evidenceMatchesJob(pending, job)) return { ok: false };
     await setJob({ ...job, manualSubmissionPending: true });
+    if (pending.retiredForReplacement && job.runId !== pending.runId) {
+      for (const next of pendingPageResults.values()) {
+        if (next.runId === job.runId) next.resolve({ status: 'unknown', diagnosticProgress: { observations: { manualPending: true } } });
+      }
+    }
     return { ok: true };
   });
 }
@@ -1168,7 +1220,8 @@ async function checkRun(runId, sender, renew = true) {
     const job = await getJob();
     const now = Date.now();
     const pending = [...pendingPageResults.values()].find(item => item.runId === runId);
-    const allowed = Boolean(!revokedRuns.has(runId) && sender.id === chrome.runtime.id && job?.enabled && job.phase === 'sending' && job.runId === runId
+    const allowed = Boolean(!revokedRuns.has(runId) && pendingRunAllowed(pending)
+      && sender.id === chrome.runtime.id && job?.enabled && job.phase === 'sending' && job.runId === runId
       && (now < job.runDeadline || pending) && sender.tab?.id === job.tabId
       && sender.frameId === 0 && normalizeUrl(sender.url || sender.tab?.url) === job.url);
     if (!allowed) return { ok: true, allowed: false };
@@ -1181,7 +1234,7 @@ async function checkRun(runId, sender, renew = true) {
       if (pending) pending.leaseRenewals++;
       deliveryCounter(pending, 'leaseRenewals');
     }
-    return { ok: true, allowed: true, runDeadline: job.runDeadline };
+    return { ok: true, allowed: pendingRunAllowed(pending), runDeadline: job.runDeadline };
   });
 }
 async function waitRun(message, sender) {
@@ -1211,7 +1264,8 @@ async function commitRun(message, sender) {
   if (!(await checkRun(message.runId, sender)).allowed) return { ok: false, code: 'cancelled' };
   const permit = await transact(async () => {
     const job = await getJob();
-    if (!job?.enabled || job.phase !== 'sending' || job.runKind === 'reply-check'
+    const pending = [...pendingPageResults.values()].find(item => item.runId === message.runId);
+    if (!pendingRunAllowed(pending) || !job?.enabled || job.phase !== 'sending' || job.runKind === 'reply-check'
       || job.runId !== message.runId || Date.now() >= job.runDeadline
       || sender.tab?.id !== job.tabId || sender.frameId !== 0
       || normalizeUrl(sender.url || sender.tab?.url) !== job.url) return null;
@@ -1235,6 +1289,7 @@ async function commitRun(message, sender) {
       if (checked.allowed) permit.args.deadline = checked.runDeadline;
       return checked.allowed && permit.version === intentVersion;
     };
+    const pending = [...pendingPageResults.values()].find(item => item.runId === message.runId);
     let requireButton = false;
     let absentSendObserved = false;
     let grantRequest = null;
@@ -1291,7 +1346,7 @@ async function commitRun(message, sender) {
       return accepted;
     };
     const invoke = async phase => {
-      const pending = [...pendingPageResults.values()].find(item => item.runId === message.runId);
+      if (!pendingRunAllowed(pending)) return { supported: true, dispatched: false, code: 'cancelled' };
       if (pending) pending.ownsModelStages = true;
       if (pending) pending.stage = phase === 'observe' ? 'readiness' : phase === 'commit' ? 'authorization' : 'prepare';
       deliveryProgress(pending, { reason: phase === 'commit' ? 'grant-pending' : phase === 'observe' ? 'waiting-send' : 'starting' });
@@ -1303,7 +1358,13 @@ async function commitRun(message, sender) {
           if (!await allowed()) return { supported: true, dispatched: false, code: 'cancelled' };
         }
         if (pending?.manualSubmission) return { supported: true, dispatched: false, code: 'manual-submission', manualSubmission: true };
-        if (phase === 'commit' && pending) { pending.stage = 'dispatch'; pending.mainCommitPending = true; }
+        if (!pendingRunAllowed(pending)) return { supported: true, dispatched: false, code: 'cancelled' };
+        if (phase === 'commit' && pending) {
+          pending.stage = 'dispatch';
+          pending.mainCommitPending = true;
+          pending.mainCommitAdmitted = true;
+          if (pending.delivery?.retired.length) pending.delivery.successorDispatchPossible = true;
+        }
         let value;
         try {
           const frames = await chrome.scripting.executeScript({ target,
@@ -1355,8 +1416,12 @@ async function commitRun(message, sender) {
     if (prepared?.manualSubmission) return notDispatched(prepared);
     // Only an explicit, non-mutating unsupported view permits the legacy path.
     if (prepared?.supported === false && prepared.dispatched === false && prepared.code === 'unsupported-view') {
-      const pending = [...pendingPageResults.values()].find(item => item.runId === message.runId);
-      if (pending) { pending.stage = 'dispatch'; pending.ownsModelStages = false; }
+      if (!pendingRunAllowed(pending)) return { ok: false, code: 'cancelled' };
+      if (pending) {
+        pending.stage = 'dispatch';
+        pending.ownsModelStages = false;
+        if (pending.delivery?.retired.length) pending.delivery.successorDispatchPossible = true;
+      }
       return { ok: true, supported: false, dispatched: false };
     }
     if (prepared?.dispatched !== false) return { ok: false, code: 'unknown' };
@@ -1558,13 +1623,15 @@ async function runRound(force = false, expectedJobId = null, expectedIntentVersi
     if (runKind === 'send' && (!Number.isSafeInteger(ordinal) || ordinal < 1
         || !Number.isSafeInteger(promptDelivery?.ordinal) || promptDelivery.ordinal !== ordinal
         || !Number.isSafeInteger(promptDelivery?.issuedAt) || promptDelivery.issuedAt < 0)) throw fail(t('操作未完成，请重试。'));
+    const version = intentVersion;
     const snapshot = { ...job, promptDelivery, phase: 'sending', runKind, runId: token(), runDeadline: Date.now() + EXECUTION_MS, lastRunAt: Date.now(), statusText: t('正在后台检查目标页面…') };
     try { await setJob(snapshot); }
     catch (error) { revokedRuns.add(snapshot.runId); throw error; }
-    await updateBadge(snapshot); return { job: snapshot, claimed: true };
+    await updateBadge(snapshot); return { job: snapshot, claimed: true, version };
   });
   if (!claim.claimed) return { ok: true, job: claim.job };
   let snapshot = claim.job;
+  const delivery = { version: claim.version, runId: snapshot.runId, retired: [] };
   const traceEpoch = diagnosticEpoch;
   const trace = snapshot.runKind === 'send' ? await newDeliveryTrace() : null;
   let result;
@@ -1572,7 +1639,7 @@ async function runRound(force = false, expectedJobId = null, expectedIntentVersi
   try {
     const resolved = await resolveTarget(snapshot);
     if (!resolved.tab) result = resolved;
-    else if (!await runStillCurrent(snapshot)) result = { status: 'cancelled' };
+    else if (!await runStillCurrent(snapshot) || !deliveryIntentCurrent(delivery) || hasDeliveryEvidence(delivery)) result = { status: 'cancelled' };
     else if (resolved.tab.frozen || resolved.tab.discarded) {
       try {
         await chrome.tabs.reload(resolved.tab.id);
@@ -1587,7 +1654,7 @@ async function runRound(force = false, expectedJobId = null, expectedIntentVersi
       const changed = result.assistantToken ? result.assistantToken !== snapshot.assistantToken : result.assistantCount > snapshot.assistantCount;
       if (result.status === 'ready') result = changed ? { status: 'reply-complete' } : { status: 'busy', message: t('等待新的 Agent 回复完成。') };
     } else {
-      result = await executePage({ mode: 'send', expectedUrl: snapshot.url, prompt: currentPrompt(snapshot), promptDelivery: snapshot.promptDelivery, runId: snapshot.runId, runDeadline: snapshot.runDeadline, stopMarkers: snapshot.stopMarkers ?? [], waitForIdle: snapshot.waitForIdle ?? false, extensionPriority: true, extensionClock: true, modelCommit: true, unlimitedReadiness: true, persistentDelivery: true, sendMethod: snapshot.sendMethod ?? 'auto', targetIdentity: snapshot.targetIdentity }, snapshot.tabId, snapshot.runDeadline, trace, traceEpoch);
+      result = await executePage({ mode: 'send', expectedUrl: snapshot.url, prompt: currentPrompt(snapshot), promptDelivery: snapshot.promptDelivery, runId: snapshot.runId, runDeadline: snapshot.runDeadline, stopMarkers: snapshot.stopMarkers ?? [], waitForIdle: snapshot.waitForIdle ?? false, extensionPriority: true, extensionClock: true, modelCommit: true, unlimitedReadiness: true, persistentDelivery: true, sendMethod: snapshot.sendMethod ?? 'auto', targetIdentity: snapshot.targetIdentity }, snapshot.tabId, snapshot.runDeadline, trace, traceEpoch, delivery);
     }
   } catch { result = snapshot.runKind === 'reply-check' ? { status: 'error', message: t('回复检查暂不可用，继续等待新回复。') } : { status: 'unknown', message: t('后台页面操作未确认。'), diagnosticCode: 'execution-exception' }; }
   if (snapshot.runKind !== 'send' || result?.retryable !== true || !await runStillCurrent(snapshot)) break;
@@ -1596,13 +1663,31 @@ async function runRound(force = false, expectedJobId = null, expectedIntentVersi
   await new Promise(resolve => setTimeout(resolve, 1000));
   const renewed = await transact(async () => {
     const current = await getJob();
-    if (!current?.enabled || current.phase !== 'sending' || current.id !== snapshot.id || current.runId !== snapshot.runId) return null;
+    if (!deliveryIntentCurrent(delivery) || hasDeliveryEvidence(delivery) || !current?.enabled || current.phase !== 'sending'
+      || current.manualSubmissionPending || current.id !== snapshot.id || current.runId !== snapshot.runId
+      || current.url !== snapshot.url || current.tabId !== snapshot.tabId) return null;
     const next = { ...current, runId: token(), editorCommitRunId: null, runDeadline: Date.now() + EXECUTION_MS,
       statusText: t('仍在等待目标页面或发送回执；无固定等待时限，可随时暂停。') };
-    await setJob(next);await updateBadge(next);return next;
+    // Receipt/manual handlers record evidence before entering this queue. Link
+    // their accounting to the successor before storage can yield to them.
+    delivery.runId = next.runId;
+    try { await setJob(next); await updateBadge(next); }
+    catch {
+      revokedRuns.add(next.runId);
+      revokedRuns.add(current.runId);
+      const observed = await getJob().catch(() => null);
+      const written = observed?.runId === next.runId ? next : current;
+      delivery.runId = written.runId;
+      return { job: written, admitted: false };
+    }
+    return { job: next, admitted: deliveryIntentCurrent(delivery) && !hasDeliveryEvidence(delivery) };
   });
-  if (!renewed) break;
-  snapshot = renewed;
+  if (renewed) snapshot = renewed.job;
+  if (!renewed?.admitted) {
+    result = { status: 'unknown', diagnosticCode: 'commit-not-dispatched',
+      manualSubmission: delivery.retired.some(item => item.manualSubmission) };
+    break;
+  }
   }
   if (trace) void persistDeliveryTrace(updateDeliveryTrace(trace, {
     state: ['sent', 'manual-sent', 'cancelled', 'unknown', 'blocked', 'error'].includes(result?.status) ? result.status : 'blocked',
@@ -1614,7 +1699,11 @@ async function runRound(force = false, expectedJobId = null, expectedIntentVersi
   try { return await finishRound(snapshot, result); }
   finally {
     for (const [key, pending] of pendingPageResults) {
-      if (pending.runId === snapshot.runId) pendingPageResults.delete(key);
+      if (pending.runId === snapshot.runId || pending.delivery === delivery && pending.retiredForReplacement) {
+        clearTimeout(pending.receiptRetryTimer);
+        clearTimeout(pending.traceTimer);
+        pendingPageResults.delete(key);
+      }
     }
   }
 }
