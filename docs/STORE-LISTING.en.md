@@ -1,8 +1,10 @@
 # Chrome Web Store Listing - English
 
-Canonical English listing source for the unreleased Agent Continue **3.0.22** candidate. The 3.0.20 Web Store package was submitted and is Pending review in the Developer Console. The 3.0.22 candidate has not been installed, published or submitted. This file does not change a saved Store listing, submit a package, publish a release or establish approval or installation. Actual availability and submission state require separate platform receipts. Historical v2.2.1 is a separate scheduler-only release; do not replace its assets or describe it as Windows-enabled. The repository's [Windows review notes](https://github.com/1235357/agent-continue/blob/main/docs/STORE-LISTING.windows-candidate.en.md) retain the disclosure and submission checks.
+English listing source for Agent Continue **3.0.22**. New item `jgjoeiidbnpmgbbhhmphicehbcdgbhga` was submitted through the in-app browser on 2026-11-16 (America/Chicago). The platform returned "Your extension was submitted for review" and Pending review. Publish automatically after review was checked. This is not approval or public availability. The original published item `jpioilmpbolfokedaefmbfbjeaahfdkl` was not modified; a new item is not an update for its existing users. Historical submission and runtime observations remain scoped to their exact artifacts.
 
-After final release and disclosure gates are closed, use the entire **Description** section, including the developer/support block, for the new listing draft. The copy uses plain-text URLs rather than relying on Markdown rendering. Do not withdraw an existing review merely to apply this source copy.
+The copy uses plain-text URLs rather than relying on Markdown rendering. Do not withdraw an existing review merely to apply source copy. Detailed technical notes below are not consumer-facing Store description text and do not certify the current artifact.
+
+Changing this file alone does not change a saved Store listing, submit a package, publish a release or establish approval. Actual availability and submission state require separate platform receipts. Historical v2.2.1 is a separate scheduler-only release and does not include Windows control.
 
 ## Name
 
@@ -14,19 +16,19 @@ Schedule your own prompts in ChatGPT or Your dot, with local queues, pause contr
 
 ## Description
 
-Schedule your own prompts in a chosen ChatGPT or Your dot conversation. Repeat a prompt, work through a queue, set an interval and pause whenever needed. Type a prompt or import local document text. Scheduled sends replace unsent text and remove pending attachments before sending the configured prompt. The interface defaults to English, with Simplified Chinese in Settings; your content is not translated.
+Schedule your own prompts in a chosen ChatGPT or Your dot conversation. Repeat a prompt, work through a queue, set an interval and pause whenever needed. Type a prompt or import local document text. Scheduled sends replace unsent text and remove pending attachments before sending the configured prompt. The interface defaults to English, with Simplified Chinese available in Settings; your content is not translated.
 
-The computer and browser must stay running, with the target conversation open and signed in. While running, the scheduler can continue preparation and checks in the same bound conversation after page redraws, composer remounts or delayed send controls; it automatically retries sending only when a submission is explicitly known not to have been dispatched. Every terminal unknown pauses the task, whether or not a dispatch was recorded. Check the conversation before Resume: it may resend and cause duplicates. Manual Pause overrides retries and recovery, but cannot retract a dispatched submission. Sleep, background throttling or website changes can delay or prevent sending. Delivery and server acceptance are not guaranteed. The extension does not increase quotas or guarantee task completion.
+Delivery prioritizes continuing submission when the composer changes. The prepared message may use changed or website-normalized composer text. Confirmed sends is a local heuristic based on new page-message markers and approximate text matching, including partial matches; it does not verify every original character or server acceptance.
+
+The computer and browser must stay running, with the target conversation open and signed in. The scheduler checks readiness in the background and can continue preparation after page redraws or delayed send controls. Manual Pause overrides scheduled actions, but cannot retract an already dispatched message. Website changes, sleeping pages, account limits or connectivity can delay or prevent delivery. Delivery and server acceptance are not guaranteed. This extension does not increase ChatGPT quotas or guarantee task completion.
 
 Optional Windows control
 
-Connect a separate local runtime to let an authorized conversation read and write files, run PowerShell commands and manage processes. Setup requires your configured OpenAI app and tunnel, a local runtime key, and the relevant browser, Windows and conversation approvals. Current-account tools use your existing privileges; administrator access requires Windows elevation. This is not a sandbox: authorized tools can affect the selected account's files and system. The extension alone does not install or authorize these tools.
+A separate local runtime must be installed before an authorized conversation can read and write files, run PowerShell commands and manage processes. Setup requires your configured OpenAI app and tunnel, a local runtime key and the relevant browser, Windows and conversation approvals. Current-account tools use that account's privileges; administrator access requires Windows elevation. This is account-wide access, not a sandbox. Installing the extension alone does not enable these tools.
 
-Windows tool arguments and results travel through OpenAI's official tunnel and can include sensitive content. Prompts submitted by the scheduler also go to OpenAI. There is no developer-operated data collection backend. Local settings and activity records remain on your device, but local storage is not encrypted. Runtime tool history can retain commands, paths and results. Optional diagnostic exports include activity metadata; review them before sharing.
+Submitted prompts and authorized Windows tool arguments and results travel to OpenAI and may contain sensitive content. There is no developer-operated data collection backend. Local settings and diagnostic records remain on your device, but local storage is not encrypted. Review exported logs before sharing.
 
-Scheduler Pause and device Pause are separate. Use the administrator connection's own Pause or Revoke controls when that runtime is enabled, and verify the resulting status. Reopening the browser must not override manual Pause or Revoke. Pause or Revoke may not stop detached programs. Revoke OpenAI conversation access and runtime keys separately. Stopping access cannot undo earlier actions or retract transmitted data. Removing the extension does not remove a separately installed runtime or its credentials and history.
-
-Read the setup and privacy information before enabling Windows control:
+Scheduler Pause and Windows connection Pause are separate controls. Pause or Revoke cannot undo earlier actions and may not stop detached programs. Revoke OpenAI conversation access and runtime keys separately. Removing the extension does not remove a separately installed runtime, its credentials or history. Read the setup and privacy information before enabling Windows control:
 https://github.com/1235357/agent-continue
 https://github.com/1235357/agent-continue/blob/main/PRIVACY.md
 
@@ -34,11 +36,12 @@ Free and open source under the MIT license.
 
 Developer: Zhentong Ye
 Email: zhentongye2028@u.northwestern.edu
+GitHub profile: https://github.com/1235357
 Open-source project: https://github.com/1235357/agent-continue
 Bug reports and suggestions: https://github.com/1235357/agent-continue/issues/new/choose
 Author's LinkedIn: https://www.linkedin.com/in/tony-zhentong-ye/
 
-For a bug report, include the version, reproduction steps and expected versus actual behavior. Sanitized logs are optional. GitHub issues are public: never attach keys, private conversations or raw tool history. Support links do not upload data automatically.
+Please include your extension version, reproduction steps, and expected versus actual behavior when reporting a bug. Sanitized diagnostic logs are optional. GitHub issues are public: never attach keys, private conversations or raw tool history. Support links do not upload data automatically.
 
 Independent personal project; not an official OpenAI product. The university email does not imply university endorsement or support.
 
@@ -60,7 +63,7 @@ The candidate removes application-set prompt and aggregate queue-text character 
 
 The interface defaults to English and offers a Simplified Chinese language switch. Your language preference is stored locally; your prompts and custom content are not translated. The Developer & support page shows the developer contacts and installed extension version and offers the same language choices.
 
-Scheduled sends and Send once now replace unsent text and remove pending attachments before sending the configured prompt, including text or attachments added while preparing the send. Detachment removes the pending website selection, not original local files or data already uploaded to the website; unsent drafts and pending attachment selections are not preserved. While running, the scheduler can continue preparation and readiness checks in the same bound conversation after a page redraw, composer remount or temporarily unavailable send control. It automatically retries sending only when a submission is explicitly known not to have been dispatched. It never dispatches in another conversation or selects a substitute target; dispatch waits when the original conversation cannot be verified. Manual Pause takes precedence over retries and recovery, and current background authorization remains required. Each attempt uses one submission mechanism. A matching new user-message marker is required for local confirmation; clearing the composer alone is not success. Every terminal unknown pauses the task, whether or not a dispatch was recorded; missing confirmation is not proof of rejection. Inspect the conversation before Resume, which may resend and cause duplicates. Delivery, server acceptance and exactly-once execution are not guaranteed. Send once now submits a real message, and Pause cannot retract an action already dispatched.
+Scheduled sends and Send once now initially replace unsent text and remove pending attachments to prepare the configured prompt. Under persistent delivery, changed or website-normalized prepared composer text may be adopted and submitted instead of triggering another refill. This intentionally prioritizes continued submission over byte-for-byte fidelity; the saved prompt is not rewritten by that adoption. Detachment removes the pending website selection, not original local files or data already uploaded to the website; unsent drafts and pending attachment selections are not preserved. Preparation and readiness checks can continue in the same bound conversation after redraws or delayed controls, without a fixed overall readiness deadline. The scheduler never selects a substitute conversation; current identity and authorization checks and manual Pause remain required. Each attempt uses one submission mechanism. New page-message markers are matched approximately, including partial text matches, for a local confirmation count; an empty composer alone is not confirmation. That count does not prove the full original prompt or server acceptance. Every terminal unknown pauses the task; missing confirmation is not proof of rejection. Inspect the conversation before Resume, which may resend and cause duplicates. Delivery and exactly-once execution are not guaranteed. Send once now submits a real message, and Pause cannot retract an action already dispatched.
 
 The computer and browser must remain running, with the target tab open and signed in. Background throttling, sleeping pages, and website changes may delay or prevent sending. Optional idle-sleep prevention does not override manual sleep. The extension does not increase account quotas, extend model context, or guarantee completion of an agent task.
 
