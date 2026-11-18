@@ -6,7 +6,7 @@ Schedule your own prompts in one existing ChatGPT or Your dot conversation. The 
 
 **3.0.25 Windows-enabled release candidate. Manifest V3. Free and MIT-licensed.**
 
-[Chrome Web Store](https://chromewebstore.google.com/detail/agent-continue-background/jgjoeiidbnpmgbbhhmphicehbcdgbhga) · [GitHub Releases](https://github.com/1235357/agent-continue/releases) · [Source](https://github.com/1235357/agent-continue) · [Changelog](https://github.com/1235357/agent-continue/blob/main/CHANGELOG.md) · [Privacy](https://github.com/1235357/agent-continue/blob/main/PRIVACY.md)
+[Chrome Web Store](https://chromewebstore.google.com/detail/agent-continue-background/jgjoeiidbnpmgbbhhmphicehbcdgbhga) · [GitHub Releases](https://github.com/1235357/agent-continue/releases) · [Source](https://github.com/1235357/agent-continue) · [Changelog](https://github.com/1235357/agent-continue/blob/main/CHANGELOG.md) · [Privacy](https://github.com/1235357/agent-continue/blob/main/PRIVACY.md) · [Technical Architecture & Retrospective](https://github.com/1235357/agent-continue/blob/main/docs/TECHNICAL-RETROSPECTIVE-AND-ARCHITECTURE.md)
 
 The separately released v2.2.1 remains scheduler-only, including its acknowledgement fixes, developer support and schema 3 diagnostics; its published assets are preserved. Source version, GitHub release availability, npm publication, Chrome Web Store review and your installed version are separate states. Consult the respective listing and your browser's extension details rather than treating this README as a publication or installation receipt.
 
