@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.0.25] - 2026-11-18
+
+- Fix severe scroll and mouse-hover lag on long Your dot and ChatGPT conversation pages (`content.js`, `adapter.js`):
+  - Scope approval/authorization DOM scans to open modal dialogs (`[role="dialog"]`, `[role="alertdialog"]`, `[aria-modal="true"]`, `dialog[open]`) and the latest 2 assistant message turns rather than scanning every historical turn in `document`.
+  - Add $O(1)$ `childElementCount <= 4` and `textContent.length <= 80` fast-rejection filters before running `extractOptionText()`, `closest()`, `getComputedStyle()`, or `getBoundingClientRect()`, reducing layout/style checks from tens of thousands of nodes per scan to 0–5 matched option nodes (`< 2ms` scan time on 20,000+ node pages).
+  - Make `content.js` scroll-aware (`scroll` / `wheel` passive listeners defer background scans during active scrolling), filter `MutationObserver` callbacks to element-addition mutations only, and run background checks inside `requestIdleCallback`.
+
 ## [3.0.24] - 2026-11-18
 
 - Expand the automatic exception and confirmation engine (`adapter.js`, `content.js`) beyond basic `Allow` / `Deny` to handle authorization, OAuth login, connector linking, and action consent prompts (`Authorize`, `Confirm`, `Approve`, `Accept`, `Agree and continue`, `Continue`, `Grant access`, `Allow access`, `Sign in`, `Log in`, `Connect`, `Connect account`, and Chinese equivalents `授权`, `确认授权`, `同意并登录`, `同意并继续`, `连接账号`, `去授权`), including scoped single-button authorization/login cards inside assistant turns and modal dialogs (`[role="dialog"]`).

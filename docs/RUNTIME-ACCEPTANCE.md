@@ -9,6 +9,10 @@ does not include unversioned source fixes on main or prove current-build
 Windows tool/Pause/Revoke/reopen acceptance. See the current checklist in
 [Windows recovery checkpoint](WINDOWS-RECOVERY-20261117.md).
 
+## Candidate 3.0.25 (2026-11-18)
+
+Eliminates main-thread DOM scan lag on long Dot/ChatGPT conversations via turn-scoped scanning, $O(1)$ fast-rejection filters before layout/style checks, scroll-aware deferral, and `requestIdleCallback` scheduling.
+
 ## Candidate 3.0.24 (2026-11-18)
 
 Expands pre-send tool/permission/authorization/OAuth-login confirmation handling (`auto-allowed` / `auto-allowed-prompt`), spinner/re-render deduplication, and sequential cyclic queue UX for Your dot and ChatGPT conversations.

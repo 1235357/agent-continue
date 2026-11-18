@@ -16,6 +16,10 @@ ProseMirror suite passed in two same-source partitions, 66/66 and 135/135;
 editor-commit browser passed 14/14. No installed acceptance is established.
 See `docs/WINDOWS-RECOVERY-20261117.md` for exact logs and scope.
 
+## Version 3.0.25 — Release Candidate, November 18, 2026
+
+Eliminates main-thread DOM scan lag on long Dot/ChatGPT conversations via turn-scoped scanning, $O(1)$ fast-rejection filters before layout/style checks, scroll-aware deferral, and `requestIdleCallback` scheduling.
+
 ## Version 3.0.24 — Release Candidate, November 18, 2026
 
 Expands pre-send tool/permission/authorization/OAuth-login confirmation handling (`auto-allowed` / `auto-allowed-prompt`), spinner/re-render deduplication, and sequential cyclic queue UX for Your dot and ChatGPT conversations.

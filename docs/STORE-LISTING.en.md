@@ -1,6 +1,6 @@
 # Chrome Web Store Listing - English
 
-English listing source for Agent Continue **3.0.24**. New item `jgjoeiidbnpmgbbhhmphicehbcdgbhga` was submitted through the in-app browser on 2026-11-16 (America/Chicago). The platform returned "Your extension was submitted for review" and Pending review. Publish automatically after review was checked. This is not approval or public availability. The original published item `jpioilmpbolfokedaefmbfbjeaahfdkl` was not modified; a new item is not an update for its existing users. Historical submission and runtime observations remain scoped to their exact artifacts.
+English listing source for Agent Continue **3.0.25**. New item `jgjoeiidbnpmgbbhhmphicehbcdgbhga` was submitted through the in-app browser on 2026-11-16 (America/Chicago). The platform returned "Your extension was submitted for review" and Pending review. Publish automatically after review was checked. This is not approval or public availability. The original published item `jpioilmpbolfokedaefmbfbjeaahfdkl` was not modified; a new item is not an update for its existing users. Historical submission and runtime observations remain scoped to their exact artifacts.
 
 The copy uses plain-text URLs rather than relying on Markdown rendering. Do not withdraw an existing review merely to apply source copy. Detailed technical notes below are not consumer-facing Store description text and do not certify the current artifact.
 

@@ -496,6 +496,33 @@ test('Auto-Allow Exception Engine & Cyclic Queue: 3 consecutive A Allow / B Deny
     assert.equal(currentPrompt({ ...cyclicConfig, queueIndex: 2 }), 'Prompt 3: Deploy & verify');
     assert.equal(currentPrompt({ ...cyclicConfig, queueIndex: 3 }), 'Prompt 1: Audit status');
 
+    // Performance benchmark: 50 historical turns with 20,000+ nested div/span nodes must scan in < 50ms (zero scroll lag)
+    await page.evaluate(() => {
+      const conv = document.getElementById('conversation');
+      const frag = document.createDocumentFragment();
+      for (let t = 0; t < 50; t++) {
+        const row = document.createElement('article');
+        row.className = t % 2 === 0 ? 'message-row self' : 'message-row';
+        row.setAttribute('data-message-id', `acct~dot~Msg~hist${t}`);
+        const body = document.createElement('div');
+        body.className = 'message-body';
+        body.setAttribute('data-message-id', `acct~dot~Msg~hist${t}`);
+        for (let b = 0; b < 80; b++) {
+          const wrap = document.createElement('div');
+          wrap.innerHTML = '<div><span>Historical discussion block with nested spans and prose content for performance benchmarking.</span><span>More nested text</span></div>';
+          body.appendChild(wrap);
+        }
+        row.appendChild(body);
+        frag.appendChild(row);
+      }
+      conv.insertBefore(frag, conv.firstChild);
+    });
+
+    const t0 = performance.now();
+    await page.evaluate(pageAction, { mode: 'check', expectedUrl: 'https://chatgpt.com/dots/home', prompt: '', sendMethod: 'auto', runId: null, stopMarkers: [] });
+    const scanMs = performance.now() - t0;
+    assert.ok(scanMs < 100, `Expected sub-100ms scan on 20,000+ DOM nodes, got ${scanMs.toFixed(2)}ms`);
+
     await context.close();
   } finally {
     await browser.close();

@@ -533,21 +533,36 @@ export async function pageAction(args) {
     const selector = 'button, [role="button"], [role="option"], [role="radio"], [role="menuitem"], label, li, a, div, span';
     const excludedSelector = '[data-message-author-role="user"], article.message-row.self, article.self, pre, code, nav, header, aside, footer, [role="navigation"], [role="banner"], [data-testid*="sidebar"]';
     const rawMatched = [];
+    const seenVisited = new Set();
     const scanRoot = root => {
       let nodes = [];
-      try { nodes = [...root.querySelectorAll(selector)]; } catch { return; }
-      for (const el of nodes) {
+      try { nodes = root.querySelectorAll(selector); } catch { return; }
+      for (let i = 0; i < nodes.length; i++) {
+        const el = nodes[i];
+        if (seenVisited.has(el)) continue;
+        seenVisited.add(el);
         if (el.shadowRoot) scanRoot(el.shadowRoot);
+        if (el.childElementCount > 4) continue;
+        const rawTC = el.textContent;
+        if (!rawTC || rawTC.length > 80) continue;
+        const info = classifyOptionText(extractOptionText(el));
+        if (!info) continue;
         if (editor && (el === editor || editor.contains(el))) continue;
         if (composer && (el === composer || composer.contains(el))) continue;
         if (el.closest?.(excludedSelector)) continue;
         if (el.tagName === 'A' && el.hasAttribute('href') && !el.matches?.('[role="button"]') && !/oauth|authorize|connect|login|signin|auth/i.test(el.getAttribute('href') || '')) continue;
         if (!visible(el)) continue;
-        const info = classifyOptionText(extractOptionText(el));
-        if (info) rawMatched.push({ el, info });
+        rawMatched.push({ el, info });
       }
     };
-    scanRoot(document);
+    const dialogs = [...document.querySelectorAll('[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]')];
+    const recentAssistantTurns = [...document.querySelectorAll('article.message-row:not(.self), [data-message-author-role="assistant"], [data-chatgpt-search-unit-key$=":assistant"]')].slice(-2);
+    const roots = [...dialogs, ...recentAssistantTurns];
+    if (roots.length > 0) {
+      for (const r of roots) scanRoot(r);
+    } else {
+      scanRoot(document);
+    }
     if (!rawMatched.length) return null;
 
     // Collapse nested parent-child chains that represent a single option pill/button.

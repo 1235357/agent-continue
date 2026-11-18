@@ -1,6 +1,6 @@
 // Agent Continue Content Script
 // Keeps the chat tab active and protected against background tab discarding/freezing in Chrome / Edge,
-// and observes blocking tool/permission/authorization/login confirmation prompts in real time.
+// and observes blocking tool/permission/authorization/login confirmation prompts with sub-millisecond overhead.
 
 (() => {
   const runtimeId = typeof chrome !== 'undefined' && chrome.runtime?.id ? chrome.runtime.id : 'default';
@@ -29,9 +29,15 @@
 
   connectKeepalive();
 
-  // Real-time observer for tool/permission/authorization/login confirmation prompts.
   let approvalScanScheduled = false;
   let lastApprovalNotifyAt = 0;
+  let lastUserScrollAt = 0;
+
+  try {
+    const onScrollOrWheel = () => { lastUserScrollAt = Date.now(); };
+    window.addEventListener('scroll', onScrollOrWheel, { passive: true, capture: true });
+    window.addEventListener('wheel', onScrollOrWheel, { passive: true, capture: true });
+  } catch {}
 
   function hasUnansweredApprovalPrompt() {
     try {
@@ -115,18 +121,35 @@
       const selector = 'button, [role="button"], [role="option"], [role="radio"], [role="menuitem"], label, li, a, div, span';
       const excludedSelector = '#prompt-textarea, .ProseMirror, [contenteditable="true"], [data-message-author-role="user"], article.message-row.self, article.self, pre, code, nav, header, aside, footer, [role="navigation"], [role="banner"], [data-testid*="sidebar"]';
       const rawMatched = [];
+      const seenVisited = new Set();
       const scan = root => {
         let nodes = [];
-        try { nodes = [...root.querySelectorAll(selector)]; } catch { return; }
-        for (const el of nodes) {
+        try { nodes = root.querySelectorAll(selector); } catch { return; }
+        for (let i = 0; i < nodes.length; i++) {
+          const el = nodes[i];
+          if (seenVisited.has(el)) continue;
+          seenVisited.add(el);
           if (el.shadowRoot) scan(el.shadowRoot);
-          if (!visible(el) || el.closest?.(excludedSelector)) continue;
-          if (el.tagName === 'A' && el.hasAttribute('href') && !el.matches?.('[role="button"]') && !/oauth|authorize|connect|login|signin|auth/i.test(el.getAttribute('href') || '')) continue;
+          // O(1) fast-reject BEFORE any recursion, selector walk, or getComputedStyle call:
+          if (el.childElementCount > 4) continue;
+          const rawTC = el.textContent;
+          if (!rawTC || rawTC.length > 80) continue;
           const info = classify(extractText(el));
-          if (info) rawMatched.push({ el, info });
+          if (!info) continue;
+          if (el.closest?.(excludedSelector)) continue;
+          if (el.tagName === 'A' && el.hasAttribute('href') && !el.matches?.('[role="button"]') && !/oauth|authorize|connect|login|signin|auth/i.test(el.getAttribute('href') || '')) continue;
+          if (!visible(el)) continue;
+          rawMatched.push({ el, info });
         }
       };
-      scan(document);
+      const dialogs = [...document.querySelectorAll('[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]')];
+      const recentAssistantTurns = [...document.querySelectorAll('article.message-row:not(.self), [data-message-author-role="assistant"], [data-chatgpt-search-unit-key$=":assistant"]')].slice(-2);
+      const roots = [...dialogs, ...recentAssistantTurns];
+      if (roots.length > 0) {
+        for (const r of roots) scan(r);
+      } else {
+        scan(document);
+      }
       if (!rawMatched.length) return false;
 
       const leafItems = rawMatched.filter(item =>
@@ -275,7 +298,11 @@
     }
   }
 
-  function scheduleApprovalCheck(delayMs = 200, force = false) {
+  const runIdle = typeof requestIdleCallback === 'function'
+    ? cb => requestIdleCallback(cb, { timeout: 400 })
+    : cb => setTimeout(cb, 16);
+
+  function scheduleApprovalCheck(delayMs = 500, force = false) {
     if (approvalScanScheduled && delayMs > 0 && !force) return;
     if (typeof chrome === 'undefined' || !chrome.runtime?.id) return;
     approvalScanScheduled = true;
@@ -283,20 +310,27 @@
       approvalScanScheduled = false;
       if (typeof chrome === 'undefined' || !chrome.runtime?.id) return;
       const now = Date.now();
-      if (!force && delayMs > 0 && now - lastApprovalNotifyAt < 1200) return;
-      if (hasUnansweredApprovalPrompt()) {
-        lastApprovalNotifyAt = now;
-        try {
-          Promise.resolve(chrome.runtime.sendMessage({ type: 'APPROVAL_PROMPT_OBSERVED' }))
-            .then(res => {
-              if (res?.autoAllowed) {
-                scheduleApprovalCheck(900, true);
-                scheduleApprovalCheck(2500, true);
-              }
-            })
-            .catch(() => {});
-        } catch {}
+      if (!force && now - lastUserScrollAt < 450) {
+        scheduleApprovalCheck(450, false);
+        return;
       }
+      if (!force && delayMs > 0 && now - lastApprovalNotifyAt < 1200) return;
+      runIdle(() => {
+        if (typeof chrome === 'undefined' || !chrome.runtime?.id) return;
+        if (hasUnansweredApprovalPrompt()) {
+          lastApprovalNotifyAt = Date.now();
+          try {
+            Promise.resolve(chrome.runtime.sendMessage({ type: 'APPROVAL_PROMPT_OBSERVED' }))
+              .then(res => {
+                if (res?.autoAllowed) {
+                  scheduleApprovalCheck(900, true);
+                  scheduleApprovalCheck(2500, true);
+                }
+              })
+              .catch(() => {});
+          } catch {}
+        }
+      });
     }, delayMs);
   }
 
@@ -311,7 +345,17 @@
   } catch {}
 
   if (typeof MutationObserver !== 'undefined') {
-    const observer = new MutationObserver(() => scheduleApprovalCheck());
+    const observer = new MutationObserver(mutations => {
+      for (let i = 0; i < mutations.length; i++) {
+        const added = mutations[i].addedNodes;
+        for (let j = 0; j < added.length; j++) {
+          if (added[j].nodeType === 1) {
+            scheduleApprovalCheck(500, false);
+            return;
+          }
+        }
+      }
+    });
     const attachObserver = () => {
       if (!document.body) {
         setTimeout(attachObserver, 200);
@@ -322,5 +366,5 @@
     };
     attachObserver();
   }
-  setInterval(() => scheduleApprovalCheck(0), 2500);
+  setInterval(() => scheduleApprovalCheck(0, false), 4000);
 })();
