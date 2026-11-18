@@ -189,4 +189,7 @@ export default {
   '已发送 Ctrl+Enter，但未确认新消息；本周期不追加点击或重复按键。': 'Ctrl+Enter was sent, but no new message was confirmed; no extra clicks or repeated keys this cycle.',
   '已点击发送，但未确认新消息；本周期不立即重试。': 'Send was clicked, but no new message was confirmed; no immediate retry this cycle.',
   '页面操作未完成，未记录页面内容。': 'The page operation did not complete; no page content was logged.',
+  '检测到权限确认选项，已自动点击 Allow 并继续推进。': 'Detected a permission confirmation prompt and automatically clicked Allow to continue.',
+  '检测到权限确认选项，已自动点击 Allow；一分钟后继续检查。': 'Detected a permission confirmation prompt and automatically clicked Allow; checking again in one minute.',
+  '已自动点击 Allow，正在等待 Agent 完成授权操作。': 'Automatically clicked Allow; waiting for the Agent to finish the authorized action.',
 };

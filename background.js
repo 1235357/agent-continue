@@ -4,7 +4,7 @@ import runtimeCatalog from './i18n-runtime.js';
 const t = createTranslator(runtimeCatalog);
 
 import { DEFAULT_CONFIG, DELIVERY_BEHAVIOR_VERSION, normalizeUrl, validateTarget, readConfig, currentPrompt, inQuietHours } from './config.js';
-import { pageAction, pageInvocationState, translatePageResult } from './adapter.js';
+import { pageAction, pageInvocationState, translatePageResult, mainWorldAutoAllowClick } from './adapter.js';
 import { editorCommit } from './editor-commit.js';
 import { createDeliveryTrace, updateDeliveryTrace, sanitizeDeliveryDiagnostics } from './delivery-diagnostics.js';
 import { BUNDLED_PROMPT } from './preset.js';
@@ -400,7 +400,7 @@ async function logEvent(event, message, diagnostic = null, epoch = activityEpoch
   const stored = result.value.logs;
   const logs = !activityDiscardPrevious && Array.isArray(stored) ? stored.filter(entry => entry && typeof entry === 'object' && !Array.isArray(entry)
     && Number.isFinite(entry.at) && typeof entry.event === 'string' && entry.event.length > 0 && typeof entry.message === 'string') : [];
-  const codes = ['adapter-result', 'execution-exception', 'execution-timeout', 'no-valid-result', 'existing-draft', 'composer-changed', 'composer-unstable', 'composer-slow-write', 'chunk-unconfirmed', 'chunk-attachment', 'chunk-mismatch', 'timing-probe', 'send-not-ready', 'commit-not-dispatched', 'paste-unconfirmed', 'paste-attachment-unconfirmed', 'receipt-ambiguous', 'receipt-mismatch', 'document-replaced', 'unconfirmed-retry'];
+  const codes = ['adapter-result', 'execution-exception', 'execution-timeout', 'no-valid-result', 'existing-draft', 'composer-changed', 'composer-unstable', 'composer-slow-write', 'chunk-unconfirmed', 'chunk-attachment', 'chunk-mismatch', 'timing-probe', 'send-not-ready', 'commit-not-dispatched', 'paste-unconfirmed', 'paste-attachment-unconfirmed', 'receipt-ambiguous', 'receipt-mismatch', 'document-replaced', 'unconfirmed-retry', 'auto-allowed-prompt'];
   const detail = diagnostic && codes.includes(diagnostic.code)
     ? { diagnostic: { code: diagnostic.code, ...(Number.isFinite(diagnostic.durationMs)
       ? { durationMs: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, diagnostic.durationMs)) } : {}) } } : {};
@@ -892,7 +892,7 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS, tr
       const counters = value.diagnosticProgress?.counters;
       const hasManualIntent = manualSubmission || counters?.manualIntents > 0;
       const knownPreSubmitStop = value.retryable !== true && value.status === 'blocked'
-        && ['composer-slow-write', 'chunk-unconfirmed', 'chunk-attachment', 'chunk-mismatch'].includes(value.diagnosticCode);
+        && ['composer-slow-write', 'chunk-unconfirmed', 'chunk-attachment', 'chunk-mismatch'].includes(value.diagnosticCode) || (value.retryable !== true && value.status === 'busy' && value.diagnosticCode === 'auto-allowed-prompt');
       if (hasManualIntent || pending?.confirmedReceipt || pending?.dispatched === true || pending?.commitUncertain === true || counters?.dispatchAttempts !== 0 || counters?.manualIntents !== 0
           || (value.retryable !== true && !knownPreSubmitStop)) {
         return { status: 'unknown', message: t('页面未返回可确认的结果。'), diagnosticCode: 'adapter-result', executionDiagnostic: executionDiagnostic(), manualSubmission: hasManualIntent,
@@ -901,7 +901,7 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS, tr
     }
     // Return only bounded adapter status fields.
     const diagnosticCode = (value.status === 'draft' && value.diagnosticCode === 'existing-draft')
-      || (value.status === 'busy' && value.diagnosticCode === 'send-not-ready')
+      || (value.status === 'busy' && ['send-not-ready', 'auto-allowed-prompt'].includes(value.diagnosticCode))
       || (value.status === 'blocked' && ['commit-not-dispatched', 'composer-unstable', 'composer-slow-write', 'chunk-unconfirmed', 'chunk-attachment', 'chunk-mismatch'].includes(value.diagnosticCode))
       || (value.status === 'unknown' && ['paste-unconfirmed', 'paste-attachment-unconfirmed', 'receipt-ambiguous', 'receipt-mismatch', 'document-replaced'].includes(value.diagnosticCode)) ? value.diagnosticCode : null;
     const dispatchAttempts = value.diagnosticProgress?.counters?.dispatchAttempts;
@@ -1162,16 +1162,18 @@ async function start(configInput, version, tabId) {
     assertSupportedTab(latestTab, normalizeUrl(tab.url));
     const protection = await protectFromDiscard(latestTab, config.preventDiscard);
     const now = Date.now();
-    const job = { ...config, id: token(), runId: token(), enabled: true, tabId: latestTab.id, url: normalizeUrl(latestTab.url), title: latestTab.title || 'ChatGPT / dot', targetIdentity: result.identity, sentCount: 0, unknownCount: 0, queueIndex: 0, unknownRecoveryVersion: UNKNOWN_RECOVERY_VERSION, nextAt: now + (config.startImmediately ? 0 : config.intervalMinutes * 60_000), lastRunAt: null, runDeadline: null, phase: 'idle', awaitingReply: false, assistantToken: null, assistantCount: 0, needsAttention: false, statusText: config.startImmediately ? t('已开始，即将进行首次后台检查。') : t`持续运行中；约 ${config.intervalMinutes} 分钟后首次检查。`, ...protection };
+    const autoAllowedOnStart = result.diagnosticCode === 'auto-allowed-prompt';
+    const job = { ...config, id: token(), runId: token(), enabled: true, tabId: latestTab.id, url: normalizeUrl(latestTab.url), title: latestTab.title || 'ChatGPT / dot', targetIdentity: result.identity, sentCount: 0, unknownCount: 0, queueIndex: 0, unknownRecoveryVersion: UNKNOWN_RECOVERY_VERSION, nextAt: now + (autoAllowedOnStart ? RETRY_MS : config.startImmediately ? 0 : config.intervalMinutes * 60_000), lastRunAt: null, runDeadline: null, phase: 'idle', awaitingReply: false, assistantToken: null, assistantCount: 0, needsAttention: false, statusText: autoAllowedOnStart ? t('检测到权限确认选项，已自动点击 Allow；一分钟后继续检查。') : config.startImmediately ? t('已开始，即将进行首次后台检查。') : t`持续运行中；约 ${config.intervalMinutes} 分钟后首次检查。`, ...protection };
     job.systemAwake = await syncPower(job);
     await chrome.storage.local.set({ config });
     await setJob(job);
     try { await syncAlarm(job); } catch { await pauseLocked(job, t('后台计时器不可用，未启动任务。'), 'scheduler-error'); throw fail(t('无法创建后台计时器。')); }
     await recordActivityEvent('started', t`开始任务，间隔 ${config.intervalMinutes} 分钟，${config.maxSends ? t`上限 ${config.maxSends} 次` : t('不限次数')}。`);
+    if (autoAllowedOnStart) await recordActivityEvent('auto-allowed', t('检测到权限确认选项，已自动点击 Allow 并继续推进。'), { code: 'auto-allowed-prompt' });
     await updateBadge(job);
     return { ok: true, job };
   });
-  if (config.startImmediately) return runRound(true, response.job.id);
+  if (config.startImmediately && result.diagnosticCode !== 'auto-allowed-prompt') return runRound(true, response.job.id);
   return response;
 }
 async function resume(version) {
@@ -1219,6 +1221,7 @@ async function resume(version) {
       throw fail(t('无法创建后台计时器。'));
     }
     await recordActivityEvent('resumed', t('已使用原提示词与原设置继续任务。'));
+    if (Number.isInteger(job.tabId)) pingOrAttachApprovalObserver(job.tabId);
     await updateBadge(job);
     return { ok: true, job };
   });
@@ -1595,6 +1598,12 @@ async function finishRoundLocked(snapshot, result, delivery = null) {
       job.nextAt = now + job.intervalMinutes * 60_000;
       job.statusText = t`检测到新的回复已结束；约 ${job.intervalMinutes} 分钟后发送下一条。`;
       await recordActivityEvent('reply-complete', t('新的回复已结束，开始下一发送间隔。'));
+    } else if (result.status === 'busy' && result.diagnosticCode === 'auto-allowed-prompt') {
+      job.nextAt = now + RETRY_MS;
+      job.needsAttention = false;
+      job.statusText = t('检测到权限确认选项，已自动点击 Allow；一分钟后继续检查。');
+      await recordActivityEvent('auto-allowed', t('检测到权限确认选项，已自动点击 Allow 并继续推进。'),
+        { code: 'auto-allowed-prompt', durationMs: now - snapshot.lastRunAt, ...result.executionDiagnostic });
     } else if (['busy', 'draft', 'blocked', 'error'].includes(result.status)) {
       job.nextAt = now + (result.diagnosticCode === 'composer-unstable' ? job.intervalMinutes * 60_000 : RETRY_MS);
       job.needsAttention = ['blocked', 'error'].includes(result.status);
@@ -1633,7 +1642,7 @@ async function runRound(force = false, expectedJobId = null, expectedIntentVersi
     if (expectedJobId && job?.id !== expectedJobId) return { job, claimed: false };
     if (!job?.enabled) { await syncAlarm(job); if (force) throw fail(t('请先开始或继续任务。')); return { job, claimed: false }; }
     if (job.phase !== 'idle') { if (force) throw fail(t('本次检查尚未结束。')); return { job, claimed: false }; }
-    if (!force && Date.now() < job.nextAt) return { job, claimed: false };
+    if (!force && Date.now() < job.nextAt) { if (Number.isInteger(job.tabId)) pingOrAttachApprovalObserver(job.tabId); return { job, claimed: false }; }
     if (inQuietHours(job)) {
       const waiting = { ...job, nextAt: Date.now() + RETRY_MS, statusText: t('处于你设置的静默时段；任务保持启用，时段结束后继续。') };
       await setJob(waiting); await updateBadge(waiting); return { job: waiting, claimed: false };
@@ -1740,6 +1749,7 @@ async function runRound(force = false, expectedJobId = null, expectedIntentVersi
     state: ['sent', 'manual-sent', 'cancelled', 'unknown', 'blocked', 'error'].includes(result?.status) ? result.status : 'blocked',
     reason: result?.status === 'sent' ? 'receipt-confirmed' : result?.status === 'manual-sent' ? 'manual-receipt-confirmed'
       : result?.status === 'cancelled' ? 'cancelled'
+      : result?.diagnosticCode === 'auto-allowed-prompt' ? 'auto-allowed-prompt'
       : result?.status === 'blocked' && ['composer-slow-write', 'chunk-unconfirmed', 'chunk-attachment', 'chunk-mismatch'].includes(result?.diagnosticCode) ? result.diagnosticCode
       : result?.status === 'unknown' && ['paste-unconfirmed', 'paste-attachment-unconfirmed', 'receipt-ambiguous', 'receipt-mismatch', 'composer-slow-write', 'document-replaced'].includes(result?.diagnosticCode) ? result.diagnosticCode : undefined,
   }, Date.now()), traceEpoch);
@@ -1835,7 +1845,7 @@ async function initialize() {
         .filter(value => Number.isFinite(value) && value > Date.now());
       if (deadlines.length) job = { ...job, submissionFenceUntil: Math.max(...deadlines) };
     }
-    if (job) { job.systemAwake = await syncPower(job); await setJob(job); }
+    if (job) { job.systemAwake = await syncPower(job); await setJob(job); if (job.enabled && Number.isInteger(job.tabId)) pingOrAttachApprovalObserver(job.tabId); }
     else await syncPower(null);
     try { await syncAlarm(job); }
     catch {
@@ -1881,6 +1891,70 @@ async function readConfigState() {
     ]);
   } finally { clearTimeout(timer); }
 }
+let lastRealtimeApprovalProbeAt = 0;
+function pingOrAttachApprovalObserver(tabId) {
+  if (!Number.isInteger(tabId)) return;
+  try {
+    Promise.resolve(chrome.tabs.sendMessage(tabId, { type: 'SCAN_APPROVAL_PROMPT' })).catch(() => {
+      if (chrome.runtime?.onInstalled) {
+        chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] })
+          .then(() => chrome.tabs.sendMessage(tabId, { type: 'SCAN_APPROVAL_PROMPT' }))
+          .catch(() => undefined);
+      }
+    });
+  } catch {}
+}
+async function handleAutoAllowClick(message, sender) {
+  if (sender.id !== chrome.runtime.id || !Number.isInteger(sender.tab?.id)
+      || typeof message?.token !== 'string' || !message.token || message.token.length > 120) {
+    return { ok: false };
+  }
+  try {
+    const frames = await chrome.scripting.executeScript({
+      target: { tabId: sender.tab.id, ...(sender.documentId ? { documentIds: [sender.documentId] } : {}) },
+      world: 'MAIN',
+      func: mainWorldAutoAllowClick,
+      args: [message.token],
+    });
+    return { ok: true, result: frames?.find(f => f.frameId === 0)?.result ?? frames?.[0]?.result ?? null };
+  } catch {
+    return { ok: false };
+  }
+}
+async function handleApprovalPromptObserved(sender) {
+  if (sender.id !== chrome.runtime.id || !Number.isInteger(sender.tab?.id)) return { ok: false };
+  const now = Date.now();
+  if (now - lastRealtimeApprovalProbeAt < 700) return { ok: true, throttled: true };
+  const current = await transact(getJob);
+  if (!current?.enabled || current.phase !== 'idle') return { ok: false };
+  const senderUrl = normalizeUrl(sender.url || sender.tab?.url || '');
+  if (current.tabId !== sender.tab.id && senderUrl !== current.url) return { ok: false };
+  lastRealtimeApprovalProbeAt = now;
+  try {
+    const tab = await chrome.tabs.get(sender.tab.id);
+    if (!tab || normalizeUrl(tab.url) !== current.url) return { ok: false };
+    const result = await probe(tab, current, current.targetIdentity);
+    if (result?.diagnosticCode === 'auto-allowed-prompt') {
+      await transact(async () => {
+        const latest = await getJob();
+        if (!latest?.enabled || latest.id !== current.id) return;
+        const updated = {
+          ...latest,
+          statusText: t('检测到权限确认选项，已自动点击 Allow；一分钟后继续检查。'),
+          lastResult: 'busy',
+          lastDiagnosticCode: 'auto-allowed-prompt',
+        };
+        await setJob(updated);
+        await recordActivityEvent('auto-allowed', t('检测到权限确认选项，已自动点击 Allow 并继续推进。'), { code: 'auto-allowed-prompt' });
+        await updateBadge(updated);
+      });
+      return { ok: true, autoAllowed: true };
+    }
+    return { ok: true, autoAllowed: false };
+  } catch {
+    return { ok: false };
+  }
+}
 async function dispatch(message, sender, version) {
   if (SETUP_MESSAGES.includes(message?.type)) return setupInstallation?.handleMessage(message, sender) ?? null;
   if (message?.type === BROWSER_DEVICE_MESSAGE) return browserWake?.handleMessage(message, sender) ?? null;
@@ -1893,7 +1967,7 @@ async function dispatch(message, sender, version) {
   if (!message || typeof message.type !== 'string') throw fail(t('无效请求。'));
   const ownExtensionPage = chrome.runtime.id && sender.id === chrome.runtime.id && typeof sender.url === 'string' && sender.url.startsWith(chrome.runtime.getURL(''));
   if (['PREPARE_START', 'START', 'PAUSE', 'RESUME', 'CLEAR_DATA', 'SAVE_DRAFT', 'SAVE_TEMPLATES'].includes(message.type) && !ownExtensionPage) throw fail(t('此操作只能从扩展控制面板发起。'));
-  if (!['CHECK_RUN', 'WAIT_RUN', 'COMMIT_RUN', 'PAGE_RESULT', 'MANUAL_SUBMISSION'].includes(message.type) && sender.tab && !ownExtensionPage) throw fail(t('此操作只能从扩展控制面板发起。'));
+  if (!['CHECK_RUN', 'WAIT_RUN', 'COMMIT_RUN', 'PAGE_RESULT', 'MANUAL_SUBMISSION', 'AUTO_ALLOW_CLICK', 'APPROVAL_PROMPT_OBSERVED'].includes(message.type) && sender.tab && !ownExtensionPage) throw fail(t('此操作只能从扩展控制面板发起。'));
   if (['PREPARE_START', 'START', 'RESUME'].includes(message.type) && (draftClearPending || draftClearFailed))
     throw fail(t('配置暂时无法读取；暂停仍可使用，重试前不会覆盖本地配置。'));
   switch (message.type) {
@@ -1929,6 +2003,8 @@ async function dispatch(message, sender, version) {
     case 'COMMIT_RUN': return commitRun(message, sender);
     case 'PAGE_RESULT': return receivePageResult(message, sender);
     case 'MANUAL_SUBMISSION': return receiveManualSubmission(message, sender);
+    case 'AUTO_ALLOW_CLICK': return handleAutoAllowClick(message, sender);
+    case 'APPROVAL_PROMPT_OBSERVED': return handleApprovalPromptObserved(sender);
     case 'PREPARE_START':
       assertIntent(version);
       if (pendingStartReservation?.version !== version) throw fail(t('此操作已被较新的开始或暂停操作取消。'));
@@ -2123,6 +2199,18 @@ chrome.commands.onCommand.addListener(command => {
     pendingStopIntents--;
     if (pendingActivationVersion === version) pendingActivationVersion = null;
   });
+});
+
+chrome.runtime.onInstalled?.addListener?.(() => {
+  ensureInitialized().then(async () => {
+    const tabs = await chrome.tabs.query({ url: 'https://chatgpt.com/*' }).catch(() => []);
+    for (const tab of tabs) {
+      if (!Number.isInteger(tab?.id) || tab.discarded || tab.frozen) continue;
+      chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] })
+        .then(() => chrome.tabs.sendMessage(tab.id, { type: 'SCAN_APPROVAL_PROMPT' }))
+        .catch(() => undefined);
+    }
+  }).catch(() => undefined);
 });
 
 chrome.runtime.onConnect?.addListener?.(port => {

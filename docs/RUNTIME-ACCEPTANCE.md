@@ -9,6 +9,14 @@ does not include unversioned source fixes on main or prove current-build
 Windows tool/Pause/Revoke/reopen acceptance. See the current checklist in
 [Windows recovery checkpoint](WINDOWS-RECOVERY-20261117.md).
 
+## Candidate 3.0.24 (2026-11-18)
+
+Expands pre-send tool/permission/authorization/OAuth-login confirmation handling (`auto-allowed` / `auto-allowed-prompt`), spinner/re-render deduplication, and sequential cyclic queue UX for Your dot and ChatGPT conversations.
+
+## Candidate 3.0.23 (2026-11-17)
+
+Adds pre-send tool/permission approval prompt detection and automatic allow confirmation (`auto-allowed` / `auto-allowed-prompt`) for Your dot and ChatGPT conversations.
+
 ## Candidate 3.0.22 (2026-11-16)
 
 Fresh continuation evidence supersedes the former blanket "not installed or

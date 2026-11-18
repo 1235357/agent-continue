@@ -87,7 +87,7 @@ const eventLabels = () => ({
   unconfirmed: t('本轮结果未知'), 'reply-complete': t('回复已结束'), 'limit-reached': t('达到次数上限'),
   'queue-complete': t('队列已完成'), 'marker-reached': t('匹配停止标记'), 'target-closed': t('等待目标重开'),
   quiet: t('静默时段'), skipped: t('本轮跳过'), done: t('达到停止条件'), stopped: t('任务已停止'),
-  'timing-diagnostics': t('只读计时诊断'),
+  'timing-diagnostics': t('只读计时诊断'), 'auto-allowed': t('自动确认权限'),
 });
 
 if (fullView) {
@@ -212,7 +212,7 @@ function renderPromptMeta(config) {
   $('sealedLabel').textContent = length ? t('正文已隐藏') : t('还没有提示词');
   $('promptSummary').textContent = config.mode === 'repeat'
     ? length ? t`正文已准备 · ${length.toLocaleString()} 字符` : t('请先输入或导入提示词')
-    : t`队列 ${config.queue.length} 条 · ${config.mode === 'queue-loop' ? t('循环发送') : t('执行一遍')}`;
+    : config.mode === 'queue-loop' && config.queue.length > 0 ? t`队列 ${config.queue.length} 条 · 循环发送（每轮 ${config.queue.length * config.intervalMinutes} 分钟）` : t`队列 ${config.queue.length} 条 · ${config.mode === 'queue-loop' ? t('循环发送') : t('执行一遍')}`;
   $('promptLabel').textContent = latestJob?.enabled ? t('当前任务的提示词') : t('重复发送的提示词');
   if (revealed) {
     setField('prompt', config.prompt || '');
@@ -740,10 +740,12 @@ $('dropZone').addEventListener('dragleave', () => $('dropZone').classList.remove
 $('dropZone').addEventListener('drop', event => { event.preventDefault(); $('dropZone').classList.remove('dragging'); importFiles(event.dataTransfer.files); });
 $('addToQueue').addEventListener('click', () => {
   if (!canEdit()) return;
-  if (!draftConfig.prompt?.trim()) { tell(t('请先输入或导入一条提示词。'), true); return; }
+  if (draftConfig.queue.length >= 50) { tell(t('队列最多 50 条。'), true); return; }
+  if (!draftConfig.prompt?.trim()) { queueEditing = -1; $('queueName').value = t`提示词 ${draftConfig.queue.length + 1}`; $('queueText').value = ''; $('queueEditor').hidden = false; $('queueText').focus(); return; }
   if (draftConfig.queue.length >= 50) { tell(t('队列最多 50 条。'), true); return; }
   const next = clone(draftConfig);
   next.queue.push({ name: t`提示词 ${next.queue.length + 1}`, text: next.prompt });
+  next.mode = 'queue-loop';
   try { draftConfig = readConfig(next, { allowEmpty: true }); } catch (error) { tell(safeFailure(error), true); return; }
   saveDraft(); paint(latestJob); tell(t('已加入队列。可在“任务”中选择队列发送模式。'));
 });
@@ -752,7 +754,7 @@ $('saveQueueItem').addEventListener('click', () => {
   const text = $('queueText').value;
   if (!text.trim()) { tell(t('队列提示词不能为空。'), true); return; }
   const next = clone(draftConfig);
-  next.queue[queueEditing] = { name: $('queueName').value.trim() || t`提示词 ${queueEditing + 1}`, text };
+  if (queueEditing < 0) { if (next.queue.length >= 50) { tell(t('队列最多 50 条。'), true); return; } next.queue.push({ name: $('queueName').value.trim() || t`提示词 ${next.queue.length + 1}`, text }); next.mode = 'queue-loop'; } else { next.queue[queueEditing] = { name: $('queueName').value.trim() || t`提示词 ${queueEditing + 1}`, text }; }
   try { draftConfig = readConfig(next, { allowEmpty: true }); } catch (error) { tell(safeFailure(error), true); return; }
   closeQueueEditor(); saveDraft(); queueSignature = ''; paint(latestJob); tell(t('队列项已更新，正文已隐藏。'));
 });

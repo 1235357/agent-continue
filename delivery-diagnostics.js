@@ -10,7 +10,7 @@ const REASONS = new Set([
   'model-not-synchronous', 'receipt-unavailable', 'dispatched', 'already-dispatched', 'dispatch-error',
   'commit-error', 'manual-submission', 'cancelled', 'transport-pending', 'transport-rejected',
   'result-missing', 'grant-pending', 'grant-accepted', 'awaiting-receipt', 'receipt-confirmed',
-  'manual-receipt-confirmed', 'document-replaced', 'worker-interrupted', 'diagnostics-write-failed', 'paste-unconfirmed', 'paste-attachment-unconfirmed', 'receipt-ambiguous', 'receipt-mismatch', 'unknown',
+  'manual-receipt-confirmed', 'document-replaced', 'worker-interrupted', 'diagnostics-write-failed', 'paste-unconfirmed', 'paste-attachment-unconfirmed', 'receipt-ambiguous', 'receipt-mismatch', 'auto-allowed-prompt', 'unknown',
 ]);
 const COUNTERS = ['pageAdmissions', 'modelWrites', 'domWrites', 'textChunks', 'slowChunks', 'rejectedChunks', 'chunkRestarts', 'prefixRewriteRestarts', 'chunkSettlementRestarts', 'chunkUnserializableChecks', 'chunkUnserializableRestarts', 'chunkUnserializableRecoveries', 'chunkDifferences', 'insertedBlankSeparators', 'fillCalls', 'readinessChecks',
   'authorizationChecks', 'grantRequests', 'grantReadbacks', 'retiredReadbacks', 'dispatchAttempts',

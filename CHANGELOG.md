@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.0.24] - 2026-11-18
+
+- Expand the automatic exception and confirmation engine (`adapter.js`, `content.js`) beyond basic `Allow` / `Deny` to handle authorization, OAuth login, connector linking, and action consent prompts (`Authorize`, `Confirm`, `Approve`, `Accept`, `Agree and continue`, `Continue`, `Grant access`, `Allow access`, `Sign in`, `Log in`, `Connect`, `Connect account`, and Chinese equivalents `授权`, `确认授权`, `同意并登录`, `同意并继续`, `连接账号`, `去授权`), including scoped single-button authorization/login cards inside assistant turns and modal dialogs (`[role="dialog"]`).
+- Eliminate duplicate `auto-allowed` activity log entries while tool execution spinners (`A Allow ⟳`) are active or when React re-renders card DOM nodes: synchronize `hasAsymmetricSvgCheckmark`, `aria-busy`/`animate-spin` filtering, and shared in-memory card deduplication (`__agentContinueAllowedCards`) across `adapter.js` and `content.js`, and emit `auto-allowed-prompt` only on actual click transitions.
+- Add rapid follow-up scans (`900ms` and `2500ms`) in `content.js` after an auto-allow action so multi-step sequential confirmation flows (`Connect` -> `Authorize` -> `Allow`) proceed without waiting for the next minute alarm.
+- Enhance sequential cyclic prompt queue (`queue-loop`) ergonomics in `popup.js` and `i18n-popup.js`: display full-cycle duration (`队列 N 条 · 循环发送（每轮 M 分钟）` / `Queue: N · Loop (M min/cycle)`), automatically switch to `queue-loop` when adding prompts to the queue, and allow creating new queue items directly when the single-prompt draft is empty.
+
+## [3.0.23] - 2026-11-17
+
+- Add automatic detection and handling for blocking tool/permission confirmation prompts (`Allow` / `Always allow` / `Allow once` / `A Allow` paired with `Deny` / `B Deny`) in ChatGPT and Your dot conversations (`adapter.js`, `background.js`, `content.js`).
+- Intercept active confirmation prompts at the start of `pageAction()` before any composer preparation or prompt injection, prioritizing `Always allow` > `Allow once` > `Allow`, dispatching full pointer/mouse/click sequences with a MAIN-world React `__reactProps$` fallback, and deferring prompt injection while the approved tool executes.
+- Add real-time `MutationObserver` and periodic checks in `content.js` plus `onInstalled` / `resume` / heartbeat notifications in `background.js`, recording dedicated `auto-allowed` (`auto-allowed-prompt`) activity log entries in the Logs panel.
+
 ## [3.0.22] - 2026-11-16
 
 - Prevent repeated chunked re-insertion: in `insertChunkedText()`, when `args.persistentDelivery === true && outcome.signature?.final`, adopt the settled draft immediately on Pass 1 rather than restarting and wiping composer text across 3 passes.

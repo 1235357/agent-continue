@@ -16,6 +16,14 @@ ProseMirror suite passed in two same-source partitions, 66/66 and 135/135;
 editor-commit browser passed 14/14. No installed acceptance is established.
 See `docs/WINDOWS-RECOVERY-20261117.md` for exact logs and scope.
 
+## Version 3.0.24 — Release Candidate, November 18, 2026
+
+Expands pre-send tool/permission/authorization/OAuth-login confirmation handling (`auto-allowed` / `auto-allowed-prompt`), spinner/re-render deduplication, and sequential cyclic queue UX for Your dot and ChatGPT conversations.
+
+## Version 3.0.23 — Release Candidate, November 17, 2026
+
+Adds pre-send tool/permission approval prompt detection and automatic allow confirmation (`auto-allowed` / `auto-allowed-prompt`) for Your dot and ChatGPT conversations.
+
 ## Version 3.0.22 — Release Candidate, November 16, 2026
 
 Fresh continuation: GitHub v3.0.22 is public, a new Store item contains a 3.0.22
