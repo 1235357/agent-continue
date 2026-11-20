@@ -6,7 +6,14 @@
 
 **3.0.25 Windows 版发布候选 · Manifest V3 · 免费 · MIT 开源**
 
-[Chrome 应用商店](https://chromewebstore.google.com/detail/agent-continue-background/jgjoeiidbnpmgbbhhmphicehbcdgbhga) · [GitHub Releases](https://github.com/1235357/agent-continue/releases) · [源码](https://github.com/1235357/agent-continue) · [更新记录](CHANGELOG.md) · [隐私说明（英文）](PRIVACY.md) · [技术架构与复盘报告（英文）](https://github.com/1235357/agent-continue/blob/main/docs/TECHNICAL-RETROSPECTIVE-AND-ARCHITECTURE.md)
+[Chrome 应用商店](https://chromewebstore.google.com/detail/agent-continue-background/jgjoeiidbnpmgbbhhmphicehbcdgbhga) · [GitHub Releases](https://github.com/1235357/agent-continue/releases) · [源码](https://github.com/1235357/agent-continue) · [更新记录](CHANGELOG.md) · [隐私说明（英文）](PRIVACY.md) · ## 技术文档
+
+底层原理：
+* [技术架构与复盘报告 (Technical Architecture)](https://github.com/1235357/agent-continue/blob/main/docs/TECHNICAL-RETROSPECTIVE-AND-ARCHITECTURE.md)
+* [性能引擎优化 (Performance Engine)](https://github.com/1235357/agent-continue/blob/main/docs/PERFORMANCE-ENGINE-OPTIMIZATION.md)
+* [Windows 隧道与 SSH 安全 (Windows Tunnel & SSH Security)](https://github.com/1235357/agent-continue/blob/main/docs/WINDOWS-TUNNEL-SSH-SECURITY.md)
+* [调度队列逻辑 (Scheduler Queue Logic)](https://github.com/1235357/agent-continue/blob/main/docs/SCHEDULER-QUEUE-LOGIC.md)
+
 
 已单独发布的 v2.2.1 仍仅含调度、发送确认修复、开发者支持及 schema 3 诊断，不含 Windows 控制，其公开资产保持不变。源码版本、GitHub 发布、npm 发布、商店审核与浏览器已安装版本是不同状态；请分别核对对应页面和扩展详情，不能把本说明当成发布或安装回执。
 
