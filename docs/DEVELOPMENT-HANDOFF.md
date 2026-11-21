@@ -1,5 +1,41 @@
 # Agent Continue Development Handoff
 
+## Log Analysis and Windows Artifact Proof (2026-11-21)
+
+- The Windows delivery run [44879249505](https://github.com/1235357/agent-continue/actions/runs/44879249505)
+  and headed [extension checks](https://github.com/1235357/agent-continue/actions/runs/44877693634)
+  passed for `8344a5e`. Both GitHub artifact digests and the three original
+  source/build/smoke receipts were checked on Windows. Rebuilding the six
+  setup files from the Git-LF source and the downloaded administrator ZIP
+  reproduced all six hashes. The locally paired GitHub and Store ZIPs were
+  built and the actual Store ZIP passed 14 isolated Chromium MV3 scenarios.
+  The npm package suite against that closure passed 115 tests.
+  These artifacts still identify as 3.2.0: offline evidence only, not for
+  upload or for following the pinned online installer link on the old tag.
+- A separate experimental Windows job failed all six administrator-intent
+  cases on the same fixture layout check. A local test reproduced it by
+  changing drive-letter case, which the JavaScript realpath preserved and
+  native realpath normalized. The fixture now uses native realpath; the
+  production canonical path and authorization checks were not relaxed.
+- Three historical schema-5 activity exports were inspected using only fixed
+  counters, stages, and timings. In 3.0.25 one retained running snapshot
+  showed 4,394 page admissions in 4,576,332 ms, with zero writes and zero
+  dispatch attempts (missing composer). In 3.0.22 another showed one
+  admission and a maximum synchronous DOM write of roughly 11.2 seconds.
+  Those are distinct failure modes; neither metric proves the renderer's
+  exact CPU cost or server acceptance. The exports have at most twenty
+  retained deliveries and are not comparable success-rate samples.
+  Final delivery traces now preserve the missing-composer or agent-pause
+  reason from the accepted scheduler result, rather than inheriting a
+  generic or transient reason. Keep prompt text and conversation IDs out
+  of exports.
+
+Next acceptance: on a dedicated Windows install, capture the actual ordinary
+ChatGPT receipt first, then Dot, followed by Pause, Revoke, and a full browser
+restart. Compare phase and write/admission counters against the historical
+failure shapes. Do not adopt the existing partial installation, run against
+production, or infer installed readiness from CI.
+
 ## Scheduler and Release Checkpoint (2026-11-21)
 
 Start from canonical `main` at `4cd6625`, after the v3.2.0 tag

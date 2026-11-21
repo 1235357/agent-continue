@@ -1757,8 +1757,8 @@ async function runRound(force = false, expectedJobId = null, expectedIntentVersi
     state: ['sent', 'manual-sent', 'cancelled', 'unknown', 'blocked', 'error'].includes(result?.status) ? result.status : 'blocked',
     reason: result?.status === 'sent' ? 'receipt-confirmed' : result?.status === 'manual-sent' ? 'manual-receipt-confirmed'
       : result?.status === 'cancelled' ? 'cancelled'
-      : result?.diagnosticCode === 'approval-required' ? 'approval-required'
-      : result?.status === 'blocked' && ['composer-slow-write', 'chunk-unconfirmed', 'chunk-attachment', 'chunk-mismatch'].includes(result?.diagnosticCode) ? result.diagnosticCode
+      : result?.status === 'busy' && ['approval-required', 'agent-paused', 'agent-busy'].includes(result?.diagnosticCode) ? result.diagnosticCode
+      : result?.status === 'blocked' && ['composer-unavailable', 'composer-slow-write', 'chunk-unconfirmed', 'chunk-attachment', 'chunk-mismatch'].includes(result?.diagnosticCode) ? result.diagnosticCode
       : result?.status === 'unknown' && ['paste-unconfirmed', 'paste-attachment-unconfirmed', 'receipt-ambiguous', 'receipt-mismatch', 'composer-slow-write', 'document-replaced'].includes(result?.diagnosticCode) ? result.diagnosticCode : undefined,
   }, Date.now()), traceEpoch);
   try { return await finishRound(snapshot, result, delivery); }

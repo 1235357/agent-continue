@@ -11,11 +11,12 @@ const header = encode({ format: 'agent-continue-device-operations', version: 1 }
 const entered = encode({ id: 'uncertain', action: 'reconnect', status: 'in-progress' });
 const settled = encode({ id: 'uncertain', action: 'reconnect', status: 'settled' });
 
-function fixture(t) {
-  const directory = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'ac-admin-intent-'));
+function fixture(t, temporaryRoot = os.tmpdir()) {
+  // Match the runtime's canonical path contract, including Windows drive case.
+  const directory = fs.mkdtempSync(path.join(fs.realpathSync.native(temporaryRoot), 'ac-admin-intent-'));
   t.after(() => {
     assert.match(path.basename(directory), /^ac-admin-intent-[a-zA-Z0-9]{6}$/);
-    assert.equal(fs.realpathSync(directory), directory);
+    assert.equal(fs.realpathSync.native(directory), directory);
     fs.rmSync(directory, { recursive: true, force: true });
   });
   const root = path.join(directory, 'b'.repeat(24) + '.state');
@@ -26,6 +27,17 @@ function fixture(t) {
   fs.writeFileSync(file, state(true));
   return { root, vault, file, journal };
 }
+
+test('the intent fixture canonicalizes a Windows temporary root with alternate drive casing',
+  { skip: process.platform !== 'win32' || !/^[a-z]:/i.test(os.tmpdir()) }, t => {
+    const temporaryRoot = fs.realpathSync.native(os.tmpdir());
+    const letter = temporaryRoot[0];
+    const alternateRoot = (letter === letter.toUpperCase() ? letter.toLowerCase() : letter.toUpperCase())
+      + temporaryRoot.slice(1);
+    const f = fixture(t, alternateRoot);
+    assert.equal(checkAdministratorOwnerConnect(f.root, f.vault, () => true), true);
+    assert.equal(fs.readFileSync(f.file, 'utf8'), state(true));
+  });
 
 test('only explicit Connect publishes running intent, and Pause persists without replaying anything', t => {
   const f = fixture(t);

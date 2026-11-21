@@ -696,6 +696,12 @@ await scenario('An unavailable composer or paused Dot yields without fast reinje
       assert.equal(result.job.enabled,true);
       assert.equal(result.job.lastDiagnosticCode,diagnosticCode);
       assert.ok(h.state.local.logs.some(entry=>entry.diagnostic?.code===diagnosticCode));
+      await until(()=>h.state.local.deliveryDiagnostics?.some(item=>item.state!=='running'));
+      const trace=h.state.local.deliveryDiagnostics.at(-1);
+      assert.equal(trace.state,'blocked');
+      assert.equal(trace.reason,diagnosticCode);
+      assert.equal(trace.history.at(-1).reason,diagnosticCode);
+      assert.equal(trace.counters.dispatchAttempts,0);
       assert.equal(result.job.sentCount,0);
       assert.equal(result.job.unknownCount,0);
       assert.ok(result.job.nextAt-Date.now()>55_000);
