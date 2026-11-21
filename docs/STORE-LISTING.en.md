@@ -135,12 +135,15 @@ Before submission, reconcile actual privacy-form categories with the finalized p
 
 ## Links
 
-- Store: https://chromewebstore.google.com/detail/jpioilmpbolfokedaefmbfbjeaahfdkl
+- Store (current listing): https://chromewebstore.google.com/detail/agent-continue-background/jgjoeiidbnpmgbbhhmphicehbcdgbhga
 - Source and support: https://github.com/1235357/agent-continue
 - Release downloads: https://github.com/1235357/agent-continue/releases
 - Privacy policy source: https://github.com/1235357/agent-continue/blob/main/PRIVACY.md
 
-These are listing-copy links, not evidence of a 3.0.4 upload, approval, publication or installation.
+Use the current listing for release verification. Users who installed the
+original item have a separate extension ID and do not receive updates from
+this item. A listing link is not evidence of a new upload, approval,
+publication or installation.
 
 ## Reviewer Test Instructions (500-Character Form)
 

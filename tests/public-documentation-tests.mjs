@@ -21,6 +21,16 @@ const bootstrapFiles = new Set(PACKAGE_FILES.map(name => 'native/bootstrap/' + n
 const npmContains = name => ['package.json', 'README.md', 'LICENSE'].includes(name) ||
   packageFiles.some(entry => entry.endsWith('/') ? name.startsWith(entry) : name === entry);
 
+test('the Store review source and both readmes point to the same current listing', () => {
+  const item = /https:\/\/chromewebstore\.google\.com\/detail\/(?:[\w-]+\/)?([a-p]{32})(?![\w-])/g;
+  const listedItems = name => [...new Set(Array.from(read(name).matchAll(item), match => match[1]))];
+  const reviewItems = listedItems('docs/STORE-LISTING.en.md');
+  assert.equal(reviewItems.length, 1, 'The review source should link only the current public item');
+  for (const name of ['README.md', 'README.zh-CN.md']) {
+    assert.deepEqual(listedItems(name), reviewItems, `${name} points to a different item`);
+  }
+});
+
 for (const name of disclosureFiles) {
   test(`${name} describes schema 5 without rewriting historical schema 3`, () => {
     const text = read(name);
