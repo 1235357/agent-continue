@@ -165,7 +165,7 @@ function fixture(options = {}) {
       if (selector === 'article.message-row, [data-message-author-role], article[data-testid^="conversation-turn-"]') return identity === null ? [] : [row];
       if (selector.startsWith('#prompt-textarea') || selector.includes('[data-composer-input]')) return editors;
       if (selector.startsWith('[data-message-author-role="user"]')) return users;
-      if (selector.startsWith('[data-message-author-role="assistant"]') || selector.startsWith('.typing-indicator')) return [];
+      if (selector.startsWith('[data-message-author-role="assistant"]') || selector.startsWith('.typing-indicator') || selector.includes('message-row:not(.self)') || selector.includes('[role="dialog"]')) return [];
       throw new Error('Unexpected document-wide selector: ' + selector);
     },
   };

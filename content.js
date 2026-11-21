@@ -7,6 +7,8 @@
   if (globalThis.__agentContinueContentRuntimeId === runtimeId) return;
   globalThis.__agentContinueContentRuntimeId = runtimeId;
 
+  const classifyDialogContext = globalThis.__agentContinueClassifyDialog ?? (() => ({ safe: true, kind: 'none', evidence: [], confidence: 1.0 }));
+
   let keepalivePort = null;
 
   function connectKeepalive() {
@@ -317,6 +319,16 @@
       if (!force && delayMs > 0 && now - lastApprovalNotifyAt < 1200) return;
       runIdle(() => {
         if (typeof chrome === 'undefined' || !chrome.runtime?.id) return;
+        const ctx = classifyDialogContext();
+        if (!ctx.safe) {
+          Promise.resolve(chrome.runtime.sendMessage({
+            type: 'DIALOG_EXCEPTION',
+            kind: ctx.kind,
+            evidence: ctx.evidence,
+            confidence: ctx.confidence,
+          })).catch(() => {});
+          return;
+        }
         if (hasUnansweredApprovalPrompt()) {
           lastApprovalNotifyAt = Date.now();
           try {

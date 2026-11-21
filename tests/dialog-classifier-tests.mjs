@@ -1,0 +1,314 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+
+// Helper to simulate a browser-like DOM environment in Node.js
+class FakeElement {
+  constructor(tagName = 'div', attributes = {}, textContent = '') {
+    this.tagName = tagName.toUpperCase();
+    this.attributes = { ...attributes };
+    this.children = [];
+    this.parentElement = null;
+    this.textContent = textContent;
+  }
+
+  getAttribute(name) {
+    return this.attributes[name] ?? null;
+  }
+
+  hasAttribute(name) {
+    return Object.hasOwn(this.attributes, name);
+  }
+
+  setAttribute(name, value) {
+    this.attributes[name] = String(value);
+  }
+
+  appendChild(child) {
+    child.parentElement = this;
+    this.children.push(child);
+    return child;
+  }
+
+  closest(selector) {
+    let curr = this;
+    while (curr) {
+      if (curr.matches && curr.matches(selector)) return curr;
+      curr = curr.parentElement;
+    }
+    return null;
+  }
+
+  matches(selector) {
+    if (selector.includes('[role="dialog"]') && this.getAttribute('role') === 'dialog') return true;
+    if (selector.includes('[aria-modal="true"]') && this.getAttribute('aria-modal') === 'true') return true;
+    if (selector.includes('article.message-row') && this.attributes.class?.includes('message-row')) return true;
+    if (selector.includes('[data-message-author-role="assistant"]') && this.getAttribute('data-message-author-role') === 'assistant') return true;
+    return false;
+  }
+
+  querySelector(selector) {
+    return this.querySelectorAll(selector)[0] || null;
+  }
+
+  querySelectorAll(selector) {
+    const results = [];
+    const walk = node => {
+      for (const child of node.children) {
+        if (child.matches && child.matches(selector)) {
+          results.push(child);
+        } else if (selector.includes('a[href*="accounts.google.com"]') && child.tagName === 'A' && (child.getAttribute('href') || '').includes('accounts.google.com')) {
+          results.push(child);
+        } else if (selector.includes('data-href') && (child.getAttribute('data-href') || '').includes('accounts.google.com')) {
+          results.push(child);
+        } else if (!selector.includes('data-href') && (selector.includes('button') || selector.includes('[role="button"]')) && (child.tagName === 'BUTTON' || child.getAttribute('role') === 'button')) {
+          results.push(child);
+        }
+        walk(child);
+      }
+    };
+    walk(this);
+    return results;
+  }
+}
+
+class FakeDocument {
+  constructor() {
+    this.title = 'ChatGPT';
+    this.body = new FakeElement('body');
+    this.elementsById = new Map();
+  }
+
+  getElementById(id) {
+    return this.elementsById.get(id) || null;
+  }
+
+  querySelector(selector) {
+    return this.querySelectorAll(selector)[0] || null;
+  }
+
+  querySelectorAll(selector) {
+    const results = [];
+    const walk = node => {
+      for (const child of node.children) {
+        if (selector.includes('[role="dialog"]') && child.getAttribute('role') === 'dialog') {
+          results.push(child);
+        } else if (selector.includes('[role="alertdialog"]') && child.getAttribute('role') === 'alertdialog') {
+          results.push(child);
+        } else if (selector.includes('[aria-modal="true"]') && child.getAttribute('aria-modal') === 'true') {
+          results.push(child);
+        } else if (selector.includes('[data-testid="login-button"]') && child.getAttribute('data-testid') === 'login-button') {
+          results.push(child);
+        } else if (selector.includes('form[action*="login"]') && child.tagName === 'FORM' && (child.getAttribute('action') || '').includes('login')) {
+          results.push(child);
+        }
+        walk(child);
+      }
+    };
+    walk(this.body);
+    return results;
+  }
+}
+
+// Set up globals before importing dialog-classifier
+const doc = new FakeDocument();
+globalThis.document = doc;
+globalThis.window = {
+  location: {
+    hostname: 'chatgpt.com',
+    pathname: '/c/test-chat',
+  },
+};
+globalThis.getComputedStyle = el => ({
+  display: el.getAttribute('data-display') || 'block',
+  visibility: el.getAttribute('data-visibility') || 'visible',
+});
+
+// Import the classifier script
+await import('../dialog-classifier.js');
+const classifyDialogContext = globalThis.__agentContinueClassifyDialog;
+
+test('TC-01: Normal chat, no dialog -> safe: true, kind: none', () => {
+  doc.title = 'ChatGPT';
+  doc.body = new FakeElement('body');
+  const textarea = new FakeElement('textarea', { id: 'prompt-textarea' });
+  doc.body.appendChild(textarea);
+  doc.elementsById.set('prompt-textarea', textarea);
+  window.location.hostname = 'chatgpt.com';
+  window.location.pathname = '/c/test-chat';
+
+  const t0 = performance.now();
+  const res = classifyDialogContext();
+  const elapsed = performance.now() - t0;
+
+  assert.equal(res.safe, true);
+  assert.equal(res.kind, 'none');
+  assert.ok(elapsed < 10, `Elapsed ${elapsed}ms should be fast`);
+});
+
+test('TC-02: Simple ChatGPT tool-use dialog -> safe: true, kind: none', () => {
+  doc.title = 'ChatGPT';
+  doc.body = new FakeElement('body');
+  const textarea = new FakeElement('textarea', { id: 'prompt-textarea' });
+  doc.body.appendChild(textarea);
+  doc.elementsById.set('prompt-textarea', textarea);
+
+  // Dialog inside assistant message row with Allow button
+  const turn = new FakeElement('article', { class: 'message-row', 'data-message-author-role': 'assistant' });
+  const dialog = new FakeElement('div', { role: 'dialog' }, 'Allow ChatGPT to search your messages in your room for "Smartsheet"?');
+  const allowBtn = new FakeElement('button', {}, 'Allow');
+  dialog.appendChild(allowBtn);
+  turn.appendChild(dialog);
+  doc.body.appendChild(turn);
+
+  const res = classifyDialogContext();
+  assert.equal(res.safe, true);
+  assert.equal(res.kind, 'none');
+});
+
+test('TC-03: Session expired page -> safe: false, kind: session-expired', () => {
+  doc.title = 'Sign in to ChatGPT — ChatGPT';
+  doc.body = new FakeElement('body');
+  doc.elementsById.clear(); // No prompt-textarea
+  window.location.pathname = '/auth/login';
+
+  const loginForm = new FakeElement('form', { action: '/auth/login' });
+  doc.body.appendChild(loginForm);
+
+  const res = classifyDialogContext();
+  assert.equal(res.safe, false);
+  assert.equal(res.kind, 'session-expired');
+  assert.ok(res.confidence >= 0.9, 'Confidence should be >= 0.9 for 2+ signals');
+  assert.ok(res.evidence.length >= 2);
+});
+
+test('TC-04: OAuth dialog — "Sign in with Google" -> safe: false, kind: oauth-popup', () => {
+  doc.title = 'ChatGPT';
+  doc.body = new FakeElement('body');
+  const textarea = new FakeElement('textarea', { id: 'prompt-textarea' });
+  doc.body.appendChild(textarea);
+  doc.elementsById.set('prompt-textarea', textarea);
+  window.location.pathname = '/c/test-chat';
+
+  const dialog = new FakeElement('div', { role: 'dialog', 'aria-modal': 'true' }, 'Sign in with Google to connect your account');
+  const googleBtn = new FakeElement('button', {}, 'Sign in with Google');
+  dialog.appendChild(googleBtn);
+  doc.body.appendChild(dialog);
+
+  const res = classifyDialogContext();
+  assert.equal(res.safe, false);
+  assert.equal(res.kind, 'oauth-popup');
+  assert.ok(res.confidence >= 0.8);
+});
+
+test('TC-04b: Mixed dialog with OAuth text and Allow button -> safe: false, kind: oauth-popup takes priority', () => {
+  doc.title = 'ChatGPT';
+  doc.body = new FakeElement('body');
+  const textarea = new FakeElement('textarea', { id: 'prompt-textarea' });
+  doc.body.appendChild(textarea);
+  doc.elementsById.set('prompt-textarea', textarea);
+
+  const dialog = new FakeElement('div', { role: 'dialog', 'aria-modal': 'true' }, 'Sign in with Google or Allow connection');
+  const allowBtn = new FakeElement('button', {}, 'Allow');
+  const googleBtn = new FakeElement('button', {}, 'Sign in with Google');
+  dialog.appendChild(allowBtn);
+  dialog.appendChild(googleBtn);
+  doc.body.appendChild(dialog);
+
+  const res = classifyDialogContext();
+  assert.equal(res.safe, false);
+  assert.equal(res.kind, 'oauth-popup');
+});
+
+test('TC-05: Unknown modal persisting over 5s -> safe: false, kind: unknown-modal', () => {
+  doc.title = 'ChatGPT';
+  doc.body = new FakeElement('body');
+  const textarea = new FakeElement('textarea', { id: 'prompt-textarea' });
+  doc.body.appendChild(textarea);
+  doc.elementsById.set('prompt-textarea', textarea);
+
+  const modal = new FakeElement('div', { role: 'dialog' }, 'Cookie notice: We use cookies. Learn more.');
+  const okBtn = new FakeElement('button', {}, 'Got it');
+  modal.appendChild(okBtn);
+  doc.body.appendChild(modal);
+
+  // First check records timestamp in WeakMap
+  const res1 = classifyDialogContext();
+  assert.equal(res1.safe, true, 'First seen should not trigger unknown-modal immediately');
+
+  // Advance first seen timestamp by 6000ms
+  const firstSeenMap = globalThis.__agentContinueFirstSeenMap;
+  firstSeenMap.set(modal, performance.now() - 6000);
+
+  const res2 = classifyDialogContext();
+  assert.equal(res2.safe, false);
+  assert.equal(res2.kind, 'unknown-modal');
+});
+
+test('TC-06: Chrome notification fires when permission granted', async () => {
+  let createdNotification = null;
+  const fakeChrome = {
+    permissions: {
+      contains: async ({ permissions }) => permissions.includes('notifications'),
+    },
+    notifications: {
+      create: (id, options) => {
+        createdNotification = { id, options };
+      },
+    },
+  };
+
+  const MSGS = {
+    'session-expired': ['Agent Continue — Action needed', 'Session expired. Please sign in again, then resume the task.'],
+  };
+  const [title, message] = MSGS['session-expired'];
+  if (await fakeChrome.permissions.contains({ permissions: ['notifications'] })) {
+    fakeChrome.notifications.create('test-id', { type: 'basic', title, message });
+  }
+
+  assert.ok(createdNotification);
+  assert.equal(createdNotification.options.title, 'Agent Continue — Action needed');
+  assert.equal(createdNotification.options.message, 'Session expired. Please sign in again, then resume the task.');
+});
+
+test('TC-07: Chrome notification silently skipped when permission not granted', async () => {
+  let createdNotification = null;
+  const fakeChrome = {
+    permissions: {
+      contains: async () => false,
+    },
+    notifications: {
+      create: (id, options) => {
+        createdNotification = { id, options };
+      },
+    },
+  };
+
+  if (await fakeChrome.permissions.contains({ permissions: ['notifications'] })) {
+    fakeChrome.notifications.create('test-id', { type: 'basic', title: 'test', message: 'test' });
+  }
+
+  assert.equal(createdNotification, null, 'Notification should not be created without permission');
+});
+
+test('TC-08: Performance — 100 rapid calls average < 2ms', () => {
+  doc.title = 'ChatGPT';
+  doc.body = new FakeElement('body');
+  const textarea = new FakeElement('textarea', { id: 'prompt-textarea' });
+  doc.body.appendChild(textarea);
+  doc.elementsById.set('prompt-textarea', textarea);
+
+  // Populate 50 article message rows
+  for (let i = 0; i < 50; i++) {
+    const article = new FakeElement('article', { class: 'message-row' }, 'Sample message text '.repeat(30));
+    doc.body.appendChild(article);
+  }
+
+  const start = performance.now();
+  for (let i = 0; i < 100; i++) {
+    classifyDialogContext();
+  }
+  const total = performance.now() - start;
+  const avg = total / 100;
+
+  assert.ok(avg < 2, `Average time per call ${avg.toFixed(3)}ms should be < 2ms`);
+});

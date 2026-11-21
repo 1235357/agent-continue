@@ -4,7 +4,7 @@
   "default_locale": "en",
   "author": "Zhentong Ye",
   "homepage_url": "https://github.com/1235357/agent-continue",
-  "version": "3.0.25",
+  "version": "3.1.0",
   "description": "__MSG_extensionDescription__",
   "minimum_chrome_version": "120",
   "permissions": [
@@ -19,6 +19,7 @@
         "https://chatgpt.com/*"
       ],
       "js": [
+        "dialog-classifier.js",
         "content.js"
       ],
       "run_at": "document_idle"
@@ -49,7 +50,8 @@
   ],
   "optional_permissions": [
     "power",
-    "nativeMessaging"
+    "nativeMessaging",
+    "notifications"
   ],
   "options_ui": {
     "page": "popup.html?view=full",

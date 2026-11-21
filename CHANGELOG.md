@@ -1,5 +1,15 @@
 # Changelog
 
+## [3.1.0] - 2026-11-20
+
+- Implement Exception Dialog Engine (`dialog-classifier.js`, `content.js`, `background.js`) to classify blocking dialog contexts before auto-allow dispatch:
+  - Detect session expiration (`session-expired`) via page title and auth forms without composer, automatically pausing the task with clear recovery guidance.
+  - Detect OAuth authorization popups (`oauth-popup`) via OAuth provider text and external provider URLs (`accounts.google.com`, `login.microsoftonline.com`, `appleid.apple.com`, `github.com`), pausing the scheduler to require intentional manual user authentication rather than blind auto-clicking.
+  - Detect unknown blocking modals (`unknown-modal`) persisting over 5 seconds without allow-family options, logging diagnostic observations and suppressing unintended clicks without stalling background schedules.
+  - Add optional Chrome notification dispatch (`notifications` permission) when task is paused due to session expiration or OAuth login requirements.
+  - Implement zero-overhead fail-open architecture ensuring harmless exceptions in classification never impede legitimate tool-use approval workflows (`Smartsheet`, file access, etc.).
+  - Add full unit and integration test suite (`tests/dialog-classifier-tests.mjs`) covering TC-01 through TC-08.
+
 ## [3.0.25] - 2026-11-18
 
 - Fix severe scroll and mouse-hover lag on long Your dot and ChatGPT conversation pages (`content.js`, `adapter.js`):

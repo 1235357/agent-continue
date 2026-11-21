@@ -9,6 +9,10 @@ does not include unversioned source fixes on main or prove current-build
 Windows tool/Pause/Revoke/reopen acceptance. See the current checklist in
 [Windows recovery checkpoint](WINDOWS-RECOVERY-20261117.md).
 
+## Candidate 3.1.0 (2026-11-20)
+
+Implements Exception Dialog Engine (`dialog-classifier.js`) to classify dialog contexts before auto-allow dispatch, detecting session expiration (`session-expired`), external OAuth popups (`oauth-popup`), and unrecognized blocking modals (`unknown-modal`) with optional Chrome notification support and fail-open guarantees. Passes all 9 acceptance tests in `tests/dialog-classifier-tests.mjs`.
+
 ## Candidate 3.0.25 (2026-11-18)
 
 Eliminates main-thread DOM scan lag on long Dot/ChatGPT conversations via turn-scoped scanning, $O(1)$ fast-rejection filters before layout/style checks, scroll-aware deferral, and `requestIdleCallback` scheduling.

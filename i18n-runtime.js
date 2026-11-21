@@ -192,4 +192,9 @@ export default {
   '检测到权限确认选项，已自动点击 Allow 并继续推进。': 'Detected a permission confirmation prompt and automatically clicked Allow to continue.',
   '检测到权限确认选项，已自动点击 Allow；一分钟后继续检查。': 'Detected a permission confirmation prompt and automatically clicked Allow; checking again in one minute.',
   '已自动点击 Allow，正在等待 Agent 完成授权操作。': 'Automatically clicked Allow; waiting for the Agent to finish the authorized action.',
+  '检测到会话过期，任务已暂停。': 'Session expired; task paused.',
+  '检测到登录授权弹窗，任务已暂停。': 'Sign-in dialog detected; task paused.',
+  '检测到未知对话框，自动点击已停止。': 'Unknown dialog detected; auto-click paused.',
+  '检测到会话过期，请重新登录后再继续。': 'Session expired; please sign in again before resuming.',
+  '检测到登录授权弹窗，请手动完成后再继续。': 'Sign-in dialog detected; please complete it manually before resuming.',
 };

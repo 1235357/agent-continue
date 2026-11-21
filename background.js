@@ -1955,6 +1955,51 @@ async function handleApprovalPromptObserved(sender) {
     return { ok: false };
   }
 }
+async function maybeFireNotification(kind) {
+  try {
+    if (!chrome.permissions?.contains || !chrome.notifications?.create) return;
+    if (!(await chrome.permissions.contains({ permissions: ['notifications'] }))) return;
+    const MSGS = {
+      'session-expired': ['Agent Continue — Action needed',
+        'Session expired. Please sign in again, then resume the task.'],
+      'oauth-popup':     ['Agent Continue — Paused',
+        'A sign-in dialog was detected. Please complete it manually, then resume.'],
+      'unknown-modal':   ['Agent Continue — Notice',
+        'An unrecognized dialog is blocking auto-allow. The scheduler continues but cannot click it.'],
+    };
+    const [title, message] = MSGS[kind] ?? ['Agent Continue', `Exception: ${kind}`];
+    chrome.notifications.create(
+      `agent-continue-ex-${Date.now()}`,
+      { type: 'basic', iconUrl: 'icons/icon-48.png', title, message }
+    );
+  } catch { /* notifications not supported or not granted — silently ignore */ }
+}
+
+async function handleDialogException(message, sender) {
+  if (sender.id !== chrome.runtime.id || !Number.isInteger(sender.tab?.id)) return { ok: false };
+  const { kind, evidence, confidence } = message;
+  const safeEvidence = Array.isArray(evidence)
+    ? evidence.filter(e => typeof e === 'string').slice(0, 8).map(e => e.slice(0, 120))
+    : [];
+  await recordActivityEvent('exception-detected',
+    kind === 'session-expired' ? t('检测到会话过期，任务已暂停。') :
+    kind === 'oauth-popup'     ? t('检测到登录授权弹窗，任务已暂停。') :
+                                 t('检测到未知对话框，自动点击已停止。'),
+    { code: 'exception-detected', kind, evidence: safeEvidence, confidence });
+
+  if (kind === 'session-expired' || kind === 'oauth-popup') {
+    await transact(async () => {
+      const job = await getJob();
+      if (!job?.enabled) return;
+      await pauseLocked(job,
+        kind === 'session-expired' ? t('检测到会话过期，请重新登录后再继续。') : t('检测到登录授权弹窗，请手动完成后再继续。'),
+        'paused', { code: `exception-detected-${kind}` });
+    });
+  }
+  void maybeFireNotification(kind);
+  return { ok: true };
+}
+
 async function dispatch(message, sender, version) {
   if (SETUP_MESSAGES.includes(message?.type)) return setupInstallation?.handleMessage(message, sender) ?? null;
   if (message?.type === BROWSER_DEVICE_MESSAGE) return browserWake?.handleMessage(message, sender) ?? null;
@@ -1967,7 +2012,7 @@ async function dispatch(message, sender, version) {
   if (!message || typeof message.type !== 'string') throw fail(t('无效请求。'));
   const ownExtensionPage = chrome.runtime.id && sender.id === chrome.runtime.id && typeof sender.url === 'string' && sender.url.startsWith(chrome.runtime.getURL(''));
   if (['PREPARE_START', 'START', 'PAUSE', 'RESUME', 'CLEAR_DATA', 'SAVE_DRAFT', 'SAVE_TEMPLATES'].includes(message.type) && !ownExtensionPage) throw fail(t('此操作只能从扩展控制面板发起。'));
-  if (!['CHECK_RUN', 'WAIT_RUN', 'COMMIT_RUN', 'PAGE_RESULT', 'MANUAL_SUBMISSION', 'AUTO_ALLOW_CLICK', 'APPROVAL_PROMPT_OBSERVED'].includes(message.type) && sender.tab && !ownExtensionPage) throw fail(t('此操作只能从扩展控制面板发起。'));
+  if (!['CHECK_RUN', 'WAIT_RUN', 'COMMIT_RUN', 'PAGE_RESULT', 'MANUAL_SUBMISSION', 'AUTO_ALLOW_CLICK', 'APPROVAL_PROMPT_OBSERVED', 'DIALOG_EXCEPTION'].includes(message.type) && sender.tab && !ownExtensionPage) throw fail(t('此操作只能从扩展控制面板发起。'));
   if (['PREPARE_START', 'START', 'RESUME'].includes(message.type) && (draftClearPending || draftClearFailed))
     throw fail(t('配置暂时无法读取；暂停仍可使用，重试前不会覆盖本地配置。'));
   switch (message.type) {
@@ -2005,6 +2050,7 @@ async function dispatch(message, sender, version) {
     case 'MANUAL_SUBMISSION': return receiveManualSubmission(message, sender);
     case 'AUTO_ALLOW_CLICK': return handleAutoAllowClick(message, sender);
     case 'APPROVAL_PROMPT_OBSERVED': return handleApprovalPromptObserved(sender);
+    case 'DIALOG_EXCEPTION': return handleDialogException(message, sender);
     case 'PREPARE_START':
       assertIntent(version);
       if (pendingStartReservation?.version !== version) throw fail(t('此操作已被较新的开始或暂停操作取消。'));
