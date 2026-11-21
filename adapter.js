@@ -223,7 +223,21 @@ export async function pageAction(args) {
   const useKeyboardOnly = sendMethod === 'ctrl-enter';
 
   const stopSelector = 'button[data-testid="stop-button"], button[aria-label="Stop streaming"], button[aria-label="Stop generating"], button[aria-label="Stop response"], button[aria-label="停止生成"], button[aria-label="停止输出"], button[aria-label="停止流式传输"], button[aria-label*="Stop" i], button[aria-label*="停止" i]';
+  const pauseSelector = 'button[aria-label*="Resume" i], button[aria-label*="Pause" i], button[aria-label*="继续" i], button[aria-label*="暂停" i], [data-testid*="resume" i], [data-testid*="pause" i], [data-testid*="paused" i]';
   const busySelector = '.typing-indicator, ' + stopSelector;
+  const isDotPaused = () => {
+    if (!isDot) return false;
+    try {
+      const pills = [...document.querySelectorAll('[data-testid*="pause" i], [data-testid*="resume" i], button[aria-label*="Resume" i], button[aria-label*="Pause" i]')];
+      for (const el of pills) {
+        const text = el.textContent?.trim();
+        if ((text === '⏸ Paused' || text === 'Paused' || text === '暂停' || text === '已暂停' || (typeof text === 'string' && text.startsWith('⏸'))) && visible(el)) {
+          return true;
+        }
+      }
+      return false;
+    } catch { return false; }
+  };
   const sendSelector = 'button[data-testid="send-button"], button[data-testid="composer-submit-button"], button[data-testid="fruitjuice-send-button"], button[data-testid*="send" i], button[data-testid*="submit" i], button[aria-label="Send prompt"], button[aria-label="Send message"], button[aria-label="发送提示"], button[aria-label="发送消息"], button[aria-label="Send"], button[aria-label="发送"], button[aria-label*="Send" i], button[aria-label*="发送" i], button[type="submit"]';
   const modernSelector = role => `[data-chatgpt-search-unit-key$=":${role}"][data-chatgpt-search-message-ids]`;
   const userSelector = isDot
@@ -298,7 +312,7 @@ export async function pageAction(args) {
   const withinDeadline = () => !revoked && Number.isFinite(args.runDeadline) && Date.now() < args.runDeadline;
   const forceInterrupt = args.waitForIdle !== true;
   const busy = () => {
-    metrics.observations.busy = visibleMatches(busySelector).length > 0;
+    metrics.observations.busy = visibleMatches(busySelector).length > 0 || visibleMatches(pauseSelector).length > 0 || isDotPaused();
     return !forceInterrupt && metrics.observations.busy;
   };
   const enabled = button => !!button && !button.disabled && button.getAttribute('aria-disabled') !== 'true';
@@ -358,7 +372,13 @@ export async function pageAction(args) {
   };
 
   const initial = findComposer();
-  if (!initial) return result('blocked', '未识别到唯一输入框。页面可能尚未加载、已退出登录，或界面结构已变化。');
+  if (!initial) {
+    if (visibleMatches(busySelector).length > 0 || visibleMatches(pauseSelector).length > 0 || isDotPaused()) {
+      metrics.observations.busy = true;
+      return result('busy', isDotPaused() ? 'Agent 处于暂停状态，等待继续或完成后发送。' : 'Agent 仍在运行，稍后再次检查。', isDotPaused() ? 'agent-paused' : 'agent-busy');
+    }
+    return result('blocked', '未识别到唯一输入框。页面可能尚未加载、已退出登录，或界面结构已变化。');
+  }
   let { editor, composer } = initial;
   metrics.observations.composerPresent = true;
   metrics.observations.hidden = document.visibilityState === 'hidden';

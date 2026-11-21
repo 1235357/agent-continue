@@ -1,5 +1,15 @@
 # Changelog
 
+## [3.2.0] - 2026-11-20
+
+- Fix infinite 1Hz script injection loop and extreme page stutter/lag on Dot and ChatGPT pages (`background.js`, `adapter.js`):
+  - Eliminate the unbounded 1-second `for (;;)` retry loop in `background.js:runRound`: break immediately when `result.status === 'blocked'` and `result.diagnosticCode === 'composer-unavailable'`, yielding to the scheduler alarm (`RETRY_MS = 60s`).
+  - Add hard `MAX_PRE_SUBMISSION_RETRIES = 3` bound in `runRound` preventing any execution from monopolizing the renderer thread with repeated script injections.
+  - Fix Dot `⏸ Paused` state and active generation awareness in `adapter.js`: check busy and pause indicators (`button[aria-label*="Resume"]`, `button[aria-label*="Pause"]`, `button:has-text("Paused")`, `[data-testid*="paused"]`) BEFORE returning composer-unavailable `blocked`, classifying paused agents as `status: 'busy'`, `diagnosticCode: 'agent-paused'` so the scheduler waits rather than hammering the tab.
+  - Broaden `diagnosticCode` allowlist in `background.js` to accept `agent-paused`, `agent-busy`, and `composer-unavailable`.
+  - Add bilingual localization strings in `i18n-runtime.js` for paused agent state guidance.
+  - Add comprehensive unit test suite (`tests/pause-detection-tests.mjs`) covering cyclic queue progression, single repeat prompts, queue-once completion, affirmative consent classification, and diagnostic code routing.
+
 ## [3.1.0] - 2026-11-20
 
 - Implement Exception Dialog Engine (`dialog-classifier.js`, `content.js`, `background.js`) to classify blocking dialog contexts before auto-allow dispatch:

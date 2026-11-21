@@ -16,6 +16,13 @@ ProseMirror suite passed in two same-source partitions, 66/66 and 135/135;
 editor-commit browser passed 14/14. No installed acceptance is established.
 See `docs/WINDOWS-RECOVERY-20261117.md` for exact logs and scope.
 
+## Version 3.2.0 — Release Candidate, November 20, 2026
+
+- Stability and Pause-Awareness Engine (`background.js`, `adapter.js`):
+  - Fixes 1Hz script injection tight-loop on missing composer, bounding pre-submission retries to at most 3 and immediately yielding to the background alarm timer (`RETRY_MS = 60s`).
+  - Implements Dot `⏸ Paused` state and active tool execution recognition in `adapter.js`, returning `status: 'busy'`, `diagnosticCode: 'agent-paused'` before composer failure to prevent tab thrashing.
+  - Adds cyclic prompt queue and affirmative consent test suite (`tests/pause-detection-tests.mjs`).
+
 ## Version 3.1.0 — Release Candidate, November 20, 2026
 
 Implements Exception Dialog Engine (`dialog-classifier.js`) to classify dialog contexts before auto-allow dispatch, detecting session expiration (`session-expired`), external OAuth popups (`oauth-popup`), and unrecognized blocking modals (`unknown-modal`) with optional Chrome notification support and fail-open guarantees. Passes all 9 acceptance tests in `tests/dialog-classifier-tests.mjs`.

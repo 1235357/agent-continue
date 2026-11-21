@@ -197,4 +197,6 @@ export default {
   '检测到未知对话框，自动点击已停止。': 'Unknown dialog detected; auto-click paused.',
   '检测到会话过期，请重新登录后再继续。': 'Session expired; please sign in again before resuming.',
   '检测到登录授权弹窗，请手动完成后再继续。': 'Sign-in dialog detected; please complete it manually before resuming.',
+  'Agent 处于暂停状态，等待继续或完成后发送。': 'Agent is paused; waiting for resumption or completion before sending.',
+  'Agent 仍在运行或处于暂停中，稍后再次检查。': 'Agent is still running or paused; will check again shortly.',
 };

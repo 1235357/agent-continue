@@ -9,6 +9,11 @@ does not include unversioned source fixes on main or prove current-build
 Windows tool/Pause/Revoke/reopen acceptance. See the current checklist in
 [Windows recovery checkpoint](WINDOWS-RECOVERY-20261117.md).
 
+## Candidate 3.2.0 (2026-11-20)
+
+- Anti-Thrashing Scheduler: bounded pre-submission loop in `background.js` (max 3 attempts; immediate break on `composer-unavailable`), eliminating the 1Hz injection loop that previously created 4,394 injections over 76 minutes.
+- Dot `⏸ Paused` Recognition: detects `⏸ Paused` pill and resume buttons in `adapter.js` before composer check, returning `status: 'busy'`, `diagnosticCode: 'agent-paused'` to allow safe background waiting without page stutter.
+
 ## Candidate 3.1.0 (2026-11-20)
 
 Implements Exception Dialog Engine (`dialog-classifier.js`) to classify dialog contexts before auto-allow dispatch, detecting session expiration (`session-expired`), external OAuth popups (`oauth-popup`), and unrecognized blocking modals (`unknown-modal`) with optional Chrome notification support and fail-open guarantees. Passes all 9 acceptance tests in `tests/dialog-classifier-tests.mjs`.

@@ -901,8 +901,8 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS, tr
     }
     // Return only bounded adapter status fields.
     const diagnosticCode = (value.status === 'draft' && value.diagnosticCode === 'existing-draft')
-      || (value.status === 'busy' && ['send-not-ready', 'auto-allowed-prompt'].includes(value.diagnosticCode))
-      || (value.status === 'blocked' && ['commit-not-dispatched', 'composer-unstable', 'composer-slow-write', 'chunk-unconfirmed', 'chunk-attachment', 'chunk-mismatch'].includes(value.diagnosticCode))
+      || (value.status === 'busy' && ['send-not-ready', 'auto-allowed-prompt', 'agent-paused', 'agent-busy'].includes(value.diagnosticCode))
+      || (value.status === 'blocked' && ['commit-not-dispatched', 'composer-unstable', 'composer-slow-write', 'chunk-unconfirmed', 'chunk-attachment', 'chunk-mismatch', 'composer-unavailable'].includes(value.diagnosticCode))
       || (value.status === 'unknown' && ['paste-unconfirmed', 'paste-attachment-unconfirmed', 'receipt-ambiguous', 'receipt-mismatch', 'document-replaced'].includes(value.diagnosticCode)) ? value.diagnosticCode : null;
     const dispatchAttempts = value.diagnosticProgress?.counters?.dispatchAttempts;
     return { status: value.status, message: String(value.message || '').slice(0, 300), identity: typeof value.identity === 'string' ? value.identity.slice(0, 500) : null, assistantToken: typeof value.assistantToken === 'string' ? value.assistantToken.slice(0, 500) : null, assistantCount: Number(value.assistantCount) || 0, diagnosticCode, executionDiagnostic: executionDiagnostic(), manualSubmission,
@@ -1675,6 +1675,8 @@ async function runRound(force = false, expectedJobId = null, expectedIntentVersi
   const traceEpoch = diagnosticEpoch;
   const trace = snapshot.runKind === 'send' ? await newDeliveryTrace() : null;
   let result;
+  let sendAttemptCount = 0;
+  const MAX_PRE_SUBMISSION_RETRIES = 3;
   for (;;) {
   try {
     const resolved = await resolveTarget(snapshot);
@@ -1698,6 +1700,9 @@ async function runRound(force = false, expectedJobId = null, expectedIntentVersi
     }
   } catch { result = snapshot.runKind === 'reply-check' ? { status: 'error', message: t('回复检查暂不可用，继续等待新回复。') } : { status: 'unknown', message: t('后台页面操作未确认。'), diagnosticCode: 'execution-exception' }; }
   if (snapshot.runKind !== 'send' || result?.retryable !== true || !await runStillCurrent(snapshot)) break;
+  if (result?.status === 'blocked' && (result?.diagnosticCode === 'composer-unavailable' || !result?.diagnosticCode)) break;
+  sendAttemptCount++;
+  if (sendAttemptCount >= MAX_PRE_SUBMISSION_RETRIES) break;
   // Explicit no-dispatch may recover a same-document attachment. Authority
   // remains pinned even if the page is replaced after this readback.
   if (delivery.mainCommitAdmitted) {
