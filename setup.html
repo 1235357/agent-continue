@@ -28,8 +28,15 @@
           <div class="actions primary-setup-action"><button id="copyWindowsBrowserPowerShell" type="button" disabled data-i18n="复制 PowerShell 命令">Copy PowerShell command</button></div>
           <p id="windowsBrowserPowerShellFeedback" class="feedback" role="status" aria-live="polite"></p>
           <div class="setup-result" aria-labelledby="setup-result-title">
-            <h3 id="setup-result-title" data-i18n="目标设备安装">Target device installation</h3>
-            <p id="installDetection" class="feedback" role="status" aria-live="polite">Not checked yet.</p>
+            <h3 id="setup-result-title" data-i18n="Windows 设置状态">Windows setup status</h3>
+            <dl class="setup-status">
+              <dt data-i18n="本机安装">Local installation</dt>
+              <dd id="installDetection" role="status" aria-live="polite" data-i18n="未验证">Not verified</dd>
+              <dt data-i18n="隧道连接">Tunnel connection</dt>
+              <dd id="setupTunnelStatus" role="status" aria-live="polite" data-i18n="未验证">Not verified</dd>
+              <dt data-i18n="对话授权">Chat authorization</dt>
+              <dd id="setupChatStatus" data-i18n="未验证">Not verified</dd>
+            </dl>
           </div>
           <p id="windowsExistingDevice" hidden><a id="openBrowserManagedDevices" href="devices.html?mode=browser-managed" data-i18n="已安装？打开设备页">Already installed? Open Devices</a></p>
           <details id="windowsCommandDetails">

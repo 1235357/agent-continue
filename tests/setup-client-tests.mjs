@@ -179,6 +179,7 @@ test('a matching unconfirmed current-account response closes its admission permi
       {automaticConnect:true,receipt:currentProof}),scope:'current-account'})});
   await f.click();
   assert.equal(f.client.getState().state,'unconfirmed');assert.equal(f.count('CANCEL'),1);
+  assert.equal(f.client.getState().installationVerified, true);
   await f.click();assert.equal(f.count('CONNECT'),1);assert.equal(f.generated,1);
 });
 
@@ -346,6 +347,7 @@ test('wrong envelope or receipt IDs, missing worker and invented Ready cannot au
       reply('waiting', { automaticConnect: true }) : observation });
     await f.click(); await tick();
     assert.equal(f.count('CONNECT'), 0); assert.equal(f.client.getState().state, 'unconfirmed');
+    assert.equal(f.client.getState().installationVerified, false);
   }
 });
 
@@ -357,7 +359,10 @@ test('unconfirmed, cancelled, wrong-ID or Ready Connect responses never mean rea
     await f.click(); await tick(); await f.click();
     assert.equal(f.count('CONNECT'), 1);
     assert.equal(f.client.getState().state, response?.state === 'cancelled' ? 'cancelled' : 'unconfirmed');
+    assert.equal(f.client.getState().installationVerified, true, 'a Connect response cannot erase the earlier matching install receipt');
     assert.equal(f.states.some(value => /ready/i.test(value.state)), false);
+    f.client.cancel();
+    assert.equal(f.client.getState().installationVerified, false, 'ending local consent clears this document proof');
   }
 });
 

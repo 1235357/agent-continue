@@ -26,7 +26,15 @@ const catalog = {
   '已复制安装命令。等待本页确认安装；尚未请求连接。': 'Install command copied. Waiting for this page to confirm installation; no connection requested yet.',
   '正在请求连接；就绪尚未确认。': 'Requesting a connection; readiness is unconfirmed.',
   '已请求连接；就绪尚未确认。请在设备页查看状态。ChatGPT 和 Dot 仍需分别授权。': 'Connection requested; readiness is unconfirmed. Check status in Devices. ChatGPT and Dot still require separate authorization.',
-  '安装已验证；连接就绪尚未确认。ChatGPT 和 Dot 仍需分别授权。': 'Installation verified; connection readiness is unconfirmed. Authorize ChatGPT and Dot separately.',
+  'Windows 设置状态': 'Windows setup status',
+  '本机安装': 'Local installation',
+  '隧道连接': 'Tunnel connection',
+  '对话授权': 'Chat authorization',
+  '本次已验证': 'Verified in this setup',
+  '正在请求；未验证': 'Requesting; not verified',
+  '已请求；未验证': 'Requested; not verified',
+  '请求已结束；未验证': 'Request ended; not verified',
+  '连接结果未确认；不会重试。请在设备页检查原操作。': 'Connection result unconfirmed; no retry. Check the original operation in Devices.',
   '已复制安装命令；此版本不支持本页自动连接。安装后请在设备页手动连接。': 'Install command copied; this version does not support automatic connection from this page. After installation, connect manually in Devices.',
   '安装或连接结果未确认；不会重试或创建新请求。请在设备页检查原操作。': 'Installation or connection is unconfirmed; no retry or new request will be made. Check the original operation in Devices.',
   '自动复制失败，本页自动连接已取消。请手动复制命令，安装后在设备页连接。': 'Automatic copy failed and automatic connection from this page is cancelled. Copy the command manually, then connect in Devices after installation.',
@@ -191,7 +199,6 @@ const catalog = {
   '安装后检查': 'Post-install check',
   '我已运行，检测': 'I ran it — check now',
   '尚未检测。': 'Not checked yet.',
-  '浏览器管理安装尚未验证。请在设备页核对所选账户；浏览器权限不代表桥接已安装。': 'Browser-managed installation is not verified. Check the selected account in Devices; browser permission does not verify bridge installation.',
   '独立管理器桥接诊断': 'Standalone bridge diagnostics',
   '此检查仅查询 com.agentcontinue.device_control，不验证浏览器管理的当前账户或管理员桥接，也不会连接设备。': 'This checks only com.agentcontinue.device_control, not the browser-managed current-account or administrator bridge. It does not connect a device.',
   '检测独立桥接': 'Check standalone bridge',
@@ -504,16 +511,20 @@ function renderInstall() {
   $('installConsentLabel').hidden = installOs !== 'windows';
   $('windowsExistingDevice').hidden = installOs !== 'windows';
   $('windowsSourceInstall').hidden = installOs !== 'windows';
-  const administratorState = selectedSetupClient()?.getState();
+  const setupState = selectedSetupClient()?.getState();
+  const installationVerified = setupState?.installationVerified === true;
+  const guidedFeedback = installationVerified && setupState.state === 'unconfirmed'
+    ? '连接结果未确认；不会重试。请在设备页检查原操作。'
+    : ADMINISTRATOR_SETUP_FEEDBACK[setupState?.state];
   for (const [shell, [preview, copy, feedback]] of Object.entries(WINDOWS_GUIDED_ENTRIES)) {
     const command = windowsGuidedCommand(plan, shell);
     $(preview).textContent = command;
-    $(copy).disabled = !command || !!(administratorState && !['idle', 'permission-denied'].includes(administratorState.state));
-    $(feedback).textContent = command && administratorState?.shell === shell
-      ? t(ADMINISTRATOR_SETUP_FEEDBACK[administratorState.state] ?? '')
+    $(copy).disabled = !command || !!(setupState && !['idle', 'permission-denied'].includes(setupState.state));
+    $(feedback).textContent = command && setupState?.shell === shell
+      ? t(guidedFeedback ?? '')
       : command && windowsCopyAttempt?.command === command ? t(windowsCopyAttempt.feedbackKey) : '';
   }
-  const setupFeedback = ADMINISTRATOR_SETUP_FEEDBACK[administratorState?.state] ??
+  const setupFeedback = guidedFeedback ??
     (installConsent && !windowsGuidedCommand(plan, 'browserPowerShell')
       ? '此源码预览未包含已核验的发布安装入口，不能复制远程安装命令。请使用完整的已发布版本；已解压安装包的备用命令位于高级选项中。'
       : installFeedbackKey);
@@ -521,9 +532,9 @@ function renderInstall() {
   $('installFeedback').textContent = t(setupFeedback ?? '勾选同意后可复制命令。');
   $('windowsInstallCheck').hidden = installOs !== 'windows';
   $('managementSection').hidden = installOs !== 'windows';
-  $('installDetection').textContent = ['connecting', 'requested'].includes(administratorState?.state)
-    ? t('安装已验证；连接就绪尚未确认。ChatGPT 和 Dot 仍需分别授权。')
-    : t('浏览器管理安装尚未验证。请在设备页核对所选账户；浏览器权限不代表桥接已安装。');
+  $('installDetection').textContent = t(installationVerified ? '本次已验证' : '未验证');
+  $('setupTunnelStatus').textContent = t(({ connecting: '正在请求；未验证', requested: '已请求；未验证',
+    cancelled: '请求已结束；未验证', unconfirmed: '请求已结束；未验证' })[installationVerified ? setupState.state : ''] ?? '未验证');
   $('legacyInstallDetection').textContent = legacyDetectionText();
   $('detectInstall').disabled = detecting;
   $('managementRegistered').textContent = t(detection === 'registered' ? '已注册' :

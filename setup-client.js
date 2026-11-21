@@ -31,7 +31,7 @@ export function createSetupClient({ api = globalThis.chrome, getContext, permiss
       !Number.isFinite(callTimeoutMs) || callTimeoutMs < 1 || callTimeoutMs > 10000 ||
       !Number.isFinite(connectTimeoutMs) || connectTimeoutMs < 1 || connectTimeoutMs > 120000) throw new Error('invalid_setup_client');
   let attempt = null, closed = false;
-  let view = Object.freeze({ state: 'idle', setupId: null, extensionId: null, shell: null, command: '', copied: false });
+  let view = Object.freeze({ state: 'idle', setupId: null, extensionId: null, shell: null, command: '', copied: false, installationVerified: false });
   const getState = () => view;
   function publish(state, extra = {}) {
     view = Object.freeze({ ...view, ...extra, state });
@@ -43,19 +43,20 @@ export function createSetupClient({ api = globalThis.chrome, getContext, permiss
     try { Promise.resolve(api.runtime.sendMessage(request(TYPES.CANCEL))).catch(() => {}); }
     catch { /* Best effort only; worker document/permit/expiry checks still apply. */ }
   }
-  function finish(state, cancel = attempt?.context.scope === 'current-account' || !attempt?.connectSent) {
+  function finish(state, cancel = attempt?.context.scope === 'current-account' || !attempt?.connectSent, extra = {}) {
     if (!attempt || attempt.terminal) return;
     attempt.terminal = true;
     timers.clearTimeout(attempt.poll);
     timers.clearTimeout(attempt.deadlineTimer);
     for (const release of [...attempt.waiters]) release(UNKNOWN);
     if (cancel) cancelWorker();
-    publish(state);
+    publish(state, extra);
   }
   function cancel() {
     if (!attempt) return;
-    if (!attempt.terminal) finish('cancelled', true);
-    else { cancelWorker(); publish('cancelled'); }
+    const cleared = { installationVerified: false };
+    if (!attempt.terminal) finish('cancelled', true, cleared);
+    else { cancelWorker(); publish('cancelled', cleared); }
   }
   function current() {
     if (!attempt || attempt.terminal) return false;
@@ -112,7 +113,8 @@ export function createSetupClient({ api = globalThis.chrome, getContext, permiss
         value.receipt.state !== 'installed') { finish('unconfirmed'); return; }
     if (!await permitted() || !current() || attempt.connectSent) return;
     attempt.connectSent = true;
-    publish('connecting');
+    // The matching install receipt survives an uncertain Connect response.
+    publish('connecting', { installationVerified: true });
     const connected = await message(TYPES.CONNECT);
     if (!current()) return;
     if (!matching(connected)) { finish('unconfirmed'); return; }

@@ -1,5 +1,24 @@
 # Agent Continue Development Handoff
 
+## Windows Setup Status Separation (2026-11-21)
+
+Setup keeps a matching install receipt scoped to the initiating document and
+selected Windows account. A missing, cancelled, or unconfirmed Connect result
+does not turn that verified installation into an unobserved one. The status
+area shows local installation, tunnel connection, and chat authorization
+separately. It never calls a Connect request ready, never retries it, and
+never infers ChatGPT or Dot authorization. Leaving the page, withdrawing
+consent, losing native messaging permission, or changing scope clears the
+page-local installation proof. Check the same operation in Devices before
+considering any recovery.
+
+The [Windows delivery run 44880844228](https://github.com/1235357/agent-continue/actions/runs/44880844228)
+passed for `cd7617a`. Its original source and build receipts were downloaded
+and verified. All six reported file hashes match the independently verified
+`8344a5e` sidecar bytes. The Setup status change still needs exact-commit
+verification and a dedicated installed Windows session. Browser fixtures do
+not give live ChatGPT, Dot, Pause, Revoke, or restart acceptance.
+
 ## Log Analysis and Windows Artifact Proof (2026-11-21)
 
 - The Windows delivery run [44879249505](https://github.com/1235357/agent-continue/actions/runs/44879249505)

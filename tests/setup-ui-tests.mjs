@@ -398,7 +398,7 @@ async function assertPrimarySetupFlow(page) {
     elements.filter(element => element.checkVisibility()).map(element => element.id));
   assert.deepEqual(visibleControls, ['windowsAccessScope', 'installConsent', 'copyWindowsBrowserPowerShell'],
     'the normal flow has one scope selector, consent and one copy action');
-  for (const id of ['setupRisk', 'setupGrantBoundary', 'installDetection', 'openBrowserManagedDevices']) {
+  for (const id of ['setupRisk', 'setupGrantBoundary', 'installDetection', 'setupTunnelStatus', 'setupChatStatus', 'openBrowserManagedDevices']) {
     assert.equal(await page.locator('#' + id).isVisible(), true, id + ' remains in the normal flow');
   }
   for (const id of ['windowsSetupSteps', 'windowsRunGuidance', 'windowsConnectGuidance', 'hosted-prepare-title',
@@ -672,7 +672,7 @@ async function probeBridgeProofIsolation() {
         }
         const proof = await page.locator('#installDetection').textContent();
         if (phase === 'pending') assert.equal(proof, baseline);
-        else assert.match(proof, uiLanguage === 'en' ? /Installation verified.*unconfirmed/ : /安装已验证.*未确认/);
+        else assert.equal(proof, uiLanguage === 'en' ? 'Verified in this setup' : '本次已验证');
         const before = await page.evaluate(() => ({ messages: __setupMock.setupMessages, permissions: __setupMock.permissionRequests }));
         await openDetails(page, 'windowsInstallCheck');
         await page.locator('#detectInstall').click();
@@ -873,9 +873,7 @@ try {
     });
   }
   for (const uiLanguage of ['en', 'zh_CN']) {
-    const installationVerified = uiLanguage === 'en'
-      ? 'Installation verified; connection readiness is unconfirmed. Authorize ChatGPT and Dot separately.'
-      : '安装已验证；连接就绪尚未确认。ChatGPT 和 Dot 仍需分别授权。';
+    const installationVerified = uiLanguage === 'en' ? 'Verified in this setup' : '本次已验证';
     for (const connectState of ['submitted', 'unconfirmed', 'cancelled']) {
       await withFixture({ granted: true, setupMode: 'automatic', clipboardMode: 'allowed', uiLanguage,
         viewport: { width: 320, height: 600 } }, async fixture => {
@@ -894,6 +892,8 @@ try {
         await page.evaluate(() => __setupMock.finishSetupObserve());
         await page.waitForFunction(() => typeof __setupMock.finishSetupConnect === 'function');
         assert.equal(await page.locator('#installDetection').textContent(), installationVerified, 'connecting shows installation proof, not readiness');
+        assert.equal(await page.locator('#setupTunnelStatus').textContent(),
+          uiLanguage === 'en' ? 'Requesting; not verified' : '正在请求；未验证');
         await assertPrimarySetupFlow(page);
         await layout(page, 'light');
         await assertUnverified(page);
@@ -902,18 +902,17 @@ try {
         const before = await effects(fixture);
         await page.evaluate(() => __setupMock.finishSetupConnect());
         const expectedFeedback = connectState === 'submitted' ? /Connection requested|已请求连接/
-          : connectState === 'cancelled' ? /intent.*cancelled|意图已取消/ : /Installation or connection is unconfirmed|安装或连接结果未确认/;
+          : connectState === 'cancelled' ? /intent.*cancelled|意图已取消/ : /Connection result unconfirmed|连接结果未确认/;
         await page.waitForFunction(pattern => new RegExp(pattern).test(document.getElementById('installFeedback').textContent), expectedFeedback.source);
+        if (connectState === 'unconfirmed') await capture(page, `setup-unconfirmed-connection-${uiLanguage}.png`);
         for (const language of [uiLanguage === 'en' ? 'zh_CN' : 'en', uiLanguage]) {
           await page.evaluate(value => __setupMock.changeLanguage(value), language);
-          const verified = language === 'en'
-            ? 'Installation verified; connection readiness is unconfirmed. Authorize ChatGPT and Dot separately.'
-            : '安装已验证；连接就绪尚未确认。ChatGPT 和 Dot 仍需分别授权。';
-          const unchecked = language === 'en'
-            ? 'Browser-managed installation is not verified. Check the selected account in Devices; browser permission does not verify bridge installation.'
-            : '浏览器管理安装尚未验证。请在设备页核对所选账户；浏览器权限不代表桥接已安装。';
-          assert.equal(await page.locator('#installDetection').textContent(), connectState === 'submitted' ? verified : unchecked,
-            'only connecting/requested can show this installation proof, including after a language rerender');
+          assert.equal(await page.locator('#installDetection').textContent(), language === 'en' ? 'Verified in this setup' : '本次已验证',
+            'a settled connection request does not erase the verified installation, including after a language rerender');
+          assert.equal(await page.locator('#setupTunnelStatus').textContent(), connectState === 'submitted'
+            ? (language === 'en' ? 'Requested; not verified' : '已请求；未验证')
+            : (language === 'en' ? 'Request ended; not verified' : '请求已结束；未验证'));
+          assert.equal(await page.locator('#setupChatStatus').textContent(), language === 'en' ? 'Not verified' : '未验证');
           assert.equal(await page.locator('#managementConnection').textContent(), language === 'en' ? 'Unknown' : '未知');
           await assertUnverified(page);
         }
@@ -1081,9 +1080,11 @@ try {
           await page.locator('#copyWindowsBrowserPowerShell').click();
           await page.waitForFunction(() => __setupMock.clipboardWrites.length === 1 && __setupMock.setupMessages.some(value =>
             value.scope === 'current-account' && value.type.endsWith('CONNECT_V1')) &&
-            document.getElementById('installDetection').textContent.match(/Installation verified|安装已验证/));
+            document.getElementById('setupTunnelStatus').textContent.match(/Requested; not verified|已请求；未验证/));
           await assertPrimarySetupFlow(page);
-          assert.match(await page.locator('#installDetection').textContent(),uiLanguage==='en'?/Installation verified.*unconfirmed/:/安装已验证.*未确认/);
+          assert.equal(await page.locator('#installDetection').textContent(), uiLanguage === 'en' ? 'Verified in this setup' : '本次已验证');
+          assert.equal(await page.locator('#setupTunnelStatus').textContent(), uiLanguage === 'en' ? 'Requested; not verified' : '已请求；未验证');
+          assert.equal(await page.locator('#setupChatStatus').textContent(), uiLanguage === 'en' ? 'Not verified' : '未验证');
           const currentSetupId=await page.evaluate(()=>__setupMock.setupMessages.find(value=>value.scope==='current-account').setupId);
           assert.deepEqual((await clipboardWrites(page)).at(-1), {
             text: browserCommand(extensionId,'current-account','browserPowerShell',currentSetupId), active: true,
