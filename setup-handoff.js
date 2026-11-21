@@ -9,6 +9,23 @@ const validTarget = value => typeof value === 'string' && [37,65].includes(value
   /^[a-f0-9]{32}:(?:[a-f0-9]{32}|idle)$/.test(value);
 const validExtension = value => typeof value === 'string' && value.length === 32 && /^[a-p]{32}$/.test(value);
 
+export const SETUP_CONNECT_BLOCKER = Object.freeze({
+  proof: 'installation-readback-unconfirmed',
+  permission: 'native-permission-unconfirmed',
+  pause: 'pause-support-unconfirmed',
+  observer: 'observer-unconfirmed',
+});
+
+export function validSetupConnectBlocker(value) {
+  const keys = ['setupId', 'state', 'receipt', 'operation', 'blocker'];
+  const hasScope = Object.hasOwn(value ?? {}, 'scope');
+  if (hasScope) keys.push('scope');
+  return exact(value, keys) && hex(value.setupId,32) && (!hasScope || ['current-account','administrator'].includes(value.scope)) &&
+    value.state === 'not-requested' &&
+    value.receipt === null && value.operation === null &&
+    Object.values(SETUP_CONNECT_BLOCKER).includes(value.blocker);
+}
+
 export function validCurrentAccountSetupReceipt(value, setupId, extensionId) {
   if (!hex(setupId,32) || !validExtension(extensionId) ||
       !exact(value,['setupId','state','scope','extensionId','bindingSha256']) ||

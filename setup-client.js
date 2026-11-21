@@ -1,4 +1,4 @@
-import { validSetupReceipt, validCurrentAccountSetupReceipt } from './setup-handoff.js';
+import { validSetupReceipt, validCurrentAccountSetupReceipt, validSetupConnectBlocker } from './setup-handoff.js';
 import { buildWindowsSetupCommand } from './setup-entry.js';
 
 const TYPES = Object.freeze(Object.fromEntries(['BEGIN', 'OBSERVE', 'CONNECT', 'CANCEL']
@@ -118,6 +118,10 @@ export function createSetupClient({ api = globalThis.chrome, getContext, permiss
     const connected = await message(TYPES.CONNECT);
     if (!current()) return;
     if (!matching(connected)) { finish('unconfirmed'); return; }
+    if (validSetupConnectBlocker(connected)) {
+      finish('not-requested', attempt.context.scope === 'current-account', { connectionBlocker: connected.blocker });
+      return;
+    }
     // A worker submission is an operation request, never a readiness observation.
     const state = connected.state === 'submitted' ? 'requested' :
       connected.state === 'cancelled' || connected.state === 'expired' ? 'cancelled' : 'unconfirmed';

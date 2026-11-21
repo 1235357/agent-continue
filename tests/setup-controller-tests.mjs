@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { SETUP_CONNECT_BLOCKER } from '../setup-handoff.js';
 
 const source = await import('../setup-controller.js').catch(error => {
   if (error.code === 'ERR_MODULE_NOT_FOUND') return {};
@@ -20,7 +21,7 @@ function fixture(t,options={}) {
   let time=0,permit=true,granted=true;
   const calls=[],removed=event(),updated=event();
   const api={runtime:{id:extension,getURL:path=>`chrome-extension://${extension}/${path}`},
-    permissions:{contains:async()=>granted},tabs:{onRemoved:removed,onUpdated:updated}};
+    permissions:{contains:options.contains??(async()=>granted)},tabs:{onRemoved:removed,onUpdated:updated}};
   const controls={captureStartupPermit:()=>()=>permit,
     async connectFromSetup(value,admit){calls.push(value);return admit()?record:null;}};
   const controller=source.bindSetupInstallation(api,{controls,now:()=>time,observe:options.observe??(async()=>receipt),
@@ -36,7 +37,10 @@ test('the source-only setup worker implementation is present',()=>{
 });
 test('the default missing observer gate cannot submit a connection',async t=>{
   const f=fixture(t,{defaultObserver:true});await f.send(source.SETUP_BEGIN);
-  assert.equal((await f.send(source.SETUP_CONNECT)).state,'unconfirmed');assert.equal(f.calls.length,0);
+  const refused=await f.send(source.SETUP_CONNECT);
+  assert.deepEqual(refused,{setupId:id,state:'not-requested',receipt:null,operation:null,blocker:SETUP_CONNECT_BLOCKER.observer});
+  assert.deepEqual(await f.send(source.SETUP_CONNECT),refused);
+  assert.equal(f.calls.length,0);
 });
 test('Pause while observer attachment is pending prevents all startup transport',async t=>{
   const pending=Promise.withResolvers();let preparing=false;
@@ -102,19 +106,49 @@ test('a stale, mismatched or unavailable installation proof never requests a con
   for(const proof of [null,{...receipt,setupId:'f'.repeat(32)},
     {...receipt,state:'unconfirmed',bundleSha256:null,target:null},{...receipt,extra:true}]) {
     const f=fixture(t,{observe:async()=>proof});await f.send(source.SETUP_BEGIN);
-    assert.equal((await f.send(source.SETUP_CONNECT)).state,'unconfirmed');assert.equal(f.calls.length,0);
+    const refused=await f.send(source.SETUP_CONNECT);
+    assert.equal(refused.state,'not-requested');assert.equal(refused.blocker,SETUP_CONNECT_BLOCKER.proof);
+    assert.equal(refused.operation,null);assert.equal(f.calls.length,0);
     await f.send(source.SETUP_CONNECT);assert.equal(f.calls.length,0);
   }
 });
 test('the default stop-capability gate cannot silently enable automatic connection',async t=>{
   const f=fixture(t,{defaultStopSupport:true});await f.send(source.SETUP_BEGIN);
-  assert.equal((await f.send(source.SETUP_CONNECT)).state,'unconfirmed');assert.equal(f.calls.length,0);
+  const refused=await f.send(source.SETUP_CONNECT);
+  assert.equal(refused.state,'not-requested');assert.equal(refused.blocker,SETUP_CONNECT_BLOCKER.pause);
+  assert.equal(refused.operation,null);assert.equal(f.calls.length,0);
   const pending=Promise.withResolvers();let checked;
   const g=fixture(t,{checkStopSupport:async value=>{checked=value;return pending.promise;}});
   await g.send(source.SETUP_BEGIN);const result=g.send(source.SETUP_CONNECT);
   for(let i=0;i<30&&!checked;i++)await turn();
   assert.equal(checked,digest);g.deny();pending.resolve(true);
   assert.equal((await result).state,'cancelled');assert.equal(g.calls.length,0);
+});
+test('permission failures before and after readback do not report an invalid installation receipt',async t=>{
+  for (const denyAt of [2,3]) {
+    let connecting=false,checks=0,reads=0;
+    const f=fixture(t,{contains:async()=>!connecting || ++checks!==denyAt,
+      observe:async()=>{reads++;return receipt;}});
+    await f.send(source.SETUP_BEGIN);connecting=true;
+    const refused=await f.send(source.SETUP_CONNECT);
+    assert.equal(reads,denyAt===2?0:1);
+    assert.equal(refused.state,'not-requested');assert.equal(refused.blocker,SETUP_CONNECT_BLOCKER.permission);
+    assert.equal(refused.operation,null);assert.equal(f.calls.length,0);
+  }
+});
+test('rejected pre-dispatch checks are distinguished from a rejection after native admission',async t=>{
+  const reject=async()=>{throw new Error('fixture failure');};
+  for (const [check,blocker] of [['checkStopSupport',SETUP_CONNECT_BLOCKER.pause],['prepareObserver',SETUP_CONNECT_BLOCKER.observer]]) {
+    const f=fixture(t,{[check]:reject});await f.send(source.SETUP_BEGIN);
+    const refused=await f.send(source.SETUP_CONNECT);
+    assert.deepEqual(refused,{setupId:id,state:'not-requested',receipt:null,operation:null,blocker});
+    assert.equal(f.calls.length,0);
+  }
+  const after=fixture(t);await after.send(source.SETUP_BEGIN);
+  after.controls.connectFromSetup=async value=>{after.calls.push(value);return reject();};
+  const unknown=await after.send(source.SETUP_CONNECT);
+  assert.equal(unknown.state,'unconfirmed');assert.equal(Object.hasOwn(unknown,'blocker'),false);
+  assert.deepEqual(await after.send(source.SETUP_CONNECT),unknown);assert.equal(after.calls.length,1);
 });
 test('concurrent Continue calls share one pending submission and never replace an uncertain result',async t=>{
   const pending=Promise.withResolvers();const f=fixture(t);await f.send(source.SETUP_BEGIN);
@@ -184,7 +218,9 @@ test('current-account setup cannot adopt an administrator proof or switch scope 
   const f=currentFixture(t,{observe:async()=>receipt});
   assert.equal((await f.send(source.SETUP_BEGIN))?.state,'waiting');
   assert.equal(await f.send(source.SETUP_CONNECT,'administrator'),null);
-  assert.equal((await f.send(source.SETUP_CONNECT)).state,'unconfirmed');assert.equal(f.calls.length,0);
+  const refused=await f.send(source.SETUP_CONNECT);
+  assert.equal(refused.state,'not-requested');assert.equal(refused.blocker,SETUP_CONNECT_BLOCKER.proof);
+  assert.equal(refused.scope,'current-account');assert.equal(refused.operation,null);assert.equal(f.calls.length,0);
 });
 
 test('Pause cancels current-account pending observation and uncertain Connect remains consumed',async t=>{

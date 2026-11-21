@@ -5,6 +5,9 @@ import vm from 'node:vm';
 import { buildSetupRequest, serializeSetupRequest, describeTarget } from '../setup-model.js';
 import { resolveStatusView } from '../native/bootstrap/registration-status-view.mjs';
 import { buildInstallPlan } from '../native/bootstrap/install-plan.mjs';
+import { SETUP_CONNECT_BLOCKER } from '../setup-handoff.js';
+import { SETUP_ENTRY_RELEASE } from '../setup-entry-release.js';
+import { validSetupEntryMetadata } from '../setup-entry.js';
 
 async function page() {
   const html = fs.readFileSync(new URL('../setup.html', import.meta.url), 'utf8');
@@ -29,6 +32,7 @@ async function page() {
     .replace(/^import .+ from '.+';\r?$/gm, '');
   await vm.runInNewContext('(async () => {\n' + source + '\n})()', {
     buildSetupRequest, serializeSetupRequest, describeTarget, resolveStatusView, buildInstallPlan,
+    SETUP_CONNECT_BLOCKER, SETUP_ENTRY_RELEASE, validSetupEntryMetadata,
     createTranslator: catalog => text => language === 'en' ? catalog[text] ?? text : text,
     getLanguage: () => language, initializeLanguage: async () => language, subscribeLanguage() {},
     setLanguage: async value => { language = value; effects.writes.push({ uiLanguage: value }); },

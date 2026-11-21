@@ -4,6 +4,7 @@ import { resolveStatusView } from './native/bootstrap/registration-status-view.m
 import { buildInstallPlan } from './native/bootstrap/install-plan.mjs';
 import { controlDevice } from './device-control.js';
 import { createSetupClient } from './setup-client.js';
+import { SETUP_CONNECT_BLOCKER } from './setup-handoff.js';
 import { buildWindowsSetupCommand, validSetupEntryMetadata } from './setup-entry.js';
 import { SETUP_ENTRY_RELEASE } from './setup-entry-release.js';
 
@@ -36,6 +37,11 @@ const catalog = {
   '已请求；未验证': 'Requested; not verified',
   '请求已结束；未验证': 'Request ended; not verified',
   '连接结果未确认；不会重试。请在设备页检查原操作。': 'Connection result unconfirmed; no retry. Check the original operation in Devices.',
+  '本页未请求连接：未能重新确认安装回执。请在设备页检查状态，不要重复安装。': 'Setup did not request a connection: the installation receipt could not be verified again. Check Devices before reinstalling.',
+  '本页未请求连接：未能重新确认浏览器本机通信权限。请在设备页检查权限，不要重复安装。': 'Setup did not request a connection: browser native messaging permission could not be verified again. Check permissions in Devices before reinstalling.',
+  '本页未请求连接：未确认本机暂停能力。请在设备页检查状态，不要重复安装。': 'Setup did not request a connection: local Pause support was not verified. Check Devices before reinstalling.',
+  '本页未请求连接：未确认本机状态读取通道。请在设备页检查状态，不要重复安装。': 'Setup did not request a connection: the local status channel was not verified. Check Devices before reinstalling.',
+  '本页未请求；未验证': 'Not requested here; not verified',
   '已复制安装命令；此版本不支持本页自动连接。安装后请在设备页手动连接。': 'Install command copied; this version does not support automatic connection from this page. After installation, connect manually in Devices.',
   '安装或连接结果未确认；不会重试或创建新请求。请在设备页检查原操作。': 'Installation or connection is unconfirmed; no retry or new request will be made. Check the original operation in Devices.',
   '自动复制失败，本页自动连接已取消。请手动复制命令，安装后在设备页连接。': 'Automatic copy failed and automatic connection from this page is cancelled. Copy the command manually, then connect in Devices after installation.',
@@ -272,6 +278,12 @@ const ADMINISTRATOR_SETUP_FEEDBACK = Object.freeze({
   'copy-failed': '自动复制失败，本页自动连接已取消。请手动复制命令，安装后在设备页连接。',
   cancelled: '本页自动连接意图已取消；已提交的操作仍可能完成。可在设备页检查状态或暂停。',
   'permission-denied': '未获得浏览器本机通信权限；未复制命令或请求连接。',
+});
+const SETUP_CONNECT_BLOCKED_FEEDBACK = Object.freeze({
+  [SETUP_CONNECT_BLOCKER.proof]: '本页未请求连接：未能重新确认安装回执。请在设备页检查状态，不要重复安装。',
+  [SETUP_CONNECT_BLOCKER.permission]: '本页未请求连接：未能重新确认浏览器本机通信权限。请在设备页检查权限，不要重复安装。',
+  [SETUP_CONNECT_BLOCKER.pause]: '本页未请求连接：未确认本机暂停能力。请在设备页检查状态，不要重复安装。',
+  [SETUP_CONNECT_BLOCKER.observer]: '本页未请求连接：未确认本机状态读取通道。请在设备页检查状态，不要重复安装。',
 });
 // This diagnostic belongs only to the legacy standalone device_control host.
 let detecting = false;
@@ -527,9 +539,9 @@ function renderInstall(releaseEntryAvailable = hasWindowsReleaseEntry()) {
   $('windowsBrowserCmdDetails').hidden = !releaseEntryAvailable;
   const setupState = selectedSetupClient()?.getState();
   const installationVerified = setupState?.installationVerified === true;
-  const guidedFeedback = installationVerified && setupState.state === 'unconfirmed'
-    ? '连接结果未确认；不会重试。请在设备页检查原操作。'
-    : ADMINISTRATOR_SETUP_FEEDBACK[setupState?.state];
+  const guidedFeedback = setupState?.state === 'not-requested' ? SETUP_CONNECT_BLOCKED_FEEDBACK[setupState.connectionBlocker]
+    : installationVerified && setupState.state === 'unconfirmed' ? '连接结果未确认；不会重试。请在设备页检查原操作。'
+      : ADMINISTRATOR_SETUP_FEEDBACK[setupState?.state];
   for (const [shell, [preview, copy, feedback]] of Object.entries(WINDOWS_GUIDED_ENTRIES)) {
     const command = windowsGuidedCommand(plan, shell);
     $(preview).textContent = command;
@@ -549,6 +561,7 @@ function renderInstall(releaseEntryAvailable = hasWindowsReleaseEntry()) {
   $('managementSection').hidden = installOs !== 'windows';
   $('installDetection').textContent = t(installationVerified ? '本次已验证' : '未验证');
   $('setupTunnelStatus').textContent = t(({ connecting: '正在请求；未验证', requested: '已请求；未验证',
+    'not-requested': '本页未请求；未验证',
     cancelled: '请求已结束；未验证', unconfirmed: '请求已结束；未验证' })[installationVerified ? setupState.state : ''] ?? '未验证');
   $('legacyInstallDetection').textContent = legacyDetectionText();
   $('detectInstall').disabled = detecting;

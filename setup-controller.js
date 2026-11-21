@@ -1,5 +1,5 @@
 import { readSetupStatus, validSetupReceipt, readCurrentAccountSetupStatus,
-  validCurrentAccountSetupReceipt } from './setup-handoff.js';
+  validCurrentAccountSetupReceipt, SETUP_CONNECT_BLOCKER } from './setup-handoff.js';
 import { administratorControlRecord } from './admin-control.js';
 
 export const SETUP_BEGIN = 'WINDOWS_INSTALLATION_BEGIN_V1';
@@ -37,6 +37,7 @@ export function bindSetupInstallation(api,{controls,observe=readSetupStatus,chec
   const inactiveState=intent=>!intent.cancelled && !disposed && now()>=intent.deadline?'expired':'cancelled';
   const result=(intent,state,receipt=null)=>({setupId:intent.setupId,state,receipt,operation:intent.operation??null,
     ...(intent.explicitScope?{scope:intent.scope}:{})});
+  const notRequested=(intent,blocker)=>({...result(intent,'not-requested'),blocker});
   async function permitted() {
     let timer;
     try {
@@ -48,14 +49,20 @@ export function bindSetupInstallation(api,{controls,observe=readSetupStatus,chec
     finally { clearTimeout(timer); }
   }
   async function proof(intent) {
-    if (!current(intent) || !await permitted() || !current(intent)) return null;
+    if (!current(intent) || !await permitted() || !current(intent)) {
+      return { receipt:null, blocker:SETUP_CONNECT_BLOCKER.permission };
+    }
     let value;
-    try { value=Object.freeze({...await intent.observe(api,intent.setupId)}); } catch { return null; }
+    try { value=Object.freeze({...await intent.observe(api,intent.setupId)}); }
+    catch { return { receipt:null, blocker:SETUP_CONNECT_BLOCKER.proof }; }
     const valid=intent.scope==='current-account'?
       validCurrentAccountSetupReceipt(value,intent.setupId,runtime.id):validSetupReceipt(value,intent.setupId);
-    if (!current(intent) || !valid || value.state!=='installed' ||
-        !await permitted() || !current(intent)) return null;
-    return value;
+    if (!current(intent) || !valid || value.state!=='installed') return { receipt:null, blocker:SETUP_CONNECT_BLOCKER.proof };
+    if (!await permitted() || !current(intent)) return { receipt:null, blocker:SETUP_CONNECT_BLOCKER.permission };
+    return { receipt:value };
+  }
+  async function confirmed(check) {
+    try { return await check()===true; } catch { return false; }
   }
   function matchesOperation(value,receipt,intent) {
     if (intent.scope==='current-account') return exact(value,['setupId','scope','extensionId','bindingSha256',
@@ -72,15 +79,15 @@ export function bindSetupInstallation(api,{controls,observe=readSetupStatus,chec
     // Consume before any await, including proof reads. Uncertainty is not a retry.
     intent.consumed=true;
     intent.work=Promise.resolve().then(async()=>{
-      const receipt=await proof(intent);
+      const {receipt,blocker}=await proof(intent);
       if (!current(intent)) return result(intent,inactiveState(intent));
-      if (!receipt) return result(intent,'unconfirmed');
-      const canStop=await intent.checkStopSupport(intent.scope==='current-account'?receipt:receipt.bundleSha256);
+      if (!receipt) return notRequested(intent,blocker);
+      const canStop=await confirmed(()=>intent.checkStopSupport(intent.scope==='current-account'?receipt:receipt.bundleSha256));
       if (!current(intent)) return result(intent,inactiveState(intent));
-      if (canStop!==true) return result(intent,'unconfirmed');
-      const observer=await intent.prepareObserver(()=>current(intent));
+      if (canStop!==true) return notRequested(intent,SETUP_CONNECT_BLOCKER.pause);
+      const observer=await confirmed(()=>intent.prepareObserver(()=>current(intent)));
       if (!current(intent)) return result(intent,inactiveState(intent));
-      if (observer!==true) return result(intent,'unconfirmed');
+      if (observer!==true) return notRequested(intent,SETUP_CONNECT_BLOCKER.observer);
       if (!await permitted() || !current(intent)) {cancel(intent);return result(intent,inactiveState(intent));}
       const setup=intent.scope==='current-account'?{setupId:intent.setupId,scope:intent.scope,
         extensionId:runtime.id,bindingSha256:receipt.bindingSha256}:
@@ -136,7 +143,7 @@ export function bindSetupInstallation(api,{controls,observe=readSetupStatus,chec
       if (!await permitted() || !current(intent)) {cancel(intent);return result(intent,'cancelled');}
       if (message.type===SETUP_CONNECT) return connect(intent);
       if (intent.consumed) return intent.work??result(intent,'unconfirmed');
-      const receipt=await proof(intent);
+      const {receipt}=await proof(intent);
       if (!current(intent)) return result(intent,inactiveState(intent));
       return result(intent,receipt?'installed':'waiting',receipt);
     },

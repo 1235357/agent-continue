@@ -6,6 +6,8 @@ import { buildSetupRequest, serializeSetupRequest, describeTarget } from '../set
 import { resolveStatusView } from '../native/bootstrap/registration-status-view.mjs';
 import { buildInstallPlan } from '../native/bootstrap/install-plan.mjs';
 import { bindSetupInstallation } from '../setup-controller.js';
+import { SETUP_CONNECT_BLOCKER } from '../setup-handoff.js';
+import { validSetupEntryMetadata } from '../setup-entry.js';
 
 const source = await import('../setup-client.js').catch(error => {
   if (error.code === 'ERR_MODULE_NOT_FOUND') return {};
@@ -181,6 +183,32 @@ test('a matching unconfirmed current-account response closes its admission permi
   assert.equal(f.client.getState().state,'unconfirmed');assert.equal(f.count('CANCEL'),1);
   assert.equal(f.client.getState().installationVerified, true);
   await f.click();assert.equal(f.count('CONNECT'),1);assert.equal(f.generated,1);
+});
+
+test('only a matching pre-dispatch gate response can show that Setup did not request a connection', async () => {
+  for (const scope of ['administrator', 'current-account']) {
+    const current = scope === 'current-account';
+    const proof = current ? {setupId,state:'installed',scope,extensionId,bindingSha256:'b'.repeat(64)} : receipt;
+    const rejection = reply('not-requested', {blocker:SETUP_CONNECT_BLOCKER.pause, ...(current ? {scope} : {})});
+    for (const [response, expected] of [
+      [rejection, 'not-requested'],
+      [{...rejection, blocker:'unexpected-error'}, 'unconfirmed'],
+      [{...rejection, setupId:'f'.repeat(32)}, 'unconfirmed'],
+      [{...rejection, operation:{outcome:'requested'}}, 'unconfirmed'],
+      [{...rejection, scope:current ? 'administrator' : 'current-account'}, 'unconfirmed'],
+    ]) {
+      const f = fixture({context:{scope,connectionConsent:true}, send:async message => {
+        if (message.type === types.CONNECT) return response;
+        return {...reply(message.type === types.BEGIN ? 'waiting' : 'installed',
+          {automaticConnect:true,receipt:proof}), ...(current ? {scope} : {})};
+      }});
+      await f.click();
+      const state = f.client.getState();
+      assert.equal(state.state,expected);assert.equal(state.installationVerified,true);
+      assert.equal(state.connectionBlocker,expected === 'not-requested' ? SETUP_CONNECT_BLOCKER.pause : undefined);
+      await f.click();assert.equal(f.count('CONNECT'),1);assert.equal(f.generated,1);
+    }
+  }
 });
 
 test('synchronous rendering cancellation cannot leave a new deadline timer or request permission',async()=>{
@@ -449,12 +477,17 @@ async function setupPage(options = {}) {
       clipboard: context.navigator.clipboard, crypto: context.crypto, page: context }),
     administratorSetupCommand: source.administratorSetupCommand,
     buildWindowsSetupCommand: localCommand,
+    validSetupEntryMetadata, SETUP_CONNECT_BLOCKER,
+    SETUP_ENTRY_RELEASE: {format:'agent-continue-windows-setup-entry',version:1,releaseTag:'v2.3.4',
+      entryUrl:'https://github.com/1235357/agent-continue/releases/download/v2.3.4/install.ps1',
+      entrySha256:'a'.repeat(64),sumsSha256:'b'.repeat(64)},
     buildSetupRequest, serializeSetupRequest, describeTarget, resolveStatusView, buildInstallPlan,
     createTranslator: catalog => text => language === 'en' ? catalog[text] ?? text : text,
     initializeLanguage: async () => {}, subscribeLanguage() {}, getLanguage: () => language,
     setLanguage: async value => { language = value; },
     document: { getElementById: node, querySelectorAll: () => [], documentElement: {} },
-    chrome: { runtime: { id: extensionId, getURL: name => `chrome-extension://${extensionId}/${name}`, async sendMessage(message) {
+    chrome: { runtime: { id: extensionId, getManifest: () => ({version:'2.3.4'}),
+      getURL: name => `chrome-extension://${extensionId}/${name}`, async sendMessage(message) {
       messages.push(message);
       const deliver = () => {
         if (controller) return controller.handleMessage(message, { id: extensionId, frameId: 0,

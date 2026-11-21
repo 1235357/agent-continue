@@ -147,6 +147,7 @@ async function createFixture(options = {}) {
           } };
         }
         if (mock.deferSetupConnect) await new Promise(resolve => { mock.finishSetupConnect = resolve; });
+        if (mock.setupConnectBlocker) return { ...result('not-requested'), blocker: mock.setupConnectBlocker };
         return result(mock.setupConnectState ?? 'submitted');
       }, connect: forbid('runtime.connect'),
       sendNativeMessage: forbid('runtime.sendNativeMessage'), connectNative: forbid('runtime.connectNative'),
@@ -1856,6 +1857,24 @@ try {
       assert.deepEqual(await page.evaluate(() => __setupMock.permissionRequests), []);
     });
     pass(`${uiLanguage}: absent entry metadata disables remote setup before permission, BEGIN or copy`);
+  }
+  for (const uiLanguage of ['en', 'zh_CN']) {
+    await withFixture({ uiLanguage, setupMode: 'automatic', granted: true, clipboardMode: 'allowed' }, async ({ page }) => {
+      for (const scope of ['current-account', 'administrator']) {
+        await page.locator('#windowsAccessScope').selectOption(scope);
+        await page.locator('#installConsent').check();
+        await page.evaluate(() => { __setupMock.setupConnectBlocker = 'pause-support-unconfirmed'; });
+        const button = page.locator('#copyWindowsBrowserPowerShell');
+        await button.click();
+        await page.waitForFunction(() => /did not request a connection|本页未请求连接/.test(document.getElementById('installFeedback').textContent));
+        assert.equal(await page.locator('#installDetection').innerText(), uiLanguage === 'en' ? 'Verified in this setup' : '本次已验证');
+        assert.equal(await page.locator('#setupTunnelStatus').innerText(), uiLanguage === 'en' ? 'Not requested here; not verified' : '本页未请求；未验证');
+        assert.match(await page.locator('#installFeedback').innerText(), uiLanguage === 'en' ? /Pause support was not verified.*Devices/ : /未确认本机暂停能力.*设备页/);
+        assert.equal(await button.isDisabled(), true);
+      }
+      assert.equal(await page.evaluate(() => __setupMock.setupMessages.filter(message => message.type.endsWith('CONNECT_V1')).length), 2);
+    });
+    pass(`${uiLanguage}: both setup scopes distinguish a blocked connection from an unknown dispatch without retry`);
   }
   await probeQueuedCloseRace();
   console.log(`Setup UI: ${checks}/${checks} checks passed (synthetic only; no real websites, accounts, installed extension, installer or native host).`);
