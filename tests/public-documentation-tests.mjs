@@ -106,6 +106,20 @@ test('execution progress disclosure includes every exported stage and result cha
   }
 });
 
+test('Windows disclosure distinguishes the local argument audit from tool result history', () => {
+  const lines = read('PRIVACY.md').split(/\r?\n/);
+  const audit = lines.find(line => line.includes('home/.claude-server-commander/claude_tool_call.log'));
+  const history = lines.find(line => line.includes('home/.claude-server-commander/tool-history.jsonl'));
+  assert.ok(audit && history && audit !== history, 'Disclose both Desktop Commander records separately');
+  assert.match(audit, /unredacted tool arguments/i);
+  assert.match(audit, /does not record tool results/i);
+  assert.match(audit, /does not prune rotated files/i);
+  assert.match(history, /results/i);
+  const listing = read('docs/STORE-LISTING.en.md');
+  assert.match(listing, /local argument audit log.*unredacted tool arguments/i);
+  assert.match(listing, /Telemetry opt-out does not disable these local records/i);
+});
+
 const contexts = [
   ['README.md', 'extension ZIP', name => extensionFiles.has(name)],
   ['README.md', 'root npm package', npmContains],
