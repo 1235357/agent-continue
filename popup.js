@@ -88,6 +88,7 @@ const eventLabels = () => ({
   'queue-complete': t('队列已完成'), 'marker-reached': t('匹配停止标记'), 'target-closed': t('等待目标重开'),
   quiet: t('静默时段'), skipped: t('本轮跳过'), done: t('达到停止条件'), stopped: t('任务已停止'),
   'timing-diagnostics': t('只读计时诊断'), 'auto-allowed': t('自动确认权限'),
+  'exception-detected': t('检测到未知对话框，需要手动检查。'),
 });
 
 if (fullView) {

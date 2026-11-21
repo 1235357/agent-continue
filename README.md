@@ -11,7 +11,7 @@ Schedule your own prompts in one existing ChatGPT or Your dot conversation. The 
 ## Technical Documentation & Architecture
 
 Under the hood:
-* [Windows Direct Tunnel & SSH Architecture](https://github.com/1235357/agent-continue/blob/main/docs/WINDOWS-DIRECT-TUNNEL-SSH-ARCHITECTURE.md) — Comprehensive technical report on zero-intermediary tunneling, informed consent, DesktopCommanderMCP integration, and remote Linux research cluster access.
+* [Windows Device Control & Official Tunnel Architecture](https://github.com/1235357/agent-continue/blob/main/docs/WINDOWS-DIRECT-TUNNEL-SSH-ARCHITECTURE.md) — OpenAI tunnel data path, separate consent gates, Windows runtime acceptance, and deferred SSH scope.
 * [Stability, Pause-Awareness & Anti-Thrashing Design](https://github.com/1235357/agent-continue/blob/main/docs/DESIGN-v3.2.0-STABILITY-AND-PAUSE-DETECTION.md) — Architectural design for Dot paused-state recognition and bounded retry scheduler engine.
 * [Exception Dialog Engine Design](https://github.com/1235357/agent-continue/blob/main/docs/DESIGN-v3.1.0-EXCEPTION-DIALOG-ENGINE.md) — Multi-tier classification for session expiration, OAuth popups, and tool execution confirmations.
 * [Technical Architecture & Retrospective](https://github.com/1235357/agent-continue/blob/main/docs/TECHNICAL-RETROSPECTIVE-AND-ARCHITECTURE.md)

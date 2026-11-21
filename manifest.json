@@ -50,8 +50,7 @@
   ],
   "optional_permissions": [
     "power",
-    "nativeMessaging",
-    "notifications"
+    "nativeMessaging"
   ],
   "options_ui": {
     "page": "popup.html?view=full",

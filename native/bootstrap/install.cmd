@@ -14,12 +14,17 @@ exit /b %ERRORLEVEL%
 
 :guidedBrowser
 if "%~2"=="" goto :usage
-if not "%~3"=="" goto :usage
+if not "%~4"=="" goto :usage
+if "%~3"=="" goto :guidedBrowserUnpaired
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -File "%~dp0install.ps1" -InstallLocal -BrowserManaged -Consent accept-install -PromptForConnection -ExtensionId "%~2" -BrowserSetupId "%~3"
+exit /b %ERRORLEVEL%
+
+:guidedBrowserUnpaired
 "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -File "%~dp0install.ps1" -InstallLocal -BrowserManaged -Consent accept-install -PromptForConnection -ExtensionId "%~2"
 exit /b %ERRORLEVEL%
 
 :usage
->&2 echo Usage: install.cmd guided EXTENSION_ID or install.cmd guided-browser EXTENSION_ID or install.cmd guided-administrator EXTENSION_ID [SETUP_ID]
+>&2 echo Usage: install.cmd guided EXTENSION_ID or install.cmd guided-browser EXTENSION_ID [SETUP_ID] or install.cmd guided-administrator EXTENSION_ID [SETUP_ID]
 exit /b 2
 
 :guidedAdministrator

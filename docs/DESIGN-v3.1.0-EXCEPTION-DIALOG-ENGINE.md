@@ -5,6 +5,8 @@
 **Author:** Zhentong Ye
 **Baseline:** v3.0.25 source, commit f5e11c8
 
+> Historical design record. Current code observes permission cards without clicking them or invoking their handlers. Auto-approval acceptance criteria below no longer apply.
+
 ---
 
 ## Review Findings Applied in This Revision

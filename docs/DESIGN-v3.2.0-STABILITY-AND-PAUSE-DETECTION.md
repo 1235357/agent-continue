@@ -5,6 +5,8 @@
 **Author:** Zhentong Ye  
 **Baseline:** v3.1.0 source, commit d4a75e5  
 
+> Historical design record. The current [Windows architecture](WINDOWS-DIRECT-TUNNEL-SSH-ARCHITECTURE.md) supersedes the direct-tunnel and elevated-retry claims below. Tool-approval prompts require a human decision.
+
 ---
 
 ## Concepts Brief

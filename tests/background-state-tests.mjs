@@ -685,6 +685,24 @@ await scenario('Known pre-submission failures keep retrying without waiting an i
   assert.equal(h.state.session.job.enabled,false);
 });
 
+await scenario('An unavailable composer or paused Dot yields without fast reinjection',async()=>{
+  for(const [status, diagnosticCode] of [['blocked','composer-unavailable'],['busy','agent-paused']]){
+    const h=await harness();await h.start();let sends=0;
+    try {
+      h.pageResult=async args=>args.mode==='send'?(++sends,{status,diagnosticCode,retryable:true,
+        diagnosticProgress:{counters:{dispatchAttempts:0,manualIntents:0}}}):{status:'ready'};
+      const result=await h.message({type:'SEND_NOW'});
+      assert.equal(sends,1);
+      assert.equal(result.job.enabled,true);
+      assert.equal(result.job.lastDiagnosticCode,diagnosticCode);
+      assert.ok(h.state.local.logs.some(entry=>entry.diagnostic?.code===diagnosticCode));
+      assert.equal(result.job.sentCount,0);
+      assert.equal(result.job.unknownCount,0);
+      assert.ok(result.job.nextAt-Date.now()>55_000);
+    } finally {await h.message({type:'PAUSE'});}
+  }
+});
+
 await scenario('A retryable result missing manualIntents must not trigger another send',async()=>{
   const h=await harness();await h.start();let sends=0;
   h.pageResult=async args=>args.mode!=='send'?{status:'ready'}:++sends===1

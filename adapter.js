@@ -22,69 +22,6 @@ export function pageInvocationState({ runId, resultToken }) {
       observations: { ...metrics.observations } } } : {}) };
 }
 
-// Executed in MAIN world when an approval option needs React prop/fiber fallback.
-export function mainWorldAutoAllowClick(clickToken) {
-  if (typeof clickToken !== 'string' || !clickToken) return { ok: false };
-  const findAttr = (root, attr) => {
-    const direct = root.querySelector?.(`[${attr}="${clickToken}"]`);
-    if (direct) return direct;
-    for (const el of root.querySelectorAll ? root.querySelectorAll('*') : []) {
-      if (el.shadowRoot) {
-        const found = findAttr(el.shadowRoot, attr);
-        if (found) return found;
-      }
-    }
-    return null;
-  };
-  const pillEl = findAttr(document, 'data-agent-continue-target-allow');
-  const leafEl = findAttr(document, 'data-agent-continue-target-leaf') || pillEl;
-  const groupEl = findAttr(document, 'data-agent-continue-target-group') || pillEl?.parentElement;
-  if (!pillEl || !pillEl.isConnected) return { ok: true, alreadyTransitioned: true };
-  const initialSvgs = Number(pillEl.getAttribute('data-agent-continue-initial-svgs') || 0);
-  const isSelected = el => !el.isConnected || el.disabled || el.getAttribute('aria-disabled') === 'true'
-    || ['aria-checked', 'aria-pressed', 'aria-selected'].some(a => el.getAttribute(a) === 'true')
-    || ['checked', 'selected', 'active'].includes(el.getAttribute('data-state'))
-    || el.getAttribute('data-selected') === 'true'
-    || /[✓✔☑]/.test(el.textContent || '')
-    || el.querySelectorAll('svg').length > initialSvgs;
-  if (isSelected(pillEl)) return { ok: true, alreadyTransitioned: true };
-
-  let curr = leafEl;
-  const reactPropsPrefix = '__react' + 'Props$';
-  const reactFiberPrefix = '__react' + 'Fiber$';
-  while (curr && curr !== groupEl && curr !== document.body) {
-    const keys = Object.keys(curr);
-    const propsKey = keys.find(k => k.startsWith(reactPropsPrefix));
-    const fiberKey = keys.find(k => k.startsWith(reactFiberPrefix));
-    const props = (propsKey && curr[propsKey]) || (fiberKey && curr[fiberKey]?.memoizedProps);
-    if (props && typeof props === 'object') {
-      const handler = props.onClick || props.onPress || props.onSelect || props.onPointerUp || props.onMouseUp;
-      if (typeof handler === 'function') {
-        try {
-          const nativeEvt = new MouseEvent('click', { bubbles: true, cancelable: true, view: window, button: 0, buttons: 1 });
-          handler({
-            type: 'click',
-            target: curr,
-            currentTarget: curr,
-            nativeEvent: nativeEvt,
-            button: 0,
-            buttons: 1,
-            isTrusted: true,
-            defaultPrevented: false,
-            preventDefault() { this.defaultPrevented = true; },
-            stopPropagation() {},
-            isPropagationStopped: () => false,
-            persist() {},
-          });
-          return { ok: true, via: 'react-props' };
-        } catch {}
-      }
-    }
-    curr = curr.parentElement;
-  }
-  try { pillEl.click(); return { ok: true, via: 'main-click' }; } catch { return { ok: false }; }
-}
-
 // This function is injected into one explicitly selected tab.
 // Executed in ISOLATED world with authoritative background permission checks.
 export async function pageAction(args) {
@@ -288,9 +225,9 @@ export async function pageAction(args) {
 
   let beforeAssistant = null;
   const result = (status, message, diagnosticCode) => {
-    metrics.reason = diagnosticCode === 'auto-allowed-prompt' ? 'auto-allowed-prompt' : resultReason(status);
+    metrics.reason = ['approval-required', 'agent-paused', 'agent-busy'].includes(diagnosticCode) ? diagnosticCode : resultReason(status);
     return { status, message,
-    ...(args.persistentDelivery === true && !submitted && !manualPending && ['blocked', 'draft', 'busy', 'error'].includes(status) && diagnosticCode !== 'auto-allowed-prompt'
+    ...(args.persistentDelivery === true && !submitted && !manualPending && ['blocked', 'draft', 'busy', 'error'].includes(status) && diagnosticCode !== 'approval-required'
       ? { retryable: true } : {}),
     ...(diagnosticCode ? { diagnosticCode } : {}), identity: identity(),
     ...(['sent', 'manual-sent'].includes(status) ? beforeAssistant : assistantState()) };
@@ -312,8 +249,9 @@ export async function pageAction(args) {
   const withinDeadline = () => !revoked && Number.isFinite(args.runDeadline) && Date.now() < args.runDeadline;
   const forceInterrupt = args.waitForIdle !== true;
   const busy = () => {
-    metrics.observations.busy = visibleMatches(busySelector).length > 0 || visibleMatches(pauseSelector).length > 0 || isDotPaused();
-    return !forceInterrupt && metrics.observations.busy;
+    const paused = isDotPaused();
+    metrics.observations.busy = paused || visibleMatches(busySelector).length > 0 || visibleMatches(pauseSelector).length > 0;
+    return paused || (!forceInterrupt && metrics.observations.busy);
   };
   const enabled = button => !!button && !button.disabled && button.getAttribute('aria-disabled') !== 'true';
   const wait = async (ms, renew = true) => {
@@ -371,13 +309,18 @@ export async function pageAction(args) {
     };
   };
 
+  const pausedResult = () => result('busy', 'Agent 处于暂停状态，等待继续或完成后发送。', 'agent-paused');
+  if (isDotPaused()) {
+    metrics.observations.busy = true;
+    return pausedResult();
+  }
   const initial = findComposer();
   if (!initial) {
-    if (visibleMatches(busySelector).length > 0 || visibleMatches(pauseSelector).length > 0 || isDotPaused()) {
+    if (visibleMatches(busySelector).length > 0 || visibleMatches(pauseSelector).length > 0) {
       metrics.observations.busy = true;
-      return result('busy', isDotPaused() ? 'Agent 处于暂停状态，等待继续或完成后发送。' : 'Agent 仍在运行，稍后再次检查。', isDotPaused() ? 'agent-paused' : 'agent-busy');
+      return result('busy', 'Agent 仍在运行，稍后再次检查。', 'agent-busy');
     }
-    return result('blocked', '未识别到唯一输入框。页面可能尚未加载、已退出登录，或界面结构已变化。');
+    return result('blocked', '未识别到唯一输入框。页面可能尚未加载、已退出登录，或界面结构已变化。', 'composer-unavailable');
   }
   let { editor, composer } = initial;
   metrics.observations.composerPresent = true;
@@ -528,27 +471,6 @@ export async function pageAction(args) {
     return null;
   };
 
-  const getAllowedCardMap = () => {
-    if (!(globalThis.__agentContinueAllowedCards instanceof Map)) {
-      globalThis.__agentContinueAllowedCards = new Map();
-    }
-    return globalThis.__agentContinueAllowedCards;
-  };
-
-  const computeCardKey = (groupEl, allowIndex = 0) => {
-    let cardRoot = groupEl;
-    const baseBtns = groupEl?.querySelectorAll ? groupEl.querySelectorAll('button, [role="button"], [role="option"], [role="radio"]').length : 0;
-    for (let d = 0; d < 4 && cardRoot?.parentElement && cardRoot.parentElement !== document.body && cardRoot.parentElement.tagName !== 'MAIN'; d++) {
-      const parent = cardRoot.parentElement;
-      if (parent.querySelectorAll('article.message-row, [data-message-author-role]').length > 1) break;
-      const parentBtns = parent.querySelectorAll('button, [role="button"], [role="option"], [role="radio"]').length;
-      if (baseBtns > 0 && parentBtns > baseBtns) break;
-      cardRoot = parent;
-    }
-    const text = extractOptionText(cardRoot).replace(/\s+/g, ' ').trim().slice(0, 160);
-    return `${allowIndex}:${text || 'approval-card'}`;
-  };
-
   const findApprovalPrompt = () => {
     const selector = 'button, [role="button"], [role="option"], [role="radio"], [role="menuitem"], label, li, a, div, span';
     const excludedSelector = '[data-message-author-role="user"], article.message-row.self, article.self, pre, code, nav, header, aside, footer, [role="navigation"], [role="banner"], [data-testid*="sidebar"]';
@@ -577,12 +499,7 @@ export async function pageAction(args) {
     };
     const dialogs = [...document.querySelectorAll('[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]')];
     const recentAssistantTurns = [...document.querySelectorAll('article.message-row:not(.self), [data-message-author-role="assistant"], [data-chatgpt-search-unit-key$=":assistant"]')].slice(-2);
-    const roots = [...dialogs, ...recentAssistantTurns];
-    if (roots.length > 0) {
-      for (const r of roots) scanRoot(r);
-    } else {
-      scanRoot(document);
-    }
+    for (const root of [...dialogs, ...recentAssistantTurns]) scanRoot(root);
     if (!rawMatched.length) return null;
 
     // Collapse nested parent-child chains that represent a single option pill/button.
@@ -632,17 +549,12 @@ export async function pageAction(args) {
 
     const approvalPromptPattern = /allow\s+chatgpt\s+to\b|wants\s+to\s+(?:use|call|run|access|search|read|write|execute|connect|open|view|edit|send|create|update|delete)\b|permission\s+to\s+(?:use|run|access|connect|read|write)|authorize\s+.+\s+to\b|requires?\s+(?:authorization|authentication|permission|sign[\s-]?in|log[\s-]?in)|(?:connect|link|sign\s+in\s+to|log\s+in\s+to|authorize)\s+(?:your\s+)?[a-z0-9_.\s-]{1,40}\s*(?:account|workspace|integration|connector|app)?|to\s+continue,?\s+(?:please\s+)?(?:sign\s+in|log\s+in|connect|authorize|allow|confirm)|confirm\s+(?:this\s+)?(?:action|request|tool|operation)|是否允许\s*chatgpt|允许\s*chatgpt\s*(?:使用|访问|调用|搜索|读取|执行|连接|查看|修改)|(?:需要|请求|请先?)\s*(?:授权|登录|连接|确认权限|允许访问)|(?:连接|关联|绑定|登录|授权)\s*(?:你的|您的)?\s*[^\s，。！？]{1,30}\s*(?:账号|账户|工作区|应用|服务)?/i;
     const assistantOrDialogSelector = 'article.message-row:not(.self), [data-message-author-role="assistant"], [data-chatgpt-search-unit-key$=":assistant"], [role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]';
-    const allMessages = [...messageNodes('user'), ...messageNodes('assistant')];
-
     const findLCA = (a, b) => {
       for (let curr = a; curr && curr !== document.body && curr !== document.documentElement && curr.tagName !== 'MAIN'; curr = curr.parentElement) {
         if (curr.contains(b)) return curr;
       }
       return null;
     };
-
-    let sawRecentlyAllowed = false;
-    const allowedCardMap = getAllowedCardMap();
 
     for (const allowOpt of [...allowOptions].reverse()) {
       let groupContainer = null;
@@ -688,12 +600,6 @@ export async function pageAction(args) {
       }
       if (!groupContainer) continue;
 
-      const isDialogOverlay = Boolean(groupContainer.closest?.('[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]'));
-      const hasNewerMessage = !isDialogOverlay && allMessages.some(msg =>
-        msg && msg.isConnected && !groupContainer.contains(msg) && !msg.contains(groupContainer)
-        && Boolean(groupContainer.compareDocumentPosition(msg) & Node.DOCUMENT_POSITION_FOLLOWING)
-      );
-
       const groupAllows = allowOptions.filter(o => groupContainer.contains(o.pillEl)).sort((a, b) => b.info.priority - a.info.priority);
       const groupDenies = denyOptions.filter(o => groupContainer.contains(o.pillEl));
       const groupAll = [...groupAllows, ...groupDenies];
@@ -719,133 +625,22 @@ export async function pageAction(args) {
         || (groupDenies.some(o => o.pillEl.querySelectorAll('svg').length > 0) && groupAllows.every(o => o.pillEl.querySelectorAll('svg').length === 0))
       );
 
-      const domStamp = Number(
-        groupContainer.getAttribute('data-agent-continue-allowed')
-        || groupAllows[0]?.pillEl.getAttribute('data-agent-continue-allowed')
-        || 0
-      );
-      const cardKey = computeCardKey(groupContainer, allowOptions.indexOf(allowOpt));
-      const memStamp = Number(allowedCardMap.get(cardKey) || 0);
-      const now = Date.now();
-
-      if (domStamp > 0) {
-        if (!hasNewerMessage && now - domStamp < 25_000) sawRecentlyAllowed = true;
-        continue;
-      }
-      if (memStamp > 0 && !hasNewerMessage && (now - memStamp < 3000 || (hasAsymmetricSvgCheckmark && now - memStamp < 25_000))) {
-        sawRecentlyAllowed = true;
-        continue;
-      }
-      if (groupAll.some(isOptionDisabledOrBusy) || hasAsymmetricSvgCheckmark) {
-        continue;
-      }
-
-      return { state: 'pending', target: groupAllows[0], deny: groupDenies[0] || null, groupContainer, cardKey };
+      if (groupAll.some(isOptionDisabledOrBusy) || hasAsymmetricSvgCheckmark) continue;
+      if (groupContainer.closest?.(assistantOrDialogSelector)) return true;
     }
-    if (sawRecentlyAllowed) return { state: 'recently-allowed' };
-    return null;
+    return false;
   };
 
-  const checkAndHandleApprovalPrompt = async () => {
-    if (args.autoAllow === false) return null;
-    const found = findApprovalPrompt();
-    if (!found) return null;
-    if (found.state === 'recently-allowed') {
-      metrics.observations.busy = true;
-      return result('busy', '已自动点击 Allow，正在等待 Agent 完成授权操作。');
-    }
-    const { target, groupContainer, cardKey } = found;
-    const clickToken = crypto.randomUUID();
-    const nowMs = Date.now();
-    const nowStr = String(nowMs);
-    try {
-      if (cardKey) getAllowedCardMap().set(cardKey, nowMs);
-      groupContainer.setAttribute('data-agent-continue-allowed', nowStr);
-      target.pillEl.setAttribute('data-agent-continue-allowed', nowStr);
-      target.pillEl.setAttribute('data-agent-continue-initial-svgs', String(target.pillEl.querySelectorAll('svg').length));
-      target.pillEl.setAttribute('data-agent-continue-target-allow', clickToken);
-      target.leafEl.setAttribute('data-agent-continue-target-leaf', clickToken);
-      groupContainer.setAttribute('data-agent-continue-target-group', clickToken);
-    } catch {}
-
-    const dispatchClickSequence = el => {
-      if (!el || !el.isConnected) return;
-      try { el.focus?.({ preventScroll: true }); } catch {}
-      let clientX = 0, clientY = 0;
-      try {
-        const rect = el.getBoundingClientRect();
-        if (rect.width > 0 && rect.height > 0) {
-          clientX = Math.round(rect.left + rect.width / 2);
-          clientY = Math.round(rect.top + rect.height / 2);
-        }
-      } catch {}
-      const mouseInit = { bubbles: true, composed: true, cancelable: true, view: window, clientX, clientY, button: 0, buttons: 1 };
-      const pointerInit = { ...mouseInit, pointerId: 1, pointerType: 'mouse', isPrimary: true };
-      try { el.dispatchEvent(new PointerEvent('pointerover', pointerInit)); } catch {}
-      try { el.dispatchEvent(new MouseEvent('mouseover', mouseInit)); } catch {}
-      try { el.dispatchEvent(new PointerEvent('pointerdown', pointerInit)); } catch {}
-      try { el.dispatchEvent(new MouseEvent('mousedown', mouseInit)); } catch {}
-      try { el.dispatchEvent(new PointerEvent('pointerup', { ...pointerInit, buttons: 0 })); } catch {}
-      try { el.dispatchEvent(new MouseEvent('mouseup', { ...mouseInit, buttons: 0 })); } catch {}
-      try { el.click(); } catch {}
-    };
-
-    dispatchClickSequence(target.pillEl);
-    if (target.leafEl && target.leafEl !== target.pillEl && target.pillEl.tagName !== 'BUTTON') {
-      try { target.leafEl.click(); } catch {}
-    }
-
-    const snapshotAfterAttrs = target.pillEl.outerHTML;
-    const classAfterAttrs = target.pillEl.className;
-    await new Promise(resolve => setTimeout(resolve, 80));
-
-    const unchangedAfterDomClick = target.pillEl.isConnected
-      && !target.pillEl.disabled
-      && target.pillEl.outerHTML === snapshotAfterAttrs
-      && target.pillEl.className === classAfterAttrs;
-
-    if (unchangedAfterDomClick) {
-      // Fallback for components that ignore synthetic DOM events: invoke React props in MAIN world.
-      let curr = target.leafEl || target.pillEl;
-      const reactPropsPrefix = '__react' + 'Props$';
-      const reactFiberPrefix = '__react' + 'Fiber$';
-      while (curr && curr !== groupContainer && curr !== document.body) {
-        const keys = Object.keys(curr);
-        const propsKey = keys.find(k => k.startsWith(reactPropsPrefix));
-        const fiberKey = keys.find(k => k.startsWith(reactFiberPrefix));
-        const props = (propsKey && curr[propsKey]) || (fiberKey && curr[fiberKey]?.memoizedProps);
-        if (props && typeof props === 'object') {
-          const handler = props.onClick || props.onPress || props.onSelect || props.onPointerUp || props.onMouseUp;
-          if (typeof handler === 'function') {
-            try {
-              const nativeEvt = new MouseEvent('click', { bubbles: true, cancelable: true, view: window, button: 0, buttons: 1 });
-              handler({
-                type: 'click', target: curr, currentTarget: curr, nativeEvent: nativeEvt,
-                button: 0, buttons: 1, isTrusted: true, defaultPrevented: false,
-                preventDefault() { this.defaultPrevented = true; }, stopPropagation() {},
-                isPropagationStopped: () => false, persist() {},
-              });
-              break;
-            } catch {}
-          }
-        }
-        curr = curr.parentElement;
-      }
-      if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-        try {
-          await Promise.resolve(chrome.runtime.sendMessage({ type: 'AUTO_ALLOW_CLICK', runId: args.runId, token: clickToken })).catch(() => undefined);
-        } catch {}
-      }
-      await new Promise(resolve => setTimeout(resolve, 60));
-    }
+  const approvalWait = () => {
+    if (!findApprovalPrompt()) return null;
     metrics.observations.busy = true;
-    return result('busy', '检测到权限确认选项，已自动点击 Allow 并继续推进。', 'auto-allowed-prompt');
+    return result('busy', '目标页面请求权限确认；请在页面中决定。', 'approval-required');
   };
 
-  const initialApprovalOutcome = await checkAndHandleApprovalPrompt();
+  const initialApprovalOutcome = approvalWait();
   if (initialApprovalOutcome) return initialApprovalOutcome;
 
-  if (busy()) return result('busy', 'Agent 仍在运行，稍后再次检查。');
+  if (busy()) return isDotPaused() ? pausedResult() : result('busy', 'Agent 仍在运行，稍后再次检查。', 'agent-busy');
   if (!editable() && !(forceInterrupt && visibleMatches(stopSelector, composer).length === 1)) {
     return result('blocked', '输入框当前不可编辑。');
   }
@@ -1605,7 +1400,9 @@ export async function pageAction(args) {
 
   try {
     if (!samePage() || !keepComposer()) return result('blocked', '页面已变化。');
-    if (busy()) return result('busy', 'Agent 仍在运行。');
+    const beforeInterruptApproval = approvalWait();
+    if (beforeInterruptApproval) return beforeInterruptApproval;
+    if (busy()) return isDotPaused() ? pausedResult() : result('busy', 'Agent 仍在运行。', 'agent-busy');
     if (hasAttachment() && args.persistentDelivery === true && !await detachAttachments())
       return result('blocked', '发送控件当前不可用，稍后自动检查。', 'commit-not-dispatched');
     if (hasAttachment()) return protectedDraft('输入框有附件，本次不提交。');
@@ -1616,7 +1413,7 @@ export async function pageAction(args) {
     if (!samePage() || !withinDeadline() || !keepComposer() || !editable()) return result('blocked', '输入框当前不可用，稍后重试。');
     if (hasAttachment()) return protectedDraft('输入框有附件，本次不提交。');
 
-    const preCommitApprovalOutcome = await checkAndHandleApprovalPrompt();
+    const preCommitApprovalOutcome = approvalWait();
     if (preCommitApprovalOutcome) return preCommitApprovalOutcome;
 
     if (args.modelCommit === true) {

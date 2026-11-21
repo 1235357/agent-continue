@@ -5,12 +5,12 @@ const CHANNELS = new Set(['none', 'execute-script', 'extension-message', 'page-r
 const REASONS = new Set([
   'starting', 'prepared', 'ready', 'waiting-send', 'empty-composer', 'send-unavailable', 'send-ambiguous',
   'unsupported-view', 'composer-unavailable', 'composer-changed', 'composer-unstable', 'composer-slow-write', 'chunk-unconfirmed', 'chunk-attachment', 'chunk-mismatch', 'view-changed', 'not-editable',
-  'attachments', 'busy', 'expired', 'page-mismatch', 'target-mismatch', 'invalid-arguments',
+  'attachments', 'busy', 'agent-paused', 'agent-busy', 'expired', 'page-mismatch', 'target-mismatch', 'invalid-arguments',
   'invalid-method', 'invalid-phase', 'invalid-url', 'empty-payload', 'commit-state-unavailable',
   'model-not-synchronous', 'receipt-unavailable', 'dispatched', 'already-dispatched', 'dispatch-error',
   'commit-error', 'manual-submission', 'cancelled', 'transport-pending', 'transport-rejected',
   'result-missing', 'grant-pending', 'grant-accepted', 'awaiting-receipt', 'receipt-confirmed',
-  'manual-receipt-confirmed', 'document-replaced', 'worker-interrupted', 'diagnostics-write-failed', 'paste-unconfirmed', 'paste-attachment-unconfirmed', 'receipt-ambiguous', 'receipt-mismatch', 'auto-allowed-prompt', 'unknown',
+  'manual-receipt-confirmed', 'document-replaced', 'worker-interrupted', 'diagnostics-write-failed', 'paste-unconfirmed', 'paste-attachment-unconfirmed', 'receipt-ambiguous', 'receipt-mismatch', 'auto-allowed-prompt', 'approval-required', 'unknown',
 ]);
 const COUNTERS = ['pageAdmissions', 'modelWrites', 'domWrites', 'textChunks', 'slowChunks', 'rejectedChunks', 'chunkRestarts', 'prefixRewriteRestarts', 'chunkSettlementRestarts', 'chunkUnserializableChecks', 'chunkUnserializableRestarts', 'chunkUnserializableRecoveries', 'chunkDifferences', 'insertedBlankSeparators', 'fillCalls', 'readinessChecks',
   'authorizationChecks', 'grantRequests', 'grantReadbacks', 'retiredReadbacks', 'dispatchAttempts',

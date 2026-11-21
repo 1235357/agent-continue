@@ -234,6 +234,7 @@ test('TC-05: Unknown modal persisting over 5s -> safe: false, kind: unknown-moda
   // First check records timestamp in WeakMap
   const res1 = classifyDialogContext();
   assert.equal(res1.safe, true, 'First seen should not trigger unknown-modal immediately');
+  assert.equal(res1.recheckAfterMs, 5000, 'A stationary modal needs a delayed observation even without DOM mutation');
 
   // Advance first seen timestamp by 6000ms
   const firstSeenMap = globalThis.__agentContinueFirstSeenMap;
@@ -242,52 +243,7 @@ test('TC-05: Unknown modal persisting over 5s -> safe: false, kind: unknown-moda
   const res2 = classifyDialogContext();
   assert.equal(res2.safe, false);
   assert.equal(res2.kind, 'unknown-modal');
-});
-
-test('TC-06: Chrome notification fires when permission granted', async () => {
-  let createdNotification = null;
-  const fakeChrome = {
-    permissions: {
-      contains: async ({ permissions }) => permissions.includes('notifications'),
-    },
-    notifications: {
-      create: (id, options) => {
-        createdNotification = { id, options };
-      },
-    },
-  };
-
-  const MSGS = {
-    'session-expired': ['Agent Continue — Action needed', 'Session expired. Please sign in again, then resume the task.'],
-  };
-  const [title, message] = MSGS['session-expired'];
-  if (await fakeChrome.permissions.contains({ permissions: ['notifications'] })) {
-    fakeChrome.notifications.create('test-id', { type: 'basic', title, message });
-  }
-
-  assert.ok(createdNotification);
-  assert.equal(createdNotification.options.title, 'Agent Continue — Action needed');
-  assert.equal(createdNotification.options.message, 'Session expired. Please sign in again, then resume the task.');
-});
-
-test('TC-07: Chrome notification silently skipped when permission not granted', async () => {
-  let createdNotification = null;
-  const fakeChrome = {
-    permissions: {
-      contains: async () => false,
-    },
-    notifications: {
-      create: (id, options) => {
-        createdNotification = { id, options };
-      },
-    },
-  };
-
-  if (await fakeChrome.permissions.contains({ permissions: ['notifications'] })) {
-    fakeChrome.notifications.create('test-id', { type: 'basic', title: 'test', message: 'test' });
-  }
-
-  assert.equal(createdNotification, null, 'Notification should not be created without permission');
+  assert.equal(res2.recheckAfterMs, undefined);
 });
 
 test('TC-08: Performance — 100 rapid calls average < 2ms', () => {

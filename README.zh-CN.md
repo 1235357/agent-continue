@@ -11,7 +11,7 @@
 ## 技术文档与底层架构
 
 底层原理：
-* [Windows 直连隧道与 SSH 架构设计 (Windows Direct Tunnel & SSH Architecture)](https://github.com/1235357/agent-continue/blob/main/docs/WINDOWS-DIRECT-TUNNEL-SSH-ARCHITECTURE.md) — 零中转端到端直连隧道、知情同意模型、DesktopCommanderMCP 集成及直通科研 Linux 服务器的设计报告。
+* [Windows 设备控制与官方隧道架构](https://github.com/1235357/agent-continue/blob/main/docs/WINDOWS-DIRECT-TUNNEL-SSH-ARCHITECTURE.md) — OpenAI 隧道数据路径、各层授权、Windows 运行时验收，以及暂未交付的 SSH 范围。
 * [稳定性、暂停感知与防抖动引擎设计 (Stability & Anti-Thrashing Design)](https://github.com/1235357/agent-continue/blob/main/docs/DESIGN-v3.2.0-STABILITY-AND-PAUSE-DETECTION.md) — Dot 暂停状态识别与调度器防高频注入设计。
 * [异常对话框与权限引擎设计 (Exception Dialog Engine Design)](https://github.com/1235357/agent-continue/blob/main/docs/DESIGN-v3.1.0-EXCEPTION-DIALOG-ENGINE.md) — 会话过期、OAuth 登录与工具权限多级分类处理。
 * [技术架构与复盘报告 (Technical Architecture)](https://github.com/1235357/agent-continue/blob/main/docs/TECHNICAL-RETROSPECTIVE-AND-ARCHITECTURE.md)

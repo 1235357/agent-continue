@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+- Keep pending tool approvals manual in ChatGPT and Your dot. Detect and report them without clicking, writing to the composer, or trying to approve through page internals.
+- Wait on scheduler alarms when Dot is paused or the composer is unavailable; keep bounded fast recovery when a transient result proves that no submission was attempted.
+- Preserve distinct pause, busy, and missing-composer codes in local diagnostic exports without exposing page text.
+- Keep dialog alerts inside the extension rather than requesting the optional browser notifications permission.
+- Fix the guided Windows CMD entry so it forwards the optional setup ID to PowerShell.
+
 ## [3.2.0] - 2026-11-20
 
 - Fix infinite 1Hz script injection loop and extreme page stutter/lag on Dot and ChatGPT pages (`background.js`, `adapter.js`):

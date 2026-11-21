@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as entry from '../setup-entry.js';
 
@@ -51,6 +54,38 @@ test('local fallback is explicit and never silently replaces release acquisition
   assert.match(build({ mode: 'local', scope: 'current-account', entryMetadata: null }), /^\.\\install\.ps1 -InstallLocal -BrowserManaged/);
   assert.match(build({ mode: 'local', shell: 'browserCmd', entryMetadata: null }), /^install\.cmd guided-administrator/);
 });
+
+test('local guided CMD preserves paired and unpaired PowerShell argument vectors',
+  { skip: process.platform !== 'win32' }, t => {
+    const parent = fs.realpathSync(os.tmpdir());
+    const dir = fs.mkdtempSync(path.join(parent, 'ac setup cmd '));
+    t.after(() => {
+      assert.equal(path.dirname(dir), parent);
+      assert.equal(fs.realpathSync(dir), dir);
+      fs.rmSync(dir, { recursive: true });
+    });
+    fs.copyFileSync(new URL('../native/bootstrap/install.cmd', import.meta.url), path.join(dir, 'install.cmd'));
+    fs.writeFileSync(path.join(dir, 'install.ps1'), `param([switch]$InstallLocal,[switch]$BrowserManaged,[switch]$PromptForConnection,[string]$Consent,[string]$ExtensionId,[string]$BrowserSetupId)
+if(-not ($InstallLocal -and $BrowserManaged -and $PromptForConnection) -or $Consent -cne 'accept-install'){exit 99}
+[ordered]@{extensionId=$ExtensionId;setupId=$BrowserSetupId;paired=$PSBoundParameters.ContainsKey('BrowserSetupId')}|ConvertTo-Json -Compress
+exit 23
+`);
+    const run = command => {
+      const result = spawnSync(path.join(process.env.SystemRoot, 'System32', 'cmd.exe'),
+        ['/d', '/c', command], { cwd: dir, encoding: 'utf8', windowsHide: true, timeout: 15000 });
+      assert.ifError(result.error);
+      return result;
+    };
+    const args = { mode: 'local', scope: 'current-account', shell: 'browserCmd', entryMetadata: null };
+    for (const id of [setupId, undefined]) {
+      const result = run(build({ ...args, setupId: id }));
+      assert.equal(result.status, 23, result.stdout + result.stderr);
+      assert.deepEqual(JSON.parse(result.stdout), { extensionId, setupId: id ?? '', paired: Boolean(id) });
+    }
+    const extra = run(build(args) + ' unexpected');
+    assert.equal(extra.status, 2, extra.stdout + extra.stderr);
+    assert.equal(extra.stdout.trim(), '');
+  });
 
 test('remote bootstrap has finite entry acquisition, restrictive storage and verified separate child', () => {
   const source = entry.windowsEntryBootstrapSource({ extensionId, setupId, scope: 'administrator', metadata });

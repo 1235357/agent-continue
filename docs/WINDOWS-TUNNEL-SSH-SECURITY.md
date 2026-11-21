@@ -1,21 +1,15 @@
 # Windows Tunnel & SSH Security Architecture
 
-This document details how Agent Continue enables secure, direct host-to-host connectivity between web-based AI agents (Dot/ChatGPT) and local/remote infrastructure.
+The optional Windows runtime uses the official OpenAI tunnel service to carry
+authorized tool requests and results. There is no Agent Continue relay, but
+tool data passes through OpenAI; this is not peer-to-peer browser-to-Windows SSH.
 
-> **Deep-Dive Architecture:** For the comprehensive, publication-grade treatise on system design, Northwestern CS 381/CS 310 principles, sequence diagrams, and comparative analysis with DesktopCommanderMCP, see [WINDOWS-DIRECT-TUNNEL-SSH-ARCHITECTURE.md](https://github.com/1235357/agent-continue/blob/main/docs/WINDOWS-DIRECT-TUNNEL-SSH-ARCHITECTURE.md).
+Current-account tools run with that account's existing privileges. Administrator
+setup is separate and requires Windows elevation. Browser native messaging,
+local runtime setup, and conversation tool access are separate grants. A
+permission or connectivity error never grants an elevated retry.
 
-## 1. Zero Third-Party Relay Topology
-Our architecture strictly adheres to **End-to-End Tunneling**.
-* **Traffic Flow**: OpenAI Tunnel Runtime (`openai/tunnel-client`) $\leftrightarrow$ `DesktopCommanderMCP` $\leftrightarrow$ Local Windows Host.
-* **Security Constraint**: **NO** external cloud relay, third-party proxy, or unverified middleman handles tool arguments or responses.
-
-## 2. Windows-First Control Anchor
-The Windows host serves as the authenticated anchor. The extension does not manage keys; it only orchestrates commands that invoke native OS tools.
-* **SSH Authority**: The system leverages the native Windows OpenSSH client (`ssh.exe`).
-* **Key Integrity**: SSH keys and the OpenAI runtime key remain exclusively in protected Windows local storage (`%LOCALAPPDATA%\AgentContinue\secrets\`). They are never transferred to the browser extension memory space.
-
-## 3. Administrator Elevation as Self-Healing
-Elevation is reserved strictly for autonomous exception handling:
-* **Roadblock Clearance**: If standard user execution fails (e.g., Firewall rules, PowerShell Execution Policies, Task Scheduler registration), the exception engine triggers an elevated retry.
-* **Informed Consent**: Elevation is never default. It requires explicit user approval through the extension setup UI.
-* **Auditability**: Administrative actions are audited and restricted to pre-defined "Healing" command paths.
+Remote Linux SSH is outside the Windows-first delivery gate. This extension
+does not enroll remote hosts, manage SSH keys, or establish remote SSH sessions.
+See the [architecture and acceptance criteria](WINDOWS-DIRECT-TUNNEL-SSH-ARCHITECTURE.md)
+and the [privacy disclosure](../PRIVACY.md).

@@ -6168,7 +6168,7 @@ try {
     }
   });
   await scenario('A rejected chunk at a surrogate boundary never attempts an empty write', async page => {
-    const largePrompt = '🙂'.repeat(1800) + '_SYNTHETIC_UNICODE_END';
+    const largePrompt = 'A' + '🙂'.repeat(1800) + '_SYNTHETIC_UNICODE_END';
     const started = await start(page, { prompt: largePrompt, sendMethod: 'button', intervalMinutes: 30 });
     await worker.evaluate(async tabId => chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => {
       const original = document.execCommand.bind(document);
@@ -6177,7 +6177,6 @@ try {
         if (name === 'insertText') {
           if (!value) unicodeProbe.empty++;
           unicodeProbe.attempted.push({ length: value.length, valid: value.isWellFormed() });
-          if (unicodeProbe.rejected >= 14) document.documentElement.dataset.unicodeProbeComplete = 'true';
           if (value.length > 1) { unicodeProbe.rejected++; return false; }
           if (value.length === 1) return false;
         }
@@ -6186,14 +6185,16 @@ try {
     } }), started.job.tabId);
     const sending = call({ type: 'SEND_NOW' });
     try {
-      await page.waitForFunction(() => document.documentElement.dataset.unicodeProbeComplete === 'true', null, { timeout: 12000 });
+      const outcome = await sending;
       const probe = await worker.evaluate(async tabId => {
         const frames = await chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', func: () => unicodeProbe });
         return frames.find(frame => frame.frameId === 0)?.result;
       }, started.job.tabId);
-      assert.ok(probe.rejected >= 14);
+      assert.ok(probe.rejected >= 2, 'At least one smaller attempted write must follow the reject');
+      assert.ok(probe.attempted[1].length < probe.attempted[0].length);
       assert.equal(probe.empty, 0);
       assert.ok(probe.attempted.every(item => item.length > 0 && item.valid));
+      assert.equal(outcome.job.sentCount, 0);
       assert.equal((await inspect(page)).submits, 0);
     } finally {
       await call({ type: 'PAUSE' });

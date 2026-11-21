@@ -199,4 +199,7 @@ export default {
   '检测到登录授权弹窗，请手动完成后再继续。': 'Sign-in dialog detected; please complete it manually before resuming.',
   'Agent 处于暂停状态，等待继续或完成后发送。': 'Agent is paused; waiting for resumption or completion before sending.',
   'Agent 仍在运行或处于暂停中，稍后再次检查。': 'Agent is still running or paused; will check again shortly.',
+  '目标页面请求权限确认；请在页面中决定。': 'The page is asking for permission. Review the request on the page.',
+  '目标页面请求权限确认；请在页面中决定。一分钟后再检查。': 'The page is asking for permission. Review it on the page; the task will check again in one minute.',
+  '检测到未知对话框，需要手动检查。': 'An unrecognized dialog needs manual review.',
 };

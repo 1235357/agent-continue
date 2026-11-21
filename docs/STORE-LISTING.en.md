@@ -1,6 +1,6 @@
 # Chrome Web Store Listing - English
 
-English listing source for Agent Continue **3.2.0**. New item `jgjoeiidbnpmgbbhhmphicehbcdgbhga` was submitted through the in-app browser on 2026-11-16 (America/Chicago). The platform returned "Your extension was submitted for review" and Pending review. Publish automatically after review was checked. This is not approval or public availability. The original published item `jpioilmpbolfokedaefmbfbjeaahfdkl` was not modified; a new item is not an update for its existing users. Historical submission and runtime observations remain scoped to their exact artifacts.
+English listing source for Agent Continue (source baseline **3.2.0**). Item `jgjoeiidbnpmgbbhhmphicehbcdgbhga` was submitted as version 3.0.22 on 2026-11-16 (America/Chicago), with automatic publication after review selected. The item was observed publicly listing 3.0.22 on 2026-11-20. Neither observation establishes submission or publication of 3.2.0 or later. The original item `jpioilmpbolfokedaefmbfbjeaahfdkl` was not modified by that submission; a new item is not an update for its existing users.
 
 The copy uses plain-text URLs rather than relying on Markdown rendering. Do not withdraw an existing review merely to apply source copy. Detailed technical notes below are not consumer-facing Store description text and do not certify the current artifact.
 
@@ -20,7 +20,7 @@ Schedule your own prompts in a chosen ChatGPT or Your dot conversation. Repeat a
 
 Delivery prioritizes continuing submission when the composer changes. The prepared message may use changed or website-normalized composer text. Confirmed sends is a local heuristic based on new page-message markers and approximate text matching, including partial matches; it does not verify every original character or server acceptance.
 
-The computer and browser must stay running, with the target conversation open and signed in. The scheduler checks readiness in the background and can continue preparation after page redraws or delayed send controls. Manual Pause overrides scheduled actions, but cannot retract an already dispatched message. Website changes, sleeping pages, account limits or connectivity can delay or prevent delivery. Delivery and server acceptance are not guaranteed. This extension does not increase ChatGPT quotas or guarantee task completion.
+The computer and browser must stay running, with the target conversation open and signed in. The scheduler checks readiness in the background and can continue preparation after page redraws or delayed send controls. The extension does not answer tool approval requests. Manual Pause overrides scheduled actions, but cannot retract an already dispatched message. Website changes, sleeping pages, account limits or connectivity can delay or prevent delivery. Delivery and server acceptance are not guaranteed. This extension does not increase ChatGPT quotas or guarantee task completion.
 
 Optional Windows control
 

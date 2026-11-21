@@ -2,7 +2,7 @@
 // Classifies dialog contexts in ChatGPT and Dot pages to detect:
 // 1. Session expiry (requires re-login; auto-pauses task)
 // 2. OAuth sign-in popups (requires manual user authentication; pauses task and notifies)
-// 3. Unknown blocking modals (logs diagnostic; suppresses auto-allow without pausing)
+// 3. Unknown blocking modals (logs a diagnostic without pausing)
 //
 // Designed according to docs/DESIGN-v3.1.0-EXCEPTION-DIALOG-ENGINE.md
 // Fail-open: any internal error returns { safe: true, kind: 'none' } so normal flow is never bricked.
@@ -151,6 +151,7 @@
       ...document.querySelectorAll('[role="dialog"], [role="alertdialog"]')
     ];
     const now = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+    let recheckAfterMs = Infinity;
 
     for (const dialog of dialogs) {
       if (dialog.hasAttribute('hidden') || dialog.getAttribute('aria-hidden') === 'true') continue;
@@ -176,13 +177,10 @@
       }
       if (hasAllowButton) continue;
 
-      let firstSeen = firstSeenMap.get(dialog);
-      if (!firstSeen) {
-        firstSeenMap.set(dialog, now);
-        continue;
-      }
-
-      if (now - firstSeen >= 5000) {
+      const firstSeen = firstSeenMap.get(dialog) ?? now;
+      firstSeenMap.set(dialog, firstSeen);
+      const remaining = Math.ceil(5000 - (now - firstSeen));
+      if (remaining <= 0) {
         return {
           safe: false,
           kind: 'unknown-modal',
@@ -190,9 +188,12 @@
           confidence: 0.7,
         };
       }
+      recheckAfterMs = Math.min(recheckAfterMs, remaining);
     }
 
-    return null;
+    return Number.isFinite(recheckAfterMs)
+      ? { safe: true, kind: 'none', evidence: [], confidence: 1.0, recheckAfterMs }
+      : null;
   }
 
   function classifyDialogContext() {

@@ -1,5 +1,37 @@
 # Agent Continue Development Handoff
 
+## Scheduler and Release Checkpoint (2026-11-21)
+
+Start from canonical `main` at `4cd6625`, after the v3.2.0 tag
+(`db5c940`). The Extension checks run for `4cd6625` failed three
+background-state cases: definite pre-submit remounts did not retry. The
+repair separates transient, proven no-dispatch outcomes from a missing composer
+or a paused Dot. The former get up to three page admissions in one round;
+the latter yield to the next scheduler alarm without disabling the task.
+This is not an overall wait limit. Manual submission and unknown outcomes
+are not replayed. Tool approvals remain manual on both surfaces.
+The public packager rejects the previous manifest's optional notifications
+permission. The repair removes that permission and retains status and logs
+inside the extension instead of widening the release allowlist.
+
+Local read-only approval, scheduler, and guided CMD fixtures are separate
+from installed-tenant evidence. An isolated Windows preview can be built
+with `python -B scripts/package.py --windows-preview --output-dir <scratch>`;
+do not upload it to the Store. In the first full Windows run, one native stager
+fixture timed out before readback; the isolated rerun passed. Preserve both
+results rather than treating the full invocation as green.
+
+The published GitHub v3.2.0 Release was observed with only a Windows device
+preview ZIP. The public Store listing `jgjoeiidbnpmgbbhhmphicehbcdgbhga`
+was observed at 3.0.22. Neither contains this unreleased repair. Do not
+overwrite the old release or use its artifacts as evidence for the next one.
+For the next release: verify headed CI and the six matching Windows sidecars
+and receipts; install the exact candidate into a dedicated Windows test
+browser environment; verify an ordinary ChatGPT send before Dot, then verify
+setup consent, browser reopen, Pause, and Revoke. Keep existing tasks and
+connections unchanged. Only then create a new matching GitHub Release and
+submit its separate Store ZIP; wait for the Store's own publication readback.
+
 ## Reacquired Status (2026-11-17)
 
 Latest continuation: [Windows recovery checkpoint](WINDOWS-RECOVERY-20261117.md).
