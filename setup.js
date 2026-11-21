@@ -4,7 +4,8 @@ import { resolveStatusView } from './native/bootstrap/registration-status-view.m
 import { buildInstallPlan } from './native/bootstrap/install-plan.mjs';
 import { controlDevice } from './device-control.js';
 import { createSetupClient } from './setup-client.js';
-import { buildWindowsSetupCommand } from './setup-entry.js';
+import { buildWindowsSetupCommand, validSetupEntryMetadata } from './setup-entry.js';
+import { SETUP_ENTRY_RELEASE } from './setup-entry-release.js';
 
 const catalog = {
   '全新安装后仅请求一次连接。撤回同意可取消未发请求；已受理操作仍可能完成，请核对原回执。ChatGPT / Dot 需分别授权。': 'Fresh install, then one connection request. Withdrawal cancels unsent requests; admitted work may finish. Check the original receipt. Authorize ChatGPT / Dot separately.',
@@ -47,7 +48,8 @@ const catalog = {
   '我理解并同意上述访问范围。': 'I understand and agree to this access.',
   '准备源码与隧道。': 'Prepare the source and tunnel.',
   '仅限全新安装：命令自动下载并核验本版本的安装源码。准备官方隧道 ID 和本机密钥文件路径；无需预先下载或解压安装包。': 'Fresh installations only: the command downloads and verifies this exact version of the setup source. Prepare the official tunnel ID and local key-file path; no manual bundle download or extraction is needed.',
-  '此源码预览未包含已核验的发布安装入口，不能复制远程安装命令。请使用完整的已发布版本；已解压安装包的备用命令位于高级选项中。': 'This source preview has no verified release entry, so remote setup commands are unavailable. Use a complete published release; extracted-bundle fallback commands are in Advanced.',
+  '此源码预览未包含已核验的发布安装入口。请使用完整的已发布版本，或查看下方的独立管理器备用命令。': 'This source preview has no verified release entry. Use a complete published release, or see the standalone fallback below.',
+  '此源码预览未包含已核验的管理员发布安装入口。请使用包含 Windows 管理员包的完整已发布版本。': 'This source preview has no verified administrator release entry. Use a complete published release that includes the Windows administrator bundle.',
   '在 PowerShell 中运行。': 'Run in PowerShell.',
   '粘贴命令，按提示输入隧道 ID 和密钥文件路径，再输入 REGISTER 注册桥接；留空取消。无需 JSON，不要粘贴密钥内容；此步骤不启动隧道。': 'Paste the command, supply the tunnel ID and key-file path when prompted, then type REGISTER to register the bridge; leave it blank to cancel. No JSON is needed. Never paste the key itself. This step does not start the tunnel.',
   '在设备页连接。': 'Connect in Devices.',
@@ -83,7 +85,10 @@ const catalog = {
   '安装中断后的检查': 'If installation stops',
   '安装结果不明时，不要删除目录或重复安装。使用原安装路径查询首次连接结果，即使没有显示操作 ID 也可以检查。': 'If the result is unclear, do not delete the directory or reinstall. Check the first connection attempt using the original install path, even if no operation ID was displayed.',
   '需要报告问题时，请提供扩展版本和错误代码；不要上传密钥文件、完整路径或原始终端输出。卸载选项目前只生成计划，不会清理文件；待检查不等于已完成。': 'For an issue report, share the extension version and error code, not key files, full paths or raw terminal output. The uninstall option currently generates a plan only; it does not remove files. Pending review does not mean completed.',
-  '从已审阅并解压的源码包目录运行安装命令。不安装 AgentContinue EXE；仅浏览器管理模式注册 Chrome 主机。': 'Run the install command from the reviewed, extracted source bundle. No Agent Continue EXE is installed; only browser-managed mode registers its Chrome host.',
+  '不使用 Agent Continue EXE/MSI 安装程序；仅浏览器管理模式注册 Chrome 主机。': 'No Agent Continue EXE/MSI installer is used; only browser-managed mode registers a Chrome native host.',
+  '请在原版本的已核验、已解压安装包目录中运行下方检查命令。': 'Run the check below from the verified, extracted setup bundle for the original version.',
+  '请在已核验、已解压的安装包目录中运行下方的备用命令。': 'Run the fallback commands below from the verified, extracted setup bundle.',
+  '如需下载原版本安装包，请先对照该版本发布的 SHA-256 校验值，再解压。': 'To obtain the original bundle, find its release and check the ZIP against the published SHA-256 before extracting.',
   '审阅并导出 Windows 配置请求': 'Review and export a Windows setup request',
   '引导命令已包含当前扩展 ID，无需导出 JSON。请核对终端显示的扩展 ID，再输入官方隧道 ID 和运行密钥文件的绝对路径。不要粘贴密钥内容。': "The guided command includes this extension's ID; no JSON export is needed. Check the extension ID shown in the terminal, then enter the official tunnel ID and absolute path to the runtime-key file. Do not paste the key itself.",
   '已有兼容的 Node.js 时直接使用；否则确认后会自动下载并校验官方便携 Node ZIP，只为当前用户安装。不运行 EXE/MSI 安装器，不需要管理员权限，不改系统 PATH。': 'Setup reuses compatible Node.js. Otherwise, after you confirm, it automatically downloads and verifies the official portable Node ZIP and installs it for the current user only. No EXE/MSI installer, administrator access, or system PATH changes.',
@@ -98,7 +103,7 @@ const catalog = {
   'PowerShell（支持补装便携 Node）': 'PowerShell (can provision portable Node)',
   '暂停与恢复': 'Pause and reconnect',
   '使用便携 Node 时的管理命令': 'Manage with portable Node',
-  '安装成功后，如果终端提示可选配对：输入 PAIR 打开扩展控制面板，或按 Enter 保留连接而不配对。': 'If the terminal offers pairing after a successful install: Type PAIR to open extension controls; Enter keeps the connection without pairing.',
+  '安装成功后，如果终端提示可选配对：输入 PAIR 生成配对凭证，或按 Enter 保留连接而不配对。': 'If the terminal offers pairing after a successful install: Type PAIR to generate a pairing ticket; Enter keeps the connection without pairing.',
   '输入 PAIR 后，同一终端会显示一条临时配对凭证，不会自动打开浏览器。只将整行 ACPAIR1 凭证粘贴到扩展控制面板，不要分享。': 'PAIR displays a temporary pairing ticket in the same terminal. No browser opens automatically. Paste the entire ACPAIR1 line into the extension controls only. Do not share it.',
   '打开扩展控制面板': 'Open extension controls',
   '临时浏览器控制页': 'Temporary browser controls',
@@ -153,6 +158,8 @@ const catalog = {
   '我已核对目标与扩展标识，同意发起本机 JSON 导出。': 'I checked the target and extension identity and agree to initiate the local JSON export.',
   '取消': 'Cancel', '导出请求': 'Export request',
   'Windows 仅有源码候选版本；尚无已发布安装器。': 'Windows has a source candidate only; no released installer.',
+  '本版本包含经过校验的 Windows 安装命令。': 'This build includes verified Windows setup commands.',
+  '当前扩展身份未确认，无法复制 Windows 安装命令。': 'The extension identity is unverified; Windows setup commands cannot be copied.',
   'macOS 原生安装尚未实现；尚无已发布安装器。': 'macOS native installation is not implemented; no released installer.',
   'Linux 仅有离线源码包候选版本；不是安装器。': 'Linux has an offline source-kit candidate only; it is not an installer.',
   '远程 Linux 可在目标服务器上用候选源码包配置；没有已发布的安装器。': 'Remote Linux can be configured on the target server from the source candidate; no installer has been released.',
@@ -433,6 +440,9 @@ async function localAction(action) {
 }
 
 function currentRequest() { return buildSetupRequest($('target').value, globalThis.chrome?.runtime?.id); }
+function hasWindowsReleaseEntry() {
+  return validSetupEntryMetadata(SETUP_ENTRY_RELEASE, globalThis.chrome?.runtime?.getManifest?.()?.version);
+}
 function render() {
   for (const element of document.querySelectorAll('[data-i18n]')) element.textContent = t(element.dataset.i18n);
   document.documentElement.lang = getLanguage() === 'zh_CN' ? 'zh-CN' : 'en';
@@ -446,7 +456,8 @@ function render() {
   $('extension-id').textContent = typeof id === 'string' && id.length === 32 && /^[a-p]{32}$/.test(id) ? id : t('未知');
   $('browser-permission').textContent = t({ granted: '已授权', absent: '未授权', unknown: '未知' }[permission]);
   const target = $('target').value;
-  $('availability').textContent = t({ windows: 'Windows 仅有源码候选版本；尚无已发布安装器。', macos: 'macOS 原生安装尚未实现；尚无已发布安装器。',
+  const releaseEntryAvailable = hasWindowsReleaseEntry();
+  $('availability').textContent = t({ windows: releaseEntryAvailable ? '本版本包含经过校验的 Windows 安装命令。' : 'Windows 仅有源码候选版本；尚无已发布安装器。', macos: 'macOS 原生安装尚未实现；尚无已发布安装器。',
     linux: 'Linux 仅有离线源码包候选版本；不是安装器。', 'linux-server': '远程 Linux 可在目标服务器上用候选源码包配置；没有已发布的安装器。' }[target] || '请选择目标。本候选版本没有已发布的安装器。');
   $('target-boundary').textContent = t(!target ? '目标选择不会检测、连接或控制任何设备。' :
     target === 'windows' ? 'Windows 直连官方隧道。浏览器管理模式需要本机桥接；独立管理模式不需要。' :
@@ -463,10 +474,10 @@ function render() {
   $('reviewSetup').disabled = !initialized || !valid;
   $('export-feedback').textContent = t(feedback);
   $('downloadSetup').disabled = !reviewed || !$('exportConsent').checked;
-  renderInstall();
+  renderInstall(releaseEntryAvailable);
 }
 
-function renderInstall() {
+function renderInstall(releaseEntryAvailable = hasWindowsReleaseEntry()) {
   // The install panel answers "install this device's bridge", so it is scoped
   // to its own OS switch and never rewrites the setup target or its review.
   const plan = installPlan(installOs);
@@ -511,6 +522,9 @@ function renderInstall() {
   $('installConsentLabel').hidden = installOs !== 'windows';
   $('windowsExistingDevice').hidden = installOs !== 'windows';
   $('windowsSourceInstall').hidden = installOs !== 'windows';
+  $('windowsSetupReleaseLink').hidden = installOs !== 'windows' || releaseEntryAvailable;
+  $('windowsCommandDetails').hidden = !releaseEntryAvailable;
+  $('windowsBrowserCmdDetails').hidden = !releaseEntryAvailable;
   const setupState = selectedSetupClient()?.getState();
   const installationVerified = setupState?.installationVerified === true;
   const guidedFeedback = installationVerified && setupState.state === 'unconfirmed'
@@ -524,10 +538,11 @@ function renderInstall() {
       ? t(guidedFeedback ?? '')
       : command && windowsCopyAttempt?.command === command ? t(windowsCopyAttempt.feedbackKey) : '';
   }
-  const setupFeedback = guidedFeedback ??
-    (installConsent && !windowsGuidedCommand(plan, 'browserPowerShell')
-      ? '此源码预览未包含已核验的发布安装入口，不能复制远程安装命令。请使用完整的已发布版本；已解压安装包的备用命令位于高级选项中。'
-      : installFeedbackKey);
+  const unavailableFeedback = !releaseEntryAvailable
+    ? (administrator ? '此源码预览未包含已核验的管理员发布安装入口。请使用包含 Windows 管理员包的完整已发布版本。'
+      : '此源码预览未包含已核验的发布安装入口。请使用完整的已发布版本，或查看下方的独立管理器备用命令。')
+    : !plan ? '当前扩展身份未确认，无法复制 Windows 安装命令。' : null;
+  const setupFeedback = guidedFeedback ?? unavailableFeedback ?? installFeedbackKey;
   $('installFeedback').hidden = installOs !== 'windows' || (installConsent && !setupFeedback);
   $('installFeedback').textContent = t(setupFeedback ?? '勾选同意后可复制命令。');
   $('windowsInstallCheck').hidden = installOs !== 'windows';

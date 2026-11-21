@@ -23,6 +23,7 @@
       <p id="setupGrantBoundary" data-i18n="全新安装后仅请求一次连接。撤回同意可取消未发请求；已受理操作仍可能完成，请核对原回执。ChatGPT / Dot 需分别授权。">Fresh install, then one connection request. Withdrawal cancels unsent requests; admitted work may finish. Check the original receipt. Authorize ChatGPT / Dot separately.</p>
       <label id="installConsentLabel" class="consent" for="installConsent"><input id="installConsent" type="checkbox" aria-describedby="setupRisk setupGrantBoundary"><span data-i18n="我同意安装并请求一次连接。">I agree to install and request one connection.</span></label>
       <p id="installFeedback" class="feedback" role="status" aria-live="polite">Agree to the statement to enable copying.</p>
+      <p id="windowsSetupReleaseLink" hidden><a href="https://github.com/1235357/agent-continue/releases" target="_blank" rel="noopener noreferrer" data-i18n="Agent Continue 发布页">Agent Continue releases</a></p>
       <div id="windowsSourceInstall" hidden>
         <div id="windowsBrowserInstall">
           <div class="actions primary-setup-action"><button id="copyWindowsBrowserPowerShell" type="button" disabled data-i18n="复制 PowerShell 命令">Copy PowerShell command</button></div>
@@ -47,8 +48,8 @@
               <li><strong data-i18n="确认连接状态。">Confirm connection state.</strong> <span id="windowsConnectGuidance" data-i18n="全新安装验证后，本页请求一次连接；请求不代表就绪。请在设备页核对状态，ChatGPT 和 Dot 仍需分别授权。">After fresh installation is verified, this page requests one connection; a request does not mean ready. Check status in Devices and authorize ChatGPT and Dot separately.</span> <a id="windowsSetupDevices" href="devices.html?mode=browser-managed" data-i18n="打开浏览器管理的 Windows 设备">Open browser-managed Windows device</a> · <a href="#chat-connection-title" data-i18n="连接 ChatGPT 和 Dot">Connect ChatGPT and Dot</a></li>
             </ol>
             <pre class="handoff-command install-command" tabindex="0"><code id="windowsBrowserPowerShell"></code></pre>
-            <p data-i18n="从已审阅并解压的源码包目录运行安装命令。不安装 AgentContinue EXE；仅浏览器管理模式注册 Chrome 主机。">Run the install command from the reviewed, extracted source bundle. No Agent Continue EXE is installed; only browser-managed mode registers its Chrome host.</p>
-            <p><a href="https://github.com/1235357/agent-continue/releases" target="_blank" rel="noopener noreferrer" data-i18n="Agent Continue 发布页">Agent Continue releases</a> · <span id="windowsReleaseCheck" data-i18n="仅使用明确提供安装 ZIP 和 SHA-256 校验值的版本。解压前，核对 ZIP 的 SHA-256 是否与该版本公布的校验值完全一致。">Use only a release that provides the setup ZIP and its SHA-256 checksum. Before extracting, compare the ZIP hash with the checksum for that exact release.</span></p>
+            <p><a href="https://github.com/1235357/agent-continue/releases" target="_blank" rel="noopener noreferrer" data-i18n="Agent Continue 发布页">Agent Continue releases</a></p>
+            <p data-i18n="不使用 Agent Continue EXE/MSI 安装程序；仅浏览器管理模式注册 Chrome 主机。">No Agent Continue EXE/MSI installer is used; only browser-managed mode registers a Chrome native host.</p>
             <p id="windowsGuidedInputs" data-i18n="引导命令已包含当前扩展 ID，无需导出 JSON。请核对终端显示的扩展 ID，再输入官方隧道 ID 和运行密钥文件的绝对路径。不要粘贴密钥内容。">The guided command includes this extension's ID; no JSON export is needed. Check the extension ID shown in the terminal, then enter the official tunnel ID and absolute path to the runtime-key file. Do not paste the key itself.</p>
             <p id="windowsCommandScope" data-i18n="复制会申请浏览器本机通信权限并准备本页安装意图，不会运行安装。安装只使用当前账户，不请求管理员提权。">Copy requests browser native-messaging permission and prepares setup intent for this page; it does not install anything. Installation uses the current account without requesting administrator elevation.</p>
             <p data-i18n="计划按 Node 22.13.0 或更高版本生成；安装器运行前会重新核对。">The plan assumes Node 22.13.0 or newer; the installer re-checks before running.</p>
@@ -63,6 +64,8 @@
           </details>
           <details id="windowsBrowserRecovery">
             <summary data-i18n="浏览器管理安装的只读检查">Read-only browser-managed install check</summary>
+            <p data-i18n="请在原版本的已核验、已解压安装包目录中运行下方检查命令。">Run the check below from the verified, extracted setup bundle for the original version.</p>
+            <p><span data-i18n="如需下载原版本安装包，请先对照该版本发布的 SHA-256 校验值，再解压。">To obtain the original bundle, find its release and check the ZIP against the published SHA-256 before extracting.</span> <a href="https://github.com/1235357/agent-continue/releases" target="_blank" rel="noopener noreferrer" data-i18n="Agent Continue 发布页">Agent Continue releases</a></p>
             <p id="windowsBrowserRecoveryHelp" data-i18n="安装结果不明时，不要删除目录或重复安装。此只读命令分别检查配置、本机控制桥文件与注册信息，不会连接或重试；检查通过也不证明浏览器启动或对话授权。">If setup is unclear, do not delete the directory or reinstall. This read-only command checks configuration, bridge files and registration separately. It does not connect or retry; a pass is not proof of browser launch or chat authorization.</p>
             <pre class="handoff-command install-command" tabindex="0"><code id="windowsBrowserInstallerStatusCommand"></code></pre>
           </details>
@@ -70,6 +73,8 @@
         <details id="windowsStandaloneInstall">
         <summary data-i18n="备用：独立管理器和高级命令">Fallback: standalone manager and advanced commands</summary>
         <p data-i18n="如果选择独立管理器，不要同时运行上方浏览器管理命令，也不要用它覆盖现有安装。">Use standalone setup instead of browser-managed setup, not alongside it or over an existing installation.</p>
+        <p id="windowsReleaseCheck" data-i18n="仅使用明确提供安装 ZIP 和 SHA-256 校验值的版本。解压前，核对 ZIP 的 SHA-256 是否与该版本公布的校验值完全一致。">Use only a release that provides the setup ZIP and its SHA-256 checksum. Before extracting, compare the ZIP hash with the checksum for that exact release.</p>
+        <p data-i18n="请在已核验、已解压的安装包目录中运行下方的备用命令。">Run the fallback commands below from the verified, extracted setup bundle.</p>
         <p data-i18n="核对后输入 CONNECT 开始安装并请求连接；留空取消。">Type CONNECT to install and request a connection, or leave it blank to cancel.</p>
         <pre class="handoff-command install-command" tabindex="0"><code id="windowsGuidedCommand"></code></pre>
         <div class="actions"><button id="copyWindowsGuidedCommand" type="button" disabled data-i18n="复制 PowerShell 命令">Copy PowerShell command</button></div>
@@ -80,7 +85,7 @@
           <div class="actions"><button id="copyWindowsGuidedCmdCommand" type="button" disabled data-i18n="复制 CMD 命令">Copy CMD command</button></div>
           <p id="windowsCmdCopyFeedback" class="feedback" role="status" aria-live="polite"></p>
         </details>
-        <p data-i18n="安装成功后，如果终端提示可选配对：输入 PAIR 打开扩展控制面板，或按 Enter 保留连接而不配对。">If the terminal offers pairing after a successful install: Type PAIR to open extension controls; Enter keeps the connection without pairing.</p>
+        <p data-i18n="安装成功后，如果终端提示可选配对：输入 PAIR 生成配对凭证，或按 Enter 保留连接而不配对。">If the terminal offers pairing after a successful install: Type PAIR to generate a pairing ticket; Enter keeps the connection without pairing.</p>
         <p data-i18n="输入 PAIR 后，同一终端会显示一条临时配对凭证，不会自动打开浏览器。只将整行 ACPAIR1 凭证粘贴到扩展控制面板，不要分享。">PAIR displays a temporary pairing ticket in the same terminal. No browser opens automatically. Paste the entire ACPAIR1 line into the extension controls only. Do not share it.</p>
         <div class="actions"><button id="openWindowsLocalControls" type="button" aria-controls="localControlDetails" data-i18n="打开扩展控制面板">Open extension controls</button></div>
         <h4 data-i18n="高级：手动传入参数">Advanced: pass arguments manually</h4>

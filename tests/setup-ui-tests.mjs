@@ -380,7 +380,7 @@ async function assertLinks(page) {
     assert.equal(link.href.includes(extensionId), false);
     external.push(link.href);
   }
-  assert.deepEqual(external.sort(), [...officialLinks].sort());
+  assert.deepEqual([...new Set(external)].sort(), [...officialLinks].sort());
   assert.equal(await page.locator('link[rel~="prefetch"],link[rel~="preconnect"],link[rel~="dns-prefetch"],link[rel~="prerender"],link[rel~="modulepreload"],script[type="speculationrules"]').count(), 0);
   assert.deepEqual(await page.locator('input:not([type="checkbox"]),textarea,[contenteditable="true"],iframe')
     .evaluateAll(elements => elements.map(element => element.id)), ['localControlTicket', 'localControlFrame']);
@@ -775,7 +775,7 @@ try {
         assert.match(await page.locator('#windowsBrowserPowerShellFeedback').textContent(), language === 'en' ? /unconfirmed.*no retry/ : /未确认.*不会重试/);
         assert.match(await page.locator('#windowsCommandScope').textContent(), language === 'en' ? /installation and connection.*separate Windows approvals.*UAC/i : /安装和连接.*分别.*UAC/);
         assert.match(await page.locator('#windowsSetupSteps').innerText(), language === 'en' ? /request does not mean ready/ : /请求不代表就绪/);
-        assert.match(await page.locator('#availability').innerText(), language === 'en' ? /source candidate.*no released installer/ : /源码候选.*尚无已发布安装器/);
+        assert.match(await page.locator('#availability').innerText(), language === 'en' ? /includes verified Windows setup commands/ : /包含经过校验的 Windows 安装命令/);
       }
       assert.deepEqual({ ...await effects(fixture), writes: beforeCopy.writes }, beforeCopy, 'copy and translation do not export or launch anything');
       await scope.selectOption('current-account');
@@ -1067,7 +1067,7 @@ try {
           assert.ok(firstScreen.risk < firstScreen.consent && firstScreen.consent < firstScreen.copy);
           assert.ok(firstScreen.copy <= firstScreen.height, 'risk, consent and primary action fit the first viewport: ' + JSON.stringify(firstScreen));
           const text = await page.locator('#installSection').innerText();
-          assert.match(text, uiLanguage === 'en' ? /source candidate.*no released installer/ : /源码候选.*尚无已发布安装器/);
+          assert.match(text, uiLanguage === 'en' ? /includes verified Windows setup commands/ : /包含经过校验的 Windows 安装命令/);
           assert.doesNotMatch(text, uiLanguage === 'en' ? /reviewed, extracted setup source bundle/ : /已审阅并解压的安装源码包/);
           assert.doesNotMatch(text, /SHA-256|OperationId|operation ID|ACPAIR1|YOUR_TUNNEL_ID|--setup-request/);
           assert.deepEqual(await effects(fixture), { writes: 0, objectURLs: 0, exportClicks: 0, forbidden: [], downloads: 0, popups: 0 });
@@ -1238,7 +1238,7 @@ try {
       await page.locator('#installConsent').check();
       await page.locator('#windowsStandaloneInstall > summary').click();
       const guidance = await page.locator('#windowsSourceInstall').innerText();
-      assert.match(guidance, chinese ? /输入 PAIR.*按 Enter.*保留连接.*不配对/ : /Type PAIR to open extension controls; Enter keeps the connection without pairing/);
+      assert.match(guidance, chinese ? /输入 PAIR 生成配对凭证.*按 Enter.*保留连接.*不配对/ : /Type PAIR to generate a pairing ticket; Enter keeps the connection without pairing/);
       assert.match(guidance, chinese ? /同一终端.*临时配对凭证.*整行 ACPAIR1/ : /temporary pairing ticket in the same terminal.*entire ACPAIR1 line/);
       assert.match(guidance, chinese ? /不会自动打开浏览器/ : /No browser opens automatically/);
       assert.equal(await open.getAttribute('type'), 'button');
@@ -1354,6 +1354,12 @@ try {
     assert.match(await page.locator('#windowsGuidedInputs').innerText(), /no JSON export is needed.*Check the extension ID/);
     assert.match(await page.locator('#windowsNodeProvisioning').innerText(), /after you confirm.*automatically downloads and verifies.*No EXE\/MSI installer/);
     assert.match(await page.locator('#windowsPolicyHelp').innerText(), /verify its source and SHA-256.*do not bypass/);
+    assert.match(await page.locator('#windowsCommandDetails').innerText(), /no manual bundle download or extraction is needed/);
+    assert.doesNotMatch(await page.locator('#windowsCommandDetails').innerText(), /before extracting|extracted (?:source|setup) bundle/i);
+    assert.match(await page.locator('#windowsStandaloneInstall').innerText(), /Run the fallback commands below from the verified, extracted setup bundle/);
+    assert.match(await page.locator('#windowsBrowserRecovery').innerText(), /verified, extracted setup bundle for the original version/);
+    assert.match(await page.locator('#windowsBrowserRecovery').innerText(), /published SHA-256 before extracting/);
+    assert.equal(await page.locator('#windowsBrowserRecovery a').getAttribute('href'), 'https://github.com/1235357/agent-continue/releases');
     assert.match(await page.locator('#windowsReleaseCheck').innerText(), /Before extracting, compare the ZIP hash with the checksum for that exact release/);
     await page.locator('#language').selectOption('zh_CN');
     assert.equal(await copy.innerText(), '复制 PowerShell 命令');
@@ -1362,6 +1368,11 @@ try {
     assert.match(await page.locator('#windowsGuidedInputs').innerText(), /无需导出 JSON.*核对终端显示的扩展 ID/);
     assert.match(await page.locator('#windowsNodeProvisioning').innerText(), /确认后会自动下载并校验.*不运行 EXE\/MSI 安装器/);
     assert.match(await page.locator('#windowsPolicyHelp').innerText(), /核对来源与 SHA-256.*不要绕过策略/);
+    assert.match(await page.locator('#windowsCommandDetails').innerText(), /无需预先下载或解压安装包/);
+    assert.doesNotMatch(await page.locator('#windowsCommandDetails').innerText(), /解压前|已解压/);
+    assert.match(await page.locator('#windowsStandaloneInstall').innerText(), /已核验、已解压的安装包目录.*备用命令/);
+    assert.match(await page.locator('#windowsBrowserRecovery').innerText(), /原版本的已核验、已解压安装包目录/);
+    assert.match(await page.locator('#windowsBrowserRecovery').innerText(), /该版本发布的 SHA-256 校验值，再解压/);
     assert.match(await page.locator('#windowsReleaseCheck').innerText(), /解压前.*与该版本公布的校验值完全一致/);
     assert.equal(await page.locator('#windowsNodeCommand').innerText(), command);
     assert.equal(await page.locator('#windowsVerifyCommand').innerText(), verify);
@@ -1580,7 +1591,7 @@ try {
       await chooseTarget(fixture, target);
       assert.equal(await page.locator('#reviewSetup').isEnabled(), true);
       const text = await page.locator('#availability').innerText();
-      if (target === 'windows') assert.match(text, /source candidate.*no released installer/i);
+      if (target === 'windows') assert.match(text, /includes verified Windows setup commands/i);
       if (target === 'macos') assert.match(text, /not implemented.*no released installer/i);
       if (target === 'linux') assert.match(text, /offline source-kit.*not an installer/i);
       if (target === 'linux-server') {
@@ -1738,7 +1749,7 @@ try {
     const { page } = fixture;
     await page.waitForFunction(() => document.getElementById('browser-permission').textContent === '已授权');
     const labels = {
-      windows: /源码候选.*尚无已发布安装器/,
+      windows: /包含经过校验的 Windows 安装命令/,
       macos: /尚未实现.*尚无已发布安装器/,
       linux: /离线源码包候选.*不是安装器/,
       'linux-server': /目标服务器上用候选源码包配置.*没有已发布的安装器/,
@@ -1820,13 +1831,25 @@ try {
   }
   for (const uiLanguage of ['en', 'zh_CN']) {
     await withFixture({ uiLanguage, noEntryMetadata: true }, async ({ page }) => {
-      await page.locator('#installConsent').check();
+      const english = uiLanguage === 'en';
+      assert.match(await page.locator('#availability').innerText(), english ? /source candidate.*no released installer/ : /源码候选.*尚无已发布安装器/);
       for (const scope of ['current-account', 'administrator']) {
         await page.locator('#windowsAccessScope').selectOption(scope);
-        await page.locator('#installConsent').check();
-        assert.equal(await page.locator('#copyWindowsBrowserPowerShell').isDisabled(), true);
-        assert.equal(await page.locator('#copyWindowsBrowserCmd').isDisabled(), true);
-        assert.match(await page.locator('#installFeedback').innerText(), uiLanguage === 'en' ? /no verified release entry/ : /未包含已核验/);
+        for (const consent of [false, true]) {
+          await page.locator('#installConsent').setChecked(consent);
+          assert.equal(await page.locator('#copyWindowsBrowserPowerShell').isDisabled(), true);
+          assert.equal(await page.locator('#copyWindowsBrowserCmd').isDisabled(), true);
+          assert.equal(await page.locator('#windowsCommandDetails').isVisible(), false);
+          assert.equal(await page.locator('#windowsStandaloneInstall').isVisible(), scope === 'current-account');
+          assert.equal(await page.locator('#windowsSetupReleaseLink a').isVisible(), true);
+          const feedback = await page.locator('#installFeedback').innerText();
+          if (scope === 'administrator') {
+            assert.match(feedback, english ? /no verified administrator release entry/ : /未包含已核验的管理员发布安装入口/);
+            assert.doesNotMatch(feedback, english ? /standalone fallback/ : /独立管理器备用/);
+          } else {
+            assert.match(feedback, english ? /no verified release entry.*standalone fallback/ : /未包含已核验.*独立管理器备用/);
+          }
+        }
       }
       assert.deepEqual(await clipboardWrites(page), []);
       assert.deepEqual(await page.evaluate(() => __setupMock.setupMessages), []);
