@@ -5,7 +5,7 @@ on:
     tags:
       - 'v*'
 
-# Repository contents access is sufficient to create a release.
+# Repository contents access is sufficient to stage a release draft.
 # No personal access token or third-party publishing service is needed.
 permissions:
   contents: write
@@ -399,7 +399,7 @@ jobs:
           sha256sum "agent-continue-${RELEASE_VERSION}.zip" "agent-continue-${RELEASE_VERSION}-store.zip" > SHA256SUMS
           sha256sum --check SHA256SUMS
 
-      - name: Create the GitHub Release without replacing assets
+      - name: Create the GitHub Release draft without replacing assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -419,9 +419,10 @@ jobs:
             printf '%s\n' 'Existing release or draft must be reconciled without replacing its assets.' >&2
             exit 1
           fi
+          # Exact draft assets need live acceptance before a separate publish action.
           gh release create "$RELEASE_TAG" "$archive" "$store" dist/SHA256SUMS \
             dist/native-setup/agent-continue-setup.zip dist/native-setup/install.ps1 \
             dist/native-setup/install-administrator.ps1 dist/native-setup/Stage-WindowsAdministratorBundle.ps1 \
             dist/native-setup/agent-continue-windows-administrator-x64.zip \
             dist/native-setup/SHA256SUMS.txt dist/npm-cli/*.tgz dist/npm-cli/NPM-SHA256SUMS.txt \
-            --verify-tag --title "Agent Continue ${RELEASE_TAG}" --notes-file "$notes"
+            --draft --verify-tag --title "Agent Continue ${RELEASE_TAG}" --notes-file "$notes"

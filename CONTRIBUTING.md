@@ -85,16 +85,17 @@ PDF.js 升级不能只修改 `package.json`：需一起审查主模块和 Worker
 
 ## 发布版本
 
-1. 将 `manifest.json`、`package.json`、`package-lock.json` 顶层及根包版本统一为 `MAJOR.MINOR.PATCH`。
+1. 将 `manifest.json` 更新为扩展发行版本 `MAJOR.MINOR.PATCH`。npm CLI 独立编号；`package.json` 与 `package-lock.json` 顶层及根包版本须一致，但不必等于扩展版本。
 2. 在 [CHANGELOG.md](CHANGELOG.md) 增加 `## [版本号]` 小节；说明行为变化、升级方式和实际验证边界。
 3. 从干净依赖状态运行 `npm ci --ignore-scripts`、`npm run vendor`、`npm test` 和 `python3 scripts/package.py`。
 4. 检查安装 ZIP 根目录是 `AgentContinue/`，入口文件、离线 PDF 资源、版本和第三方许可证齐全；不含任何个人配置或预置文件。
-5. 提交经过审查的变更，创建并推送 `vMAJOR.MINOR.PATCH` 标签。
-6. 查看 Release 工作流结果及附件：`agent-continue-MAJOR.MINOR.PATCH.zip` 和 `SHA256SUMS`。
+5. 只从已审查、包含草稿发布保护的 `main` 提交创建并推送 `vMAJOR.MINOR.PATCH`。不要给旧提交补打新发行标签；标签会使用该提交中的工作流。
+6. 从 GitHub Release 草稿下载扩展 ZIP、Store ZIP、匹配的 Windows 安装资产与校验文件。在隔离 Windows 环境使用本地解压安装路径，对同一套资产先验普通 ChatGPT，再验 Dot，记录实际调用、浏览器重开、暂停和撤销。不要使用尚未公开的下载链接。
+7. 实测通过后，重新核对草稿标签和资产摘要，再单独发布同一个草稿。确认公开下载可用，再提交对应 Store ZIP；商店审核与公开状态分别核实。
 
-标签工作流先验证版本与变更记录，再安装依赖、生成离线资源、运行全部测试、打包并校验 ZIP，最后用仓库自带的 `GITHUB_TOKEN` 创建或更新 Release。无需个人 PAT。若前置步骤失败，工作流不会发布新的安装附件；重跑会更新该标签的生成附件。
+标签工作流先验证版本与变更记录，再构建并校验资产，最后用仓库自带的 `GITHUB_TOKEN` 创建未公开的 Release 草稿。无需个人 PAT。已有草稿或 Release 会阻止重跑创建；上传失败可能留下不完整的草稿，先查原草稿，不自动覆盖或重试。草稿不会隐藏公开仓库的 Git 标签或源码。
 
-不要在没有证据时把“合成 Chromium 已通过”写成“真实 Windows / Edge 和线上私人会话全部通过”。安装包发布后，可在可控环境补充真实浏览器与长期运行记录，并更新 [VALIDATION.md](VALIDATION.md)。
+不要在没有证据时把“合成 Chromium 已通过”写成真实安装或线上会话已通过。将分阶段的证据记录到 [VALIDATION.md](VALIDATION.md)。
 
 ## Issue / PR 建议内容
 

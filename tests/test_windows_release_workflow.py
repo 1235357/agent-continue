@@ -348,11 +348,11 @@ class WindowsReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("verify_administrator_bundle", check)
 
     def test_release_uploads_the_exact_sidecars_and_preserves_ordinary_assets(self):
-        create = step(job(self.source, "release"), "Create the GitHub Release without replacing assets")
+        create = step(job(self.source, "release"), "Create the GitHub Release draft without replacing assets")
         command = create.split('gh release create "$RELEASE_TAG"', 1)[1]
         self.assertEqual(set(re.findall(r"dist/native-setup/([^\s\\]+)", command)), ASSETS)
         for text in ('"$archive"', '"$store"', "dist/SHA256SUMS", "dist/npm-cli/*.tgz",
-                     "dist/npm-cli/NPM-SHA256SUMS.txt", "--verify-tag"):
+                     "dist/npm-cli/NPM-SHA256SUMS.txt", "--draft", "--verify-tag"):
             self.assertIn(text, command)
         self.assertIn("Existing release or draft must be reconciled", create)
         self.assertIn("if ! existing=", create)

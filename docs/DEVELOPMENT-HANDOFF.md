@@ -80,12 +80,15 @@ The published GitHub v3.2.0 Release was observed with only a Windows device
 preview ZIP. The public Store listing `jgjoeiidbnpmgbbhhmphicehbcdgbhga`
 was observed at 3.0.22. Neither contains this unreleased repair. Do not
 overwrite the old release or use its artifacts as evidence for the next one.
-For the next release: verify headed CI and the six matching Windows sidecars
-and receipts; install the exact candidate into a dedicated Windows test
-browser environment; verify an ordinary ChatGPT send before Dot, then verify
-setup consent, browser reopen, Pause, and Revoke. Keep existing tasks and
-connections unchanged. Only then create a new matching GitHub Release and
-submit its separate Store ZIP; wait for the Store's own publication readback.
+For the next release, use an approved main revision containing the draft-only
+tag workflow. Verify headed CI and the six matching Windows sidecars and
+receipts. Download and hash-check the exact draft assets, then install from
+the adjacent local setup files in a dedicated Windows test environment.
+Verify ordinary ChatGPT before Dot, test scheduler sends separately, and
+check setup consent, browser reopen, Pause, and Revoke. Keep existing tasks
+and connections unchanged. After acceptance, recheck the draft asset digests
+and publish that same draft separately. Verify public downloads and submit its
+matching Store ZIP; wait for the Store's own publication readback.
 
 ## Reacquired Status (2026-11-17)
 

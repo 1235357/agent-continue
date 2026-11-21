@@ -68,8 +68,18 @@ separately:
 4. Verify background sends and accounting separately: busy composer, pending
    approval, manual Send takeover, and resume after readiness. A local send
    count is not a delivery acknowledgement from the platform.
-5. Publish only the matching tested version. GitHub Release, Store submission,
-   Store approval and public Store listing are separate observations.
+5. The tag workflow stages a GitHub Release draft, not a public release. A
+   maintainer downloads the exact assets from the authenticated draft for
+   acceptance. Use the extracted local installer in this phase; do not assume
+   public release download URLs work before publication. The Git tag and its
+   source archive may already be visible.
+6. After live acceptance, recheck the draft tag and every asset digest
+   against the tested set, then publish that same draft separately. If a
+   draft is incomplete after an upload failure, reconcile the original
+   draft before any retry; the workflow never replaces assets. Verify public
+   download and submit only the matching Store ZIP. GitHub publication,
+   Store submission, Store approval, and public Store listing are separate
+   observations.
 
 See [runtime acceptance](RUNTIME-ACCEPTANCE.md) for dated receipts and
 [Windows recovery](WINDOWS-RECOVERY-20261117.md) for the local preflight record.

@@ -1,8 +1,9 @@
 """Exercise release source checks against actual Git histories."""
 
-import subprocess
 import os
+import shlex
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -82,7 +83,7 @@ class ReleaseSourceTests(unittest.TestCase):
         for command in ("gh release upload", "gh release edit", "--clobber"):
             self.assertNotIn(command, workflow)
 
-    def test_create_step_has_no_write_when_existing_or_lookup_failed(self):
+    def test_create_step_only_stages_a_draft_for_an_unused_tag(self):
         if os.name == "nt":
             bash = Path(shutil.which("git")).resolve().parents[1] / "bin/bash.exe"
         else:
@@ -97,32 +98,37 @@ gh() {
   printf '%s\\n' "$*" >> "$GH_CALLS"
   case "$1 $2" in
     'api --paginate') printf '%s\\n' "$KNOWN_TAGS"; return "$LOOKUP_EXIT";;
-    'release create') return 0;;
+    'release create') return "$CREATE_EXIT";;
     *) return 99;;
   esac
 }
 """
         cases = (
-            ("published", "v1.1.0", 0, False),
-            ("draft", "v1.1.0", 0, False),
-            ("lookup unavailable", "", 1, False),
-            ("new tag", "v1.1.01\nv0.1.0", 0, True),
+            ("published", "v1.1.0", 0, 0, False, 1),
+            ("draft", "v1.1.0", 0, 0, False, 1),
+            ("lookup unavailable", "", 1, 0, False, 1),
+            ("new tag", "v1.1.01\nv0.1.0", 0, 0, True, 0),
+            ("create or upload failed", "", 0, 17, True, 17),
         )
-        for label, tags, lookup, created in cases:
+        for label, tags, lookup, create_exit, attempted, expected_exit in cases:
             with self.subTest(label=label):
                 calls = self.repo / "gh-calls"
                 calls.unlink(missing_ok=True)
                 env = {**os.environ, "GH_CALLS": calls.as_posix(), "GH_REPO": "fixture/agent-continue",
-                       "KNOWN_TAGS": tags, "LOOKUP_EXIT": str(lookup), "RELEASE_TAG": "v1.1.0",
+                       "KNOWN_TAGS": tags, "LOOKUP_EXIT": str(lookup),
+                       "CREATE_EXIT": str(create_exit), "RELEASE_TAG": "v1.1.0",
                        "RELEASE_VERSION": "1.1.0", "RUNNER_TEMP": self.repo.as_posix()}
                 result = subprocess.run([str(bash), "--noprofile", "--norc", "-e", "-c", fake_cli + command],
                                         cwd=self.repo, env=env, text=True, capture_output=True)
-                self.assertEqual(result.returncode == 0, created, result.stderr)
+                self.assertEqual(result.returncode, expected_exit, result.stderr)
                 issued = calls.read_text(encoding="utf-8").splitlines()
                 self.assertTrue(issued[0].startswith("api --paginate"))
-                self.assertEqual(len(issued), 2 if created else 1)
-                if created:
-                    self.assertTrue(issued[1].startswith("release create v1.1.0 "))
+                self.assertEqual(len(issued), 2 if attempted else 1)
+                if attempted:
+                    args = shlex.split(issued[1])
+                    self.assertEqual(args[:3], ["release", "create", "v1.1.0"])
+                    self.assertEqual(args.count("--draft"), 1)
+                    self.assertIn("--verify-tag", args)
 
 
 if __name__ == "__main__":
