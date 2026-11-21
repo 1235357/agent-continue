@@ -2,6 +2,8 @@
 
 This document details how Agent Continue enables secure, direct host-to-host connectivity between web-based AI agents (Dot/ChatGPT) and local/remote infrastructure.
 
+> **Deep-Dive Architecture:** For the comprehensive, publication-grade treatise on system design, Northwestern CS 381/CS 310 principles, sequence diagrams, and comparative analysis with DesktopCommanderMCP, see [WINDOWS-DIRECT-TUNNEL-SSH-ARCHITECTURE.md](https://github.com/1235357/agent-continue/blob/main/docs/WINDOWS-DIRECT-TUNNEL-SSH-ARCHITECTURE.md).
+
 ## 1. Zero Third-Party Relay Topology
 Our architecture strictly adheres to **End-to-End Tunneling**.
 * **Traffic Flow**: OpenAI Tunnel Runtime (`openai/tunnel-client`) $\leftrightarrow$ `DesktopCommanderMCP` $\leftrightarrow$ Local Windows Host.

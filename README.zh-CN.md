@@ -6,9 +6,14 @@
 
 **3.2.0 Windows 版发布候选 · Manifest V3 · 免费 · MIT 开源**
 
-[Chrome 应用商店](https://chromewebstore.google.com/detail/agent-continue-background/jgjoeiidbnpmgbbhhmphicehbcdgbhga) · [GitHub Releases](https://github.com/1235357/agent-continue/releases) · [源码](https://github.com/1235357/agent-continue) · [更新记录](CHANGELOG.md) · [隐私说明（英文）](PRIVACY.md) · ## 技术文档
+[Chrome 应用商店](https://chromewebstore.google.com/detail/agent-continue-background/jgjoeiidbnpmgbbhhmphicehbcdgbhga) · [GitHub Releases](https://github.com/1235357/agent-continue/releases) · [源码](https://github.com/1235357/agent-continue) · [更新记录](CHANGELOG.md) · [隐私说明（英文）](PRIVACY.md)
+
+## 技术文档与底层架构
 
 底层原理：
+* [Windows 直连隧道与 SSH 架构设计 (Windows Direct Tunnel & SSH Architecture)](https://github.com/1235357/agent-continue/blob/main/docs/WINDOWS-DIRECT-TUNNEL-SSH-ARCHITECTURE.md) — 零中转端到端直连隧道、知情同意模型、DesktopCommanderMCP 集成及直通科研 Linux 服务器的设计报告。
+* [稳定性、暂停感知与防抖动引擎设计 (Stability & Anti-Thrashing Design)](https://github.com/1235357/agent-continue/blob/main/docs/DESIGN-v3.2.0-STABILITY-AND-PAUSE-DETECTION.md) — Dot 暂停状态识别与调度器防高频注入设计。
+* [异常对话框与权限引擎设计 (Exception Dialog Engine Design)](https://github.com/1235357/agent-continue/blob/main/docs/DESIGN-v3.1.0-EXCEPTION-DIALOG-ENGINE.md) — 会话过期、OAuth 登录与工具权限多级分类处理。
 * [技术架构与复盘报告 (Technical Architecture)](https://github.com/1235357/agent-continue/blob/main/docs/TECHNICAL-RETROSPECTIVE-AND-ARCHITECTURE.md)
 * [性能引擎优化 (Performance Engine)](https://github.com/1235357/agent-continue/blob/main/docs/PERFORMANCE-ENGINE-OPTIMIZATION.md)
 * [Windows 隧道与 SSH 安全 (Windows Tunnel & SSH Security)](https://github.com/1235357/agent-continue/blob/main/docs/WINDOWS-TUNNEL-SSH-SECURITY.md)

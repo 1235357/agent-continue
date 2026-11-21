@@ -6,9 +6,14 @@ Schedule your own prompts in one existing ChatGPT or Your dot conversation. The 
 
 **3.2.0 Windows-enabled release candidate. Manifest V3. Free and MIT-licensed.**
 
-[Chrome Web Store](https://chromewebstore.google.com/detail/agent-continue-background/jgjoeiidbnpmgbbhhmphicehbcdgbhga) · [GitHub Releases](https://github.com/1235357/agent-continue/releases) · [Source](https://github.com/1235357/agent-continue) · [Changelog](https://github.com/1235357/agent-continue/blob/main/CHANGELOG.md) · [Privacy](https://github.com/1235357/agent-continue/blob/main/PRIVACY.md) · ## Technical Documentation
+[Chrome Web Store](https://chromewebstore.google.com/detail/agent-continue-background/jgjoeiidbnpmgbbhhmphicehbcdgbhga) · [GitHub Releases](https://github.com/1235357/agent-continue/releases) · [Source](https://github.com/1235357/agent-continue) · [Changelog](https://github.com/1235357/agent-continue/blob/main/CHANGELOG.md) · [Privacy](https://github.com/1235357/agent-continue/blob/main/PRIVACY.md)
+
+## Technical Documentation & Architecture
 
 Under the hood:
+* [Windows Direct Tunnel & SSH Architecture](https://github.com/1235357/agent-continue/blob/main/docs/WINDOWS-DIRECT-TUNNEL-SSH-ARCHITECTURE.md) — Comprehensive technical report on zero-intermediary tunneling, informed consent, DesktopCommanderMCP integration, and remote Linux research cluster access.
+* [Stability, Pause-Awareness & Anti-Thrashing Design](https://github.com/1235357/agent-continue/blob/main/docs/DESIGN-v3.2.0-STABILITY-AND-PAUSE-DETECTION.md) — Architectural design for Dot paused-state recognition and bounded retry scheduler engine.
+* [Exception Dialog Engine Design](https://github.com/1235357/agent-continue/blob/main/docs/DESIGN-v3.1.0-EXCEPTION-DIALOG-ENGINE.md) — Multi-tier classification for session expiration, OAuth popups, and tool execution confirmations.
 * [Technical Architecture & Retrospective](https://github.com/1235357/agent-continue/blob/main/docs/TECHNICAL-RETROSPECTIVE-AND-ARCHITECTURE.md)
 * [Performance Engine Optimization](https://github.com/1235357/agent-continue/blob/main/docs/PERFORMANCE-ENGINE-OPTIMIZATION.md)
 * [Windows Tunnel & SSH Security](https://github.com/1235357/agent-continue/blob/main/docs/WINDOWS-TUNNEL-SSH-SECURITY.md)
