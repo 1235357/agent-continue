@@ -22,6 +22,73 @@ const encode = value => JSON.stringify(value) + '\n';
 const exec = promisify(execFile);
 const workerDependencies = ['background.js', 'config.js', 'adapter.js', 'editor-commit.js', 'delivery-diagnostics.js',
   'preset.js', 'i18n-runtime.js', 'current-account-setup.js', 'setup-handoff.js', 'admin-installation-pause.js', 'setup-controller.js'];
+
+async function publishStartupReport(io, report, value) {
+  const pending = report + '.' + process.pid + '.pending';
+  await io.writeFile(pending, JSON.stringify(value), { flag: 'wx' });
+  try {
+    // Publish complete bytes without replacing another owner's receipt.
+    await io.link(pending, report);
+  } finally {
+    // Scratch teardown can remove a retained alias. Do not undo or obscure publication.
+    await io.unlink(pending).catch(() => {});
+  }
+}
+
+test('native startup report is invisible until complete and cannot be replaced', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ac-startup-report-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const report = path.join(root, 'startup.json');
+  const expected = { pid: 42, launches: 0, response: { ok: true } };
+  let observedDuringWrite;
+  const slowWriter = {
+    ...fs,
+    async writeFile(output, content, options) {
+      const handle = await fs.open(output, options.flag);
+      try {
+        observedDuringWrite = await fs.readFile(report, 'utf8').catch(error => {
+          if (error.code === 'ENOENT') return null;
+          throw error;
+        });
+        await handle.writeFile(content);
+      } finally { await handle.close(); }
+    },
+  };
+  await publishStartupReport(slowWriter, report, expected);
+  assert.equal(observedDuringWrite, null);
+  assert.deepEqual(JSON.parse(await fs.readFile(report, 'utf8')), expected);
+  await assert.rejects(publishStartupReport(fs, report, { pid: 43 }), { code: 'EEXIST' });
+  assert.deepEqual(JSON.parse(await fs.readFile(report, 'utf8')), expected);
+  assert.deepEqual(await fs.readdir(root), ['startup.json']);
+
+  await fs.unlink(report);
+  const competing = { pid: 44 };
+  const concurrentWriter = {
+    ...fs,
+    async writeFile(output, content, options) {
+      await fs.writeFile(output, content, options);
+      await fs.writeFile(report, JSON.stringify(competing), { flag: 'wx' });
+    },
+  };
+  await assert.rejects(publishStartupReport(concurrentWriter, report, expected), { code: 'EEXIST' });
+  assert.deepEqual(JSON.parse(await fs.readFile(report, 'utf8')), competing);
+  assert.deepEqual(await fs.readdir(root), ['startup.json']);
+});
+
+test('native startup report publication remains settled if alias cleanup fails', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ac-startup-report-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const report = path.join(root, 'startup.json');
+  const expected = { pid: 42, launches: 0 };
+  const cleanupBlocked = {
+    ...fs,
+    async unlink() { throw Object.assign(new Error('temporary sharing violation'), { code: 'EPERM' }); },
+  };
+  await publishStartupReport(cleanupBlocked, report, expected);
+  assert.deepEqual(JSON.parse(await fs.readFile(report, 'utf8')), expected);
+  assert.deepEqual((await fs.readdir(root)).sort(), ['startup.json', 'startup.json.' + process.pid + '.pending']);
+});
+
 function remapSetupHandoff(source, device, admin) {
   for (const [original, replacement] of [['com.agentcontinue.device_wake', device],
     ['com.agentcontinue.administrator_owner', admin]]) {
@@ -342,6 +409,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { readNativeBinding, sendDeviceRequest, startDeviceOwner } from ${JSON.stringify(ownerModule)};
 import { openController } from ${JSON.stringify(lifecycleModule)};
 import { serveBrowserWake } from ${JSON.stringify(hostModule)};
+${publishStartupReport.toString()}
 const bindingFile = ${JSON.stringify(bindingFile)};
 const binding = readNativeBinding(bindingFile);
 assert.deepEqual(process.argv.slice(2), ['--browser-wake', binding.origin]);
@@ -373,7 +441,7 @@ try {
     if (response.state?.connection === ${JSON.stringify(expectedConnection)}) break;
     await delay(100);
   }
-  await fs.writeFile(${JSON.stringify(report)}, JSON.stringify({pid: process.pid, launches, response}), {flag:'wx'});
+  await publishStartupReport(fs, ${JSON.stringify(report)}, {pid: process.pid, launches, response});
   if (${productWorker}) {
     const timer = setInterval(() => {
       if (existsSync(${JSON.stringify(path.join(scratch, 'disconnect-'))} + process.pid)) process.stdin.destroy();
@@ -584,10 +652,7 @@ void chrome.storage.local.get('armed').then(({armed}) => {
         }), 'browser did not release its connected owner');
         await fs.unlink(report);
         context = await open();
-        const reopened = await waitFor(() => fs.readFile(report, 'utf8').then(JSON.parse, error => {
-          if (error.code === 'ENOENT') return null;
-          throw error;
-        }), 'browser alone did not restore the device connected through Devices');
+        const reopened = await waitFor(readStartup, 'browser alone did not restore the device connected through Devices');
         assert.equal(reopened.launches, 1);
         assert.notEqual(reopened.pid, opened.pid);
         assert.equal(reopened.response.state.connection, 'ready');
