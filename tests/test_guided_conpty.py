@@ -1,6 +1,7 @@
 """Content-free terminal protocol regressions; no child process or network."""
 
 import importlib.util
+import json
 from pathlib import Path
 import time
 import unittest
@@ -37,6 +38,29 @@ class Terminal:
 
 
 class GuidedTerminalTests(unittest.TestCase):
+    def test_pair_timeout_distinguishes_a_valid_receipt_from_other_output_without_retaining_content(self):
+        ready = {
+            "ok": True, "action": "install-local", "mode": "command-only",
+            "configured": True, "registered": False, "connected": True,
+            "chatAuthorizationVerified": False,
+            "manager": {"ok": True, "managerRunning": True, "connected": True,
+                        "paused": False, "operationStatus": "settled",
+                        "operationId": "ae8e10c9-3791-4a13-a425-6bd41805bcaf"},
+        }
+        for line, receipt in ((b"PRIVATE_TEXT", "not-observed"),
+                              (b'{"text":"PRIVATE_TEXT"}', "unverified"),
+                              (json.dumps(ready).encode("ascii"), "ready")):
+            with self.subTest(receipt=receipt):
+                terminal = Terminal(b"", "unused")
+                terminal.chunks = [b"CONNECT\r\n" + line + b"\r\n"]
+                with self.assertRaisesRegex(FIXTURE.FixtureError, "^terminal_timeout_pair_other_output$"):
+                    FIXTURE.read_stage(terminal, time.monotonic() + 1, "pair", prompt=FIXTURE.PAIR_PROMPT)
+                self.assertEqual(terminal.pair_protocol_observation, {
+                    "phase": "pair", "state": "other_output",
+                    "receivedBytes": len(line) + len(b"CONNECT\r\n\r\n"), "receipt": receipt,
+                })
+                self.assertEqual(terminal.writes, [])
+
     def test_close_stage_observes_exited_child_even_when_terminal_stream_stays_open(self):
         terminal = Terminal(b"", "unused")
         terminal.pty = terminal

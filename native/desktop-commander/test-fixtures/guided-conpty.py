@@ -182,6 +182,23 @@ def read_stage(terminal, deadline, stage, *, prompt=None, line_count=None, echo=
                 return output.decode("utf-8")
     observed = VT_SEQUENCE.sub(b"", raw)
     state = "no_bytes" if not raw else "control_only" if not observed.strip() else "prompt_present" if prompt and prompt in observed else "other_output"
+    if stage == "pair":
+        receipt = "not-observed"
+        complete, _, _ = observed.rpartition(b"\n")
+        for line in complete.splitlines():
+            if not line.lstrip().startswith(b"{"):
+                continue
+            try:
+                success_line(line.decode("utf-8"))
+            except (FixtureError, UnicodeError):
+                if receipt == "not-observed":
+                    receipt = "unverified"
+            else:
+                receipt = "ready"
+                break
+        terminal.pair_protocol_observation = {
+            "phase": "pair", "state": state, "receivedBytes": len(raw), "receipt": receipt,
+        }
     if stage == 1:
         controls = (
             ("cursor-hide", rb"\x1b\[\?25l"),
@@ -458,7 +475,8 @@ def drive(config):
             require_listener_stopped(port, min(deadline, time.monotonic() + CLOSE_SECONDS))
         return result
     except FixtureError:
-        observation = getattr(terminal, "initial_protocol_observation", None)
+        observation = (getattr(terminal, "pair_protocol_observation", None)
+                       or getattr(terminal, "initial_protocol_observation", None))
         if observation is not None:
             try:
                 with (root / "guided-terminal-failure.json").open("x", encoding="utf-8") as report:

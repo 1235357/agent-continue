@@ -51,6 +51,12 @@ function terminalDiagnostic(root) {
     const info = fs.lstatSync(file);
     if (!info.isFile() || info.isSymbolicLink() || info.size > 2048) return { observed: false };
     const report = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (report?.phase === 'pair' && Object.keys(report).sort().join(',') === 'phase,receipt,receivedBytes,state'
+      && ['no_bytes', 'control_only', 'prompt_present', 'other_output'].includes(report.state)
+      && ['not-observed', 'unverified', 'ready'].includes(report.receipt)
+      && Number.isInteger(report.receivedBytes) && report.receivedBytes >= 0 && report.receivedBytes <= 65536) {
+      return { observed: true, phase: 'pair', state: report.state, receipt: report.receipt, receivedBytes: report.receivedBytes };
+    }
     if (!report || typeof report !== 'object' || Array.isArray(report)
       || Object.keys(report).sort().join(',') !== 'controls,cursorReplies,receivedBytes,startupPhase,state'
       || !['no_bytes', 'control_only', 'prompt_present', 'other_output'].includes(report.state)
@@ -108,6 +114,13 @@ test('terminal failure diagnostics disclose closed protocol facts only', t => {
   }
   for (const text of ['invalid json', ' '.repeat(2049)]) {
     fs.writeFileSync(file, text);
+    assert.deepEqual(terminalDiagnostic(root), { observed: false });
+  }
+  const pair = { phase: 'pair', state: 'other_output', receipt: 'ready', receivedBytes: 174 };
+  fs.writeFileSync(file, JSON.stringify(pair));
+  assert.deepEqual(terminalDiagnostic(root), { observed: true, ...pair });
+  for (const report of [{ ...pair, receipt: 'PRIVATE_RECEIPT' }, { ...pair, console: 'PRIVATE_TEXT' }]) {
+    fs.writeFileSync(file, JSON.stringify(report));
     assert.deepEqual(terminalDiagnostic(root), { observed: false });
   }
 });
