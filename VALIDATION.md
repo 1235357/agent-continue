@@ -1,5 +1,16 @@
 # Validation and Evidence Boundaries
 
+## Version 3.2.1 Candidate, November 21, 2026
+
+The source-only Windows preview can be tested in a disposable Chromium
+profile with synthetic ChatGPT and Dot pages. The MV3 suite exercises
+hidden-tab preparation and sending, one real Chromium alarm, recovery of
+the original bound target, and preservation of scheduler Pause across a
+full reopen. It cannot establish live message delivery or hosted device
+authorization. The preview is not the Store ZIP and has no public Windows
+installer descriptor. Use matching draft assets for the real Windows
+setup, ordinary ChatGPT, Dot, and device lifecycle tests before publication.
+
 ## Current Continuation, November 17, 2026
 
 The new Store item 3.0.22 is publicly published and its live listing is accessible.

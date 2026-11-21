@@ -1,6 +1,6 @@
 # Chrome Web Store Listing - English
 
-English listing source for Agent Continue (source baseline **3.2.0**). Item `jgjoeiidbnpmgbbhhmphicehbcdgbhga` was submitted as version 3.0.22 on 2026-11-16 (America/Chicago), with automatic publication after review selected. The item was observed publicly listing 3.0.22 on 2026-11-20. Neither observation establishes submission or publication of 3.2.0 or later. The original item `jpioilmpbolfokedaefmbfbjeaahfdkl` was not modified by that submission; a new item is not an update for its existing users.
+English listing source for Agent Continue (candidate **3.2.1**). Item `jgjoeiidbnpmgbbhhmphicehbcdgbhga` was submitted as version 3.0.22 on 2026-11-16 (America/Chicago), with automatic publication after review selected. The item was observed publicly listing 3.0.22 on 2026-11-20. Neither observation establishes submission or publication of 3.2.1. The original item `jpioilmpbolfokedaefmbfbjeaahfdkl` was not modified by that submission; a new item is not an update for its existing users.
 
 The copy uses plain-text URLs rather than relying on Markdown rendering. Do not withdraw an existing review merely to apply source copy. Detailed technical notes below are not consumer-facing Store description text and do not certify the current artifact.
 
@@ -151,7 +151,7 @@ Use your own ChatGPT test account; no developer credentials. Select a test chat,
 
 ## Release Scope and Remaining Gates (Not Store Copy)
 
-Version 3.0.4 combines the scheduler and optional Windows device control. Historical v2.2.0 support/schema 3 changes and v2.2.1 scheduler fixes remain scheduler-only; they did not request nativeMessaging. The permission table above describes the combined version, not those older releases.
+The 3.2.1 candidate combines the scheduler and optional Windows device control. Historical v2.2.0 support/schema 3 changes and v2.2.1 scheduler fixes remain scheduler-only; they did not request nativeMessaging. The permission table above describes the 3.2.1 candidate, not those older releases.
 
 Checkpoint97 records actual r11 full-app saved-running recovery, ordinary ChatGPT and Dot administrator command/file/owned-process results, and matching Pause/Revoke stopped receipts with independent host readback. The test runtime is revoked and not running. These bounded observations do not establish current-account hosted operation, automatic adoption of an existing installation or indefinite recovery reliability. Complete matching extension/setup/npm artifact verification, actual public downloads and the real new Store submission receipt separately. See the repository's [Runtime Acceptance](https://github.com/1235357/agent-continue/blob/main/docs/RUNTIME-ACCEPTANCE.md); do not replay settled operations or turn historical Ready into a current state.
 

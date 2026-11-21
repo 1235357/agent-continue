@@ -1,12 +1,17 @@
 # Changelog
 
-## [Unreleased]
+## [3.2.1] - 2026-11-21
 
 - Keep pending tool approvals manual in ChatGPT and Your dot. Detect and report them without clicking, writing to the composer, or trying to approve through page internals.
 - Wait on scheduler alarms when Dot is paused or the composer is unavailable; keep bounded fast recovery when a transient result proves that no submission was attempted.
 - Preserve distinct pause, busy, and missing-composer codes in local diagnostic exports without exposing page text.
 - Keep dialog alerts inside the extension rather than requesting the optional browser notifications permission.
 - Fix the guided Windows CMD entry so it forwards the optional setup ID to PowerShell.
+- In Windows Setup, distinguish verified local installation from a connection request and chat authorization. Report known browser permission and native bridge blockers without losing the installed state or replaying an uncertain Connect request.
+- Explain the separate online and extracted Windows setup paths. Stage matching extension and Windows release files in a GitHub Release draft for acceptance before publication.
+
+Send confirmation remains a local page heuristic, not a server receipt.
+ChatGPT and Dot permissions are granted separately from Windows installation.
 
 ## [3.2.0] - 2026-11-20
 
