@@ -144,6 +144,36 @@ class WindowsReleaseWorkflowTests(unittest.TestCase):
         self.assertNotIn("TUNNEL_CLIENT_TEST_GUIDED_CMD_COLD", step(core, names[0]))
         self.assertNotIn("--test-name-pattern=guided-installer tunnel.test.mjs", core)
 
+    def test_guided_installer_failures_allow_independent_evidence_but_block_upload(self):
+        source = (ROOT / ".github/workflows/native-runtime-tests.yml").read_text(encoding="utf-8")
+        core = job(source, "core")
+        dependency = "Install the Windows ConPTY fixture dependency"
+        gate = "Require both Windows guided installer outcomes"
+        upload = "uses: actions/upload-artifact@"
+        deferred = {
+            "Windows guided PowerShell install and pause over loopback": "windows-guided-powershell",
+            "Windows cold CMD provisioning and pause over loopback": "windows-guided-cold-cmd",
+        }
+        self.assertNotIn("continue-on-error", step(core, dependency))
+        self.assertEqual(core.count("continue-on-error: true"), len(deferred))
+        for name, step_id in deferred.items():
+            self.assertLess(core.index("- name: " + dependency), core.index("- name: " + name))
+            self.assertIn("id: " + step_id, step(core, name))
+            self.assertIn("continue-on-error: true", step(core, name))
+            self.assertIn("steps." + step_id + ".outcome", step(core, gate))
+        self.assertEqual(re.findall(r"^        if: (.*)$", step(core, gate), re.M),
+                         ["runner.os == 'Windows' && !cancelled()"])
+        self.assertIn("$env:POWERSHELL_INSTALL_OUTCOME -ne 'success' -or $env:COLD_CMD_INSTALL_OUTCOME -ne 'success'",
+                      step(core, gate))
+        self.assertIn("throw", step(core, gate))
+        self.assertNotIn("continue-on-error", step(core, gate))
+        self.assertLess(core.index("id: windows-preview-browser-recovery"), core.index("- name: " + gate))
+        self.assertLess(core.index("- name: " + gate), core.index(upload))
+        upload_step = re.split(r"^      - ", core[core.index(upload):], maxsplit=1, flags=re.M)[0]
+        self.assertEqual(re.findall(r"^        if: (.*)$", upload_step, re.M),
+                         ["success() && runner.os == 'Windows' && github.ref == 'refs/heads/main'"
+                          " && github.event_name != 'pull_request'"])
+
     def test_native_bootstrap_phases_cover_each_original_file_once_with_bounded_children(self):
         ordinary = (ROOT / ".github/workflows/native-runtime-tests.yml").read_text(encoding="utf-8")
         core = job(ordinary, "core")
