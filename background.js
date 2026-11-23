@@ -273,6 +273,7 @@ function pageProgress(pending, progress, source) {
   const patch = { counters: {}, timings: {}, observations: progress.observations };
   if (progress.method && progress.method !== 'none') patch.method = progress.method;
   for (const group of ['counters', 'timings']) for (const name of Object.keys(pending.trace[group] || {})) {
+    if (name === 'preSubmitTransportBackoffs' || name === 'maxPreSubmitTransportBackoffMs') continue;
     const value = progress[group]?.[name];
     if ((source === 'adapter' && ['pageAdmissions', 'authorizationChecks', 'leaseRenewals'].includes(name))) continue;
     if (source === 'adapter' && name === 'dispatchAttempts' && pending.ownsModelStages) continue;
@@ -1248,23 +1249,26 @@ async function checkRun(runId, sender, renew = true) {
     return { ok: true, allowed: pendingRunAllowed(pending), runDeadline: job.runDeadline };
   });
 }
-async function waitRun(message, sender) {
-  if (![50, 60, 150, 180, 10_000].includes(message.delayMs)) return { ok: false, allowed: false };
-  const before = await checkRun(message.runId, sender, message.renew !== false);
-  if (!before.allowed) return before;
+function waitForRunSignal(runId, delayMs) {
   // Never retain the state queue while sleeping: Pause and replacement win.
-  await new Promise(resolve => {
-    let waiters = runWaiters.get(message.runId);
-    if (!waiters) { waiters = new Set(); runWaiters.set(message.runId, waiters); }
+  return new Promise(resolve => {
+    let waiters = runWaiters.get(runId);
+    if (!waiters) { waiters = new Set(); runWaiters.set(runId, waiters); }
     let timer;
     const finish = () => {
       clearTimeout(timer); waiters.delete(finish);
-      if (!waiters.size && runWaiters.get(message.runId) === waiters) runWaiters.delete(message.runId);
+      if (!waiters.size && runWaiters.get(runId) === waiters) runWaiters.delete(runId);
       resolve();
     };
     waiters.add(finish);
-    timer = setTimeout(finish, message.delayMs);
+    timer = setTimeout(finish, delayMs);
   });
+}
+async function waitRun(message, sender) {
+  if (![50, 60, 150, 180, 1_000, 10_000].includes(message.delayMs)) return { ok: false, allowed: false };
+  const before = await checkRun(message.runId, sender, message.renew !== false);
+  if (!before.allowed) return before;
+  await waitForRunSignal(message.runId, message.delayMs);
   return checkRun(message.runId, sender, message.renew !== false);
 }
 async function commitRun(message, sender) {
@@ -1362,6 +1366,17 @@ async function commitRun(message, sender) {
       if (pending) pending.stage = phase === 'observe' ? 'readiness' : phase === 'commit' ? 'authorization' : 'prepare';
       deliveryProgress(pending, { reason: phase === 'commit' ? 'grant-pending' : phase === 'observe' ? 'waiting-send' : 'starting' });
       const target = { tabId: permit.tabId, ...(permit.documentId ? { documentIds: [permit.documentId] } : {}) };
+      let transportDelay = 150;
+      const waitForTransportRetry = async () => {
+        if (permit.version !== intentVersion || revokedRuns.has(message.runId) || !pendingRunAllowed(pending)) return;
+        // Cap retry cadence, not the total wait or number of attempts.
+        deliveryProgress(pending, {
+          counters: { preSubmitTransportBackoffs: (pending?.trace?.counters.preSubmitTransportBackoffs ?? 0) + 1 },
+          timings: { maxPreSubmitTransportBackoffMs: transportDelay },
+        });
+        await waitForRunSignal(message.runId, transportDelay);
+        transportDelay = Math.min(2 * transportDelay, 2400);
+      };
       while (await allowed()) {
         if (pending?.manualSubmission) return { supported: true, dispatched: false, code: 'manual-submission', manualSubmission: true };
         if (phase === 'commit' && pending) {
@@ -1400,13 +1415,14 @@ async function commitRun(message, sender) {
           // Prepare/observe cannot submit. Losing their transport may retry the
           // same reservation; an uncertain commit must never be replayed.
           if (phase === 'commit') { if (pending) { pending.mainCommitPending = false; pending.commitUncertain = true; } throw error; }
-          await new Promise(resolve => setTimeout(resolve, 150));
+          await waitForTransportRetry();
           continue;
         }
         if (value == null && phase !== 'commit') {
-          await new Promise(resolve => setTimeout(resolve, 150));
+          await waitForTransportRetry();
           continue;
         }
+        transportDelay = 150;
         if (!(value?.dispatched === false && value.code === 'expired')) return value;
         // The finite IPC permit expired before execution, with explicit proof
         // that no submission occurred. Keep the same reservation and wait.

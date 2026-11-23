@@ -1319,8 +1319,9 @@ try {
     await page.evaluate(() => {
       const now = Date.now();
       const trace = { sequence: 1, startedAt: now - 180000, updatedAt: now, state: 'running',
-        stage: 'readiness', reason: 'waiting-send', counters: { modelWrites: 1, readinessChecks: 88 },
-        timings: { elapsedMs: 180000, modelWriteMs: 24 }, observations: { hidden: true, sendEnabled: false },
+        stage: 'readiness', reason: 'waiting-send', counters: { modelWrites: 1, readinessChecks: 88, preSubmitTransportBackoffs: 3 },
+        timings: { elapsedMs: 180000, modelWriteMs: 24, maxPreSubmitTransportBackoffMs: 600 },
+        observations: { hidden: true, sendEnabled: false },
         history: [{ elapsedMs: 0, stage: 'prepare', reason: 'prepared' },
           { elapsedMs: 200, stage: 'readiness', reason: 'waiting-send' }], droppedHistory: 0,
         prompt: 'SYNTHETIC_PRIVATE_DIAGNOSTIC_INJECTION' };
@@ -1331,6 +1332,8 @@ try {
     await page.locator('#deliveryDiagnosticList summary').click();
     const text = await page.locator('#deliveryDiagnosticList').innerText();
     assert.match(text, /readiness \/ waiting-send \| 180 s/);
+    assert.match(text, /Pre-send transport waits: 3/);
+    assert.match(text, /"maxPreSubmitTransportBackoffMs": 600/);
     assert.match(text, /"modelWrites": 1/); assert.match(text, /"readinessChecks": 88/);
     assert.ok(!text.includes('SYNTHETIC_PRIVATE_DIAGNOSTIC_INJECTION'));
     assert.match(await page.locator('#deliveryDiagnosticHealth').innerText(), /persistence failed/);
@@ -1346,6 +1349,8 @@ try {
     const download = page.waitForEvent('download'); await page.locator('#exportLogs').click(); await download;
     const report = await page.evaluate(async () => JSON.parse(await __uiMock.exports.at(-1).text()));
     assert.equal(report.version, 5); assert.equal(report.deliveries[0].counters.modelWrites, 1);
+    assert.equal(report.deliveries[0].counters.preSubmitTransportBackoffs, 3);
+    assert.equal(report.deliveries[0].timings.maxPreSubmitTransportBackoffMs, 600);
     assert.equal(report.deliveries[0].startedAt, undefined);
     assert.ok(!JSON.stringify(report).includes('SYNTHETIC_PRIVATE_DIAGNOSTIC_INJECTION'));
     assert.equal(await page.evaluate(() => __uiMock.requests.filter(r => /^(START|RESUME|SEND)/.test(r.type)).length), 0);

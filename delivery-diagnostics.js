@@ -14,8 +14,9 @@ const REASONS = new Set([
 ]);
 const COUNTERS = ['pageAdmissions', 'modelWrites', 'domWrites', 'textChunks', 'slowChunks', 'rejectedChunks', 'chunkRestarts', 'prefixRewriteRestarts', 'chunkSettlementRestarts', 'chunkUnserializableChecks', 'chunkUnserializableRestarts', 'chunkUnserializableRecoveries', 'chunkDifferences', 'insertedBlankSeparators', 'fillCalls', 'readinessChecks',
   'authorizationChecks', 'grantRequests', 'grantReadbacks', 'retiredReadbacks', 'dispatchAttempts',
-  'receiptChecks', 'manualIntents', 'attachmentsRemoved', 'transportErrors', 'leaseRenewals', 'documentChanges', 'emptyComposerRecoveries'];
-const TIMINGS = ['modelWriteMs', 'domWriteMs', 'maxModelWriteMs', 'maxDomWriteMs', 'serializationMs', 'maxSerializationMs', 'elapsedMs', 'stageElapsedMs'];
+  'receiptChecks', 'manualIntents', 'attachmentsRemoved', 'transportErrors', 'preSubmitTransportBackoffs', 'leaseRenewals', 'documentChanges', 'emptyComposerRecoveries'];
+const TIMINGS = ['modelWriteMs', 'domWriteMs', 'maxModelWriteMs', 'maxDomWriteMs', 'serializationMs', 'maxSerializationMs',
+  'maxPreSubmitTransportBackoffMs', 'elapsedMs', 'stageElapsedMs'];
 const OBSERVATIONS = ['hidden', 'sendPresent', 'sendEnabled', 'composerPresent', 'busy', 'manualPending'];
 const uint = value => Number.isSafeInteger(value) && value >= 0;
 const epoch = value => uint(value) && value <= 8_640_000_000_000_000;

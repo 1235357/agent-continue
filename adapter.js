@@ -1442,10 +1442,11 @@ export async function pageAction(args) {
       let commit;
       let committing = true;
       const observeLease = async () => {
+        const observationInterval = 1_000;
         // Read the same invocation's current command permit while COMMIT_RUN is
         // pending. This observation does not prove MAIN progress or a submission.
         while (committing && !revoked && samePage()) {
-          try { await wait(180, false); }
+          try { await wait(observationInterval, false); }
           catch {
             if (!committing || revoked || !samePage()) return;
             try {
@@ -1454,7 +1455,7 @@ export async function pageAction(args) {
               if (reply?.ok === true && reply.allowed === false) { revoked = true; return; }
               if (reply?.allowed === true) grantedDeadline(reply.runDeadline);
             } catch { metrics.counters.transportErrors++; /* A recoverable transport error is not a permanent run veto. */ }
-            await new Promise(resolve => setTimeout(resolve, 180));
+            await new Promise(resolve => setTimeout(resolve, observationInterval));
           }
         }
       };

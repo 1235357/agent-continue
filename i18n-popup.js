@@ -2,6 +2,7 @@
 export default {
   '扩展发送：{0}；手动发送：{1}': 'Extension sends: {0}; manual sends: {1}',
   '发送阶段诊断': 'Delivery diagnostics',
+  '提交前传输等待：{0} 次': 'Pre-send transport waits: {0}',
   '尚无新版发送诊断。': 'No delivery diagnostics from this version yet.',
   '手动提交已确认': 'Manual submission confirmed',
   '记录保存失败；导出可能不完整。': 'Diagnostic persistence failed; the export may be incomplete.',

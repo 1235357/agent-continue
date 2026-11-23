@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { buildActivityExport } from '../activity-export.js';
+import { createDeliveryTrace } from '../delivery-diagnostics.js';
 import { PACKAGE_FILES } from '../native/bootstrap/payload-layout.mjs';
 
 const read = name => fs.readFileSync(new URL('../' + name, import.meta.url), 'utf8');
@@ -85,6 +86,19 @@ test('privacy and listing disclose actual timing-probe fields and enums', () => 
     for (const field of ['timing-probe', 'kind', 'status', 'durationMs', 'firstMs', 'hidden', 'ok', 'allowed']) {
       assert.ok(text.includes(field), `${name} omits timing metadata: ${field}`);
     }
+  }
+});
+
+test('pre-send wait fields are disclosed without implying elapsed time or submission', () => {
+  const report = buildActivityExport({ extensionVersion: '3.2.1', now: 200, deliveries: [createDeliveryTrace(1, 100)] });
+  const [delivery] = report.deliveries;
+  assert.equal(delivery.counters.preSubmitTransportBackoffs, 0);
+  assert.equal(delivery.timings.maxPreSubmitTransportBackoffMs, 0);
+  for (const name of ['PRIVACY.md', 'docs/STORE-LISTING.en.md']) {
+    const paragraph = read(name).split(/\r?\n/).find(line => line.includes('preSubmitTransportBackoffs'));
+    assert.match(paragraph, /scheduled pre-send transport waits/);
+    assert.match(paragraph, /longest requested interval in milliseconds .*maxPreSubmitTransportBackoffMs/);
+    assert.match(paragraph, /cancelled.*schedul|cancelled.*actual wait duration/);
   }
 });
 

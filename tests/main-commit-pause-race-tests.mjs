@@ -42,7 +42,8 @@ for (const boundaryMode of ['synthetically-accept-after-revocation', 'reject-aft
         revoked = true;
         order.push('cancel-ack-zero');
         cancelAck = { revoked: true, runId: message.runId, resultToken: message.resultToken,
-          diagnosticProgress: { counters: { dispatchAttempts: 0, manualIntents: 0 } } };
+          diagnosticProgress: { counters: { dispatchAttempts: 0, manualIntents: 0, preSubmitTransportBackoffs: 999 },
+            timings: { maxPreSubmitTransportBackoffMs: 99999 } } };
         return cancelAck;
       }
       return sendMessage(id, message);
@@ -100,6 +101,10 @@ for (const boundaryMode of ['synthetically-accept-after-revocation', 'reject-aft
       sendResponse = await sending;
     }
     await until(() => mainOutcome && commitResponse, 'MAIN completion');
+    await until(() => h.state.local.deliveryDiagnostics?.some(trace => trace.state !== 'running'), 'persisted delivery diagnostics');
+    const backoff = h.state.local.deliveryDiagnostics.at(-1);
+    assert.equal(backoff.counters.preSubmitTransportBackoffs, 0);
+    assert.equal(backoff.timings.maxPreSubmitTransportBackoffMs, 0);
     const afterCompletion = { session: copy(h.state.session.job), local: copy(h.state.local.resumeJob) };
     const restarted = await harness({ local: copy(h.state.local) });
     const afterRestart = copy(restarted.state.session.job);

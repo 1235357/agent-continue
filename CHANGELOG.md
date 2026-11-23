@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Back off repeated transport failures before submission from 150 ms to a maximum delay of 2.4 seconds between attempts. This limits retry frequency, not total waiting time. Pause cancels retries, and the scheduler still does not replay a submission whose outcome is unknown.
+- Show pre-send transport waits in the delivery log. The diagnostic export records the number of scheduled waits and the longest requested interval, separately from submission attempts.
+
 ## [3.2.1] - 2026-11-21
 
 - Keep pending tool approvals manual in ChatGPT and Your dot. Detect and report them without clicking, writing to the composer, or trying to approve through page internals.

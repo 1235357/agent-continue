@@ -7,8 +7,9 @@ const now = Date.UTC(2026, 10, 10, 12);
 const secret = 'SYNTHETIC_PRIVATE https://example.invalid/private C:\\private\\prompt.txt';
 const counterNames = ['pageAdmissions', 'modelWrites', 'domWrites', 'textChunks', 'slowChunks', 'rejectedChunks', 'chunkRestarts', 'prefixRewriteRestarts', 'chunkSettlementRestarts', 'chunkUnserializableChecks', 'chunkUnserializableRestarts', 'chunkUnserializableRecoveries', 'chunkDifferences', 'insertedBlankSeparators', 'fillCalls', 'readinessChecks',
   'authorizationChecks', 'grantRequests', 'grantReadbacks', 'retiredReadbacks', 'dispatchAttempts',
-  'receiptChecks', 'manualIntents', 'attachmentsRemoved', 'transportErrors', 'leaseRenewals', 'documentChanges', 'emptyComposerRecoveries'];
-const timingNames = ['modelWriteMs', 'domWriteMs', 'maxModelWriteMs', 'maxDomWriteMs', 'serializationMs', 'maxSerializationMs', 'elapsedMs', 'stageElapsedMs'];
+  'receiptChecks', 'manualIntents', 'attachmentsRemoved', 'transportErrors', 'preSubmitTransportBackoffs', 'leaseRenewals', 'documentChanges', 'emptyComposerRecoveries'];
+const timingNames = ['modelWriteMs', 'domWriteMs', 'maxModelWriteMs', 'maxDomWriteMs', 'serializationMs', 'maxSerializationMs',
+  'maxPreSubmitTransportBackoffMs', 'elapsedMs', 'stageElapsedMs'];
 const observationNames = ['hidden', 'sendPresent', 'sendEnabled', 'composerPresent', 'busy', 'manualPending'];
 const reasons = ['starting', 'prepared', 'ready', 'waiting-send', 'send-unavailable', 'send-ambiguous',
   'unsupported-view', 'composer-unavailable', 'composer-changed', 'view-changed', 'not-editable',
@@ -19,6 +20,25 @@ const reasons = ['starting', 'prepared', 'ready', 'waiting-send', 'send-unavaila
   'grant-pending', 'grant-accepted', 'awaiting-receipt', 'receipt-confirmed', 'manual-receipt-confirmed',
   'document-replaced', 'worker-interrupted', 'diagnostics-write-failed', 'unknown'];
 const exportActivity = extra => buildActivityExport({ extensionVersion: '3.0.12', now, ...extra });
+
+test('pre-send waits survive export without raw transport errors, and remain absent on legacy traces', () => {
+  const initial = createDeliveryTrace(1, now);
+  const first = updateDeliveryTrace(initial, {
+    stage: 'prepare', reason: 'transport-rejected', counters: { preSubmitTransportBackoffs: 1 },
+    timings: { maxPreSubmitTransportBackoffMs: 150 }, rawError: secret,
+  }, now + 1);
+  const final = updateDeliveryTrace(first, {
+    state: 'cancelled', reason: 'cancelled', counters: { preSubmitTransportBackoffs: 3, rawError: secret },
+    timings: { maxPreSubmitTransportBackoffMs: 600, rawError: secret },
+  }, now + 2);
+  const legacy = createDeliveryTrace(2, now);
+  delete legacy.counters.preSubmitTransportBackoffs;
+  delete legacy.timings.maxPreSubmitTransportBackoffMs;
+  const exported = exportActivity({ deliveries: [final, legacy] });
+  assert.deepEqual(exported.deliveries.map(value =>
+    [value.counters.preSubmitTransportBackoffs, value.timings.maxPreSubmitTransportBackoffMs]), [[3, 600], [undefined, undefined]]);
+  assert.equal(JSON.stringify(exported).includes(secret), false);
+});
 
 test('empty composer recovery is exported as fixed counters without draft content', () => {
   const trace = updateDeliveryTrace(createDeliveryTrace(1, now), {

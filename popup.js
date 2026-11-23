@@ -351,7 +351,10 @@ function renderDeliveryDiagnostics() {
     const details = document.createElement('details');
     details.dataset.sequence = String(trace.sequence); details.open = expanded.has(String(trace.sequence));
     const summary = document.createElement('summary');
-    summary.textContent = `#${trace.sequence} | ${trace.state} | ${trace.stage} / ${trace.reason} | ${Math.round((trace.updatedAt - trace.startedAt) / 1000)} s`;
+    const backoffs = trace.counters.preSubmitTransportBackoffs ?? 0;
+    const backoffSummary = backoffs > 0 ? t`提交前传输等待：${backoffs} 次` : '';
+    summary.textContent = [`#${trace.sequence} | ${trace.state} | ${trace.stage} / ${trace.reason} | ${Math.round((trace.updatedAt - trace.startedAt) / 1000)} s`,
+      backoffSummary].filter(Boolean).join(' | ');
     const data = document.createElement('pre');
     data.style.whiteSpace = 'pre-wrap'; data.style.overflowWrap = 'anywhere';
     // Only the shared fixed-field codec reaches the UI or export.

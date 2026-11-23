@@ -829,6 +829,7 @@ try {
       chrome.runtime.sendMessage = message => {
         if (!rejected && message.type === 'WAIT_RUN' && message.renew === false) {
           rejected = true;
+          document.documentElement.dataset.fixtureObserverDelay = String(message.delayMs);
           return Promise.reject(new Error('Synthetic one-off observer transport failure'));
         }
         return send(message);
@@ -836,6 +837,7 @@ try {
     } }), tabId);
     const sent = await call({ type: 'SEND_NOW' });
     assert.equal(sent.job.sentCount, 1, sent.job.statusText);
+    assert.equal(await page.evaluate(() => document.documentElement.dataset.fixtureObserverDelay), '1000');
     const observed = await inspect(page);
     assert.deepEqual([observed.keyboardCommands, observed.buttonClicks, observed.submits], [0, 1, 1]);
     assert.deepEqual(observed.sentTexts, [prompt]);
@@ -1264,10 +1266,16 @@ try {
     await start(page, { sendMethod: 'auto' });
     await worker.evaluate(() => {
       globalThis.originalExecuteScript = chrome.scripting.executeScript;
-      globalThis.prepareFailures = 0;
+      globalThis.originalTransportTimer = globalThis.setTimeout;
+      globalThis.prepareFailures = [];
+      globalThis.scheduledBackoffAtAttempt = 0;
+      globalThis.setTimeout = (callback, delay, ...args) => {
+        if (delay === 2400) scheduledBackoffAtAttempt = prepareFailures.length;
+        return originalTransportTimer(callback, delay, ...args);
+      };
       chrome.scripting.executeScript = async request => {
         if (request.func.name === 'editorCommit' && request.args[0].phase === 'prepare') {
-          prepareFailures++;
+          prepareFailures.push(performance.now());
           throw new Error('Synthetic unavailable prepare transport');
         }
         return originalExecuteScript(request);
@@ -1275,19 +1283,48 @@ try {
     });
     const sending = call({ type: 'SEND_NOW' });
     try {
-      const observationDeadline = Date.now() + 5000;
-      while (await worker.evaluate(() => prepareFailures) < 2 && Date.now() < observationDeadline)
-        await new Promise(resolve => setTimeout(resolve, 25));
-      assert.ok(await worker.evaluate(() => prepareFailures >= 2));
+      const observationDeadline = Date.now() + 25_000;
+      while (await worker.evaluate(() => scheduledBackoffAtAttempt) < 9 && Date.now() < observationDeadline)
+        await new Promise(resolve => setTimeout(resolve, 50));
+      const failures = await worker.evaluate(() => prepareFailures.slice(0, 9));
+      assert.equal(failures.length, 9, 'a still-authorized run must keep trying after reaching the cadence cap');
+      assert.ok(failures[4] - failures[3] >= 1000, 'persistent transport loss must back off before the fifth attempt');
+      assert.ok(failures[8] - failures[7] >= 2000, 'the steady retry cadence must remain bounded away from the fast path');
+      const pausedAt = Date.now();
       await call({ type: 'PAUSE' });
       await sending;
+      assert.ok(Date.now() - pausedAt < 2000, 'Pause must settle the send while a transport retry is waiting');
       const state = await call({ type: 'GET_STATE' });
       assert.equal(state.job.enabled, false);
       assert.equal(state.job.sentCount, 0);
+      let trace;
+      const traceDeadline = Date.now() + 5000;
+      do {
+        trace = await worker.evaluate(async () => (await chrome.storage.local.get('deliveryDiagnostics')).deliveryDiagnostics?.at(-1));
+        if (trace?.state === 'cancelled') break;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      } while (Date.now() < traceDeadline);
+      assert.equal(trace?.state, 'cancelled');
+      assert.deepEqual([trace?.counters.pageAdmissions, trace?.counters.readinessChecks, trace?.counters.dispatchAttempts], [1, 0, 0]);
+      assert.equal(trace.counters.preSubmitTransportBackoffs, 9);
+      assert.equal(trace.timings.maxPreSubmitTransportBackoffMs, 2400);
+      assert.ok(trace.counters.leaseRenewals >= 1, 'exercise at least one permit renewal');
+      assert.ok(trace.counters.authorizationChecks > 0 && trace.counters.authorizationChecks <= 65,
+        'one stalled preparation must not produce a fast authorization loop');
+      const attempts = await worker.evaluate(() => prepareFailures.length);
+      await new Promise(resolve => setTimeout(resolve, 2500));
+      assert.equal(await worker.evaluate(() => prepareFailures.length), attempts, 'late timers must not prepare again after Pause');
       assert.deepEqual([(await inspect(page)).buttonClicks, (await inspect(page)).submits], [0, 0]);
     } finally {
       await call({ type: 'PAUSE' });
-      await worker.evaluate(() => { chrome.scripting.executeScript = originalExecuteScript; delete globalThis.originalExecuteScript; });
+      await worker.evaluate(() => {
+        chrome.scripting.executeScript = originalExecuteScript;
+        globalThis.setTimeout = originalTransportTimer;
+        delete globalThis.originalExecuteScript;
+        delete globalThis.originalTransportTimer;
+        delete globalThis.prepareFailures;
+        delete globalThis.scheduledBackoffAtAttempt;
+      });
       await sending;
     }
   });
@@ -1296,26 +1333,46 @@ try {
     await worker.evaluate(() => {
       globalThis.originalExecuteScript = chrome.scripting.executeScript;
       globalThis.missingPhases = [];
+      globalThis.untrustedBackoffProgress = false;
       chrome.scripting.executeScript = async request => {
         const frames = await originalExecuteScript(request);
         const phase = request.args?.[0]?.phase;
-        if (request.func.name === 'editorCommit' && ['prepare','observe'].includes(phase) && !missingPhases.includes(phase)) {
+        if (request.func.name === 'editorCommit' && ['prepare','observe'].includes(phase)
+            && missingPhases.filter(seen => seen === phase).length < (phase === 'prepare' ? 4 : 1)) {
           missingPhases.push(phase);
           return [];
+        }
+        if (request.func.name === 'editorCommit' && phase === 'prepare') {
+          const progress = frames.find(frame => frame.frameId === 0)?.result?.diagnosticProgress;
+          if (progress) {
+            progress.counters.preSubmitTransportBackoffs = 999;
+            progress.timings.maxPreSubmitTransportBackoffMs = 99999;
+            untrustedBackoffProgress = true;
+          }
         }
         return frames;
       };
     });
     try {
       const sent = await call({ type: 'SEND_NOW' });
-      assert.deepEqual(await worker.evaluate(() => missingPhases), ['prepare','observe']);
+      assert.deepEqual(await worker.evaluate(() => missingPhases), ['prepare','prepare','prepare','prepare','observe']);
       assert.equal(sent.job.sentCount, 1, sent.job.statusText);
       assert.equal(sent.job.unknownCount, 0);
       const observed = await inspect(page);
       assert.deepEqual([observed.buttonClicks, observed.submits], [1, 1]);
       assert.deepEqual(observed.sentTexts, [prompt]);
+      const trace = (await call({ type: 'GET_STATE' })).deliveryDiagnostics?.at(-1);
+      assert.deepEqual([trace?.counters.pageAdmissions, trace?.counters.dispatchAttempts], [1, 1]);
+      assert.equal(await worker.evaluate(() => untrustedBackoffProgress), true);
+      assert.equal(trace.counters.preSubmitTransportBackoffs, 5);
+      assert.equal(trace.timings.maxPreSubmitTransportBackoffMs, 1200);
     } finally {
-      await worker.evaluate(() => { chrome.scripting.executeScript = originalExecuteScript; delete globalThis.originalExecuteScript; });
+      await worker.evaluate(() => {
+        chrome.scripting.executeScript = originalExecuteScript;
+        delete globalThis.originalExecuteScript;
+        delete globalThis.missingPhases;
+        delete globalThis.untrustedBackoffProgress;
+      });
     }
   });
   await scenario('A lost prepare response preserves disabled Send through unmount and reappearance without Auto keyboard fallback', async page => {

@@ -97,6 +97,8 @@ For a bug report, manually provide your extension version, browser version, oper
 
 Activity and support-page exports share schema 5 JSON diagnostics. Reports identify format agent-continue-activity and version 5, and contain extensionVersion, timestampMode, excludedEntries, logs, deliveries, coverage and diagnosticsHealth. Retained entries include an allowlisted event, event timing and an optional diagnostic code and finite numeric durationMs rounded and bounded to 0–Number.MAX_SAFE_INTEGER ms. Stored free-text messages and unknown fields are omitted, but locally collected activity metadata remains.
 
+New delivery snapshots include a count of scheduled pre-send transport waits (`preSubmitTransportBackoffs`) and the longest requested interval in milliseconds (`maxPreSubmitTransportBackoffMs`), even if the last wait was cancelled. The fields do not measure actual wait duration, identify content, or confirm a send.
+
 When a diagnostic code is timing-probe, the report can additionally include kind (authorization or page-timers), status (result, invalid-result, api-rejected or watchdog-expired), finite numeric firstMs rounded and bounded to 0–Number.MAX_SAFE_INTEGER ms, and actual boolean hidden, ok and allowed values, including false. These fields describe page visibility and probe/authorization outcomes; they are not a claim of no data collection or anonymity.
 
 Execution diagnostics can additionally contain stage (page, prepare, readiness, authorization, dispatch or receipt), resultChannel (none, execute-script, extension-message or page-readback), and integer leaseRenewals bounded to 0–1000000. These are local progress facts, not proof of service acceptance. Run tokens, document identifiers and cancellation messages are omitted.
