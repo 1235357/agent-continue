@@ -44,7 +44,9 @@
 
   const authOrLoginCardPattern = /\b(?:sign\s*in|log\s*in|login|oauth|re-?authorize|authorize\s+(?:app|with)|connect\s+(?:account|your)|link\s+account|password|2fa)\b|登录|授权登录|同意登录|连接账号|关联账号|绑定账号|密码/i;
   const toolPromptPattern = /\b(?:always\s+allow|allow\s+once|allow|allow\s+this\s+time|approve|always\s+approve)\b|始终允许|总是允许|允许一次|允许/i;
-  const takeoverRequestPattern = /把控制权交回|交回控制权|请.*完成(?:GitHub|OAuth|页面|登录|授权).*交回|请.*手动登录|请.*接管.*登录|完成授权并|请回复.*授权|\b(?:give|hand)\s+(?:me\s+)?control\s+back\b|\bhand\s+back\s+control\b|\btake\s+over\s+and\s+(?:sign\s+in|log\s+in|authenticate)\b|\bcomplete\s+(?:the\s+)?(?:sign[\s-]?in|log[\s-]?in|login|authentication|authorization).*(?:control|continue|proceed)\b/i;
+  const closedSignInCardPattern = /\bsign[\s-]?in\s+request\s+(?:closed|completed|canceled|cancelled|dismissed|done)\b|登录请求\s*(?:已关闭|已完成|已取消|已结束)/i;
+  const stripClosedSignInLines = value => String(value ?? '').split(/\r?\n/).filter(line => !closedSignInCardPattern.test(line)).join('\n');
+  const takeoverRequestPattern = /把控制权交回|交回控制权|归还控制权|请.*完成(?:GitHub|OAuth|页面|登录|授权).*交回|请.*手动登录|请.*接管.*登录|完成授权并|请回复.*授权|接管浏览器|请求接管|需要(?:你|您)?接管|请(?:你|您)?(?:先)?(?:接管|登录|授权)|登录请求(?!\s*(?:已关闭|已完成|已取消|已结束))|请先完成.{0,12}(?:登录|授权)|需要(?:你|您)?手动完成.{0,12}(?:登录|授权)|\b(?:give|hand)\s+(?:me\s+)?control\s+back\b|\bhand\s+back\s+control\b|\breturn\s+(?:browser\s+)?control\b|\btake\s+over\s+(?:the\s+)?browser\b|\btake\s+over\s+and\s+(?:sign\s+in|log\s+in|authenticate)\b|\bplease\s+(?:take\s+over|sign\s+in|log\s+in)\b|\b(?:sign\s+in|log\s+in)\s+to\s+[a-z0-9.-]+\b|\bsign[\s-]?in\s+request\b(?!\s*(?:closed|completed|canceled|cancelled|dismissed|done))|\byour\s+dot\s+(?:needs|wants)\s+you\s+to\s+(?:sign\s+in|log\s+in|take\s+over)\b|\bcomplete\s+(?:the\s+)?(?:sign[\s-]?in|log[\s-]?in|login|authentication|authorization).*(?:control|continue|proceed)\b/i;
   const captchaPattern = /\b(?:captcha|recaptcha|hcaptcha|turnstile|verify\s+you\s+are\s+human|one-time\s+(?:code|password)|2fa\s+code|verification\s+code|enter\s+(?:your\s+)?password)\b|人机验证|图形验证码|短信验证码|邮箱验证码|输入密码|动态口令/i;
   const busyControlSelector = 'button[data-testid="stop-button"], button[aria-label*="Stop" i], button[aria-label*="停止" i], .typing-indicator';
 
@@ -94,11 +96,27 @@
 
   function observeIdleTakeoverPrompt() {
     if (!document.body || document.querySelector(busyControlSelector)) return null;
+    const dialogs = [...document.querySelectorAll('[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]')];
+    for (const dlg of dialogs) {
+      if (!dlg?.isConnected || dlg.hasAttribute('hidden') || dlg.getAttribute('aria-hidden') === 'true') continue;
+      const dlgText = stripClosedSignInLines(dlg.textContent || '');
+      if (dlgText && dlgText.length <= 2000 && takeoverRequestPattern.test(dlgText) && !captchaPattern.test(dlgText)) {
+        return 'dialog:' + dlgText.replace(/\s+/g, ' ').trim().slice(0, 120);
+      }
+    }
+    const controlBtns = [...document.querySelectorAll('button, [role="button"]')];
+    for (const btn of controlBtns) {
+      if (!btn?.isConnected || btn.disabled || btn.getAttribute('aria-disabled') === 'true') continue;
+      const txt = (btn.textContent || '').trim();
+      if (/^(?:give\s+control\s+back|hand\s+(?:control\s+)?back|return\s+control|交回控制权|归还控制权)$/i.test(txt)) {
+        return 'handover:' + txt;
+      }
+    }
     const turns = document.querySelectorAll('article.message-row:not(.self), [data-message-author-role="assistant"], [data-chatgpt-search-unit-key$=":assistant"]');
     if (!turns.length) return null;
     const last = turns[turns.length - 1];
     const body = last.querySelector?.('.message-body') || last;
-    const text = body.textContent || '';
+    const text = stripClosedSignInLines(body.textContent || '');
     if (!text || text.length > 4000 || !takeoverRequestPattern.test(text) || captchaPattern.test(text)) return null;
     return body.getAttribute?.('data-message-id') || last.getAttribute?.('data-message-id')
       || body.getAttribute?.('data-testid') || text.replace(/\s+/g, ' ').trim().slice(-120);
@@ -158,7 +176,7 @@
 
   chrome.runtime.onMessage?.addListener?.(message => {
     if (message?.type === 'SCAN_DIALOG_CONTEXT') {
-      lastKind = null;
+      if (message.reset === true) lastKind = null;
       scheduleDialogCheck();
     }
     return false;

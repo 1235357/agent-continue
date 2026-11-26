@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## [3.3.2] - 2026-11-26
+
+- Eliminate false `"Sign-in dialog detected"` pauses and 60-second `exception-detected` log floods on Dot conversations (`dialog-classifier.js`, `content.js`, `background.js`, `adapter.js`):
+  - Ignore inline conversation-turn dialogs inside `dialog-classifier.js:detectOAuthPopup()` so Dot thread cards like `Sign-in request | github.com` do not classify as ChatGPT browser-session OAuth popups.
+  - Preserve `lastKind` across periodic worker-wake `SCAN_DIALOG_CONTEXT` pings (`pingDialogObserver(tabId, reset = false)`) and deduplicate repeated `unknown-modal` `exception-detected` entries so idle service-worker wakes no longer flood the 200-entry activity log every 60 seconds.
+  - Delegate `DIALOG_EXCEPTION { kind: 'oauth-popup' }` on bound tabs with `autoAuthorizeTakeover: true` through `handlePagePromptObserved(sender, 'takeover')` instead of hard-pausing before `adapter.js` inspects the page.
+  - Broaden Dot takeover & sign-in request recognition (`Sign-in request`, `登录请求`, `接管浏览器`, `Take over browser`, ignoring historical `Sign-in request closed` cards), automatically dismiss active non-CAPTCHA Dot `"Sign-in request"` dialogs (`Close` / `Dismiss`, never clicking `Take over`) or send bounded delegation replies even while Dot displays `Paused`, and reset `consecutiveTakeoverReplies` to `0` on explicit `RESUME`.
+- Surface `#taskAutoAllow` and `#taskAutoAuthorizeTakeover` quick-toggles directly on the main Task tab (`popup.html`, `popup.js`, `i18n-html.js`) kept synchronized with Settings while preserving opt-in `false` defaults.
+
 ## [3.3.1] - 2026-11-26
 
 - Raise the Linux `release` job `timeout-minutes` budget in `.github/workflows/release.yml` from `15` to `40` so the full `xvfb-run -a env TEST_HEADED=1 npm test` browser suite, store/extension packaging, SHA-256 verification, and GitHub draft release creation complete without hitting the 15-minute job cancellation timeout observed on `v3.3.0`.

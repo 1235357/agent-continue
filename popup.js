@@ -419,13 +419,13 @@ function paint(job) {
     stopMarkers: (config.stopMarkers || []).join('\n'), mode: config.mode, scheduleMode: config.scheduleMode, takeoverReply: config.takeoverReply ?? '', sendMethod: config.sendMethod,
     quietStart: config.quietHours.start, quietEnd: config.quietHours.end })) setField(id, value);
   for (const [id, value] of Object.entries({ preventDiscard: config.preventDiscard, keepAwake: config.keepAwake,
-    startImmediately: config.startImmediately, waitForIdle: config.waitForIdle, autoAllow: config.autoAllow, autoAuthorizeTakeover: config.autoAuthorizeTakeover, quietEnabled: config.quietHours.enabled })) $(id).checked = !!value;
+    startImmediately: config.startImmediately, waitForIdle: config.waitForIdle, autoAllow: config.autoAllow, taskAutoAllow: config.autoAllow, autoAuthorizeTakeover: config.autoAuthorizeTakeover, taskAutoAuthorizeTakeover: config.autoAuthorizeTakeover, quietEnabled: config.quietHours.enabled })) $(id).checked = !!value;
   $('start').hidden = enabled || activating; $('start').disabled = !loaded || busy;
   $('pause').hidden = !enabled && !activating; $('pause').disabled = false;
   $('resume').hidden = enabled || activating || !job; $('resume').disabled = !loaded || busy;
   $('check').disabled = !loaded || busy; $('sendNow').disabled = busy || !enabled;
   $('targetSelect').disabled = !loaded || busy || enabled;
-  for (const id of [...configFields, 'keepAwake', 'encoding', 'queueName', 'queueText', 'templateName', 'templateSelect', 'manualSubmissionSequence']) $(id).disabled = !canEdit();
+  for (const id of [...configFields, 'taskAutoAllow', 'taskAutoAuthorizeTakeover', 'keepAwake', 'encoding', 'queueName', 'queueText', 'templateName', 'templateSelect', 'manualSubmissionSequence']) $(id).disabled = !canEdit();
   $('prompt').readOnly = enabled || busy; $('prompt').disabled = !loaded;
   $('togglePrompt').disabled = !loaded || importing;
   for (const id of editableButtons) $(id).disabled = !canEdit();
@@ -783,6 +783,13 @@ $('check').addEventListener('click', async () => {
 });
 $('sendNow').addEventListener('click', () => act('SEND_NOW'));
 for (const id of configFields) $(id).addEventListener('input', onConfigurationInput);
+for (const [taskId, settingsId] of [['taskAutoAllow', 'autoAllow'], ['taskAutoAuthorizeTakeover', 'autoAuthorizeTakeover']]) {
+  $(taskId).addEventListener('change', () => {
+    if (!canEdit()) return;
+    $(settingsId).checked = $(taskId).checked;
+    onConfigurationInput();
+  });
+}
 for (const button of document.querySelectorAll('[data-interval]')) button.addEventListener('click', () => { if (canEdit()) { $('interval').value = button.dataset.interval; onConfigurationInput(); } });
 $('togglePrompt').addEventListener('click', () => {
   if (!loaded || importing) return;

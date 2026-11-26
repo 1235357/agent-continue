@@ -163,6 +163,80 @@ test('adapter handles opt-in routine allow, OAuth pause, Dot handover/takeover, 
       assert.equal(blocked.diagnosticCode, 'captcha-required');
       await ctx.close();
     }
+    // 5. Dot active Sign-in request dialog & Paused takeover prompt vs closed Sign-in request card
+    {
+      const ctx = await browser.newContext();
+      await ctx.route('**/*', route => route.fulfill({ status: 200, contentType: 'text/html', body: baseHtml }));
+      const page = await ctx.newPage();
+      await page.goto(url);
+      await page.evaluate(() => {
+        window.__signInActions = [];
+        const dlg = document.createElement('div');
+        dlg.setAttribute('role', 'dialog');
+        dlg.innerHTML = '<p>Sign-in request github.com</p>';
+        const takeOverBtn = document.createElement('button'); takeOverBtn.textContent = 'Take over';
+        const closeBtn = document.createElement('button'); closeBtn.textContent = 'Close';
+        takeOverBtn.addEventListener('click', () => window.__signInActions.push('take-over'));
+        closeBtn.addEventListener('click', () => { window.__signInActions.push('close'); dlg.remove(); });
+        dlg.append(takeOverBtn, closeBtn);
+        document.body.append(dlg);
+      });
+      const handled = await page.evaluate(pageAction, { ...baseArgs, mode: 'check', detectTakeover: true, autoAuthorizeTakeover: true });
+      assert.equal(handled.status, 'busy');
+      assert.equal(handled.diagnosticCode, 'auto-allowed-prompt');
+      assert.deepEqual(await page.evaluate(() => window.__signInActions), ['close']);
+
+      await page.evaluate(() => {
+        window.chrome = {
+          runtime: {
+            sendMessage: async msg => (msg?.type === 'CHECK_RUN' ? { ok: true, allowed: true, runDeadline: Date.now() + 20000 } : { ok: true }),
+          },
+        };
+        const paused = document.createElement('button');
+        paused.dataset.testid = 'dot-paused';
+        paused.textContent = 'Paused';
+        document.body.append(paused);
+        document.querySelector('article.message-row:not(.self) .message-body').textContent = 'Sign-in request github.com\nPlease sign in to github.com to continue.';
+        const editor = document.querySelector('[data-composer-markdown]');
+        const send = document.querySelector('button[aria-label="Send"]');
+        window.__sentReplies = [];
+        editor.addEventListener('input', () => { send.disabled = !editor.innerText.trim(); });
+        send.addEventListener('click', () => {
+          const text = editor.innerText.trim();
+          window.__sentReplies.push(text);
+          const row = document.createElement('article');
+          row.className = 'message-row self';
+          row.dataset.messageId = 'acct~dot~Msg~u2';
+          const body = document.createElement('div');
+          body.className = 'message-body';
+          body.dataset.messageId = 'acct~dot~Msg~u2';
+          body.textContent = text;
+          row.append(body);
+          document.querySelector('#conversation').append(row);
+          editor.innerText = '';
+          send.disabled = true;
+        });
+      });
+      const pausedTakeover = await page.evaluate(pageAction, { ...baseArgs, mode: 'check', detectTakeover: true, autoAuthorizeTakeover: true });
+      assert.equal(pausedTakeover.status, 'busy');
+      assert.equal(pausedTakeover.diagnosticCode, 'takeover-needed');
+      assert.equal(pausedTakeover.takeoverAssistantToken, 'acct~dot~Msg~a1');
+
+      const sentWhilePaused = await page.evaluate(pageAction, {
+        ...baseArgs, mode: 'send', isTakeoverReply: true, autoAuthorizeTakeover: true,
+        prompt: 'Authorized takeover proceed',
+      });
+      assert.equal(sentWhilePaused.status, 'sent');
+      assert.deepEqual(await page.evaluate(() => window.__sentReplies), ['Authorized takeover proceed']);
+
+      await page.evaluate(() => {
+        for (const el of [...document.querySelectorAll('button')].filter(b => b.textContent === 'Paused')) el.remove();
+        document.querySelector('article.message-row:not(.self) .message-body').textContent = 'Sign-in request closed\ngithub.com\nBuild succeeded.';
+      });
+      const closedCheck = await page.evaluate(pageAction, { ...baseArgs, mode: 'check', detectTakeover: true, autoAuthorizeTakeover: true });
+      assert.equal(closedCheck.status, 'ready');
+      await ctx.close();
+    }
   } finally {
     await browser.close();
   }
@@ -265,11 +339,22 @@ test('background handles ROUTINE_APPROVAL_OBSERVED and TAKEOVER_PROMPT_OBSERVED 
   assert.equal(state.session.job.enabled, false, 'more than 3 consecutive takeover replies must pause');
   assert.equal(state.session.job.lastDiagnosticCode, 'takeover-needed');
 
-  // Re-start with autoAllow: true and verify OAuth pauses
+  // Re-start with autoAllow: true and verify OAuth pauses when probe explicitly reports oauth-required,
+  // while DIALOG_EXCEPTION oauth-popup delegates to takeover inspection and unknown-modal deduplicates logs.
   probeHandler = async () => ({ status: 'ready', identity: 'acct~dot', assistantToken: 'acct~dot~Msg~a1', assistantCount: 1 });
   assert.equal((await msg({ type: 'START', tabId: 7, targetUrl: url, config: { prompt: 'Test', autoAllow: true, autoAuthorizeTakeover: true } })).ok, true);
+  assert.equal((await msg({ type: 'DIALOG_EXCEPTION', kind: 'unknown-modal' }, pageSender)).ok, true);
+  assert.equal((await msg({ type: 'DIALOG_EXCEPTION', kind: 'unknown-modal' }, pageSender)).ok, true);
+  assert.equal(state.local.logs.filter(e => e.event === 'exception-detected').length, 1, 'consecutive unknown-modal logs must deduplicate');
+
+  probeHandler = async () => ({ status: 'busy', diagnosticCode: 'auto-allowed-prompt', assistantToken: 'acct~dot~Msg~a1', assistantCount: 1 });
+  assert.equal((await msg({ type: 'DIALOG_EXCEPTION', kind: 'oauth-popup' }, pageSender)).ok, true);
+  assert.equal(state.session.job.enabled, true, 'DIALOG_EXCEPTION oauth-popup must delegate when autoAuthorizeTakeover is enabled');
+
   probeHandler = async () => ({ status: 'blocked', diagnosticCode: 'oauth-required' });
   await msg({ type: 'ROUTINE_APPROVAL_OBSERVED' }, pageSender);
   assert.equal(state.session.job.enabled, false);
   assert.equal(state.session.job.lastDiagnosticCode, 'oauth-required');
+  assert.equal((await msg({ type: 'RESUME' })).ok, true);
+  assert.equal(state.session.job.consecutiveTakeoverReplies, 0, 'explicit RESUME resets takeover cap');
 });

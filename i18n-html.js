@@ -46,6 +46,8 @@ export default {
   '成功发送之后': 'After a successful send',
   '等待回复结束后计时': 'After the reply finishes',
   '启动后立即发送第一条': 'Send the first prompt immediately on start',
+  '自动允许常规工具确认（不含密码/验证码）': 'Auto-allow routine tool confirmations (excludes passwords/CAPTCHAs)',
+  'Dot 弹出接管 / 登录请求时自动授权继续': 'Auto-handle Dot takeover & sign-in requests',
   '提示词尚未准备好': 'Prompt not ready',
   '设置提示词 →': 'Set up prompts →',
   '默认每 20 分钟打断并发送同一条提示词，不设发送次数上限。': 'By default, interrupt and send the same prompt every 20 minutes, with no send limit.',

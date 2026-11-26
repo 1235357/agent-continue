@@ -1759,12 +1759,21 @@ try {
   }
   {
     const uiAuto = await createPage({ full: true, uiLanguage: 'en' }); const { page } = uiAuto;
+    assert.equal(await page.locator('#taskAutoAllow').isChecked(), false);
+    assert.equal(await page.locator('#taskAutoAuthorizeTakeover').isChecked(), false);
+    await page.locator('#taskAutoAuthorizeTakeover').check();
     await page.locator('#tab-settings').click();
     assert.equal(await page.locator('#autoAllow').isChecked(), false);
+    assert.equal(await page.locator('#autoAuthorizeTakeover').isChecked(), true);
+    await page.locator('#autoAuthorizeTakeover').uncheck();
     assert.equal(await page.locator('#autoAuthorizeTakeover').isChecked(), false);
     assert.equal(await page.locator('#takeoverReply').inputValue(), '');
     await page.locator('#autoAllow').check();
     await page.locator('#autoAuthorizeTakeover').check();
+    await page.locator('#tab-task').click();
+    assert.equal(await page.locator('#taskAutoAllow').isChecked(), true);
+    assert.equal(await page.locator('#taskAutoAuthorizeTakeover').isChecked(), true);
+    await page.locator('#tab-settings').click();
     await page.locator('#takeoverReply').fill('Delegated takeover authorization');
     await page.waitForFunction(() => __uiMock.configWrites.some(c => c.autoAllow === true && c.autoAuthorizeTakeover === true && c.takeoverReply === 'Delegated takeover authorization'));
     const [dlWithoutSecret] = await Promise.all([

@@ -219,6 +219,19 @@ test('TC-04b: Mixed dialog with OAuth text and Allow button -> safe: false, kind
   assert.equal(res.kind, 'oauth-popup');
 });
 
+test('TC-04c: Inline Dot assistant message card mentioning GitHub sign-in does not fire oauth-popup', () => {
+  doc.title = 'Your dot';
+  doc.body = new FakeElement('body');
+  const turn = new FakeElement('article', { class: 'message-row', 'data-message-author-role': 'assistant' });
+  const card = new FakeElement('div', { role: 'dialog' }, 'Sign-in request github.com Sign in with GitHub');
+  turn.appendChild(card);
+  doc.body.appendChild(turn);
+
+  const res = classifyDialogContext();
+  assert.equal(res.safe, true);
+  assert.equal(res.kind, 'none');
+});
+
 test('TC-05: Unknown modal persisting over 5s -> safe: false, kind: unknown-modal', () => {
   doc.title = 'ChatGPT';
   doc.body = new FakeElement('body');

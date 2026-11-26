@@ -253,7 +253,10 @@ export async function pageAction(args) {
   const forceInterrupt = args.waitForIdle !== true;
   const busy = () => {
     const paused = isDotPaused();
-    metrics.observations.busy = paused || visibleMatches(busySelector).length > 0 || visibleMatches(pauseSelector).length > 0;
+    const streaming = visibleMatches(busySelector).length > 0;
+    const anyPauseControl = visibleMatches(pauseSelector).length > 0;
+    metrics.observations.busy = paused || streaming || anyPauseControl;
+    if (args.isTakeoverReply === true && paused && !streaming) return false;
     return paused || (!forceInterrupt && metrics.observations.busy);
   };
   const enabled = button => !!button && !button.disabled && button.getAttribute('aria-disabled') !== 'true';
@@ -312,7 +315,10 @@ export async function pageAction(args) {
     };
   };
 
-  const takeoverRequestPattern = /把控制权交回|交回控制权|请.*完成(?:GitHub|OAuth|页面|登录|授权).*交回|请.*手动登录|请.*接管.*登录|完成授权并|请回复.*授权|\b(?:give|hand)\s+(?:me\s+)?control\s+back\b|\bhand\s+back\s+control\b|\btake\s+over\s+and\s+(?:sign\s+in|log\s+in|authenticate)\b|\bcomplete\s+(?:the\s+)?(?:sign[\s-]?in|log[\s-]?in|login|authentication|authorization).*(?:control|continue|proceed)\b/i;
+  const closedSignInCardPattern = /\bsign[\s-]?in\s+request\s+(?:closed|completed|canceled|cancelled|dismissed|done)\b|登录请求\s*(?:已关闭|已完成|已取消|已结束)/i;
+  const stripClosedSignInLines = value => String(value ?? '').split(/\r?\n/).filter(line => !closedSignInCardPattern.test(line)).join('\n');
+  const takeoverRequestPattern = /把控制权交回|交回控制权|归还控制权|请.*完成(?:GitHub|OAuth|页面|登录|授权).*交回|请.*手动登录|请.*接管.*登录|完成授权并|请回复.*授权|接管浏览器|请求接管|需要(?:你|您)?接管|请(?:你|您)?(?:先)?(?:接管|登录|授权)|登录请求(?!\s*(?:已关闭|已完成|已取消|已结束))|请先完成.{0,12}(?:登录|授权)|需要(?:你|您)?手动完成.{0,12}(?:登录|授权)|\b(?:give|hand)\s+(?:me\s+)?control\s+back\b|\bhand\s+back\s+control\b|\breturn\s+(?:browser\s+)?control\b|\btake\s+over\s+(?:the\s+)?browser\b|\btake\s+over\s+and\s+(?:sign\s+in|log\s+in|authenticate)\b|\bplease\s+(?:take\s+over|sign\s+in|log\s+in)\b|\b(?:sign\s+in|log\s+in)\s+to\s+[a-z0-9.-]+\b|\bsign[\s-]?in\s+request\b(?!\s*(?:closed|completed|canceled|cancelled|dismissed|done))|\byour\s+dot\s+(?:needs|wants)\s+you\s+to\s+(?:sign\s+in|log\s+in|take\s+over)\b|\bcomplete\s+(?:the\s+)?(?:sign[\s-]?in|log[\s-]?in|login|authentication|authorization).*(?:control|continue|proceed)\b/i;
+  const dotSignInModalPattern = /\bsign[\s-]?in\s+request\b(?!\s*(?:closed|completed|canceled|cancelled|dismissed|done))|\btake\s+over\s+(?:the\s+)?browser\b|登录请求(?!\s*(?:已关闭|已完成|已取消|已结束))|接管浏览器|请求接管/i;
   const captchaOr2FAPattern = /\b(?:captcha|recaptcha|hcaptcha|turnstile|verify\s+you\s+are\s+human|one-time\s+(?:code|password)|2fa\s+code|verification\s+code|enter\s+(?:your\s+)?password)\b|人机验证|图形验证码|短信验证码|邮箱验证码|输入密码|动态口令/i;
 
   const detectCaptchaOr2FABlock = () => {
@@ -326,11 +332,7 @@ export async function pageAction(args) {
 
   const authTextPattern = /\b(?:sign\s*in(?:\s+with|\s+to)?|log\s*in(?:\s+with|\s+to)?|login|oauth|re-?authorize|authorize\s+(?:app|with|account)|connect\s+(?:your\s+)?account|link\s+account|session\s+expired|continue\s+with\s+(?:google|microsoft|apple|github|facebook)|password|2fa|two-factor)\b|使用\s*(?:Google|Apple|Microsoft|GitHub)\s*登录|(?:通过|使用)\s*.+\s*账号登录|会话已过期|重新登录|授权登录|同意登录|同意并登录|去登录|连接账号|关联账号|绑定账号/i;
 
-  const detectAuthOrLoginBlock = () => {
-    try {
-      const classified = globalThis.__agentContinueClassifyDialog?.();
-      if (classified && classified.safe === false) return classified.kind || 'oauth-popup';
-    } catch {}
+  const detectSessionExpiredOrOffSite = () => {
     const title = String(document.title || '');
     const pathname = String(location.pathname || '');
     const hostname = String(location.hostname || '');
@@ -339,9 +341,23 @@ export async function pageAction(args) {
       || /^\/(?:auth\/|login|signin)/i.test(pathname);
     const loginForm = document.querySelector('[data-testid="login-button"], form[action*="login"]');
     if ((hasLoginSignals && loginForm) || (loginForm && !findComposer())) return 'session-expired';
+    return null;
+  };
+
+  const detectAuthOrLoginBlock = () => {
+    const offSiteOrExpired = detectSessionExpiredOrOffSite();
+    if (offSiteOrExpired) return offSiteOrExpired;
+    if (isDot && args.autoAuthorizeTakeover === true) {
+      return null;
+    }
+    try {
+      const classified = globalThis.__agentContinueClassifyDialog?.();
+      if (classified && classified.safe === false) return classified.kind || 'oauth-popup';
+    } catch {}
     const dialogs = [...document.querySelectorAll('[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]')];
     for (const dlg of dialogs) {
       if (!visible(dlg)) continue;
+      if (dlg.closest?.('article.message-row, [data-message-author-role="assistant"], [data-chatgpt-search-unit-key$=":assistant"]')) continue;
       if (dlg.querySelector('a[href*="accounts.google.com"], a[href*="login.microsoftonline.com"], a[href*="github.com/login/oauth"], a[href*="appleid.apple.com"], button[data-href*="accounts.google.com"], button[data-href*="login.microsoftonline.com"]')) {
         return 'oauth-popup';
       }
@@ -373,31 +389,114 @@ export async function pageAction(args) {
     const controlButtons = [...document.querySelectorAll('button, [role="button"]')]
       .filter(el => visible(el) && !el.disabled && el.getAttribute('aria-disabled') !== 'true'
         && /^(?:give\s+control\s+back|hand\s+(?:control\s+)?back|return\s+control|交回控制权|归还控制权)$/i.test((el.textContent || '').trim()));
-    if (controlButtons.length !== 1) return null;
-    const btn = controlButtons[0];
-    const nowMs = Date.now();
-    const cardMap = (globalThis.__agentContinueAllowedCards ??= new WeakMap());
-    const lastClickedAt = Math.max(cardMap.get(btn) || 0, Number(btn.getAttribute('data-agent-continue-allowed') || 0));
-    if (lastClickedAt > 0 && nowMs - lastClickedAt < 4000) {
+    if (controlButtons.length === 1) {
+      const btn = controlButtons[0];
+      const nowMs = Date.now();
+      const cardMap = (globalThis.__agentContinueAllowedCards ??= new WeakMap());
+      const lastClickedAt = Math.max(cardMap.get(btn) || 0, Number(btn.getAttribute('data-agent-continue-allowed') || 0));
+      if (lastClickedAt > 0 && nowMs - lastClickedAt < 4000) {
+        metrics.observations.busy = true;
+        return result('busy', '已自动归还控制权并继续等待 Dot 推进。', 'auto-allowed-prompt');
+      }
+      cardMap.set(btn, nowMs);
+      try { btn.setAttribute('data-agent-continue-allowed', String(nowMs)); } catch {}
+      clickTargetDom(btn);
       metrics.observations.busy = true;
       return result('busy', '已自动归还控制权并继续等待 Dot 推进。', 'auto-allowed-prompt');
     }
-    cardMap.set(btn, nowMs);
-    try { btn.setAttribute('data-agent-continue-allowed', String(nowMs)); } catch {}
-    clickTargetDom(btn);
-    metrics.observations.busy = true;
-    return result('busy', '已自动归还控制权并继续等待 Dot 推进。', 'auto-allowed-prompt');
+    if (!isDot) return null;
+    const dialogs = [...document.querySelectorAll('[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]')];
+    for (const dlg of dialogs) {
+      if (!visible(dlg)) continue;
+      const dlgText = stripClosedSignInLines((dlg.innerText ?? dlg.textContent ?? '').trim());
+      if (!dlgText || !dotSignInModalPattern.test(dlgText) || captchaOr2FAPattern.test(dlgText)) continue;
+      const dismissBtns = [...dlg.querySelectorAll('button, [role="button"]')].filter(el => {
+        if (!visible(el) || el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
+        const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        const label = (el.getAttribute('aria-label') || '').trim();
+        if (/take\s+over|接管/i.test(txt) || /take\s+over|接管/i.test(label)) return false;
+        return /^(?:close|dismiss|cancel|not\s+now|skip|关闭|取消|忽略|暂不|×|✕)$/i.test(txt)
+          || /^(?:close|dismiss|cancel|关闭|取消)\b/i.test(label);
+      });
+      if (dismissBtns.length !== 1) continue;
+      const btn = dismissBtns[0];
+      const nowMs = Date.now();
+      const cardMap = (globalThis.__agentContinueAllowedCards ??= new WeakMap());
+      const lastClickedAt = Math.max(cardMap.get(dlg) || 0, Number(dlg.getAttribute('data-agent-continue-allowed') || 0));
+      if (lastClickedAt > 0 && nowMs - lastClickedAt < 4000) {
+        metrics.observations.busy = true;
+        return result('busy', '已自动处理 Dot 登录接管请求，继续等待推进。', 'auto-allowed-prompt');
+      }
+      cardMap.set(dlg, nowMs);
+      try { dlg.setAttribute('data-agent-continue-allowed', String(nowMs)); } catch {}
+      clickTargetDom(btn);
+      metrics.observations.busy = true;
+      return result('busy', '已自动处理 Dot 登录接管请求，继续等待推进。', 'auto-allowed-prompt');
+    }
+    return null;
   };
+
+  function checkTakeoverConversationPrompt(allowWhenPaused = false) {
+    if (args.autoAuthorizeTakeover !== true || (args.mode !== 'send' && args.detectTakeover !== true) || args.isTakeoverReply === true) return null;
+    if (detectCaptchaOr2FABlock()) {
+      metrics.observations.busy = true;
+      return result('blocked', '检测到需要人工完成人机验证或密码/验证码，已暂停等待处理。', 'captcha-required');
+    }
+    const streamingBusy = visibleMatches(busySelector).length > 0;
+    if (allowWhenPaused ? streamingBusy : busy()) return null;
+    const last = [...document.querySelectorAll(assistantSelector)].at(-1);
+    if (last) {
+      const bodyText = stripClosedSignInLines(textOf(last));
+      if (bodyText && takeoverRequestPattern.test(bodyText)) {
+        const assistantToken = messageKey(last) || clean(bodyText).slice(-120);
+        if (assistantToken && assistantToken !== args.lastTakeoverToken) {
+          metrics.observations.busy = true;
+          return {
+            ...result('busy', '检测到 Dot 请求接管或登录授权确认，准备自动发送授权回复。', 'takeover-needed'),
+            takeoverAssistantToken: assistantToken,
+          };
+        }
+      }
+    }
+    if (isDot) {
+      const dialogs = [...document.querySelectorAll('[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]')];
+      for (const dlg of dialogs) {
+        if (!visible(dlg)) continue;
+        const raw = (dlg.innerText ?? dlg.textContent ?? '').trim();
+        const dlgText = stripClosedSignInLines(raw);
+        if (!dlgText || !dotSignInModalPattern.test(dlgText)) continue;
+        const cardToken = 'card:' + clean(dlgText).slice(0, 120);
+        if (cardToken && cardToken !== args.lastTakeoverToken) {
+          metrics.observations.busy = true;
+          return {
+            ...result('busy', '检测到 Dot 请求接管或登录授权确认，准备自动发送授权回复。', 'takeover-needed'),
+            takeoverAssistantToken: cardToken,
+          };
+        }
+      }
+    }
+    return null;
+  }
 
   const pausedResult = () => result('busy', 'Agent 处于暂停状态，等待继续或完成后发送。', 'agent-paused');
   if (isDotPaused()) {
     const handover = tryReturnBrowserControl();
     if (handover) return handover;
-    metrics.observations.busy = true;
-    return pausedResult();
+    const takeover = checkTakeoverConversationPrompt(true);
+    if (takeover) return takeover;
+    if (args.isTakeoverReply !== true) {
+      metrics.observations.busy = true;
+      return pausedResult();
+    }
   }
   const initial = findComposer();
   if (!initial) {
+    if (args.autoAuthorizeTakeover === true) {
+      const handover = tryReturnBrowserControl();
+      if (handover) return handover;
+      const takeover = checkTakeoverConversationPrompt(true);
+      if (takeover) return takeover;
+    }
     if (args.autoAllow === true && detectAuthOrLoginBlock()) {
       metrics.observations.busy = true;
       return result('blocked', '检测到需要手动登录或 OAuth 授权的弹窗，已暂停等待处理。', 'oauth-required');
@@ -491,7 +590,7 @@ export async function pageAction(args) {
 
   const editable = () => !editor.disabled && !editor.readOnly && (editor.isContentEditable || editor instanceof HTMLTextAreaElement);
 
-  const extractOptionText = node => {
+  function extractOptionText(node) {
     if (!node) return '';
     if (node.nodeType === Node.TEXT_NODE) return node.data || '';
     if (node.nodeType !== Node.ELEMENT_NODE) return '';
@@ -503,7 +602,7 @@ export async function pageAction(args) {
       if (piece) parts.push(piece);
     }
     return parts.join(' ').replace(/\s+/g, ' ').trim();
-  };
+  }
 
   const classifyOptionText = rawInput => {
     const raw = String(rawInput ?? '').replace(/[\s✓✔☑→›↗]+$/g, '').trim();
@@ -730,26 +829,6 @@ export async function pageAction(args) {
     return result('busy', '目标页面请求权限确认；请在页面中决定。', 'approval-required');
   };
 
-  const checkTakeoverConversationPrompt = () => {
-    if (args.autoAuthorizeTakeover !== true || (args.mode !== 'send' && args.detectTakeover !== true) || args.isTakeoverReply === true) return null;
-    if (detectCaptchaOr2FABlock()) {
-      metrics.observations.busy = true;
-      return result('blocked', '检测到需要人工完成人机验证或密码/验证码，已暂停等待处理。', 'captcha-required');
-    }
-    if (busy()) return null;
-    const last = [...document.querySelectorAll(assistantSelector)].at(-1);
-    if (!last) return null;
-    const bodyText = textOf(last);
-    if (!bodyText || !takeoverRequestPattern.test(bodyText)) return null;
-    const assistantToken = messageKey(last) || clean(bodyText).slice(-120);
-    if (!assistantToken || assistantToken === args.lastTakeoverToken) return null;
-    metrics.observations.busy = true;
-    return {
-      ...result('busy', '检测到 Dot 请求接管或登录授权确认，准备自动发送授权回复。', 'takeover-needed'),
-      takeoverAssistantToken: assistantToken,
-    };
-  };
-
   const checkAndHandleApprovalPrompt = () => {
     if (args.autoAllow !== true) {
       const handover = tryReturnBrowserControl();
@@ -768,8 +847,16 @@ export async function pageAction(args) {
     const targetCore = target?.info?.core || '';
     const isAuthOption = /^(?:authorize|re-?authorize|sign\s+in|log\s*in|login|connect\s+account|link\s+account|connect|reconnect|授权登录|同意登录|同意并登录|去登录|重新登录|连接账号|关联账号|绑定账号)\b/i.test(targetCore);
     if (isAuthOption || authTextPattern.test(containerText)) {
-      metrics.observations.busy = true;
-      return result('blocked', '检测到需要手动登录或 OAuth 授权的弹窗，已暂停等待处理。', 'oauth-required');
+      if (isDot && args.autoAuthorizeTakeover === true) {
+        if (!isAuthOption) {
+          // Non-auth routine Allow button inside a Dot card mentioning login/account context.
+        } else {
+          return tryReturnBrowserControl() || checkTakeoverConversationPrompt(isDotPaused());
+        }
+      } else {
+        metrics.observations.busy = true;
+        return result('blocked', '检测到需要手动登录或 OAuth 授权的弹窗，已暂停等待处理。', 'oauth-required');
+      }
     }
     const isRoutineKind = ['always-allow', 'allow-once'].includes(target.info.kind)
       || (target.info.kind === 'allow' && (target.info.highConfidence || groupDenies.length > 0));

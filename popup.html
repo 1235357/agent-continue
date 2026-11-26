@@ -43,6 +43,8 @@
           <div class="preset-row" aria-label="常用间隔"><button data-interval="5">5 分钟</button><button data-interval="10">10 分钟</button><button data-interval="15">15 分钟</button><button data-interval="20" class="selected">20 分钟</button><button data-interval="30">30 分钟</button><button data-interval="60">1 小时</button></div>
           <div class="field-row"><div><label for="mode">提示词模式</label><select id="mode"><option value="repeat">同一条 · 持续重复</option><option value="queue-loop">多条队列 · 循环</option><option value="queue-once">多条队列 · 执行一遍</option></select></div><div><label for="scheduleMode">间隔从何时计算</label><select id="scheduleMode"><option value="interval">成功发送之后</option><option value="after-reply">等待回复结束后计时</option></select></div></div>
           <label class="check-line"><input id="startImmediately" type="checkbox"><span>启动后立即发送第一条</span></label>
+          <label class="check-line"><input id="taskAutoAllow" type="checkbox"><span>自动允许常规工具确认（不含密码/验证码）</span></label>
+          <label class="check-line"><input id="taskAutoAuthorizeTakeover" type="checkbox"><span>Dot 弹出接管 / 登录请求时自动授权继续</span></label>
           <div class="prompt-summary"><span id="promptSummary">提示词尚未准备好</span><button id="goPrompt" class="text-button">设置提示词 →</button></div>
         </section>
         <p id="configHint" class="config-hint">默认每 20 分钟打断并发送同一条提示词，不设发送次数上限。</p>

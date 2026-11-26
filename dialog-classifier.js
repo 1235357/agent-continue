@@ -118,6 +118,7 @@
 
     for (const dialog of dialogs) {
       if (dialog.hasAttribute('hidden') || dialog.getAttribute('aria-hidden') === 'true') continue;
+      if (dialog.closest?.('article.message-row, [data-message-author-role="assistant"], [data-chatgpt-search-unit-key$=":assistant"]')) continue;
       try {
         const st = getComputedStyle(dialog);
         if (st.display === 'none' || st.visibility === 'hidden') continue;
@@ -155,13 +156,12 @@
 
     for (const dialog of dialogs) {
       if (dialog.hasAttribute('hidden') || dialog.getAttribute('aria-hidden') === 'true') continue;
+      // If dialog has ChatGPT tool-use context or assistant turn ancestor, not an unknown modal
+      if (dialog.closest?.('article.message-row, [data-message-author-role="assistant"], [data-chatgpt-search-unit-key$=":assistant"]')) continue;
       try {
         const st = getComputedStyle(dialog);
         if (st.display === 'none' || st.visibility === 'hidden') continue;
       } catch {}
-
-      // If dialog has ChatGPT tool-use context or assistant turn ancestor, not an unknown modal
-      if (dialog.closest?.('article.message-row, [data-message-author-role="assistant"]')) continue;
 
       // Check if dialog contains an allow-family option button
       const buttons = dialog.querySelectorAll?.('button, [role="button"], [role="option"], [role="radio"], a, label');

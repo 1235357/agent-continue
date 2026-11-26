@@ -209,6 +209,7 @@ export default {
   '检测到未知对话框，需要手动检查。': 'An unrecognized dialog needs manual review.',
   '接管授权回复须为不超过 4000 字符的有效文本。': 'The takeover authorization reply must be valid text of at most 4000 characters.',
   '已自动归还控制权并继续等待 Dot 推进。': 'Automatically returned browser control and continued waiting for Dot.',
+  '已自动处理 Dot 登录接管请求，继续等待推进。': 'Automatically handled Dot sign-in/takeover prompt; waiting for Dot to continue.',
   '检测到需要人工完成人机验证或密码/验证码，已暂停等待处理。': 'CAPTCHA, password, or verification code detected; paused for manual action.',
   '检测到需要手动登录或 OAuth 授权的弹窗，已暂停等待处理。': 'Manual sign-in or OAuth consent dialog detected; paused for manual action.',
   '已自动确认常规工具权限，继续等待运行。': 'Automatically confirmed routine tool permission; continuing to wait.',

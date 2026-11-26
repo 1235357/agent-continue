@@ -1221,7 +1221,7 @@ async function start(configInput, version, tabId, expectedUrl) {
   const tab = await currentTab(tabId, expectedUrl);
   const url = normalizeUrl(tab.url);
   assertIntent(version);
-  const result = await probe(tab, config, null, config.autoAllow === true, false);
+  const result = await probe(tab, config, null, config.autoAllow === true, config.autoAuthorizeTakeover === true, config.autoAuthorizeTakeover === true);
   if (!['ready', 'busy', 'draft'].includes(result.status)) throw fail(result.message || t('页面暂时无法启用自动发送。'));
   if (new URL(tab.url).pathname.startsWith('/dots/') && !result.identity) throw fail(t('请先打开 dot 页面并等待会话历史加载，再绑定任务。'));
   const response = await transact(async () => {
@@ -1277,10 +1277,16 @@ async function start(configInput, version, tabId, expectedUrl) {
     await recordActivityEvent('started', t`开始任务，间隔 ${config.intervalMinutes} 分钟，${config.maxSends ? t`上限 ${config.maxSends} 次` : t('不限次数')}。`);
     if (awaitingApproval) await recordActivityEvent('busy', t('目标页面请求权限确认；请在页面中决定。'), { code: 'approval-required' });
     if (autoAllowedOnStart) await recordActivityEvent('auto-allowed', t('已自动确认常规工具权限，继续等待运行。'), { code: 'auto-allowed-prompt' });
+    if (Number.isInteger(job.tabId)) pingDialogObserver(job.tabId, true);
     await updateBadge(job);
     return { ok: true, job };
   });
-  if (config.startImmediately && !['approval-required', 'auto-allowed-prompt'].includes(result.diagnosticCode)) return runRound(true, response.job.id, version);
+  if (result?.status === 'busy' && result?.diagnosticCode === 'takeover-needed' && response?.job?.enabled
+      && response.job.autoAuthorizeTakeover === true && version === intentVersion) {
+    await runTakeoverReplyRound(result.takeoverAssistantToken, response.job.id, version);
+  } else if (config.startImmediately && !['approval-required', 'auto-allowed-prompt', 'takeover-needed'].includes(result.diagnosticCode)) {
+    return runRound(true, response.job.id, version);
+  }
   return response;
 }
 async function resume(version) {
@@ -1320,7 +1326,7 @@ async function resume(version) {
         }
       }
     } catch { /* Wait for original page. */ }
-    const job = { ...current, ...protection, enabled: true, runId: token(), runDeadline: null, phase: 'idle', manualSubmissionPending: false, nextAt: Date.now() + current.intervalMinutes * 60_000, needsAttention: false, statusText: t`已继续原任务；约 ${current.intervalMinutes} 分钟后检查。` };
+    const job = { ...current, ...protection, enabled: true, runId: token(), runDeadline: null, phase: 'idle', manualSubmissionPending: false, consecutiveTakeoverReplies: 0, nextAt: Date.now() + current.intervalMinutes * 60_000, needsAttention: false, statusText: t`已继续原任务；约 ${current.intervalMinutes} 分钟后检查。` };
     job.systemAwake = await syncPower(job);
     try { await persistActivation(job); await syncAlarm(job); }
     catch {
@@ -1328,7 +1334,7 @@ async function resume(version) {
       throw fail(t('无法创建后台计时器。'));
     }
     await recordActivityEvent('resumed', t('已使用原提示词与原设置继续任务。'));
-    if (Number.isInteger(job.tabId)) pingDialogObserver(job.tabId);
+    if (Number.isInteger(job.tabId)) pingDialogObserver(job.tabId, true);
     await updateBadge(job);
     return { ok: true, job };
   });
@@ -2205,13 +2211,13 @@ async function readConfigState() {
     ]);
   } finally { clearTimeout(timer); }
 }
-function pingDialogObserver(tabId) {
+function pingDialogObserver(tabId, reset = false) {
   if (!Number.isInteger(tabId)) return;
   try {
-    Promise.resolve(chrome.tabs.sendMessage(tabId, { type: 'SCAN_DIALOG_CONTEXT' })).catch(() => {
+    Promise.resolve(chrome.tabs.sendMessage(tabId, { type: 'SCAN_DIALOG_CONTEXT', reset })).catch(() => {
       if (chrome.runtime?.onInstalled) {
         chrome.scripting.executeScript({ target: { tabId }, files: ['dialog-classifier.js', 'content.js'] })
-          .then(() => chrome.tabs.sendMessage(tabId, { type: 'SCAN_DIALOG_CONTEXT' }))
+          .then(() => chrome.tabs.sendMessage(tabId, { type: 'SCAN_DIALOG_CONTEXT', reset }))
           .catch(() => undefined);
       }
     });
@@ -2222,12 +2228,20 @@ async function handleDialogException(message, sender) {
   const { kind } = message;
   if (sender.id !== chrome.runtime.id || sender.frameId !== 0 || !Number.isInteger(sender.tab?.id) ||
       typeof sender.url !== 'string' || !['session-expired', 'oauth-popup', 'unknown-modal'].includes(kind)) return { ok: false };
-  return transact(async () => {
+  const version = intentVersion;
+  const outcome = await transact(async () => {
     const job = await getJob();
     if (!job?.enabled || job.tabId !== sender.tab.id || normalizeUrl(sender.url) !== job.url ||
         normalizeUrl(sender.tab.url ?? '') !== job.url) return { ok: false };
     if (kind === 'unknown-modal') {
+      const logs = (await chrome.storage.local.get('logs').catch(() => ({}))).logs || [];
+      const latest = logs.at(-1);
+      if (latest?.event === 'exception-detected' && Number.isFinite(latest.at) && Date.now() - latest.at < 600_000) {
+        return { ok: true, deduplicated: true };
+      }
       await recordActivityEvent('exception-detected', t('检测到未知对话框，需要手动检查。'));
+    } else if (kind === 'oauth-popup' && job.autoAuthorizeTakeover === true) {
+      return { ok: true, delegateTakeover: true };
     } else {
       await pauseLocked(job,
         kind === 'session-expired' ? t('检测到会话过期，请重新登录后再继续。') : t('检测到登录授权弹窗，请手动完成后再继续。'),
@@ -2235,6 +2249,11 @@ async function handleDialogException(message, sender) {
     }
     return { ok: true };
   });
+  if (outcome?.delegateTakeover && version === intentVersion) {
+    await handlePagePromptObserved(sender, 'takeover');
+    return { ok: true };
+  }
+  return outcome;
 }
 
 async function handlePagePromptObserved(sender, mode) {
