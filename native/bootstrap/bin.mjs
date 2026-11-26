@@ -107,7 +107,31 @@ export async function main(args) {
     }
     return observeLocalManagerOperation(args[2]);
   }
-  if (args.length === 1 && args[0] === 'help') return { ok: true, commands: ['help', 'version', 'stage', 'acquire', 'setup', 'setup-server', 'setup-manager', 'install-local', 'start-manager', 'manager-status', 'browser-install-status', 'manager-control', 'manager-browser', 'enroll-ssh', 'install-plan', 'uninstall', 'register', 'register-browser-wake', 'status', 'verify'] };
+  if (args[0] === 'ssh-preflight') {
+    const allowed = { '--timeout-ms': 'timeoutMs', '--ssh-config': 'sshConfigPath', '--host': 'targetHost', '--port': 'targetPort' };
+    if ((args.length - 1) % 2 !== 0 || args.length > 9) throw new Error('invalid_arguments');
+    const options = {};
+    for (let index = 1; index < args.length; index += 2) {
+      const key = Object.hasOwn(allowed, args[index]) ? allowed[args[index]] : undefined;
+      const value = args[index + 1];
+      if (!key || Object.hasOwn(options, key) || typeof value !== 'string' || !value || value.startsWith('--')) {
+        throw new Error('invalid_arguments');
+      }
+      options[key] = value;
+    }
+    if (options.targetPort !== undefined && options.targetHost === undefined) throw new Error('invalid_arguments');
+    if (options.timeoutMs !== undefined) {
+      if (!/^[0-9]+$/.test(options.timeoutMs)) throw new Error('invalid_arguments');
+      options.timeoutMs = Number(options.timeoutMs);
+    }
+    if (options.targetPort !== undefined) {
+      if (!/^[1-9][0-9]{0,4}$/.test(options.targetPort)) throw new Error('invalid_arguments');
+      options.targetPort = Number(options.targetPort);
+    }
+    const { runSshPreflight } = await import('./ssh-preflight.mjs');
+    return runSshPreflight(options);
+  }
+  if (args.length === 1 && args[0] === 'help') return { ok: true, commands: ['help', 'version', 'stage', 'acquire', 'setup', 'setup-server', 'setup-manager', 'install-local', 'start-manager', 'manager-status', 'browser-install-status', 'manager-control', 'manager-browser', 'enroll-ssh', 'ssh-preflight', 'install-plan', 'uninstall', 'register', 'register-browser-wake', 'status', 'verify'] };
   if (args.length === 1 && args[0] === 'version') return { ok: true, version: BOOTSTRAP_VERSION };
   if (args[0] === 'install-plan') {
     const allowed = { '--os': 'os', '--arch': 'arch', '--install-dir': 'installRoot', '--extension-id': 'extensionId',

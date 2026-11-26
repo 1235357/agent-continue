@@ -133,6 +133,15 @@ async function scenario(name, callback) {
 }
 
 try {
+  for (const change of ['route with stale history', 'new identity at the same URL']) await scenario('Dot blocks ' + change, async ({ page, args }) => {
+    await page.evaluate(change => {
+      if (change === 'route with stale history') history.replaceState(null, '', '/dots/synthetic-other');
+      else appendMessage('Synthetic different conversation', 'acct~other~Msg~new');
+    }, change);
+    const outcome = await page.evaluate(pageAction, args);
+    assert.equal(outcome.status, 'blocked');
+    assert.deepEqual(await page.evaluate(() => [fixture.inputs, fixture.sends]), [0, 0]);
+  });
   for (const [name, html, editorSelector, buttonSelector, receiptSelector] of [
     ['Dot', fixture, '[data-composer-markdown]', 'button[aria-label="Send"]', 'article.message-row.self:last-child .message-body'],
     ['ChatGPT', await fs.readFile(path.join(here, 'fixture.html'), 'utf8'), '#prompt-textarea', '[data-testid="send-button"]', '#history [data-message-author-role="user"]:last-child'],
@@ -1514,6 +1523,29 @@ try {
     const before = await snapshot();
     assert.equal((await page.evaluate(pageAction, args)).status, 'sent');
     assert.deepEqual(await snapshot(), before);
+  });
+  await scenario('Dot prefers structured tilde IDs over optimistic unhydrated trailing turn IDs', async ({ page, args }) => {
+    const before = await page.evaluate(() => fixture.sends);
+    await page.evaluate(text => {
+      fixture.acknowledgement = 'none';
+      document.querySelector('button[aria-label="Send"]').addEventListener('click', () => {
+        appendMessage(text, 'optimistic-temp-1', true);
+      }, { once: true });
+    }, prompt);
+    const outcome = await page.evaluate(pageAction, args);
+    assert.equal(outcome.status, 'sent');
+    assert.equal(outcome.identity, 'acct~dot');
+    assert.equal(outcome.diagnosticProgress.counters.documentChanges, 0);
+    assert.equal(await page.evaluate(() => fixture.sends), before + 1);
+  });
+  await scenario('Dot still blocks structured different conversation IDs alongside optimistic rows', async ({ page, args }) => {
+    await page.evaluate(() => {
+      appendMessage('Other conversation structured row', 'acct~other~Msg~99', true);
+      appendMessage('Optimistic trailing row', 'optimistic-temp-2', false);
+    });
+    const outcome = await page.evaluate(pageAction, args);
+    assert.equal(outcome.status, 'blocked');
+    assert.deepEqual(await page.evaluate(() => [fixture.inputs, fixture.sends]), [0, 0]);
   });
 } finally { await browser.close(); }
 console.log(`RESULT ${passed}/${passed + failed} Dot adapter scenarios passed`);

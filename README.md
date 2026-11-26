@@ -4,14 +4,15 @@ English | [简体中文](https://github.com/1235357/agent-continue/blob/main/REA
 
 Schedule your own prompts in one existing ChatGPT or Your dot conversation. The Windows-enabled version also offers separately installed, explicitly authorized file, shell and process tools.
 
-**3.2.1 Windows-enabled release candidate. Manifest V3. Free and MIT-licensed.**
+**3.3.0 Windows-enabled release candidate. Manifest V3. Free and MIT-licensed.**
 
 [Chrome Web Store](https://chromewebstore.google.com/detail/agent-continue-background/jgjoeiidbnpmgbbhhmphicehbcdgbhga) · [GitHub Releases](https://github.com/1235357/agent-continue/releases) · [Source](https://github.com/1235357/agent-continue) · [Changelog](https://github.com/1235357/agent-continue/blob/main/CHANGELOG.md) · [Privacy](https://github.com/1235357/agent-continue/blob/main/PRIVACY.md)
 
 ## Technical Documentation & Architecture
 
 Under the hood:
-* [Windows Device Control & Official Tunnel Architecture](https://github.com/1235357/agent-continue/blob/main/docs/WINDOWS-DIRECT-TUNNEL-SSH-ARCHITECTURE.md) — OpenAI tunnel data path, separate consent gates, Windows runtime acceptance, and deferred SSH scope.
+* [Continuous Autonomy, Recovery & Windows SSH Design (v3.3.0)](https://github.com/1235357/agent-continue/blob/main/docs/DESIGN-v3.3.0-CONTINUOUS-AUTONOMY-AND-RECOVERY.md) — Restart auto-rebind, `preDispatch` safety recovery, Dot turn-identity stabilization, opt-in routine auto-allow (`oauth-required` pause), opt-in takeover delegation (`captcha-required` pause), and `ssh-preflight`.
+* [Windows Device Control & Official Tunnel Architecture](https://github.com/1235357/agent-continue/blob/main/docs/WINDOWS-DIRECT-TUNNEL-SSH-ARCHITECTURE.md) — OpenAI tunnel data path, separate consent gates, `ssh-preflight` diagnostics, and Windows runtime acceptance.
 * [Stability, Pause-Awareness & Anti-Thrashing Design](https://github.com/1235357/agent-continue/blob/main/docs/DESIGN-v3.2.0-STABILITY-AND-PAUSE-DETECTION.md) — Architectural design for Dot paused-state recognition and bounded retry scheduler engine.
 * [Exception Dialog Engine Design](https://github.com/1235357/agent-continue/blob/main/docs/DESIGN-v3.1.0-EXCEPTION-DIALOG-ENGINE.md) — Multi-tier classification for session expiration, OAuth popups, and tool execution confirmations.
 * [Technical Architecture & Retrospective](https://github.com/1235357/agent-continue/blob/main/docs/TECHNICAL-RETROSPECTIVE-AND-ARCHITECTURE.md)
@@ -104,6 +105,8 @@ The uninstalled source candidate also offers **Prompts → Use a TXT attachment 
 ### One Submission Mechanism per Attempt
 
 Each attempt requires a current background permit and uses one submission mechanism. Automatic mode first uses an available Send button in the bound target composer; otherwise it uses Ctrl+Enter in Your dot or Enter in ordinary ChatGPT. Explicit button-only and Ctrl+Enter-only modes are also available. There is no subsequent switch to another mechanism within that attempt.
+
+Changing a Dot conversation path does not move the task to the new address. Reopen the original conversation, or pause the task and explicitly bind the new address. Query parameters, fragments, and trailing slashes do not change the bound path.
 
 **Scheduled sends initially replace unsent text and remove pending attachments in the bound conversation.** A supported editor can use its public model interface for long text; the event fallback enters long prompts in segments without intentionally adding blank lines at segment boundaries. The saved source is unchanged, but CR/CRLF are normalized to LF. During persistent delivery, nonempty readable prepared composer text may be adopted after a website change or normalization instead of repeatedly refilling it. This intentionally prioritizes continued submission over exact original-text fidelity. A synthetic private-model case still submits stale text despite an exact public DOM/model match; public checks do not guarantee a site's independent send model is current. Pending attachments are detached using website controls, not deleted from account storage or original local files. The legacy `extensionPriority` boolean normalizes to `true`. **Resume** keeps the original prompt, target, interval and counts. Manual Pause, current authorization and exact-target guards remain. See [Mandatory Composer Priority](https://github.com/1235357/agent-continue/blob/main/docs/COMPOSER-PRIORITY.md).
 

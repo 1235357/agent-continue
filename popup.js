@@ -12,7 +12,7 @@ function t(key, ...values) {
 }
 await initializeLanguage();
 
-import { DEFAULT_CONFIG, normalizeUrl, readConfig } from './config.js';
+import { DEFAULT_CONFIG, normalizeUrl, readConfig, validateTarget } from './config.js';
 import { importPromptFile, SUPPORTED_ACCEPT } from './file-import.js';
 import { buildActivityExport } from './activity-export.js';
 import { sanitizeDeliveryDiagnostics } from './delivery-diagnostics.js';
@@ -23,6 +23,7 @@ const request = message => chrome.runtime.sendMessage(message);
 const fallbackConfig = {
   ...DEFAULT_CONFIG, intervalMinutes: DEFAULT_CONFIG.intervalMinutes ?? 20,
   mode: 'repeat', queue: [], scheduleMode: 'interval', keepAwake: false,
+  autoAllow: false, autoAuthorizeTakeover: false, takeoverReply: '',
   startImmediately: false, waitForIdle: false, sendMethod: 'auto',
   quietHours: { enabled: false, start: '23:00', end: '07:00' },
 };
@@ -34,9 +35,12 @@ const normalized = value => ({ ...clone(fallbackConfig), ...clone(value || {}),
 const parameters = new URLSearchParams(location.search);
 const fullView = parameters.get('view') === 'full';
 const initialTabId = Number(parameters.get('targetTabId'));
-let selectedTabId = Number.isInteger(initialTabId) && initialTabId > 0 ? initialTabId : null;
-let explicitTargetSelection = selectedTabId !== null;
-let selectSavedTarget = fullView && selectedTabId === null;
+const initialTargetUrl = parameters.get('targetUrl');
+const pinnedInitialTarget = Number.isInteger(initialTabId) && initialTabId > 0 && validateTarget(initialTargetUrl);
+let selectedTabId = pinnedInitialTarget ? initialTabId : null;
+let selectedTabUrl = pinnedInitialTarget ? normalizeUrl(initialTargetUrl) : null;
+let explicitTargetSelection = parameters.has('targetTabId') || parameters.has('targetUrl');
+let selectSavedTarget = fullView && !explicitTargetSelection;
 let latestJob = null;
 let draftConfig = normalized();
 let persistedDraft = null;
@@ -75,7 +79,7 @@ let targetSignature = '';
 let queueSignature = '';
 let currentSourceIdentity = null;
 const configFields = ['interval', 'maxSends', 'stopMarkers', 'preventDiscard', 'mode',
-  'scheduleMode', 'startImmediately', 'waitForIdle', 'sendMethod', 'quietEnabled', 'quietStart', 'quietEnd'];
+  'scheduleMode', 'startImmediately', 'waitForIdle', 'autoAllow', 'autoAuthorizeTakeover', 'takeoverReply', 'sendMethod', 'quietEnabled', 'quietStart', 'quietEnd'];
 const editableButtons = ['importPrompt', 'importQueue', 'addToQueue', 'loadTemplate', 'deleteTemplate', 'exportPromptTxt',
   'saveTemplate', 'importConfig', 'saveQueueItem'];
 const eventLabels = () => ({
@@ -87,6 +91,7 @@ const eventLabels = () => ({
   unconfirmed: t('本轮结果未知'), 'reply-complete': t('回复已结束'), 'limit-reached': t('达到次数上限'),
   'queue-complete': t('队列已完成'), 'marker-reached': t('匹配停止标记'), 'target-closed': t('等待目标重开'),
   quiet: t('静默时段'), skipped: t('本轮跳过'), done: t('达到停止条件'), stopped: t('任务已停止'),
+  'browser-restored': t('已从重启恢复'), 'takeover-replied': t('已回复接管授权'),
   'timing-diagnostics': t('只读计时诊断'), 'auto-allowed': t('自动确认权限'),
   'exception-detected': t('检测到未知对话框，需要手动检查。'),
 });
@@ -157,6 +162,9 @@ function gatherConfig() {
     scheduleMode: $('scheduleMode').value,
     startImmediately: $('startImmediately').checked,
     waitForIdle: $('waitForIdle').checked,
+    autoAllow: $('autoAllow').checked,
+    autoAuthorizeTakeover: $('autoAuthorizeTakeover').checked,
+    takeoverReply: $('takeoverReply').value,
     sendMethod: $('sendMethod').value,
     keepAwake: $('keepAwake').checked,
     quietHours: { enabled: $('quietEnabled').checked, start: $('quietStart').value, end: $('quietEnd').value },
@@ -274,7 +282,9 @@ function renderTargets() {
   if (selectSavedTarget) {
     const savedUrl = normalizeUrl(latestJob?.url);
     const matches = savedUrl ? targets.filter(target => normalizeUrl(target.url) === savedUrl) : [];
-    selectedTabId = matches.length === 1 ? matches[0].id : null;
+    const bound = latestJob?.enabled ? matches.find(target => target.id === latestJob.tabId) : null;
+    selectedTabId = (bound || (matches.length === 1 ? matches[0] : null))?.id ?? null;
+    selectedTabUrl = selectedTabId === null ? null : savedUrl;
   }
   const signature = JSON.stringify([getLanguage(), targets.map(target => [target.id, target.title, target.url])]);
   if (signature !== targetSignature) {
@@ -289,7 +299,12 @@ function renderTargets() {
     }
   }
   const value = latestJob?.enabled && !selectSavedTarget ? latestJob.tabId : selectedTabId;
-  if (targets.some(target => target.id === value)) $('targetSelect').value = String(value);
+  const expected = latestJob?.enabled && !selectSavedTarget ? normalizeUrl(latestJob.url) : selectedTabUrl;
+  const target = targets.find(item => item.id === value);
+  if (target && (!expected || normalizeUrl(target.url) === expected)) {
+    if (value === selectedTabId && !selectedTabUrl) selectedTabUrl = normalizeUrl(target.url);
+    $('targetSelect').value = String(value);
+  }
   else $('targetSelect').value = '';
 }
 function renderTemplates() {
@@ -353,8 +368,13 @@ function renderDeliveryDiagnostics() {
     const summary = document.createElement('summary');
     const backoffs = trace.counters.preSubmitTransportBackoffs ?? 0;
     const backoffSummary = backoffs > 0 ? t`提交前传输等待：${backoffs} 次` : '';
-    summary.textContent = [`#${trace.sequence} | ${trace.state} | ${trace.stage} / ${trace.reason} | ${Math.round((trace.updatedAt - trace.startedAt) / 1000)} s`,
-      backoffSummary].filter(Boolean).join(' | ');
+    const attempts = trace.counters.dispatchAttempts;
+    const attemptSummary = attempts === undefined ? t('未记录提交尝试次数') : t`记录到的提交尝试：${attempts} 次`;
+    const longestWrite = trace.timings.maxDomWriteMs;
+    const writeSummary = longestWrite > 0 ? t`最长 DOM 写入：${Math.round(longestWrite)} 毫秒` : '';
+    const stage = [trace.stage, trace.reason].filter(Boolean).join(' / ');
+    summary.textContent = [`#${trace.sequence} | ${trace.state} | ${stage} | ${Math.round((trace.updatedAt - trace.startedAt) / 1000)} s`,
+      attemptSummary, writeSummary, backoffSummary].filter(Boolean).join(' | ');
     const data = document.createElement('pre');
     data.style.whiteSpace = 'pre-wrap'; data.style.overflowWrap = 'anywhere';
     // Only the shared fixed-field codec reaches the UI or export.
@@ -396,10 +416,10 @@ function paint(job) {
   $('protection').textContent = t('标签保护 · ') + (!enabled ? t('待启动') : ({ active: t('已启用'), off: t('关闭'), unavailable: t('不可用') }[job.discardProtection] || t('检查中')));
   $('powerStatus').textContent = t('电脑防休眠 · ') + (enabled && config.keepAwake ? (job.systemAwake === true ? t('已启用') : t('不可用')) : t('关闭'));
   for (const [id, value] of Object.entries({ interval: config.intervalMinutes, maxSends: config.maxSends,
-    stopMarkers: (config.stopMarkers || []).join('\n'), mode: config.mode, scheduleMode: config.scheduleMode, sendMethod: config.sendMethod,
+    stopMarkers: (config.stopMarkers || []).join('\n'), mode: config.mode, scheduleMode: config.scheduleMode, takeoverReply: config.takeoverReply ?? '', sendMethod: config.sendMethod,
     quietStart: config.quietHours.start, quietEnd: config.quietHours.end })) setField(id, value);
   for (const [id, value] of Object.entries({ preventDiscard: config.preventDiscard, keepAwake: config.keepAwake,
-    startImmediately: config.startImmediately, waitForIdle: config.waitForIdle, quietEnabled: config.quietHours.enabled })) $(id).checked = !!value;
+    startImmediately: config.startImmediately, waitForIdle: config.waitForIdle, autoAllow: config.autoAllow, autoAuthorizeTakeover: config.autoAuthorizeTakeover, quietEnabled: config.quietHours.enabled })) $(id).checked = !!value;
   $('start').hidden = enabled || activating; $('start').disabled = !loaded || busy;
   $('pause').hidden = !enabled && !activating; $('pause').disabled = false;
   $('resume').hidden = enabled || activating || !job; $('resume').disabled = !loaded || busy;
@@ -417,7 +437,7 @@ function paint(job) {
   $('quietEnd').disabled = !canEdit() || !config.quietHours.enabled;
   const deliveryHint = config.waitForIdle ? t('当前方式：等待 Agent 空闲再发送。') : t('当前方式：到点打断并发送。');
   const submitHint = t('提交方式：') + ({ auto: t('自动选择单次提交'), 'ctrl-enter': t('仅 Ctrl+Enter'), button: t('仅发送按钮') }[config.sendMethod] || t('自动选择单次提交')) + t('。');
-  const cadenceHint = config.scheduleMode === 'after-reply' ? t('已选择回复结束后才开始下一间隔。') : '';
+  const cadenceHint = (config.scheduleMode === 'after-reply' ? t('已选择回复结束后才开始下一间隔。') : '') + (config.autoAllow ? t('已开启常规权限自动允许。') : '') + (config.autoAuthorizeTakeover ? t('已开启 Dot 接管与登录授权自动回复。') : '');
   $('configHint').textContent = deliveryHint + submitHint + cadenceHint + (enabled
     ? t('这里显示正在运行任务的实际配置。暂停后可编辑；“继续原任务”会沿用原配置。')
     : job ? t('修改设置后点击“绑定目标并开始”建立新任务。“继续原任务”沿用原提示词、间隔和计数。')
@@ -536,7 +556,7 @@ async function downloadPromptTxt() {
     tell(t('TXT 下载请求失败；请检查浏览器下载设置。'), true);
   }
 }
-async function act(type, extras = {}) {
+async function act(type, extras = {}, { powerUnavailable = false } = {}) {
   if (pendingAction && !['PAUSE', 'CLEAR_DATA'].includes(type)) return;
   if (['PAUSE', 'CLEAR_DATA'].includes(type)) startPreparation = null;
   if (type === 'CLEAR_DATA') { contentEpoch += 1; clearTimeout(saveTimer); loaded = false; }
@@ -552,7 +572,14 @@ async function act(type, extras = {}) {
     if (sequence !== actionSequence) return;
     if (!response?.ok) throw new Error(response?.error || t('操作未完成。'));
     if (type === 'CHECK_PAGE') { lastTranslation = null; tell(response.result?.message || t('页面检查完成。'), !['ready', 'busy', 'draft', 'done'].includes(response.result?.status)); }
-    else if (type === 'START') { hidePrompt(); closeQueueEditor(); showPanel('task'); tell(t('任务已启动。你可以切换标签页，继续使用电脑。')); }
+    else if (type === 'START') {
+      hidePrompt(); closeQueueEditor(); showPanel('task');
+      const stopped = response.job?.enabled === false;
+      if (stopped) lastTranslation = null;
+      tell((stopped && response.job.statusText) || (powerUnavailable
+        ? t('任务已启动，但未获防休眠权限；系统仍可休眠。')
+        : t('任务已启动。你可以切换标签页，继续使用电脑。')));
+    }
     else if (type === 'PAUSE') tell(t('后续发送已暂停。已经提交的消息无法撤回。'));
     else if (type === 'RESUME') { hidePrompt(); closeQueueEditor(); showPanel('task'); tell(t('已按原任务配置继续，计时重新开始。')); }
     else if (type === 'CLEAR_LOGS') {
@@ -577,10 +604,28 @@ async function act(type, extras = {}) {
   finally { if (sequence === actionSequence) { pendingAction = null; await refresh(); } }
 }
 function selectedTarget() {
-  const value = Number($('targetSelect').value);
-  const id = Number.isInteger(value) && value > 0 ? value : selectedTabId;
-  if (fullView && !targets.some(target => target.id === id)) return {};
-  return Number.isInteger(id) && id > 0 ? { tabId: id } : {};
+  const id = Number($('targetSelect').value);
+  if (id > 0) {
+    const target = targets.find(item => item.id === id);
+    const expected = latestJob?.enabled && !selectSavedTarget ? normalizeUrl(latestJob.url) : selectedTabUrl;
+    if (target && validateTarget(target.url) && (!expected || normalizeUrl(target.url) === expected)) {
+      return { tabId: id, targetUrl: normalizeUrl(target.url) };
+    }
+    throw new Error(t('请选择目标标签页'));
+  }
+  if (fullView || latestJob?.enabled || explicitTargetSelection || selectedTabId !== null) throw new Error(t('请选择目标标签页'));
+  return currentTarget();
+}
+async function currentTarget() {
+  // Capture from the popup, not from the worker after saving or a permission prompt.
+  let tabs;
+  try { tabs = await chrome.tabs.query({ active: true, currentWindow: true }); } catch {}
+  const tab = tabs?.length === 1 ? tabs[0] : null;
+  if (!Number.isInteger(tab?.id) || tab.id < 0 || !validateTarget(tab.url) ||
+      (tab.pendingUrl && normalizeUrl(tab.pendingUrl) !== normalizeUrl(tab.url))) {
+    throw new Error(t('无法确认当前标签页，请从列表明确选择目标对话。'));
+  }
+  return { tabId: tab.id, targetUrl: normalizeUrl(tab.url) };
 }
 async function importFiles(files, appendQueue = false) {
   if (!canEdit() || !files?.length) return;
@@ -640,8 +685,8 @@ function downloadJson(filename, value) {
 function exportableConfig(config, includePrompt) {
   const safe = {};
   for (const key of ['intervalMinutes', 'maxSends', 'stopMarkers', 'preventDiscard', 'mode', 'scheduleMode',
-    'keepAwake', 'startImmediately', 'waitForIdle', 'sendMethod', 'quietHours']) safe[key] = clone(config[key]);
-  if (includePrompt) { safe.prompt = config.prompt; safe.queue = clone(config.queue); }
+    'keepAwake', 'startImmediately', 'waitForIdle', 'autoAllow', 'autoAuthorizeTakeover', 'sendMethod', 'quietHours']) safe[key] = clone(config[key]);
+  if (includePrompt) { safe.prompt = config.prompt; safe.queue = clone(config.queue); if (typeof config.takeoverReply === 'string' && config.takeoverReply) safe.takeoverReply = config.takeoverReply; }
   return safe;
 }
 function checkedImport(value) {
@@ -649,10 +694,11 @@ function checkedImport(value) {
   if (!source || typeof source !== 'object' || Array.isArray(source)) throw new Error(t('配置文件格式不正确。'));
   const next = clone(draftConfig);
   for (const key of ['intervalMinutes', 'maxSends', 'stopMarkers', 'preventDiscard', 'mode', 'scheduleMode',
-    'keepAwake', 'startImmediately', 'waitForIdle', 'extensionPriority', 'sendMethod', 'quietHours', 'prompt', 'queue']) {
+    'keepAwake', 'startImmediately', 'waitForIdle', 'autoAllow', 'autoAuthorizeTakeover', 'takeoverReply', 'extensionPriority', 'sendMethod', 'quietHours', 'prompt', 'queue']) {
     if (Object.hasOwn(source, key)) next[key] = source[key];
   }
   if ('prompt' in source && typeof source.prompt !== 'string') throw new Error(t('提示词必须是文本。'));
+  if ('takeoverReply' in source && typeof source.takeoverReply !== 'string') throw new Error(t('接管回复内容必须是文本。'));
   if ('prompt' in source) next.promptSource = 'file';
   return readConfig(next, { allowEmpty: true });
 }
@@ -679,7 +725,12 @@ window.addEventListener('keydown', event => {
   }
 });
 $('goPrompt').addEventListener('click', () => showPanel('prompt'));
-$('targetSelect').addEventListener('change', () => { explicitTargetSelection = true; selectSavedTarget = false; selectedTabId = Number($('targetSelect').value) || null; });
+$('targetSelect').addEventListener('change', () => {
+  const target = targets.find(item => item.id === Number($('targetSelect').value));
+  explicitTargetSelection = !!target; selectSavedTarget = false;
+  selectedTabId = target?.id ?? null;
+  selectedTabUrl = target ? normalizeUrl(target.url) : null;
+});
 $('start').addEventListener('click', async () => {
   if (!canEdit()) return;
   const preparation = {};
@@ -688,14 +739,19 @@ $('start').addEventListener('click', async () => {
   const startEpoch = contentEpoch;
   const currentStart = () => startPreparation === preparation && startEpoch === contentEpoch
     && loaded && !latestJob?.enabled && !pendingAction && !importing;
+  let reservation, startIssued = false;
   draftConfig = gatherConfig();
   try {
-    const permission = draftConfig.keepAwake ? chrome.permissions.request({ permissions: ['power'] }) : null;
-    const reservation = request({ type: 'PREPARE_START' }).then(value => ({ value }), error => ({ error }));
-    if (permission) {
-      const granted = await permission;
+    const target = Promise.resolve(selectedTarget()).then(value => ({ value }), error => ({ error }));
+    reservation = request({ type: 'PREPARE_START' }).then(value => ({ value }), error => ({ error }));
+    const selection = await target;
+    if (!currentStart()) return;
+    if (selection.error) throw selection.error;
+    let powerUnavailable = false;
+    if (draftConfig.keepAwake) {
+      const granted = await chrome.permissions.contains({ permissions: ['power'] }).catch(() => false);
       if (!currentStart()) return;
-      if (!granted) { draftConfig.keepAwake = false; $('keepAwake').checked = false; }
+      if (!granted) { powerUnavailable = true; draftConfig.keepAwake = false; $('keepAwake').checked = false; }
     }
     const outcome = await reservation;
     if (!currentStart()) return;
@@ -705,20 +761,25 @@ $('start').addEventListener('click', async () => {
     draftConfig = readConfig(draftConfig);
     await persistDraftNow();
     if (!currentStart()) return;
+    startIssued = true;
     startPreparation = null;
-    act('START', { config: clone(draftConfig), startToken: reserved.startToken, ...selectedTarget() });
+    act('START', { config: clone(draftConfig), startToken: reserved.startToken, ...selection.value }, { powerUnavailable });
   } catch (error) {
     if (startPreparation === preparation) tell(safeFailure(error, t('本机保存失败，尚未启动。')), true);
   } finally {
     if (startPreparation === preparation) { startPreparation = null; paint(latestJob); }
+    if (!startIssued && reservation) {
+      void reservation.then(({ value }) => {
+        if (value?.ok && typeof value.startToken === 'string') return request({ type: 'CANCEL_START', startToken: value.startToken });
+      }).catch(() => undefined);
+    }
   }
 });
 $('pause').addEventListener('click', () => act('PAUSE'));
 $('resume').addEventListener('click', () => act('RESUME'));
-$('check').addEventListener('click', () => {
-  const target = selectedTarget();
-  if (fullView && !target.tabId) { tell(t('请选择目标标签页'), true); return; }
-  act('CHECK_PAGE', target);
+$('check').addEventListener('click', async () => {
+  try { await act('CHECK_PAGE', await selectedTarget()); }
+  catch (error) { tell(safeFailure(error), true); }
 });
 $('sendNow').addEventListener('click', () => act('SEND_NOW'));
 for (const id of configFields) $(id).addEventListener('input', onConfigurationInput);
@@ -791,12 +852,18 @@ for (const [id, resource] of [['setupWindows', 'setup.html'], ['manageDevices', 
   });
 }
 $('expand').addEventListener('click', async () => {
+  let target;
+  try {
+    if (explicitTargetSelection) target = await selectedTarget();
+    else if (!latestJob && !fullView) target = await currentTarget().catch(() => null);
+  } catch (error) { tell(safeFailure(error), true); return; }
   try {
     await persistDraftNow();
-    let tabId = explicitTargetSelection ? selectedTarget().tabId : null;
-    if (!tabId && !latestJob && chrome.tabs?.query) tabId = (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id;
     const url = new URL(chrome.runtime.getURL('popup.html')); url.searchParams.set('view', 'full');
-    if (Number.isInteger(tabId)) url.searchParams.set('targetTabId', String(tabId));
+    if (target) {
+      url.searchParams.set('targetTabId', String(target.tabId));
+      url.searchParams.set('targetUrl', target.targetUrl);
+    }
     await openExtensionPage(url.href);
   } catch { tell(t('无法打开完整控制台。'), true); }
 });
@@ -954,12 +1021,29 @@ chrome.storage.onChanged.addListener((changes, area) => {
     renderDeliveryDiagnostics();
   }
 });
+let targetRefreshTimer;
+if (fullView) {
+  const refreshTargetList = () => {
+    clearTimeout(targetRefreshTimer);
+    targetRefreshTimer = setTimeout(() => { void refresh(); }, 150);
+  };
+  chrome.tabs.onCreated?.addListener(tab => {
+    if (validateTarget(tab.url) || validateTarget(tab.pendingUrl)) refreshTargetList();
+  });
+  chrome.tabs.onUpdated?.addListener((id, change) => {
+    if (change.url !== undefined && (validateTarget(change.url) || targets.some(target => target.id === id))) refreshTargetList();
+  });
+  chrome.tabs.onRemoved?.addListener(id => {
+    if (targets.some(target => target.id === id)) refreshTargetList();
+  });
+  chrome.tabs.onReplaced?.addListener(refreshTargetList);
+}
 window.addEventListener('pagehide', () => {
   if (loaded && !latestJob?.enabled && !importing && !pendingAction && saveTimer) {
     clearTimeout(saveTimer);
     persistDraftNow().catch(() => undefined);
   }
-  hidePrompt(); closeQueueEditor(); clearInterval(countdownTimer);
+  hidePrompt(); closeQueueEditor(); clearInterval(countdownTimer); clearTimeout(targetRefreshTimer);
   messageRecipes.clear(); lastTranslation = null;
 });
 $('language')?.addEventListener('change', event => {

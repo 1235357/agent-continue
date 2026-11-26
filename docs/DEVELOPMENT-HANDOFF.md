@@ -1,5 +1,51 @@
 # Agent Continue Development Handoff
 
+## Hosted Acceptance Transport Check (2026-11-23)
+
+In the resumed Codex chat, the fixed-marker Catalog Canary and one read of a
+fresh disposable text fixture through the Windows Acceptance connector both
+returned HTTP 429 during the MCP SSE probe (`UNAVAILABLE`). Neither returned
+its marker. Tool discovery is therefore visible here, but this run did not
+verify hosted invocation, a local file read, browser-surface authorization,
+or SSH. The error does not locate a fault in the Windows host or either VPN.
+One later fixed-marker check at 21:53 CST returned the same HTTP 429; no
+downstream read was attempted after that result.
+
+For the next approved test window, retry a single fixed-marker probe. If it
+returns the expected marker, verify a fresh disposable fixture and its host
+receipt before testing the two separate browser surfaces. Do not retry in a
+loop, reuse a former enrollment, change the tunnel or VPN to clear 429, or
+treat connector success alone as acceptance of the release candidate.
+
+The local hosted-read verifier reports whether a matching host call was
+absent, the provider returned an error, the marker was unconfirmed, or
+the read was repeated or used an unexpected tool. `not-observed` only
+describes the retained host receipt; it does not identify the transport
+failure. The gate checks raw counts as well as the result labels.
+
+## Scheduler Reopen Checkpoint (2026-11-23)
+
+The development worktree on `f0dfc7f` includes additional scheduler fixes
+that are not in the immutable private Windows acceptance kit. Verify the
+source or artifact identity before comparing results; do not apply a receipt
+for either build to the other.
+
+Run `node tests/mv3-integration-tests.mjs` for the disposable Chromium
+profile and synthetic pages. The default suite now checks three distinct
+cases: a Dot path change with old history still mounted, a completed Pause
+followed by a full browser reopen, and a full reopen from a replayed durable
+Pause checkpoint paired with an old enabled snapshot. The replay is not a
+timed process crash. The last two cases check for no scheduler alarm and no
+Send Now authorization; the replay also checks that explicit Resume works.
+Set `TEST_REAL_DUE_ALARM=1` to add the natural browser-alarm case.
+
+These checks do not establish real ChatGPT or Dot behavior, Windows tool
+access, or device Pause/Revoke. On the dedicated Windows environment, use
+separate test conversations and a restricted locally provisioned credential.
+Record scheduler delivery, device availability after browser reopen, and
+Pause and Revoke separately. Do not test on an active research conversation,
+copy credentials into a receipt, or publish a package on fixture results.
+
 ## Windows Setup Status Separation (2026-11-21)
 
 Setup keeps a matching install receipt scoped to the initiating document and
@@ -48,6 +94,12 @@ not give live ChatGPT, Dot, Pause, Revoke, or restart acceptance.
   reason from the accepted scheduler result, rather than inheriting a
   generic or transient reason. Keep prompt text and conversation IDs out
   of exports.
+- The owner-provided activity export (14), schema 5 from 3.0.22, retains
+  20 delivery traces. Six record the `dispatch` stage with zero recorded
+  dispatch attempts; the longest synchronous DOM write was 11,189 ms.
+  Three others record one attempt but an unknown result. Compare the
+  stage, attempt counter, and receipt separately. Neither an attempt nor
+  a renderer timing measures server acceptance.
 
 Next acceptance: on a dedicated Windows install, capture the actual ordinary
 ChatGPT receipt first, then Dot, followed by Pause, Revoke, and a full browser

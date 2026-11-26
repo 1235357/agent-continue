@@ -153,6 +153,7 @@ export async function pageAction(args) {
   };
 
   const isDot = new URL(args.expectedUrl).pathname.startsWith('/dots/');
+  const expectedUrl = normalizeUrl(args.expectedUrl);
 
   // Auto prefers the scoped Send button. Without one, Dot uses Ctrl+Enter
   // and ordinary ChatGPT uses Enter. No second method follows a dispatch.
@@ -199,23 +200,28 @@ export async function pageAction(args) {
   const identity = () => {
     if (!isDot) return null;
     const rows = [...document.querySelectorAll('article.message-row, [data-message-author-role], article[data-testid^="conversation-turn-"]')];
+    let fallbackIdentity = null;
+    // Prefer trailing structured '~' Dot IDs so unhydrated optimistic turn nodes
+    // appended right after Send do not mask the bound conversation identity, while
+    // genuine conversation switches ('acct~other~...') block immediately.
     for (let i = rows.length - 1; i >= 0; i--) {
       const row = rows[i];
-      const key = messageKey(row?.querySelector('.message-body') || row);
-      if (!key) continue;
-      const parts = key.split('~');
-      const id = parts.length >= 3 ? parts.slice(0, 2).join('~') : key;
-      if (args.targetIdentity && id === args.targetIdentity) return id;
-      if (!args.targetIdentity) return id;
+      const target = row?.querySelector?.('.message-body') || row;
+      const explicit = target?.getAttribute?.('data-message-id')
+        || target?.closest?.('[data-message-id]')?.getAttribute?.('data-message-id')
+        || modernMessageKey(target);
+      if (explicit) {
+        if (explicit.includes('~')) {
+          const parts = explicit.split('~');
+          return parts.length >= 3 ? parts.slice(0, 2).join('~') : explicit;
+        }
+        fallbackIdentity ??= explicit;
+        continue;
+      }
+      const fallback = target?.getAttribute?.('data-testid') || target?.id || null;
+      if (fallback) fallbackIdentity ??= fallback;
     }
-    for (let i = rows.length - 1; i >= 0; i--) {
-      const row = rows[i];
-      const key = messageKey(row?.querySelector('.message-body') || row);
-      if (!key) continue;
-      const parts = key.split('~');
-      return parts.length >= 3 ? parts.slice(0, 2).join('~') : key;
-    }
-    return null;
+    return fallbackIdentity;
   };
 
   const assistantState = () => {
@@ -225,20 +231,17 @@ export async function pageAction(args) {
 
   let beforeAssistant = null;
   const result = (status, message, diagnosticCode) => {
-    metrics.reason = ['approval-required', 'agent-paused', 'agent-busy'].includes(diagnosticCode) ? diagnosticCode : resultReason(status);
+    metrics.reason = ['approval-required', 'auto-allowed-prompt', 'oauth-required', 'captcha-required', 'takeover-needed', 'agent-paused', 'agent-busy'].includes(diagnosticCode)
+      ? diagnosticCode : resultReason(status);
     return { status, message,
-    ...(args.persistentDelivery === true && !submitted && !manualPending && ['blocked', 'draft', 'busy', 'error'].includes(status) && diagnosticCode !== 'approval-required'
+    ...(args.persistentDelivery === true && !submitted && !manualPending && ['blocked', 'draft', 'busy', 'error'].includes(status)
+      && !['approval-required', 'auto-allowed-prompt', 'oauth-required', 'captcha-required', 'takeover-needed'].includes(diagnosticCode)
       ? { retryable: true } : {}),
     ...(diagnosticCode ? { diagnosticCode } : {}), identity: identity(),
     ...(['sent', 'manual-sent'].includes(status) ? beforeAssistant : assistantState()) };
   };
   const samePage = () => {
-    const curUrl = normalizeUrl(location.href);
-    const expUrl = args.expectedUrl;
-    const isCurDot = new URL(location.href).pathname.startsWith('/dots/');
-    const isExpDot = expUrl.includes('/dots/');
-    const urlMatch = curUrl === expUrl || (isExpDot && isCurDot);
-    if (!urlMatch) { if (pageMatched) metrics.counters.documentChanges++; pageMatched = false; return false; }
+    if (normalizeUrl(location.href) !== expectedUrl) { if (pageMatched) metrics.counters.documentChanges++; pageMatched = false; return false; }
     if (args.targetIdentity) {
       const currentId = identity();
       if (!currentId || currentId !== args.targetIdentity) { if (pageMatched) metrics.counters.documentChanges++; pageMatched = false; return false; }
@@ -309,13 +312,96 @@ export async function pageAction(args) {
     };
   };
 
+  const takeoverRequestPattern = /把控制权交回|交回控制权|请.*完成(?:GitHub|OAuth|页面|登录|授权).*交回|请.*手动登录|请.*接管.*登录|完成授权并|请回复.*授权|\b(?:give|hand)\s+(?:me\s+)?control\s+back\b|\bhand\s+back\s+control\b|\btake\s+over\s+and\s+(?:sign\s+in|log\s+in|authenticate)\b|\bcomplete\s+(?:the\s+)?(?:sign[\s-]?in|log[\s-]?in|login|authentication|authorization).*(?:control|continue|proceed)\b/i;
+  const captchaOr2FAPattern = /\b(?:captcha|recaptcha|hcaptcha|turnstile|verify\s+you\s+are\s+human|one-time\s+(?:code|password)|2fa\s+code|verification\s+code|enter\s+(?:your\s+)?password)\b|人机验证|图形验证码|短信验证码|邮箱验证码|输入密码|动态口令/i;
+
+  const detectCaptchaOr2FABlock = () => {
+    if (document.querySelector('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="challenges.cloudflare.com"], .cf-turnstile, .g-recaptcha')) {
+      return true;
+    }
+    const last = [...document.querySelectorAll(assistantSelector)].at(-1);
+    const txt = last ? textOf(last) : '';
+    return Boolean(txt && captchaOr2FAPattern.test(txt));
+  };
+
+  const authTextPattern = /\b(?:sign\s*in(?:\s+with|\s+to)?|log\s*in(?:\s+with|\s+to)?|login|oauth|re-?authorize|authorize\s+(?:app|with|account)|connect\s+(?:your\s+)?account|link\s+account|session\s+expired|continue\s+with\s+(?:google|microsoft|apple|github|facebook)|password|2fa|two-factor)\b|使用\s*(?:Google|Apple|Microsoft|GitHub)\s*登录|(?:通过|使用)\s*.+\s*账号登录|会话已过期|重新登录|授权登录|同意登录|同意并登录|去登录|连接账号|关联账号|绑定账号/i;
+
+  const detectAuthOrLoginBlock = () => {
+    try {
+      const classified = globalThis.__agentContinueClassifyDialog?.();
+      if (classified && classified.safe === false) return classified.kind || 'oauth-popup';
+    } catch {}
+    const title = String(document.title || '');
+    const pathname = String(location.pathname || '');
+    const hostname = String(location.hostname || '');
+    if (/(?:accounts\.google\.com|login\.microsoftonline\.com|github\.com|appleid\.apple\.com)$/i.test(hostname)) return 'oauth-popup';
+    const hasLoginSignals = /sign\s+in|session\s+expired|log\s*in|your\s+session|登录|会话已过期|重新登录/i.test(title)
+      || /^\/(?:auth\/|login|signin)/i.test(pathname);
+    const loginForm = document.querySelector('[data-testid="login-button"], form[action*="login"]');
+    if ((hasLoginSignals && loginForm) || (loginForm && !findComposer())) return 'session-expired';
+    const dialogs = [...document.querySelectorAll('[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]')];
+    for (const dlg of dialogs) {
+      if (!visible(dlg)) continue;
+      if (dlg.querySelector('a[href*="accounts.google.com"], a[href*="login.microsoftonline.com"], a[href*="github.com/login/oauth"], a[href*="appleid.apple.com"], button[data-href*="accounts.google.com"], button[data-href*="login.microsoftonline.com"]')) {
+        return 'oauth-popup';
+      }
+      if (authTextPattern.test(dlg.textContent || '')) return 'oauth-popup';
+    }
+    return null;
+  };
+
+  const clickTargetDom = el => {
+    if (!el || !el.isConnected) return;
+    try { el.focus?.({ preventScroll: true }); } catch {}
+    const mouseInit = { bubbles: true, composed: true, cancelable: true, view: window, button: 0, buttons: 1 };
+    const pointerInit = { ...mouseInit, pointerId: 1, pointerType: 'mouse', isPrimary: true };
+    try { el.dispatchEvent(new PointerEvent('pointerover', pointerInit)); } catch {}
+    try { el.dispatchEvent(new MouseEvent('mouseover', mouseInit)); } catch {}
+    try { el.dispatchEvent(new PointerEvent('pointerdown', pointerInit)); } catch {}
+    try { el.dispatchEvent(new MouseEvent('mousedown', mouseInit)); } catch {}
+    try { el.dispatchEvent(new PointerEvent('pointerup', { ...pointerInit, buttons: 0 })); } catch {}
+    try { el.dispatchEvent(new MouseEvent('mouseup', { ...mouseInit, buttons: 0 })); } catch {}
+    try { el.click(); } catch {}
+  };
+
+  const tryReturnBrowserControl = () => {
+    if (args.autoAuthorizeTakeover !== true) return null;
+    if (detectCaptchaOr2FABlock()) {
+      metrics.observations.busy = true;
+      return result('blocked', '检测到需要人工完成人机验证或密码/验证码，已暂停等待处理。', 'captcha-required');
+    }
+    const controlButtons = [...document.querySelectorAll('button, [role="button"]')]
+      .filter(el => visible(el) && !el.disabled && el.getAttribute('aria-disabled') !== 'true'
+        && /^(?:give\s+control\s+back|hand\s+(?:control\s+)?back|return\s+control|交回控制权|归还控制权)$/i.test((el.textContent || '').trim()));
+    if (controlButtons.length !== 1) return null;
+    const btn = controlButtons[0];
+    const nowMs = Date.now();
+    const cardMap = (globalThis.__agentContinueAllowedCards ??= new WeakMap());
+    const lastClickedAt = Math.max(cardMap.get(btn) || 0, Number(btn.getAttribute('data-agent-continue-allowed') || 0));
+    if (lastClickedAt > 0 && nowMs - lastClickedAt < 4000) {
+      metrics.observations.busy = true;
+      return result('busy', '已自动归还控制权并继续等待 Dot 推进。', 'auto-allowed-prompt');
+    }
+    cardMap.set(btn, nowMs);
+    try { btn.setAttribute('data-agent-continue-allowed', String(nowMs)); } catch {}
+    clickTargetDom(btn);
+    metrics.observations.busy = true;
+    return result('busy', '已自动归还控制权并继续等待 Dot 推进。', 'auto-allowed-prompt');
+  };
+
   const pausedResult = () => result('busy', 'Agent 处于暂停状态，等待继续或完成后发送。', 'agent-paused');
   if (isDotPaused()) {
+    const handover = tryReturnBrowserControl();
+    if (handover) return handover;
     metrics.observations.busy = true;
     return pausedResult();
   }
   const initial = findComposer();
   if (!initial) {
+    if (args.autoAllow === true && detectAuthOrLoginBlock()) {
+      metrics.observations.busy = true;
+      return result('blocked', '检测到需要手动登录或 OAuth 授权的弹窗，已暂停等待处理。', 'oauth-required');
+    }
     if (visibleMatches(busySelector).length > 0 || visibleMatches(pauseSelector).length > 0) {
       metrics.observations.busy = true;
       return result('busy', 'Agent 仍在运行，稍后再次检查。', 'agent-busy');
@@ -330,6 +416,10 @@ export async function pageAction(args) {
     metrics.observations.composerPresent = !!current;
     return current?.editor === editor && current.composer === composer;
   };
+  if (args.autoAllow === true && detectAuthOrLoginBlock()) {
+    metrics.observations.busy = true;
+    return result('blocked', '检测到需要手动登录或 OAuth 授权的弹窗，已暂停等待处理。', 'oauth-required');
+  }
   if (isDot && !identity()) return result('blocked', '等待 dot 会话历史加载，暂时无法核对目标身份。');
 
   // Guard drafts containing attachments/chips as well as plain text.
@@ -471,7 +561,7 @@ export async function pageAction(args) {
     return null;
   };
 
-  const findApprovalPrompt = () => {
+  const findApprovalPrompt = (returnDetails = false) => {
     const selector = 'button, [role="button"], [role="option"], [role="radio"], [role="menuitem"], label, li, a, div, span';
     const excludedSelector = '[data-message-author-role="user"], article.message-row.self, article.self, pre, code, nav, header, aside, footer, [role="navigation"], [role="banner"], [data-testid*="sidebar"]';
     const rawMatched = [];
@@ -500,7 +590,7 @@ export async function pageAction(args) {
     const dialogs = [...document.querySelectorAll('[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]')];
     const recentAssistantTurns = [...document.querySelectorAll('article.message-row:not(.self), [data-message-author-role="assistant"], [data-chatgpt-search-unit-key$=":assistant"]')].slice(-2);
     for (const root of [...dialogs, ...recentAssistantTurns]) scanRoot(root);
-    if (!rawMatched.length) return null;
+    if (!rawMatched.length) return returnDetails ? null : false;
 
     // Collapse nested parent-child chains that represent a single option pill/button.
     const leafItems = rawMatched.filter(item =>
@@ -545,7 +635,7 @@ export async function pageAction(args) {
 
     const allowOptions = options.filter(o => o.info.priority > 0);
     const denyOptions = options.filter(o => o.info.kind === 'deny');
-    if (!allowOptions.length) return null;
+    if (!allowOptions.length) return returnDetails ? null : false;
 
     const approvalPromptPattern = /allow\s+chatgpt\s+to\b|wants\s+to\s+(?:use|call|run|access|search|read|write|execute|connect|open|view|edit|send|create|update|delete)\b|permission\s+to\s+(?:use|run|access|connect|read|write)|authorize\s+.+\s+to\b|requires?\s+(?:authorization|authentication|permission|sign[\s-]?in|log[\s-]?in)|(?:connect|link|sign\s+in\s+to|log\s+in\s+to|authorize)\s+(?:your\s+)?[a-z0-9_.\s-]{1,40}\s*(?:account|workspace|integration|connector|app)?|to\s+continue,?\s+(?:please\s+)?(?:sign\s+in|log\s+in|connect|authorize|allow|confirm)|confirm\s+(?:this\s+)?(?:action|request|tool|operation)|是否允许\s*chatgpt|允许\s*chatgpt\s*(?:使用|访问|调用|搜索|读取|执行|连接|查看|修改)|(?:需要|请求|请先?)\s*(?:授权|登录|连接|确认权限|允许访问)|(?:连接|关联|绑定|登录|授权)\s*(?:你的|您的)?\s*[^\s，。！？]{1,30}\s*(?:账号|账户|工作区|应用|服务)?/i;
     const assistantOrDialogSelector = 'article.message-row:not(.self), [data-message-author-role="assistant"], [data-chatgpt-search-unit-key$=":assistant"], [role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]';
@@ -626,9 +716,12 @@ export async function pageAction(args) {
       );
 
       if (groupAll.some(isOptionDisabledOrBusy) || hasAsymmetricSvgCheckmark) continue;
-      if (groupContainer.closest?.(assistantOrDialogSelector)) return true;
+      if (groupContainer.closest?.(assistantOrDialogSelector)) {
+        if (!returnDetails) return true;
+        return { groupAllows, groupDenies, groupContainer };
+      }
     }
-    return false;
+    return returnDetails ? null : false;
   };
 
   const approvalWait = () => {
@@ -637,8 +730,82 @@ export async function pageAction(args) {
     return result('busy', '目标页面请求权限确认；请在页面中决定。', 'approval-required');
   };
 
-  const initialApprovalOutcome = approvalWait();
+  const checkTakeoverConversationPrompt = () => {
+    if (args.autoAuthorizeTakeover !== true || (args.mode !== 'send' && args.detectTakeover !== true) || args.isTakeoverReply === true) return null;
+    if (detectCaptchaOr2FABlock()) {
+      metrics.observations.busy = true;
+      return result('blocked', '检测到需要人工完成人机验证或密码/验证码，已暂停等待处理。', 'captcha-required');
+    }
+    if (busy()) return null;
+    const last = [...document.querySelectorAll(assistantSelector)].at(-1);
+    if (!last) return null;
+    const bodyText = textOf(last);
+    if (!bodyText || !takeoverRequestPattern.test(bodyText)) return null;
+    const assistantToken = messageKey(last) || clean(bodyText).slice(-120);
+    if (!assistantToken || assistantToken === args.lastTakeoverToken) return null;
+    metrics.observations.busy = true;
+    return {
+      ...result('busy', '检测到 Dot 请求接管或登录授权确认，准备自动发送授权回复。', 'takeover-needed'),
+      takeoverAssistantToken: assistantToken,
+    };
+  };
+
+  const checkAndHandleApprovalPrompt = () => {
+    if (args.autoAllow !== true) {
+      const handover = tryReturnBrowserControl();
+      if (handover) return handover;
+      return approvalWait();
+    }
+    if (detectAuthOrLoginBlock()) {
+      metrics.observations.busy = true;
+      return result('blocked', '检测到需要手动登录或 OAuth 授权的弹窗，已暂停等待处理。', 'oauth-required');
+    }
+    const found = findApprovalPrompt(true);
+    if (!found) return tryReturnBrowserControl();
+    const { groupAllows, groupDenies, groupContainer } = found;
+    const target = groupAllows[0];
+    const containerText = extractOptionText(groupContainer);
+    const targetCore = target?.info?.core || '';
+    const isAuthOption = /^(?:authorize|re-?authorize|sign\s+in|log\s*in|login|connect\s+account|link\s+account|connect|reconnect|授权登录|同意登录|同意并登录|去登录|重新登录|连接账号|关联账号|绑定账号)\b/i.test(targetCore);
+    if (isAuthOption || authTextPattern.test(containerText)) {
+      metrics.observations.busy = true;
+      return result('blocked', '检测到需要手动登录或 OAuth 授权的弹窗，已暂停等待处理。', 'oauth-required');
+    }
+    const isRoutineKind = ['always-allow', 'allow-once'].includes(target.info.kind)
+      || (target.info.kind === 'allow' && (target.info.highConfidence || groupDenies.length > 0));
+    if (!isRoutineKind) {
+      metrics.observations.busy = true;
+      return result('busy', '目标页面请求权限确认；请在页面中决定。', 'approval-required');
+    }
+    const nowMs = Date.now();
+    const cardMap = (globalThis.__agentContinueAllowedCards ??= new WeakMap());
+    const lastClickedAt = Math.max(
+      cardMap.get(groupContainer) || 0,
+      Number(groupContainer.getAttribute('data-agent-continue-allowed') || 0),
+      Number(target.pillEl.getAttribute('data-agent-continue-allowed') || 0),
+    );
+    if (lastClickedAt > 0 && nowMs - lastClickedAt < 4000) {
+      metrics.observations.busy = true;
+      return result('busy', '已自动确认常规工具权限，继续等待运行。', 'auto-allowed-prompt');
+    }
+    cardMap.set(groupContainer, nowMs);
+    const nowStr = String(nowMs);
+    try {
+      groupContainer.setAttribute('data-agent-continue-allowed', nowStr);
+      target.pillEl.setAttribute('data-agent-continue-allowed', nowStr);
+    } catch {}
+    clickTargetDom(target.pillEl);
+    if (target.leafEl && target.leafEl !== target.pillEl && target.pillEl.tagName !== 'BUTTON') {
+      try { target.leafEl.click(); } catch {}
+    }
+    metrics.observations.busy = true;
+    return result('busy', '已自动确认常规工具权限，继续等待运行。', 'auto-allowed-prompt');
+  };
+
+  const initialApprovalOutcome = checkAndHandleApprovalPrompt();
   if (initialApprovalOutcome) return initialApprovalOutcome;
+  const initialTakeoverOutcome = checkTakeoverConversationPrompt();
+  if (initialTakeoverOutcome) return initialTakeoverOutcome;
 
   if (busy()) return isDotPaused() ? pausedResult() : result('busy', 'Agent 仍在运行，稍后再次检查。', 'agent-busy');
   if (!editable() && !(forceInterrupt && visibleMatches(stopSelector, composer).length === 1)) {
@@ -1400,7 +1567,7 @@ export async function pageAction(args) {
 
   try {
     if (!samePage() || !keepComposer()) return result('blocked', '页面已变化。');
-    const beforeInterruptApproval = approvalWait();
+    const beforeInterruptApproval = checkAndHandleApprovalPrompt();
     if (beforeInterruptApproval) return beforeInterruptApproval;
     if (busy()) return isDotPaused() ? pausedResult() : result('busy', 'Agent 仍在运行。', 'agent-busy');
     if (hasAttachment() && args.persistentDelivery === true && !await detachAttachments())
@@ -1413,7 +1580,7 @@ export async function pageAction(args) {
     if (!samePage() || !withinDeadline() || !keepComposer() || !editable()) return result('blocked', '输入框当前不可用，稍后重试。');
     if (hasAttachment()) return protectedDraft('输入框有附件，本次不提交。');
 
-    const preCommitApprovalOutcome = approvalWait();
+    const preCommitApprovalOutcome = checkAndHandleApprovalPrompt();
     if (preCommitApprovalOutcome) return preCommitApprovalOutcome;
 
     if (args.modelCommit === true) {
@@ -1856,7 +2023,8 @@ export async function pageAction(args) {
   };
   try {
     const actionResult = await action();
-    metrics.reason = resultReason(actionResult.status);
+    metrics.reason = ['approval-required', 'auto-allowed-prompt', 'oauth-required', 'captcha-required', 'takeover-needed', 'agent-paused', 'agent-busy'].includes(actionResult.diagnosticCode)
+      ? actionResult.diagnosticCode : resultReason(actionResult.status);
     const value = { ...actionResult, diagnosticProgress: diagnosticProgress() };
     if (invocation) {
       invocation.result = value;

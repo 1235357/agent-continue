@@ -437,21 +437,23 @@ test('ordinary URL comparison ignores query, hash, and trailing slashes', () => 
   noDispatch(other);
 });
 
-test('same-origin Dot route rewrites require the captured identity, even when targetIdentity is omitted', () => {
+test('Dot commits keep the exact conversation path and current identity', () => {
   for (const targetIdentity of ['account~dot', undefined]) {
     const h = fixture({ dot: true, onEvent(type, state) {
-      if (type === 'input') state.location.href = 'https://fixture.invalid/dots/rewritten/?q=1#active';
+      if (type === 'input') state.location.href = 'https://fixture.invalid/dots/conversation/?q=1#active';
     } });
     assert.equal(h.run({ targetIdentity }).dispatched, true);
     assert.deepEqual(h.state.metrics.sent, [h.args.prompt]);
     const mismatch = fixture({ dot: true, onEvent(type, state) {
-      if (type === 'input') {
-        state.location.href = 'https://fixture.invalid/dots/rewritten';
-        state.setIdentity('account~other~message');
-      }
+      if (type === 'input') state.setIdentity('account~other~message');
     } });
     assert.equal(mismatch.run({ targetIdentity }).dispatched, false);
     noDispatch(mismatch);
+    const redirected = fixture({ dot: true, onEvent(type, state) {
+      if (type === 'input') state.location.href = 'https://fixture.invalid/dots/rewritten';
+    } });
+    assert.equal(redirected.run({ targetIdentity }).dispatched, false);
+    noDispatch(redirected);
   }
 });
 

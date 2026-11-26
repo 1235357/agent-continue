@@ -38,22 +38,34 @@ export function editorCommit(args) {
     if (!['https:', 'http:'].includes(expected.protocol)) return result('invalid-url');
     const isDot = expected.pathname.startsWith('/dots/');
     const normalizeUrl = url => url.origin + url.pathname.replace(/\/+$/, '');
+    const sameLocation = () => normalizeUrl(new URL(location.href)) === normalizeUrl(expected);
     const identity = () => {
-      const row = [...document.querySelectorAll('article.message-row, [data-message-author-role], article[data-testid^="conversation-turn-"]')].at(-1);
-      const node = row?.querySelector?.('.message-body') || row;
-      const key = node?.getAttribute('data-message-id') || node?.closest?.('[data-message-id]')?.getAttribute('data-message-id')
-        || node?.getAttribute('data-testid') || node?.id;
-      if (!key) return null;
-      const parts = key.split('~');
-      return parts.length >= 3 ? parts.slice(0, 2).join('~') : key;
+      const rows = [...document.querySelectorAll('article.message-row, [data-message-author-role], article[data-testid^="conversation-turn-"]')];
+      let fallbackIdentity = null;
+      for (let i = rows.length - 1; i >= 0; i--) {
+        const row = rows[i];
+        const node = row?.querySelector?.('.message-body') || row;
+        const explicit = node?.getAttribute?.('data-message-id')
+          || row?.getAttribute?.('data-message-id')
+          || node?.closest?.('[data-message-id]')?.getAttribute?.('data-message-id')
+          || node?.getAttribute?.('data-chatgpt-search-message-ids')?.trim?.()?.split?.(/\s+/)?.[0];
+        if (explicit) {
+          if (explicit.includes('~')) {
+            const parts = explicit.split('~');
+            return parts.length >= 3 ? parts.slice(0, 2).join('~') : explicit;
+          }
+          fallbackIdentity ??= explicit;
+          continue;
+        }
+        const fallback = node?.getAttribute?.('data-testid') || node?.id || null;
+        if (fallback) fallbackIdentity ??= fallback;
+      }
+      return fallbackIdentity;
     };
     const boundIdentity = isDot ? (args.targetIdentity ?? identity()) : null;
     const pageGuard = () => {
       if (Date.now() >= args.deadline) return 'expired';
-      const current = new URL(location.href);
-      if (current.origin !== expected.origin) return 'page-mismatch';
-      const sameDotSurface = isDot && current.pathname.startsWith('/dots/');
-      if (normalizeUrl(current) !== normalizeUrl(expected) && !sameDotSurface) return 'page-mismatch';
+      if (!sameLocation()) return 'page-mismatch';
       if ((isDot && (!boundIdentity || identity() !== boundIdentity))
           || (!isDot && args.targetIdentity != null)) return 'target-mismatch';
       return null;
@@ -185,10 +197,7 @@ export function editorCommit(args) {
         const currentComposer = currentBinding?.composer;
         const currentView = currentEditor?.editor?.view;
         if (!currentView || currentView.dom !== currentEditor || currentView.isDestroyed) return;
-        const current = new URL(location.href);
-        if (current.origin !== expected.origin || (normalizeUrl(current) !== normalizeUrl(expected)
-          && !(isDot && current.pathname.startsWith('/dots/')))
-          || (isDot && identity() !== boundIdentity)) return;
+        if (!sameLocation() || (isDot && identity() !== boundIdentity)) return;
         const target = event.target instanceof Element ? event.target : event.target?.parentElement;
         const button = target?.closest(sendSelector);
         const click = event.type === 'click' && button && currentComposer.contains(button) && enabledSend(button);

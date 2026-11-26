@@ -6,6 +6,9 @@ const t = createTranslator(runtimeCatalog);
 // Stored records from 0.2.0 did not distinguish the old waiting default from a
 // deliberate choice. Versioned records preserve choices made after the change.
 export const DELIVERY_BEHAVIOR_VERSION = 1;
+export const DEFAULT_TAKEOVER_REPLY_ZH = '我正式授权你全权处理当前授权与登录确认流程并继续推进。如果你已持有控制权或已处于登录状态，请直接继续后续步骤；仅当必须由我本人输入账号密码、验证码或人机验证 CAPTCHA 时，才明确停下并给出当前具体步骤。';
+export const DEFAULT_TAKEOVER_REPLY_EN = 'You have my explicit authorization to handle this login/authorization confirmation and continue autonomously. If you already hold control or an active session, proceed directly with the next steps. Stop and report the exact step only if human credentials, a 2FA code, or a CAPTCHA check is strictly required.';
+
 export const DEFAULT_CONFIG = Object.freeze({
   deliveryBehaviorVersion: DELIVERY_BEHAVIOR_VERSION,
   intervalMinutes: 20,
@@ -16,6 +19,9 @@ export const DEFAULT_CONFIG = Object.freeze({
   preventDiscard: true,
   keepAwake: false,
   waitForIdle: false,
+  autoAllow: false,
+  autoAuthorizeTakeover: false,
+  takeoverReply: '',
   extensionPriority: true,
   sendMethod: 'auto',
   startImmediately: false,
@@ -47,6 +53,10 @@ export function readConfig(value = {}, { allowEmpty = false } = {}) {
   // Validate whitespace without changing the user's original prompt.
   const prompt = value.prompt === undefined ? DEFAULT_CONFIG.prompt : value.prompt;
   if (typeof prompt !== 'string') throw new Error(t('提示词必须是文本。'));
+  const takeoverReply = value.takeoverReply === undefined ? DEFAULT_CONFIG.takeoverReply : value.takeoverReply;
+  if (typeof takeoverReply !== 'string' || takeoverReply.length > 4000 || takeoverReply.includes('\u0000') || !takeoverReply.isWellFormed()) {
+    throw new Error(t('接管授权回复须为不超过 4000 字符的有效文本。'));
+  }
   const markerInput = value.stopMarkers ?? DEFAULT_CONFIG.stopMarkers;
   if (!Array.isArray(markerInput) || markerInput.length > 20 || markerInput.some(marker => typeof marker !== 'string' || marker.length > 100 || /[\r\n]/.test(marker))) {
     throw new Error(t('停止标记最多 20 条，每条最多 100 个字符，且不能包含换行。'));
@@ -72,7 +82,7 @@ export function readConfig(value = {}, { allowEmpty = false } = {}) {
   }
   if (!allowEmpty && ((mode === 'repeat' && !prompt.trim()) || (mode !== 'repeat' && !queue.length))) throw new Error(mode === 'repeat' ? t('请先输入或导入提示词。') : t('请先向队列添加提示词。'));
   const booleans = {};
-  for (const key of ['preventDiscard', 'keepAwake', 'waitForIdle', 'startImmediately', 'extensionPriority']) {
+  for (const key of ['preventDiscard', 'keepAwake', 'waitForIdle', 'autoAllow', 'autoAuthorizeTakeover', 'startImmediately', 'extensionPriority']) {
     const item = value[key] ?? DEFAULT_CONFIG[key];
     if (typeof item !== 'boolean') throw new Error(t('开关设置必须为布尔值。'));
     // Keep validating the legacy key, but it can no longer disable delivery.
@@ -82,7 +92,13 @@ export function readConfig(value = {}, { allowEmpty = false } = {}) {
   if (!quiet || typeof quiet.enabled !== 'boolean' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(quiet.start) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(quiet.end)) throw new Error(t('静默时段须为有效的本地时间。'));
   if (quiet.enabled && quiet.start === quiet.end) throw new Error(t('静默时段的开始与结束不能相同。'));
   const promptSource = ['manual', 'file', 'private-file', 'template'].includes(value.promptSource) ? value.promptSource : 'manual';
-  return { deliveryBehaviorVersion: DELIVERY_BEHAVIOR_VERSION, intervalMinutes, prompt, promptSource, maxSends, stopMarkers, ...booleans, sendMethod, mode, scheduleMode, queue, quietHours: { enabled: quiet.enabled, start: quiet.start, end: quiet.end } };
+  return { deliveryBehaviorVersion: DELIVERY_BEHAVIOR_VERSION, intervalMinutes, prompt, promptSource, takeoverReply, maxSends, stopMarkers, ...booleans, sendMethod, mode, scheduleMode, queue, quietHours: { enabled: quiet.enabled, start: quiet.start, end: quiet.end } };
+}
+
+export function resolvedTakeoverPrompt(config, lang = 'zh_CN') {
+  const custom = typeof config?.takeoverReply === 'string' ? config.takeoverReply.trim() : '';
+  if (custom) return config.takeoverReply;
+  return lang === 'en' ? DEFAULT_TAKEOVER_REPLY_EN : DEFAULT_TAKEOVER_REPLY_ZH;
 }
 
 export function currentPrompt(job) {

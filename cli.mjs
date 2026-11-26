@@ -79,6 +79,7 @@ const USAGE = [
   'agent-continue manager-control --install-dir <path> --action status [--id <request UUID>]',
   'agent-continue manager-control --install-dir <path> --action disconnect-and-pause|reconnect --consent accept-control',
   'agent-continue manager-browser --install-dir <path> --consent accept-control (temporary Windows browser controls)',
+  'agent-continue ssh-preflight [--timeout-ms <200-10000>] [--host <hostname> --port <port>] (read-only Windows SSH & EasyConnect preflight)',
 ].join('\n');
 
 export function parseWindowsSetupArguments(argv) {
@@ -165,7 +166,7 @@ export async function run(argv) {
         '--runtime-key-file', path.resolve(parsed.get('--runtime-key-file'))] : []),
       ...(parsed.has('--tunnel-archive') ? ['--tunnel-archive', path.resolve(parsed.get('--tunnel-archive'))] : [])]);
   }
-  if (['status', 'verify', 'install-plan', 'uninstall', 'version', 'setup-manager', 'start-manager', 'manager-status', 'browser-install-status', 'manager-control', 'manager-browser', 'register', 'enroll-ssh'].includes(first)) return main([first, ...rest]);
+  if (['status', 'verify', 'install-plan', 'uninstall', 'version', 'setup-manager', 'start-manager', 'manager-status', 'browser-install-status', 'manager-control', 'manager-browser', 'register', 'enroll-ssh', 'ssh-preflight'].includes(first)) return main([first, ...rest]);
   throw new Error('invalid_arguments');
 }
 

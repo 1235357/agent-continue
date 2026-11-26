@@ -98,7 +98,8 @@ function fixture(options) {
       stats.events.push(type);if(type==='input')stats.inputs++;
       if(options.rewrite==='sync')reset();
       if(options.rewrite==='microtask'&&type==='input')queueMicrotask(reset);
-      if(options.rewriteUrl&&type==='input')history.replaceState(null,'','/dots/rewritten/?view=1#composer');
+      if(options.rewriteUrl&&type==='input')history.replaceState(null,'',options.rewriteUrl==='conversation'
+        ? '/dots/other-conversation' : '?view=2#composer');
       if(options.replaceSend&&type==='input'&&button){
         const fresh=button.cloneNode(true);fresh.disabled=false;button.replaceWith(fresh);button=fresh;wireButton();
       }
@@ -236,14 +237,23 @@ try {
       assert.equal(observed.dom, 'PAGE_CONTROLLED_RESET');
       assert.deepEqual(observed.events.slice(-4), ['input', 'change', 'submit', 'reset']);
     });
-  await scenario('prior hidden real editor is untouched while same-identity Dot URL rewrites still submit once',
+  await scenario('prior hidden real editor is untouched when Dot only changes URL parameters',
     { dot: true, priorHiddenEditor: true, rewrite: 'microtask', rewriteUrl: true }, async (page, args) => {
       assert.equal((await commit(page, args)).dispatched, true);
       const observed = await inspect(page);
       submittedOnce(observed);
       assert.equal(observed.prior, 'HIDDEN_PRIOR_UNTOUCHED');
       assert.equal(observed.hiddenUpdates, 0);
-      assert.match(page.url(), /\/dots\/rewritten\//);
+      assert.equal(new URL(page.url()).searchParams.get('view'), '2');
+    });
+  await scenario('Dot never submits to a different path even when the original history is still mounted',
+    { dot: true, rewriteUrl: 'conversation' }, async (page, args) => {
+      const result = await commit(page, args);
+      assert.equal(result.dispatched, false);
+      const observed = await inspect(page);
+      assert.equal(observed.submits, 0);
+      assert.equal(observed.clicks, 0);
+      assert.match(page.url(), /\/dots\/other-conversation$/);
     });
   for (const dot of [false, true]) await scenario(`${dot ? 'Dot Ctrl+Enter' : 'ordinary Enter'} auto fallback uses one official keymap command without scoped Send`,
     { dot, noSend: true, rewrite: 'microtask' }, async (page, args) => {

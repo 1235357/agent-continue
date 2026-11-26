@@ -532,6 +532,7 @@ try {
   await closeBrowser(); context = null;
   session = await launch(); context = session.context; worker = session.worker; control = session.control;
   assert.equal(session.id, id);
+  let activeBeforePause;
   try {
     const restored = await state(control);
     assert.equal(restored.job.id, oldJobId); assert.equal(restored.job.enabled, true);
@@ -562,34 +563,85 @@ try {
       'The reopened target must be unique');
     assert.equal(await restoredDot.evaluate(() => [...document.querySelectorAll('article.message-row')].at(-1)?.dataset.messageId?.split('~').slice(0, 2).join('~')), restored.job.targetIdentity,
       'The reopened synthetic conversation must match the saved identity');
+    await control.waitForFunction(async expectedId => (await chrome.storage.session.get('job')).job?.tabId === expectedId,
+      restoredTab.id, { polling: 50, timeout: 5000 });
+    const browserRestoredEvents = await worker.evaluate(async () => ((await chrome.storage.local.get('logs')).logs || []).filter(e => e.event === 'browser-restored').length);
+    assert.equal(browserRestoredEvents, 1, 'browser-restored must be logged once per browser restart');
     const resumedSend = await call(control, { type: 'SEND_NOW' });
     assert.equal(resumedSend.ok, true); assert.equal(resumedSend.job.sentCount, 1, resumedSend.job.statusText);
     assert.equal(resumedSend.job.tabId, restoredTab.id);
     assert.equal(renderedText(await restoredDot.evaluate(() => fixture.sentTexts[0])), renderedText(sentinel));
     assert.equal(await wrong.evaluate(() => fixture.sendClicks), 0);
     assert.ok(resumedSend.job.tabId !== oldTabId || restored.job.tabId === null);
-    await call(control, { type: 'PAUSE' });
     pass('Real browser restart: persisted enabled job ignores stale tab ID, waits for its exact page and resumes without sending to another conversation.');
+
+    // A client-side route change keeps old history and the composer mounted.
+    await restoredDot.evaluate(() => history.replaceState(null, '', '/dots/mv3-unrelated'));
+    await control.waitForFunction(async () => (await chrome.storage.session.get('job')).job?.tabId === null);
+    const changed = await call(control, { type: 'SEND_NOW' });
+    assert.equal(changed.ok, true);
+    assert.equal(changed.job.url, restored.job.url);
+    assert.equal(changed.job.tabId, null);
+    assert.equal(changed.job.lastResult, 'busy');
+    assert.equal(changed.job.sentCount, 1);
+    assert.equal(await restoredDot.evaluate(() => fixture.submits), 1);
+    assert.equal(await wrong.evaluate(() => fixture.submits), 0);
+
+    await restoredDot.evaluate(() => history.replaceState(null, '', '/dots/home/?view=2#composer'));
+    await control.waitForFunction(async url => (await chrome.tabs.query({ url: 'https://chatgpt.com/*' })).some(tab => tab.url === url),
+      restoredDot.url());
+    const backOnTarget = await call(control, { type: 'SEND_NOW' });
+    assert.equal(backOnTarget.ok, true);
+    assert.equal(backOnTarget.job.url, restored.job.url);
+    assert.equal(backOnTarget.job.sentCount, 2);
+    assert.equal(await restoredDot.evaluate(() => fixture.submits), 2);
+    activeBeforePause = backOnTarget.job;
+    assert.equal((await call(control, { type: 'PAUSE' })).ok, true);
+    pass('A live Dot route change with stale history does not inherit the task; the original normalized address can rebind.');
   } catch (error) {
     try { console.error('Synthetic restart diagnostics: ' + JSON.stringify(await recoveryDiagnostics(worker, control))); }
     catch { console.error('Synthetic restart diagnostics were unavailable.'); }
     throw error;
   }
-  if (testRealDueAlarm) {
-    const paused = (await state(control)).job;
-    assert.equal(paused.enabled, false);
-    await closeBrowser(); context = null;
-    session = await launch(); context = session.context; worker = session.worker; control = session.control;
-    const afterReopen = (await state(control)).job;
-    assert.equal(afterReopen.id, paused.id);
-    assert.equal(afterReopen.enabled, false);
-    assert.equal(afterReopen.nextAt, null);
-    assert.equal(afterReopen.sentCount, paused.sentCount);
-    assert.equal(afterReopen.prompt, paused.prompt);
-    assert.equal((await worker.evaluate(() => chrome.alarms.getAll())).length, 0);
-    assert.equal((await call(control, { type: 'SEND_NOW' })).ok, false);
-    pass('A full browser reopen preserves the manual scheduler pause, count and prompt without arming an alarm.');
-  }
+  const pausedBeforeReopen = (await state(control)).job;
+  assert.equal(pausedBeforeReopen.enabled, false);
+  await closeBrowser(); context = null;
+  session = await launch(); context = session.context; worker = session.worker; control = session.control;
+  const afterReopen = (await state(control)).job;
+  assert.equal(afterReopen.id, pausedBeforeReopen.id);
+  assert.equal(afterReopen.enabled, false);
+  assert.equal(afterReopen.nextAt, null);
+  assert.equal(afterReopen.sentCount, pausedBeforeReopen.sentCount);
+  assert.equal(afterReopen.prompt, pausedBeforeReopen.prompt);
+  assert.equal((await worker.evaluate(() => chrome.alarms.getAll())).length, 0);
+  assert.equal((await call(control, { type: 'SEND_NOW' })).ok, false);
+  pass('A full browser reopen preserves the manual scheduler pause, count and prompt without arming an alarm.');
+
+  // Replay the exact durable checkpoint in the disposable profile, rather
+  // than racing a real process kill between two browser storage requests.
+  const checkpoint = await worker.evaluate(async job => {
+    await chrome.storage.local.set({ resumeJob: job });
+    return chrome.storage.local.get(['resumeJob', 'mostRecentPausedRun']);
+  }, activeBeforePause);
+  assert.equal(checkpoint.resumeJob.enabled, true);
+  assert.equal(checkpoint.resumeJob.runId, activeBeforePause.runId);
+  assert.equal(checkpoint.mostRecentPausedRun, activeBeforePause.runId);
+  await closeBrowser(); context = null;
+  session = await launch(); context = session.context; worker = session.worker; control = session.control;
+  const recoveredPause = (await state(control)).job;
+  assert.equal(recoveredPause.id, activeBeforePause.id);
+  assert.equal(recoveredPause.sentCount, activeBeforePause.sentCount);
+  assert.match(recoveredPause.statusText, /last pause was restored|已恢复上次的暂停操作/i);
+  assert.equal(recoveredPause.enabled, false);
+  assert.equal(recoveredPause.nextAt, null);
+  assert.equal((await worker.evaluate(() => chrome.alarms.getAll())).length, 0);
+  assert.equal((await call(control, { type: 'SEND_NOW' })).ok, false);
+  const explicitResume = await call(control, { type: 'RESUME' });
+  assert.equal(explicitResume.ok, true);
+  assert.equal(explicitResume.job.enabled, true);
+  assert.notEqual(explicitResume.job.runId, checkpoint.mostRecentPausedRun);
+  assert.equal((await call(control, { type: 'PAUSE' })).ok, true);
+  pass('Chromium reopens a replayed Pause checkpoint without enabling stale recovery; explicit Resume still works.');
   console.log(`\n${checks.length}/${checks.length} MV3 integration scenarios passed.`);
 } finally {
   await closeBrowser();

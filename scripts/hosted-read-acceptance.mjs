@@ -167,6 +167,7 @@ async function compare(runDir, surface) {
 export function verifyHostedReadHistory(runDir, surface, logFile, { openedAt, closedAt }) {
   const { file, expected, assertCurrent } = probe(runDir, surface);
   const result = { surface, exactCalls: 0, otherReadCalls: 0, matchingCalls: 0, markerMatched: false,
+    providerErrors: 0,
     origins: { ui: 0, llm: 0, unattributed: 0 } };
   const expectedTool = surface === comparison ? 'read_multiple_files' : 'read_file';
   requireValid(Number.isSafeInteger(openedAt) && Number.isSafeInteger(closedAt) && openedAt <= closedAt);
@@ -185,6 +186,7 @@ export function verifyHostedReadHistory(runDir, surface, logFile, { openedAt, cl
     (expectedTool === 'read_file' || entry.arguments.paths.length === 1));
   result.exactCalls = calls.length;
   result.otherReadCalls = onPath.length - calls.length;
+  result.providerErrors = calls.filter(({ output }) => output?.isError === true).length;
   for (const {arguments: {origin}} of calls) result.origins[origin === 'ui' || origin === 'llm' ? origin : 'unattributed']++;
   result.matchingCalls = calls.filter(({ output }) => {
     if (!output || output.isError || !Array.isArray(output.content)) return false;
@@ -202,23 +204,30 @@ export function summarizeHostedReadEvidence(receipts, selected) {
     const observed = receipt.exactCalls + receipt.otherReadCalls > 0;
     if (!selected.has(receipt.surface)) {
       const status = observed ? 'unexpected-traffic' : 'not-tested';
-      return { ...receipt, readPath: status, singleRead: status };
+      return { ...receipt, readPath: status, singleRead: status, diagnostic: status };
     }
-    if (!observed) return { ...receipt, readPath: 'not-observed', singleRead: 'not-observed' };
+    if (!observed) return { ...receipt, readPath: 'not-observed', singleRead: 'not-observed', diagnostic: 'not-observed' };
+    const diagnostic = receipt.otherReadCalls > 0 ? 'unexpected-read' :
+      receipt.exactCalls > 1 ? 'repeated-read' : receipt.providerErrors > 0 ? 'provider-error' :
+      receipt.matchingCalls === 0 ? 'marker-unconfirmed' : 'verified';
     return { ...receipt, readPath: receipt.matchingCalls > 0 ? 'verified' : 'unverified',
-      singleRead: receipt.markerMatched ? 'verified' : 'failed' };
+      singleRead: receipt.markerMatched ? 'verified' : 'failed', diagnostic };
   });
 }
 
 export function hostedReadGate(evidence, selected, { requireSingle = true } = {}) {
   const seen = new Set();
   for (const receipt of evidence) {
-    if (seen.has(receipt.surface)) return false;
+    const { exactCalls, otherReadCalls, matchingCalls, providerErrors = 0 } = receipt;
+    if (!probeNames.includes(receipt.surface) || seen.has(receipt.surface) ||
+        ![exactCalls, otherReadCalls, matchingCalls, providerErrors].every(value => Number.isSafeInteger(value) && value >= 0) ||
+        matchingCalls > exactCalls - providerErrors) return false;
     seen.add(receipt.surface);
     if (!selected.has(receipt.surface)) {
-      if (receipt.readPath !== 'not-tested') return false;
-    } else if (receipt.readPath !== 'verified' || receipt.otherReadCalls !== 0 ||
-        (requireSingle && receipt.singleRead !== 'verified')) return false;
+      if (receipt.readPath !== 'not-tested' || exactCalls !== 0 || otherReadCalls !== 0) return false;
+    } else if (receipt.readPath !== 'verified' || otherReadCalls !== 0 || matchingCalls === 0 ||
+        (requireSingle && (exactCalls !== 1 || matchingCalls !== 1 || receipt.markerMatched !== true ||
+          receipt.singleRead !== 'verified'))) return false;
   }
   return selected.size > 0 && [...selected].every(surface => seen.has(surface));
 }

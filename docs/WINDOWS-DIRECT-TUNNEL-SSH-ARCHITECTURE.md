@@ -27,12 +27,14 @@ Chrome [native messaging](https://developer.chrome.com/docs/extensions/develop/c
 starts an already registered local host and exchanges messages using stdio;
 the browser permission alone does not install or register a native program.
 
-## Installation and Recovery
+## Installation, SSH Preflight, and Recovery
 
 1. In Setup, choose current-account or administrator scope, review its risk,
-   and copy the appropriate verified PowerShell or CMD bootstrap. A verified
-   npm package is a separate delivery route. Do not use an unpublished version
-   URL as an installer source.
+   and copy the appropriate verified PowerShell or CMD bootstrap. For administrator
+   setup, the verified Windows command uses explicit flags:
+   `-Administrator -Apply -Consent accept-administrator-browser-installation -PromptForConnection -ExtensionId '<extensionId>'`.
+   A verified npm package is a separate delivery route. Do not use an unpublished
+   version URL as an installer source.
 2. Run the command in a local terminal. Provide the official tunnel information
    and path to the local key file; do not paste the key into chat or the
    extension. The ordinary path uses the existing Windows account and can
@@ -40,14 +42,27 @@ the browser permission alone does not install or register a native program.
 3. Administrator setup is a distinct opt-in path and requires native Windows
    elevation. Installation errors do not trigger automatic escalation,
    firewall changes, or an execution-policy bypass.
-4. Browser-managed setup installs paused. After fresh consent and matching
+4. Once the Windows local MCP runtime (`DesktopCommanderMCP`) and OpenAI official
+   tunnel client (`tunnel-client`) are connected, run the read-only SSH preflight
+   before instructing ChatGPT or Dot to SSH into remote Linux research hosts from Windows:
+   ```powershell
+   npx agent-continue ssh-preflight
+   ```
+   (or `node native/bootstrap/bin.mjs ssh-preflight`). This checks `ssh.exe`,
+   parses `~/.ssh/config` (skipping `ProxyJump` inner hops from direct LAN TCP probes),
+   inspects WMI `Win32_NetworkAdapter.NetConnectionStatus === 2` for Sangfor /
+   EasyConnect VNIC adapters, and runs bounded TCP probes. EasyConnect still
+   requires interactive user login (`"欢迎访问"`) before private research IPs are reachable.
+5. Browser-managed setup installs paused. After fresh consent and matching
    installation readback, the initiating Setup page may request one connection.
    Unknown or partially installed states require inspection of the original
    operation; do not delete, overwrite, rerun, or silently adopt a different
    binding. A user pause or revoke is not cleared on restart.
-5. Grant tools in the selected ChatGPT or Dot conversation separately. The
-   scheduler detects known permission requests and waits for user action; it
-   does not activate permission or sign-in controls.
+6. Grant tools in the selected ChatGPT or Dot conversation separately. By default,
+   the scheduler keeps tool confirmations and browser handover manual; optional
+   opt-in settings (`autoAllow`, `autoAuthorizeTakeover`) are disabled unless
+   explicitly enabled in Settings and still pause on OAuth/login dialogs or
+   CAPTCHA/2FA prompts.
 
 The current-account and administrator installation receipts are not
 interchangeable. The scheduler's manual Pause remains independent of device

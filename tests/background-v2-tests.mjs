@@ -256,6 +256,31 @@ await scenario('A failed template deletion keeps configuration and templates una
   assert.equal(h.state.local.templates, undefined);
 });
 
+await scenario('Draft panel can continue an edit after a worker restart without accepting a pre-clear draft', async () => {
+  const first = await harness();
+  const initial = await first.message({ type: 'GET_STATE' });
+  const config = { ...initial.config, prompt: 'SYNTHETIC_REOPEN_DRAFT' };
+  const saved = await first.message({ type: 'SAVE_DRAFT', generation: initial.draftGeneration,
+    revision: initial.draftRevision, base: initial.config, config });
+  assert.equal(saved.ok, true);
+
+  const restarted = await harness({ local: copy(first.state.local), session: copy(first.state.session) });
+  const mode = { ...config, startImmediately: true };
+  const next = await restarted.message({ type: 'SAVE_DRAFT', generation: saved.draftGeneration,
+    revision: saved.draftRevision, base: config, config: mode });
+  assert.equal(next.ok, true, 'A still-open panel does not lose its draft version on worker wake.');
+  assert.equal((await restarted.message({ type: 'GET_STATE' })).config.startImmediately, true);
+  assert.equal((await restarted.message({ type: 'CLEAR_DATA' })).ok, true);
+
+  const afterClear = await harness({ local: copy(restarted.state.local), session: copy(restarted.state.session) });
+  const cleared = await afterClear.message({ type: 'GET_STATE' });
+  assert.notEqual(cleared.draftGeneration, next.draftGeneration);
+  const stale = await afterClear.message({ type: 'SAVE_DRAFT', generation: next.draftGeneration,
+    revision: cleared.draftRevision, base: cleared.config, config });
+  assert.equal(stale.conflict, true);
+  assert.equal((await afterClear.message({ type: 'GET_STATE' })).config.prompt, '');
+});
+
 await scenario('A failed Clear remains fenced after a worker restart', async () => {
   const h = await harness();
   const initial = await h.message({ type: 'GET_STATE' });
@@ -660,6 +685,81 @@ await scenario('A restored job without delivery flags uses interrupt and automat
   await h.message({ type: 'PAUSE' });
 });
 
+await scenario('A stale, closed, or navigating pinned target cannot be probed or replace the active job', async () => {
+  const h = await harness({ tabs: [{ id: 7, url: originalUrl, active: true }, { id: 9, url: otherUrl }] });
+  const old = await h.start();
+  const before = h.state.injections.length;
+  const expected = 'https://chatgpt.com/c/synthetic-selected';
+  for (const [id, pinned, actual] of [
+    [9, expected, { id: 9, url: otherUrl }],
+    [9, expected, null],
+    [9, expected, { id: 9, url: expected, pendingUrl: otherUrl }],
+    [undefined, expected, null],
+    [9, 'https://chatgpt.com/', { id: 9, url: otherUrl }],
+  ]) {
+    if (actual) h.state.tabs.set(9, actual);
+    else h.state.tabs.delete(9);
+    assert.equal((await h.message({ type: 'CHECK_PAGE', tabId: id, targetUrl: pinned })).ok, false);
+    assert.equal((await h.message({ type: 'START', tabId: id, targetUrl: pinned,
+      config: { prompt: 'SYNTHETIC_REPLACEMENT', startImmediately: true } })).ok, false);
+    assert.equal(h.state.session.job.id, old.id);
+    assert.equal(h.state.session.job.enabled, true);
+    assert.equal(h.state.alarms.size, 1);
+    assert.equal(h.state.injections.length, before);
+  }
+  await h.message({ type: 'PAUSE' });
+});
+
+await scenario('A bound Dot job waits for its original URL after the tab navigates to a different Dot', async () => {
+  const original = 'https://chatgpt.com/dots/synthetic-account~original';
+  const different = 'https://chatgpt.com/dots/synthetic-account~other';
+  const h = await harness({ tabs: [{ id: 7, url: original }] });
+  h.pageResult = args => ({ status: args.mode === 'check' ? 'ready' : 'sent', identity: 'synthetic-account~original' });
+  const bound = await h.start();
+  h.state.tabs.get(7).url = different;
+  h.chrome.tabs.onUpdated.emit(7, { url: different });
+  await until(() => h.state.session.job.tabId === null || h.state.session.job.url === different);
+  assert.equal(h.state.session.job.url, original);
+  assert.equal(h.state.session.job.tabId, null);
+  assert.equal(h.state.local.resumeJob.url, original);
+  await h.tick();
+  assert.equal(h.sends().length, 0);
+  h.state.tabs.set(9, { id: 9, url: original + '/?view=1#composer', autoDiscardable: true });
+  const resumed = await h.tick();
+  assert.equal(resumed.id, bound.id);
+  assert.equal(resumed.tabId, 9);
+  assert.equal(h.sends().length, 1);
+  assert.equal(h.sends()[0].args[0].expectedUrl, original);
+  assert.equal(h.sends()[0].target.tabId, 9);
+  await h.message({ type: 'PAUSE' });
+});
+
+await scenario('A pinned target that navigates during its probe leaves the existing job scheduled', async () => {
+  const h = await harness({ tabs: [{ id: 7, url: originalUrl }, { id: 9, url: otherUrl }] });
+  const old = await h.start({}, 7);
+  h.pageResult = async (args, tabId) => {
+    assert.equal(args.mode, 'check');
+    assert.equal(tabId, 9);
+    h.state.tabs.get(9).url = originalUrl;
+    return { status: 'ready' };
+  };
+  const response = await h.message({ type: 'START', tabId: 9, targetUrl: otherUrl,
+    config: { prompt: 'SYNTHETIC_REPLACEMENT', startImmediately: true } });
+  assert.equal(response.ok, false);
+  assert.equal(h.state.session.job.id, old.id);
+  assert.equal(h.state.session.job.enabled, true);
+  assert.equal(h.state.alarms.size, 1);
+  assert.equal(h.sends().length, 0);
+  await h.message({ type: 'PAUSE' });
+});
+
+await scenario('A legacy request with multiple active-tab results does not pick the first conversation', async () => {
+  const h = await harness({ tabs: [{ id: 7, url: originalUrl, active: true }, { id: 9, url: otherUrl, active: true }] });
+  assert.equal((await h.message({ type: 'CHECK_PAGE' })).ok, false);
+  assert.equal((await h.message({ type: 'START', config: { prompt: 'SYNTHETIC_AMBIGUOUS', startImmediately: true } })).ok, false);
+  assert.equal(h.state.injections.length, 0);
+});
+
 await scenario('A newer START wins over an older slow page check', async () => {
   const h = await harness({ tabs: [{ id: 7, url: originalUrl }, { id: 9, url: otherUrl }] });
   const gate = deferred();
@@ -702,6 +802,25 @@ await scenario('A newer Start reservation supersedes an older one and is single-
   assert.equal((await h.message(request(second.startToken))).ok, true);
   assert.equal((await h.message(request(second.startToken))).ok, false);
   assert.equal(h.state.injections.filter(item => item.args[0].mode === 'check').length, 1);
+  await h.message({ type: 'PAUSE' });
+});
+
+await scenario('Cancelling a Start reservation revokes only the matching token', async () => {
+  const h = await harness();
+  const prepare = () => h.message({ type: 'PREPARE_START' });
+  const cancel = startToken => ({ type: 'CANCEL_START', startToken });
+  const start = startToken => h.message({ type: 'START', startToken, tabId: 7, targetUrl: originalUrl,
+    config: { prompt: 'SYNTHETIC_RESERVED_START' } });
+  const older = await prepare();
+  const current = await prepare();
+  assert.equal((await h.message(cancel(older.startToken))).ok, true);
+  assert.equal((await h.message(cancel(current.startToken), h.sender())).ok, false);
+  assert.equal((await start(current.startToken)).ok, true);
+  const abandoned = await prepare();
+  assert.equal((await h.message(cancel(abandoned.startToken))).ok, true);
+  assert.equal((await start(abandoned.startToken)).ok, false);
+  assert.equal(h.state.session.job.enabled, true);
+  assert.equal(h.state.injections.length, 1);
   await h.message({ type: 'PAUSE' });
 });
 
@@ -790,6 +909,125 @@ await scenario('PAUSE cancels START while its page check is pending', async () =
   assert.equal(h.state.alarms.size, 0);
 });
 
+for (const [source, phase] of [['panel', 'idle'], ['shortcut', 'idle'], ['panel', 'reply-check']]) await scenario(`A ${source} Pause survives exit before its paused snapshot is written (${phase})`, async () => {
+  const h = await harness();
+  const running = await h.start();
+  if (phase === 'reply-check') {
+    const checking = { ...running, phase: 'sending', runKind: 'reply-check', runDeadline: Date.now() + 30_000, awaitingReply: true };
+    h.state.session.job = copy(checking);
+    h.state.local.resumeJob = copy(checking);
+  }
+  let interrupted;
+  h.beforeStorageSet = (area, value) => {
+    if (area === 'session' && value.job?.enabled === false && !interrupted) {
+      interrupted = { session: copy(h.state.session), local: copy(h.state.local),
+        tabs: [...h.state.tabs.values()].map(copy), alarms: [...h.state.alarms.entries()].map(copy) };
+    }
+  };
+  if (source === 'panel') assert.equal((await h.message({ type: 'PAUSE' })).ok, true);
+  else {
+    h.chrome.commands.onCommand.emit('toggle-running');
+    await until(() => h.state.local.resumeJob?.enabled === false && h.state.alarms.size === 0, 'keyboard pause committed');
+  }
+  assert.ok(interrupted);
+  assert.equal(interrupted.local.resumeJob?.enabled, true, 'snapshot is from before the paused job was persisted');
+
+  for (const restart of ['worker', 'browser']) {
+    const reopened = await harness(restart === 'worker' ? interrupted : { ...interrupted, session: {}, tabs: [] });
+    assert.equal(reopened.state.session.job?.id, running.id);
+    assert.equal(reopened.state.session.job?.enabled, false);
+    assert.equal(reopened.state.local.resumeJob?.enabled, false);
+    assert.equal(reopened.state.alarms.size, 0);
+    if (restart === 'worker') assert.equal(reopened.state.tabs.get(7).autoDiscardable, true);
+    assert.equal((await reopened.message({ type: 'SEND_NOW' })).ok, false);
+    assert.equal(reopened.sends().length, 0);
+    const resumed = await reopened.message({ type: 'RESUME' });
+    assert.equal(resumed.ok, true);
+    const afterResume = await harness({ local: copy(reopened.state.local), session: copy(reopened.state.session) });
+    assert.equal(afterResume.state.session.job?.enabled, true, 'the previous Pause must not stop an explicit Resume');
+    await afterResume.message({ type: 'PAUSE' });
+  }
+});
+
+for (const operation of ['START', 'RESUME']) await scenario(`${operation} restart reconciles the exact activation write boundary`, async () => {
+  const h = await harness();
+  if (operation === 'RESUME') { await h.start(); await h.message({ type: 'PAUSE' }); }
+  let before, committed;
+  h.beforeStorageSet = (area, value) => {
+    if (area !== 'local' || !value.resumeJob?.enabled || before) return;
+    before = { session: copy(h.state.session), local: copy(h.state.local), tabs: [...h.state.tabs.values()].map(copy) };
+    committed = { ...copy(before), local: { ...copy(before.local), resumeJob: copy(value.resumeJob) } };
+  };
+  const response = operation === 'RESUME' ? await h.message({ type: 'RESUME' }) : await h.message({
+    type: 'START', tabId: 7, targetUrl: originalUrl, config: { prompt: 'SYNTHETIC_ACTIVATION_BOUNDARY' },
+  });
+  assert.equal(response.ok, true);
+  assert.ok(before && committed);
+  await h.message({ type: 'PAUSE' });
+
+  const interrupted = await harness(before);
+  assert.equal(interrupted.state.session.job?.enabled, false, 'a staged session write is not a committed activation');
+  assert.equal(interrupted.state.alarms.size, 0);
+  assert.equal(interrupted.state.tabs.get(7).autoDiscardable, true);
+  assert.ok(!interrupted.state.local.resumeJob?.enabled);
+  assert.equal((await interrupted.message({ type: 'SEND_NOW' })).ok, false);
+  assert.equal(interrupted.sends().length, 0);
+
+  const restored = await harness(committed);
+  assert.equal(restored.state.session.job?.enabled, true, 'a matching durable write committed the activation');
+  assert.equal(restored.state.session.job?.runId, committed.local.resumeJob.runId);
+  assert.equal(restored.state.alarms.size, 1);
+  assert.equal(restored.sends().length, 0);
+  await restored.message({ type: 'PAUSE' });
+});
+
+await scenario('A failed durable Start leaves no running job in the current worker or after restart', async () => {
+  for (const rejectPausedWrite of [false, true]) {
+    const h = await harness({ permissionGranted: true });
+    h.beforeStorageSet = (area, value) => {
+      if (area === 'local' && value.resumeJob && (value.resumeJob.enabled || rejectPausedWrite)) {
+        throw new Error('Synthetic resume snapshot write failure');
+      }
+    };
+    const response = await h.message({ type: 'START', tabId: 7, targetUrl: originalUrl,
+      config: { prompt: 'SYNTHETIC_START_WRITE_FAILURE', startImmediately: true, keepAwake: true, preventDiscard: true } });
+    assert.equal(response.ok, false);
+    assert.equal(h.state.session.job?.enabled, false);
+    assert.ok(!h.state.local.resumeJob?.enabled);
+    assert.equal(h.state.tabs.get(7).autoDiscardable, true);
+    assert.equal(h.state.powerCalls.at(-1)?.method, 'release');
+    assert.equal(h.state.alarms.size, 0);
+    assert.equal((await h.message({ type: 'SEND_NOW' })).ok, false);
+    assert.equal(h.sends().length, 0);
+    for (const session of [h.state.session, {}]) {
+      const restarted = await harness({ session: copy(session), local: copy(h.state.local) });
+      assert.ok(!restarted.state.session.job?.enabled);
+      assert.equal(restarted.state.alarms.size, 0);
+      assert.equal((await restarted.message({ type: 'SEND_NOW' })).ok, false);
+      assert.equal(restarted.sends().length, 0);
+    }
+  }
+});
+
+await scenario('START session write failure does not erase the already paused task', async () => {
+  const h = await harness({ permissionGranted: true });
+  const original = await h.start();
+  await h.message({ type: 'PAUSE' });
+  h.beforeStorageSet = (area, value) => {
+    if (area === 'session' && value.job?.enabled) throw new Error('Synthetic session write failure');
+  };
+  const response = await h.message({ type: 'START', tabId: 7, targetUrl: originalUrl,
+    config: { prompt: 'SYNTHETIC_START_WRITE_FAILURE', startImmediately: true, keepAwake: true, preventDiscard: true } });
+  assert.equal(response.ok, false);
+  assert.equal(h.state.session.job.id, original.id);
+  assert.equal(h.state.session.job.enabled, false);
+  assert.equal(h.state.local.resumeJob.id, original.id);
+  assert.equal(h.state.tabs.get(7).autoDiscardable, true);
+  assert.equal(h.state.powerCalls.at(-1)?.method, 'release');
+  assert.equal(h.state.alarms.size, 0);
+  assert.equal(h.sends().length, 0);
+});
+
 await scenario('PAUSE during START commit prevents the queued immediate send', async () => {
   const h = await harness();
   const entered = deferred(), release = deferred();
@@ -800,10 +1038,33 @@ await scenario('PAUSE during START commit prevents the queued immediate send', a
   await entered.promise;
   const pausing = h.message({ type: 'PAUSE' });
   release.resolve();
-  await Promise.all([starting, pausing]);
-  assert.equal(h.state.session.job.enabled, false);
+  const [result] = await Promise.all([starting, pausing]);
+  assert.equal(result.ok, false);
+  assert.ok(!h.state.session.job?.enabled);
+  assert.equal(h.state.tabs.get(7).autoDiscardable, true);
   assert.equal(h.sends().length, 0);
   assert.equal(h.state.alarms.size, 0);
+});
+
+await scenario('Navigation or supersession during tab protection cannot activate a pinned Start', async () => {
+  for (const change of ['navigation', 'supersession']) {
+    const h = await harness();
+    const entered = deferred(), release = deferred();
+    h.beforeTabUpdate = async (_id, update) => {
+      if (update.autoDiscardable === false) { entered.resolve(); await release.promise; }
+    };
+    const starting = h.message({ type: 'START', tabId: 7, targetUrl: originalUrl,
+      config: { prompt: 'SYNTHETIC_COMMIT', startImmediately: true } });
+    await entered.promise;
+    if (change === 'navigation') h.state.tabs.get(7).url = otherUrl;
+    else assert.equal((await h.message({ type: 'PREPARE_START' })).ok, true);
+    release.resolve();
+    assert.equal((await starting).ok, false);
+    assert.ok(!h.state.session.job?.enabled);
+    assert.equal(h.state.tabs.get(7).autoDiscardable, true);
+    assert.equal(h.state.alarms.size, 0);
+    assert.equal(h.sends().length, 0);
+  }
 });
 
 await scenario('Concurrent manual sends and an alarm claim only one round', async () => {
@@ -5212,6 +5473,51 @@ for (const type of ['CLEAR_LOGS', 'CLEAR_DATA']) {
     assert.equal(response.ok, false, 'The failed removal must not report a successful clear');
   });
 }
+await scenario('initialize deduplicates browser-restored across worker wakes and preserves preDispatch interrupted runs', async () => {
+  const preDispatchJob = {
+    ...DEFAULT_CONFIG, id: 'job-predispatch-1', runId: 'run-pd-1', enabled: true, tabId: 7,
+    url: originalUrl, title: 'Synthetic', targetIdentity: 'acct~dot', phase: 'sending',
+    runKind: 'send', preDispatch: true, runDeadline: Date.now() + 60_000,
+    sentCount: 2, unknownCount: 0, nextAt: Date.now() - 1000,
+  };
+  const h = await harness({ local: { resumeJob: preDispatchJob } });
+  await until(() => h.state.session.job?.phase === 'idle', 'preDispatch recovery');
+  assert.equal(h.state.session.job.enabled, true, 'preDispatch crash must remain enabled');
+  assert.equal(h.state.session.job.tabId, null, 'cold initialize must clear stale tabId');
+  assert.equal(h.state.session.job.unknownCount, 0, 'preDispatch crash must not count as unknown');
+  assert.equal(h.state.session.job.submissionFenceUntil ?? null, null, 'preDispatch crash must not set submissionFenceUntil');
+  assert.equal(h.state.local.logs.filter(entry => entry.event === 'browser-restored').length, 1);
+
+  // Re-import worker in same session -> must not duplicate browser-restored
+  await import(pathToFileURL(path.join(root, 'background.js')).href + `?v2-test=${++importId}`);
+  assert.equal((await h.message({ type: 'GET_STATE' })).ok, true);
+  assert.equal(h.state.local.logs.filter(entry => entry.event === 'browser-restored').length, 1);
+});
+
+await scenario('tabs.onUpdated auto-rebinds unique complete target tab without binding duplicates', async () => {
+  const saved = {
+    ...DEFAULT_CONFIG, id: 'job-rebind-1', runId: 'run-rb-1', enabled: true, tabId: null,
+    url: originalUrl, title: 'Synthetic', targetIdentity: 'acct~dot', phase: 'idle',
+    sentCount: 0, unknownCount: 0, nextAt: Date.now() + 120_000,
+  };
+  const h = await harness({
+    session: { job: copy(saved), browserRestoredLoggedJobId: saved.id },
+    local: { resumeJob: copy(saved) },
+    tabs: [
+      { id: 11, url: originalUrl, active: false, status: 'complete' },
+      { id: 12, url: originalUrl, active: true, status: 'complete' },
+    ],
+  });
+  h.chrome.tabs.onUpdated.emit(11, { status: 'complete' }, copy(h.state.tabs.get(11)));
+  await delay(30);
+  assert.equal(h.state.session.job.tabId, null, 'duplicate URL tabs must refuse auto-rebind');
+
+  h.state.tabs.delete(12);
+  h.chrome.tabs.onUpdated.emit(11, { status: 'complete' }, copy(h.state.tabs.get(11)));
+  await until(() => h.state.session.job.tabId === 11, 'unique restored tab auto-rebind');
+  assert.equal(h.state.session.job.tabId, 11);
+  assert.ok(h.state.session.job.nextAt > Date.now() + 60_000, 'future schedule must not accelerate on rebind');
+});
 const failed = results.filter(result => result.status === 'FAIL');
 console.log(`RESULT ${results.length - failed.length}/${results.length} background v2 scenarios passed`);
 for (const result of failed) console.error(result.error);

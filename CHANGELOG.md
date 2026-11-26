@@ -2,10 +2,26 @@
 
 ## Unreleased
 
-- Back off repeated transport failures before submission from 150 ms to a maximum delay of 2.4 seconds between attempts. This limits retry frequency, not total waiting time. Pause cancels retries, and the scheduler still does not replay a submission whose outcome is unknown.
-- Show pre-send transport waits in the delivery log. The diagnostic export records the number of scheduled waits and the longest requested interval, separately from submission attempts.
+## [3.3.0] - 2026-11-26
+
+- Fix browser/service-worker recovery and eliminate 34-second `browser-restored` activity log spam (`background.js`):
+  - Track `restoredFromLocal` and deduplicate `browser-restored` logging once per restored browser session using session marker `browserRestoredLoggedJobId`, while keeping cold `initialize()` `tabId: null` semantics intact.
+  - Add unique-tab auto-rebinding (`rebindOrphanedJobIfUnique`) in `chrome.tabs.onUpdated` (`status === 'complete'`) and `chrome.runtime.onStartup` when an enabled task has `tabId === null` and exactly one normalized target tab matches.
+  - Add pre-dispatch recovery tracking (`preDispatch`) cleared inside `clearPreDispatch(runId)` immediately before `runScript('ISOLATED')`, so pre-injection worker interruptions resume automatically without false `unknownCount` increments, pauses, or `submissionFenceUntil` locks.
+- Fix false Dot `unknown` / `documentChanges: 1` pauses during optimistic React message rendering (`adapter.js`, `editor-commit.js`):
+  - Prefer structured `'~'`-delimited Dot message identities when resolving `identity()` across message turns, preventing transient unhydrated turn IDs from breaking `samePage()`.
+- Restore opt-in routine approval automation (`autoAllow: false` default) and OAuth/login pause guard (`config.js`, `adapter.js`, `content.js`, `background.js`, `popup.html`, `popup.js`):
+  - Add opt-in `autoAllow` toggle for routine tool execution prompts (standard DOM click dispatch only; no React internal hooks) while strictly pausing (`oauth-required`) when OAuth consent or session-expired login modals appear.
+  - Emit zero-lag idle-deferred `ROUTINE_APPROVAL_OBSERVED` signals from `content.js` separate from `DIALOG_EXCEPTION`.
+- Add opt-in Dot takeover / login delegation auto-reply & browser handover (`autoAuthorizeTakeover: false` default, `takeoverReply`, `config.js`, `adapter.js`, `content.js`, `background.js`, `popup.html`, `popup.js`):
+  - Automatically click control-return buttons or send one authorization delegation reply per assistant turn (bounded to 3 consecutive replies, preserving `queueIndex` and `sentCount`), woken by `TAKEOVER_PROMPT_OBSERVED`, while strictly pausing on CAPTCHA/2FA/password prompts (`captcha-required`).
+- Add read-only Windows SSH & EasyConnect preflight (`native/bootstrap/ssh-preflight.mjs`, `cli.mjs`, `bin.mjs`):
+  - Add `npx agent-continue ssh-preflight` / `node native/bootstrap/bin.mjs ssh-preflight` to inspect OpenSSH client availability, `~/.ssh/config` hosts (respecting `ProxyJump`), WMI `Win32_NetworkAdapter.NetConnectionStatus === 2` status for Sangfor/EasyConnect VNICs, and bounded TCP reachability.
 
 ## [3.2.1] - 2026-11-21
+
+- Back off repeated transport failures before submission from 150 ms to a maximum delay of 2.4 seconds between attempts. This limits retry frequency, not total waiting time. Pause cancels retries, and the scheduler still does not replay a submission whose outcome is unknown.
+- Show pre-send transport waits in the delivery log. The diagnostic export records the number of scheduled waits and the longest requested interval, separately from submission attempts.
 
 - Keep pending tool approvals manual in ChatGPT and Your dot. Detect and report them without clicking, writing to the composer, or trying to approve through page internals.
 - Wait on scheduler alarms when Dot is paused or the composer is unavailable; keep bounded fast recovery when a transient result proves that no submission was attempted.

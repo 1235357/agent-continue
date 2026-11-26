@@ -4,14 +4,15 @@
 
 向一个已有的 ChatGPT 或 Your dot 会话定时发送自定义提示词。Windows 版本还提供需单独安装、明确授权的文件、Shell 与进程工具。
 
-**3.2.1 Windows 版发布候选 · Manifest V3 · 免费 · MIT 开源**
+**3.3.0 Windows 版发布候选 · Manifest V3 · 免费 · MIT 开源**
 
 [Chrome 应用商店](https://chromewebstore.google.com/detail/agent-continue-background/jgjoeiidbnpmgbbhhmphicehbcdgbhga) · [GitHub Releases](https://github.com/1235357/agent-continue/releases) · [源码](https://github.com/1235357/agent-continue) · [更新记录](CHANGELOG.md) · [隐私说明（英文）](PRIVACY.md)
 
 ## 技术文档与底层架构
 
 底层原理：
-* [Windows 设备控制与官方隧道架构](https://github.com/1235357/agent-continue/blob/main/docs/WINDOWS-DIRECT-TUNNEL-SSH-ARCHITECTURE.md) — OpenAI 隧道数据路径、各层授权、Windows 运行时验收，以及暂未交付的 SSH 范围。
+* [持续自治、恢复与 Windows SSH 预检架构设计 (v3.3.0)](https://github.com/1235357/agent-continue/blob/main/docs/DESIGN-v3.3.0-CONTINUOUS-AUTONOMY-AND-RECOVERY.md) — 重启后唯一标签自动重绑、`preDispatch` 安全恢复、Dot 会话身份稳定性、可选常规工具自动允许（OAuth 自动暂停）、可选 Dot 接管与登录授权自动回复（CAPTCHA/2FA 自动暂停），以及 `ssh-preflight`。
+* [Windows 设备控制与官方隧道架构](https://github.com/1235357/agent-continue/blob/main/docs/WINDOWS-DIRECT-TUNNEL-SSH-ARCHITECTURE.md) — OpenAI 隧道数据路径、各层授权、`ssh-preflight` 预检诊断及 Windows 运行时验收。
 * [稳定性、暂停感知与防抖动引擎设计 (Stability & Anti-Thrashing Design)](https://github.com/1235357/agent-continue/blob/main/docs/DESIGN-v3.2.0-STABILITY-AND-PAUSE-DETECTION.md) — Dot 暂停状态识别与调度器防高频注入设计。
 * [异常对话框与权限引擎设计 (Exception Dialog Engine Design)](https://github.com/1235357/agent-continue/blob/main/docs/DESIGN-v3.1.0-EXCEPTION-DIALOG-ENGINE.md) — 会话过期、OAuth 登录与工具权限多级分类处理。
 * [技术架构与复盘报告 (Technical Architecture)](https://github.com/1235357/agent-continue/blob/main/docs/TECHNICAL-RETROSPECTIVE-AND-ARCHITECTURE.md)
@@ -96,6 +97,8 @@
 ## 单次提交与限制
 
 每次尝试都需通过当前后台许可，且只使用一种提交机制。自动模式优先使用绑定目标输入区域内可用的发送按钮，否则在 Your dot 使用 Ctrl+Enter，在普通 ChatGPT 使用 Enter。也可明确指定仅按钮或仅 Ctrl+Enter。同一次尝试不会再切换其他机制。
+
+切换 Dot 会话路径不会把任务转移到新地址。请重新打开原会话，或暂停任务后明确绑定新地址。查询参数、链接片段和末尾斜杠不改变已绑定的路径。
 
 **定时发送最初会替换绑定会话中的未发送文字，并移除待发送附件。** 支持的编辑器可以通过公开模型接口写入长文本；事件回退路径则分批输入，不会主动在分批边界添加空行。保存的原文不变，但 CR/CRLF 会规范为 LF。持续发送模式可以在网站改写或规范化后采用准备后的输入框文字，只要它非空且可读取，而不是不断重新填写；这是优先继续提交、而非保证原文逐字不变的明确选择。合成私有模型案例仍会在公开 DOM／模型完全匹配时提交旧文字；这些检查不能证明网站另行维护的发送模型已同步。附件通过网站控件解除待发送选择，不删除账户存储或本地原文件。旧 `extensionPriority` 布尔值统一归一化为 `true`；“继续”保留原提示词、目标、间隔及计数。手动暂停、当前授权和精确目标守卫仍有效。详见 [强制输入框优先规则](docs/COMPOSER-PRIORITY.md)。
 

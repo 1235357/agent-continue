@@ -18,7 +18,7 @@ const payloadFiles = [
 const packageFiles = [
   'bin.mjs', 'bootstrap.mjs', 'browser-control.mjs', 'browser-wake-registration.mjs', 'client-acquisition.mjs', 'device-enrollment.mjs', 'device-setup.mjs', 'payload-layout.mjs', 'package.json',
   'install-plan.mjs', 'registration-guidance.mjs', 'registration-plan.mjs', 'registration-render.mjs',
-  'registration-status.mjs', 'registration-status-view.mjs', 'registration-execution.mjs', 'registration-writer.mjs', 'registry-win.mjs', 'runtime-precheck.mjs',
+  'registration-status.mjs', 'registration-status-view.mjs', 'registration-execution.mjs', 'registration-writer.mjs', 'registry-win.mjs', 'runtime-precheck.mjs', 'ssh-preflight.mjs',
   'README.md', 'LICENSE', 'payload-manifest.json', 'Prepare-ReleaseNative.ps1', 'native-publishers.json', 'install.ps1', 'install.cmd',
   ...payloadFiles.map(name => `payload/${name}`),
 ].sort();
@@ -348,7 +348,7 @@ test('actual local npm tarball has exact closure and installed help/version/refu
     const destination = path.join(f.root, 'must not be created \u6d4b\u8bd5');
     const before = inventory(f.root);
     await command(f, ['help'], { ok: true, commands: ['help', 'version', 'stage', 'acquire', 'setup', 'setup-server', 'setup-manager', 'install-local',
-      'start-manager', 'manager-status', 'browser-install-status', 'manager-control', 'manager-browser', 'enroll-ssh', 'install-plan', 'uninstall', 'register',
+      'start-manager', 'manager-status', 'browser-install-status', 'manager-control', 'manager-browser', 'enroll-ssh', 'ssh-preflight', 'install-plan', 'uninstall', 'register',
       'register-browser-wake', 'status', 'verify'] });
     await command(f, ['version'], { ok: true, version: '0.3.0' });
     const setupArgs = ['setup', '--install-dir', destination, '--consent', 'no',

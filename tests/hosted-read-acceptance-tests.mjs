@@ -113,7 +113,7 @@ function fixture(t) {
     const result = invoke(['history', run.dir, surface, file, '1000', '2000']);
     assertRedacted(result);
     assert.equal(result.status, expected.markerMatched ? 0 : 1);
-    assert.deepEqual(JSON.parse(result.stdout), { surface, otherReadCalls: 0,
+    assert.deepEqual(JSON.parse(result.stdout), { surface, otherReadCalls: 0, providerErrors: 0,
       origins: {ui: 0, llm: 0, unattributed: expected.exactCalls}, ...expected });
   }
 
@@ -198,6 +198,8 @@ test('local receipt requires one exact post-reopen read and matching result, wit
   {exactCalls: 0, matchingCalls: 0, markerMatched: false});
   history(run, 'chatgpt', [{...valid, output: {content: [{type: 'text', text: run.probes.dot.raw}]}}],
     {exactCalls: 1, matchingCalls: 0, markerMatched: false});
+  history(run, 'chatgpt', [{...valid, output: {isError: true, content: [{type: 'text', text: raw}]}}],
+    {exactCalls: 1, matchingCalls: 0, providerErrors: 1, markerMatched: false});
 });
 
 test('comparison separates preview attribution and catches alternate-tool reads of its probe', t => {
@@ -228,6 +230,13 @@ test('hosted evidence separates working transport from repeated reads and untest
   assert.equal(summarizeHostedReadEvidence([{...dot, exactCalls: 1}], new Set(['dot']))[0].readPath, 'unverified');
   assert.equal(summarizeHostedReadEvidence([{...regular, exactCalls: 1, matchingCalls: 1, markerMatched: true}],
     new Set(['chatgpt']))[0].singleRead, 'verified');
+  const [unobserved, error, mismatch, duplicate, alternate] = summarizeHostedReadEvidence([
+    dot, {...dot, exactCalls: 1, providerErrors: 1}, {...dot, exactCalls: 1}, regular,
+    {...dot, otherReadCalls: 1},
+  ], new Set(['chatgpt', 'dot']));
+  assert.deepEqual([unobserved, error, mismatch, duplicate, alternate].map(item => item.diagnostic), [
+    'not-observed', 'provider-error', 'marker-unconfirmed', 'repeated-read', 'unexpected-read',
+  ]);
 });
 
 test('hosted release gate cannot pass missing, repeated, or out-of-scope reads', () => {
@@ -242,6 +251,10 @@ test('hosted release gate cannot pass missing, repeated, or out-of-scope reads',
   assert.equal(hostedReadGate(receipts, selected), false);
   assert.equal(hostedReadGate(receipts, selected, {requireSingle: false}), true);
   assert.equal(hostedReadGate(summarize([one('chatgpt'), one('dot'), one('chatgpt-control')]), selected), false);
+  const verified = summarize([one('chatgpt'), one('dot')]);
+  for (const inconsistent of [{exactCalls: 0}, {matchingCalls: 0}, {exactCalls: 2}, {matchingCalls: 2}, {markerMatched: false}]) {
+    assert.equal(hostedReadGate([{...verified[0], ...inconsistent}, verified[1]], selected), false);
+  }
 });
 
 test('hosted append requires exact bytes, one timed write, and an independently created receipt', t => {

@@ -1,9 +1,9 @@
-import { createTranslator, initializeLanguage } from './i18n.js';
+import { createTranslator, initializeLanguage, getLanguage } from './i18n.js';
 import runtimeCatalog from './i18n-runtime.js';
 
 const t = createTranslator(runtimeCatalog);
 
-import { DEFAULT_CONFIG, DELIVERY_BEHAVIOR_VERSION, normalizeUrl, validateTarget, readConfig, currentPrompt, inQuietHours } from './config.js';
+import { DEFAULT_CONFIG, DELIVERY_BEHAVIOR_VERSION, normalizeUrl, validateTarget, readConfig, resolvedTakeoverPrompt, currentPrompt, inQuietHours } from './config.js';
 import { pageAction, pageInvocationState, translatePageResult } from './adapter.js';
 import { editorCommit } from './editor-commit.js';
 import { createDeliveryTrace, updateDeliveryTrace, sanitizeDeliveryDiagnostics } from './delivery-diagnostics.js';
@@ -48,6 +48,9 @@ setupInstallation = bindSetupInstallation(chrome, {
 
 const ALARM_NAME = 'agent-continue-heartbeat';
 const DRAFT_CLEAR_MARKER = 'draftClearPending';
+const ACTIVATION_MARKER = 'pendingActivationRun';
+const PAUSE_MARKER = 'mostRecentPausedRun';
+const DRAFT_VERSION_KEY = 'draftVersion';
 const UNKNOWN_RECOVERY_VERSION = 1;
 const RETRY_MS = 60_000;
 // Finite MAIN-command admission permits; never a total send-wait deadline.
@@ -326,6 +329,20 @@ const migrateDelivery = value => value && value.deliveryBehaviorVersion !== DELI
 async function getConfig() {
   return readConfig(migrateDelivery((await chrome.storage.local.get('config')).config), { allowEmpty: true });
 }
+function writeDraftVersion(generation, revision) {
+  return chrome.storage.session.set({ [DRAFT_VERSION_KEY]: { generation, revision } });
+}
+async function initializeDraftVersion() {
+  try {
+    const saved = (await chrome.storage.session.get(DRAFT_VERSION_KEY))[DRAFT_VERSION_KEY];
+    if (draftClearPending) return;
+    if (typeof saved?.generation === 'string' && saved.generation &&
+        Number.isSafeInteger(saved.revision) && saved.revision >= 0) {
+      draftGeneration = saved.generation;
+      draftRevision = saved.revision;
+    } else await writeDraftVersion(draftGeneration, draftRevision);
+  } catch { /* Keep the new in-memory generation and require panels to reload. */ }
+}
 function saveDraft(message) {
   const work = draftQueue.then(async () => {
     if (draftClearPending || draftClearFailed || message.generation !== draftGeneration
@@ -345,7 +362,11 @@ function saveDraft(message) {
     await chrome.storage.local.set({ config });
     if (draftClearPending || message.generation !== draftGeneration) return { ok: false, conflict: true, draftGeneration, draftRevision };
     draftRevision++;
-    return { ok: true, draftGeneration, draftRevision };
+    const revision = draftRevision;
+    // The canonical base check still rejects stale content if version persistence fails.
+    try { await writeDraftVersion(message.generation, revision); } catch {}
+    if (draftClearPending || message.generation !== draftGeneration) return { ok: false, conflict: true, draftGeneration, draftRevision };
+    return { ok: true, draftGeneration, draftRevision: revision };
   });
   draftQueue = work.catch(() => undefined);
   return work;
@@ -369,6 +390,13 @@ function saveTemplates(message) {
   });
   draftQueue = work.catch(() => undefined);
   return work;
+}
+async function persistActivation(job) {
+  // Record the pending run in the same write as the session snapshot. The
+  // matching local snapshot is the commit record if the worker stops here.
+  await chrome.storage.session.set({ job, [ACTIVATION_MARKER]: job.runId });
+  await chrome.storage.local.set({ resumeJob: job });
+  await chrome.storage.session.remove(ACTIVATION_MARKER).catch(() => undefined);
 }
 async function setJob(job) {
   if (job) {
@@ -401,7 +429,7 @@ async function logEvent(event, message, diagnostic = null, epoch = activityEpoch
   const stored = result.value.logs;
   const logs = !activityDiscardPrevious && Array.isArray(stored) ? stored.filter(entry => entry && typeof entry === 'object' && !Array.isArray(entry)
     && Number.isFinite(entry.at) && typeof entry.event === 'string' && entry.event.length > 0 && typeof entry.message === 'string') : [];
-  const codes = ['adapter-result', 'execution-exception', 'execution-timeout', 'no-valid-result', 'existing-draft', 'composer-changed', 'composer-unstable', 'composer-slow-write', 'chunk-unconfirmed', 'chunk-attachment', 'chunk-mismatch', 'timing-probe', 'send-not-ready', 'commit-not-dispatched', 'paste-unconfirmed', 'paste-attachment-unconfirmed', 'receipt-ambiguous', 'receipt-mismatch', 'document-replaced', 'unconfirmed-retry', 'approval-required', 'agent-paused', 'agent-busy', 'composer-unavailable'];
+  const codes = ['adapter-result', 'execution-exception', 'execution-timeout', 'no-valid-result', 'existing-draft', 'composer-changed', 'composer-unstable', 'composer-slow-write', 'chunk-unconfirmed', 'chunk-attachment', 'chunk-mismatch', 'timing-probe', 'send-not-ready', 'commit-not-dispatched', 'paste-unconfirmed', 'paste-attachment-unconfirmed', 'receipt-ambiguous', 'receipt-mismatch', 'document-replaced', 'unconfirmed-retry', 'auto-allowed-prompt', 'approval-required', 'oauth-required', 'captcha-required', 'takeover-needed', 'takeover-replied', 'pre-dispatch-storage', 'agent-paused', 'agent-busy', 'composer-unavailable'];
   const detail = diagnostic && codes.includes(diagnostic.code)
     ? { diagnostic: { code: diagnostic.code, ...(Number.isFinite(diagnostic.durationMs)
       ? { durationMs: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, diagnostic.durationMs)) } : {}) } } : {};
@@ -543,14 +571,15 @@ async function pauseLocked(job, message, event = 'paused', diagnostic = null, in
   for (const pending of pendingForRun) { pending.closed = true; pending.pauseWriting = true; }
   let receipt;
   let manualUnconfirmed;
-  let dispatchUnconfirmed = job.phase === 'sending' && pendingForRun.some(pending => pending.mainCommitPending === true
+  const readOnlyRun = ['reply-check', 'approval-check'].includes(job.runKind);
+  let dispatchUnconfirmed = job.phase === 'sending' && !readOnlyRun && pendingForRun.some(pending => pending.mainCommitPending === true
     || pending.dispatched === true || pending.commitUncertain === true);
   let submissionFenceUntil = null;
   const pausedRunId = token();
   const makePaused = () => {
     receipt = job.enabled && job.phase === 'sending' && !ambiguousRecovery()
       ? pendingForRun.find(pending => pending.confirmedReceipt && !pending.receiptAccounted) : null;
-    const paused = { ...job, enabled: false, runId: pausedRunId, runDeadline: null, phase: 'idle', nextAt: null, statusText: message, discardProtection: 'paused', systemAwake: false, needsAttention: event === 'unconfirmed' || diagnostic?.code === 'composer-slow-write' };
+    const paused = { ...job, enabled: false, runId: pausedRunId, runDeadline: null, preDispatch: undefined, phase: 'idle', nextAt: null, statusText: message, discardProtection: 'paused', systemAwake: false, needsAttention: event === 'unconfirmed' || diagnostic?.code === 'composer-slow-write' };
     manualUnconfirmed = job.enabled && job.phase === 'sending'
       && (job.manualSubmissionPending || pendingForRun.some(pending => pending.manualSubmission || pending.confirmedReceipt?.diagnosticProgress?.observations?.manualPending))
       && receipt?.confirmedReceipt?.status !== 'manual-sent';
@@ -609,7 +638,13 @@ async function pauseLocked(job, message, event = 'paused', diagnostic = null, in
     }
   };
   try {
-    if (job.enabled && job.phase === 'sending' && job.runKind !== 'reply-check'
+    if (event === 'paused' && job.enabled && typeof job.runId === 'string' &&
+        (job.phase !== 'sending' || ['reply-check', 'approval-check'].includes(job.runKind) || job.preDispatch === true)) {
+      // Startup already pauses interrupted sends, but idle, pre-dispatch, and read-only checks can resume.
+      try { await chrome.storage.local.set({ [PAUSE_MARKER]: job.runId }); } catch { /* Still try saving the paused job. */ }
+      paused = makePaused();
+    }
+    if (job.enabled && job.phase === 'sending' && !['reply-check', 'approval-check'].includes(job.runKind) && job.preDispatch !== true
         && activePending.length && Number.isFinite(job.runDeadline) && job.runDeadline > Date.now()) {
       submissionFenceUntil = Math.max(Number.isFinite(job.submissionFenceUntil) ? job.submissionFenceUntil : 0, job.runDeadline);
       paused = makePaused();
@@ -634,7 +669,7 @@ async function pauseLocked(job, message, event = 'paused', diagnostic = null, in
         }
       } catch { }
       finally { clearTimeout(timeout); }
-      if (!revoked) {
+      if (!revoked && job.preDispatch !== true) {
         submissionFenceUntil = Math.max(Number.isFinite(submissionFenceUntil) ? submissionFenceUntil : 0, job.runDeadline);
         try {
           const storedFence = (await chrome.storage.session.get('submissionFenceUntil')).submissionFenceUntil;
@@ -706,6 +741,15 @@ function assertSupportedTab(tab, expectedUrl = null) {
   if (!tab || !Number.isInteger(tab.id) || !validateTarget(tab.url)) throw fail(t('请选择 chatgpt.com 的 Your dot 页面或已有会话；首页与共享页面不支持。'));
   if (expectedUrl && normalizeUrl(tab.url) !== expectedUrl) throw fail(t('目标标签页已切换到其他会话；原任务会等待原地址重新打开。'));
 }
+async function clearPreDispatch(runId) {
+  return transact(async () => {
+    const current = await getJob();
+    if (!current?.enabled || current.phase !== 'sending' || current.runId !== runId || !['send', 'takeover-reply'].includes(current.runKind)) return false;
+    if (current.preDispatch !== true) return true;
+    await setJob({ ...current, preDispatch: false });
+    return true;
+  });
+}
 async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS, trace = null, traceEpoch = diagnosticEpoch, delivery = null) {
   let timer;
   let recoveryTimer;
@@ -714,6 +758,7 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS, tr
   let rejectedResult = false;
   let settled = false;
   let waitingReported = false;
+  let terminalRetryable = false;
   let resultChannel = 'none';
   let pending;
   const resultToken = args.mode === 'send' ? token() : null;
@@ -756,6 +801,13 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS, tr
     };
     const runner = async () => {
       // Keep run authorization in the extension context; never replay a send in another world.
+      if (args.mode === 'send' && args.runId) {
+        try {
+          if (!await clearPreDispatch(args.runId)) return { status: 'cancelled' };
+        } catch {
+          return { status: 'blocked', retryable: true, diagnosticCode: 'pre-dispatch-storage', message: t('后台状态暂未保存，稍后重试。') };
+        }
+      }
       let value;
       try { value = await runScript('ISOLATED'); }
       catch (error) {
@@ -825,7 +877,10 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS, tr
             // The same token is atomically deduplicated inside pageAction. Even
             // an original queued request arriving later can only join it.
             admissionOutstanding = true;
-            runScript('ISOLATED').then(value => {
+            Promise.resolve(args.mode === 'send' && args.runId ? clearPreDispatch(args.runId) : true).then(allowed => {
+              if (!allowed) return { status: 'cancelled' };
+              return runScript('ISOLATED');
+            }).then(value => {
               if (!settled && acceptExecutionResult(value)) {
                 if (['sent', 'manual-sent'].includes(value.status)) {
                   void receivePageResult({ runId: pending.runId, resultToken, result: value },
@@ -892,8 +947,9 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS, tr
     if (args.mode === 'send' && ['blocked', 'draft', 'busy', 'error'].includes(value.status)) {
       const counters = value.diagnosticProgress?.counters;
       const hasManualIntent = manualSubmission || counters?.manualIntents > 0;
-      const knownPreSubmitStop = value.retryable !== true && value.status === 'blocked'
-        && ['composer-slow-write', 'chunk-unconfirmed', 'chunk-attachment', 'chunk-mismatch'].includes(value.diagnosticCode) || (value.retryable !== true && value.status === 'busy' && value.diagnosticCode === 'approval-required');
+      const knownPreSubmitStop = (value.retryable !== true && value.status === 'blocked'
+        && ['composer-slow-write', 'chunk-unconfirmed', 'chunk-attachment', 'chunk-mismatch', 'oauth-required', 'captcha-required'].includes(value.diagnosticCode))
+        || (value.retryable !== true && value.status === 'busy' && ['approval-required', 'auto-allowed-prompt', 'takeover-needed'].includes(value.diagnosticCode));
       if (hasManualIntent || pending?.confirmedReceipt || pending?.dispatched === true || pending?.commitUncertain === true || counters?.dispatchAttempts !== 0 || counters?.manualIntents !== 0
           || (value.retryable !== true && !knownPreSubmitStop)) {
         return { status: 'unknown', message: t('页面未返回可确认的结果。'), diagnosticCode: 'adapter-result', executionDiagnostic: executionDiagnostic(), manualSubmission: hasManualIntent,
@@ -902,13 +958,14 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS, tr
     }
     // Return only bounded adapter status fields.
     const diagnosticCode = (value.status === 'draft' && value.diagnosticCode === 'existing-draft')
-      || (value.status === 'busy' && ['send-not-ready', 'approval-required', 'agent-paused', 'agent-busy'].includes(value.diagnosticCode))
-      || (value.status === 'blocked' && ['commit-not-dispatched', 'composer-unstable', 'composer-slow-write', 'chunk-unconfirmed', 'chunk-attachment', 'chunk-mismatch', 'composer-unavailable'].includes(value.diagnosticCode))
+      || (value.status === 'busy' && ['send-not-ready', 'approval-required', 'auto-allowed-prompt', 'takeover-needed', 'agent-paused', 'agent-busy'].includes(value.diagnosticCode))
+      || (value.status === 'blocked' && ['commit-not-dispatched', 'composer-unstable', 'composer-slow-write', 'chunk-unconfirmed', 'chunk-attachment', 'chunk-mismatch', 'composer-unavailable', 'oauth-required', 'captcha-required', 'pre-dispatch-storage'].includes(value.diagnosticCode))
       || (value.status === 'unknown' && ['paste-unconfirmed', 'paste-attachment-unconfirmed', 'receipt-ambiguous', 'receipt-mismatch', 'document-replaced'].includes(value.diagnosticCode)) ? value.diagnosticCode : null;
     const dispatchAttempts = value.diagnosticProgress?.counters?.dispatchAttempts;
-    return { status: value.status, message: String(value.message || '').slice(0, 300), identity: typeof value.identity === 'string' ? value.identity.slice(0, 500) : null, assistantToken: typeof value.assistantToken === 'string' ? value.assistantToken.slice(0, 500) : null, assistantCount: Number(value.assistantCount) || 0, diagnosticCode, executionDiagnostic: executionDiagnostic(), manualSubmission,
+    terminalRetryable = !manualSubmission && value.retryable === true && ['blocked', 'draft', 'busy', 'error'].includes(value.status);
+    return { status: value.status, message: String(value.message || '').slice(0, 300), identity: typeof value.identity === 'string' ? value.identity.slice(0, 500) : null, assistantToken: typeof value.assistantToken === 'string' ? value.assistantToken.slice(0, 500) : null, assistantCount: Number(value.assistantCount) || 0, ...(typeof value.takeoverAssistantToken === 'string' ? { takeoverAssistantToken: value.takeoverAssistantToken.slice(0, 500) } : {}), diagnosticCode, executionDiagnostic: executionDiagnostic(), manualSubmission,
       dispatched: pending?.dispatched === true || pending?.commitUncertain === true || Number.isSafeInteger(dispatchAttempts) && dispatchAttempts > 0,
-      retryable: !manualSubmission && value.retryable === true && ['blocked', 'draft', 'busy', 'error'].includes(value.status) };
+      retryable: terminalRetryable };
   } catch (error) {
     if (watchdogExpired) return { status: 'unknown', message: t('页面操作超时，本周期结果未确认。'), diagnosticCode: rejectedResult ? 'execution-exception' : missingResult ? 'no-valid-result' : 'execution-timeout', executionDiagnostic: executionDiagnostic(), manualSubmission: pending?.manualSubmission === true,
       dispatched: pending?.dispatched === true || pending?.commitUncertain === true };
@@ -918,7 +975,7 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS, tr
     if (pending?.trace) {
       clearTimeout(pending.traceTimer);
       if (trace) Object.assign(trace, pending.trace);
-      void persistDeliveryTrace(pending.trace, pending.diagnosticEpoch);
+      if (args.deferTraceFlush !== true || terminalRetryable) void persistDeliveryTrace(pending.trace, pending.diagnosticEpoch);
     }
     if (resultToken && !pending?.confirmedReceipt && !pending?.retiredForReplacement) pendingPageResults.delete(resultToken);
   }
@@ -1054,23 +1111,36 @@ async function receiveManualSubmission(message, sender) {
     return { ok: true };
   });
 }
-async function probe(tab, config, targetIdentity = null) {
+async function probe(tab, config, targetIdentity = null, autoAllow = false, autoAuthorizeTakeover = false, detectTakeover = false) {
   assertSupportedTab(tab);
   if (tab.discarded || tab.frozen) return { status: 'busy', message: t('目标标签页已休眠或冻结，等待页面恢复。') };
-  return executePage({ mode: 'check', expectedUrl: normalizeUrl(tab.url), prompt: '', runId: null, stopMarkers: config.stopMarkers ?? [], waitForIdle: config.waitForIdle ?? false, sendMethod: config.sendMethod ?? 'auto', targetIdentity }, tab.id);
+  return executePage({ mode: 'check', expectedUrl: normalizeUrl(tab.url), prompt: '', runId: null, stopMarkers: config.stopMarkers ?? [], waitForIdle: config.waitForIdle ?? false, autoAllow: autoAllow === true && config.autoAllow === true, autoAuthorizeTakeover: autoAuthorizeTakeover === true && config.autoAuthorizeTakeover === true, detectTakeover: detectTakeover === true, lastTakeoverToken: config.lastTakeoverToken ?? null, sendMethod: config.sendMethod ?? 'auto', targetIdentity }, tab.id);
 }
-async function currentTab(tabId) {
-  if (Number.isInteger(tabId)) return chrome.tabs.get(tabId);
-  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-  return tabs[0];
+async function currentTab(tabId, expectedUrl) {
+  const pinned = expectedUrl !== undefined;
+  const invalidTarget = () => fail(t('目标标签页已关闭或切换，请重新选择目标对话。'));
+  if (pinned && (!Number.isInteger(tabId) || !validateTarget(expectedUrl))) throw invalidTarget();
+  let tab;
+  if (Number.isInteger(tabId)) {
+    try { tab = await chrome.tabs.get(tabId); } catch { throw invalidTarget(); }
+  } else {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tabs.length === 1) [tab] = tabs;
+  }
+  assertSupportedTab(tab);
+  const url = normalizeUrl(tab.url);
+  if ((pinned && url !== normalizeUrl(expectedUrl)) ||
+      (tab.pendingUrl && url !== normalizeUrl(tab.pendingUrl))) throw invalidTarget();
+  return tab;
 }
 async function availableTargets() {
   try { return (await chrome.tabs.query({ url: 'https://chatgpt.com/*' })).filter(tab => validateTarget(tab.url)).map(tab => ({ id: tab.id, title: tab.title || 'ChatGPT / dot', url: tab.url })); }
   catch { return []; }
 }
-async function checkPage(tabId) {
-  const tab = await currentTab(tabId);
-  return { ok: true, result: await probe(tab, await getConfig()) };
+async function checkPage(tabId, expectedUrl) {
+  const config = await getConfig();
+  const tab = await currentTab(tabId, expectedUrl);
+  return { ok: true, result: await probe(tab, config) };
 }
 async function timingDiagnostics() {
   const job = await transact(getJob);
@@ -1144,37 +1214,73 @@ async function assertSubmissionReleased(job) {
     throw fail(t('页面提交停止尚未确认；等待当前提交许可到期后再继续。'));
   }
 }
-async function start(configInput, version, tabId) {
+async function start(configInput, version, tabId, expectedUrl) {
   const config = validatedConfig(configInput || await getConfig());
-  await transact(async () => {
-    assertIntent(version);
-    const old = await getJob();
-    await assertSubmissionReleased(old);
-    if (old?.enabled) await assertSubmissionReleased(await pauseLocked(old, t('正在绑定新的目标，原任务已替换。'), 'replaced'));
-  });
-  const tab = await currentTab(tabId);
-  assertSupportedTab(tab);
-  const result = await probe(tab, config);
+  assertIntent(version);
+  await assertSubmissionReleased(await getJob());
+  const tab = await currentTab(tabId, expectedUrl);
+  const url = normalizeUrl(tab.url);
+  assertIntent(version);
+  const result = await probe(tab, config, null, config.autoAllow === true, false);
   if (!['ready', 'busy', 'draft'].includes(result.status)) throw fail(result.message || t('页面暂时无法启用自动发送。'));
   if (new URL(tab.url).pathname.startsWith('/dots/') && !result.identity) throw fail(t('请先打开 dot 页面并等待会话历史加载，再绑定任务。'));
   const response = await transact(async () => {
     assertIntent(version);
-    const latestTab = await chrome.tabs.get(tab.id);
-    assertSupportedTab(latestTab, normalizeUrl(tab.url));
+    const old = await getJob();
+    await assertSubmissionReleased(old);
+    let latestTab = await currentTab(tab.id, url);
+    assertIntent(version);
+    if (old?.enabled) {
+      await assertSubmissionReleased(await pauseLocked(old, t('正在绑定新的目标，原任务已替换。'), 'replaced'));
+      latestTab = await currentTab(tab.id, url);
+      assertIntent(version);
+    }
     const protection = await protectFromDiscard(latestTab, config.preventDiscard);
     const now = Date.now();
     const awaitingApproval = result.diagnosticCode === 'approval-required';
-    const job = { ...config, id: token(), runId: token(), enabled: true, tabId: latestTab.id, url: normalizeUrl(latestTab.url), title: latestTab.title || 'ChatGPT / dot', targetIdentity: result.identity, sentCount: 0, unknownCount: 0, queueIndex: 0, unknownRecoveryVersion: UNKNOWN_RECOVERY_VERSION, nextAt: now + (awaitingApproval ? RETRY_MS : config.startImmediately ? 0 : config.intervalMinutes * 60_000), lastRunAt: null, runDeadline: null, phase: 'idle', awaitingReply: false, assistantToken: null, assistantCount: 0, needsAttention: awaitingApproval, statusText: awaitingApproval ? t('目标页面请求权限确认；请在页面中决定。一分钟后再检查。') : config.startImmediately ? t('已开始，即将进行首次后台检查。') : t`持续运行中；约 ${config.intervalMinutes} 分钟后首次检查。`, ...protection };
-    job.systemAwake = await syncPower(job);
-    await chrome.storage.local.set({ config });
-    await setJob(job);
+    const autoAllowedOnStart = result.diagnosticCode === 'auto-allowed-prompt';
+    const job = { ...config, id: token(), runId: token(), enabled: true, tabId: latestTab.id, url: normalizeUrl(latestTab.url), title: latestTab.title || 'ChatGPT / dot', targetIdentity: result.identity, sentCount: 0, unknownCount: 0, queueIndex: 0, unknownRecoveryVersion: UNKNOWN_RECOVERY_VERSION, nextAt: now + (awaitingApproval || autoAllowedOnStart ? RETRY_MS : config.startImmediately ? 0 : config.intervalMinutes * 60_000), lastRunAt: null, runDeadline: null, phase: 'idle', awaitingReply: false, assistantToken: null, assistantCount: 0, needsAttention: awaitingApproval, statusText: autoAllowedOnStart ? t('已自动确认常规工具权限，继续等待运行。') : awaitingApproval ? t('目标页面请求权限确认；请在页面中决定。一分钟后再检查。') : config.startImmediately ? t('已开始，即将进行首次后台检查。') : t`持续运行中；约 ${config.intervalMinutes} 分钟后首次检查。`, ...protection };
+    try {
+      assertIntent(version);
+      job.systemAwake = await syncPower(job);
+      assertIntent(version);
+      await chrome.storage.local.set({ config });
+      await currentTab(tab.id, url);
+      assertIntent(version);
+    } catch (error) {
+      await restoreDiscard(job);
+      if (job.systemAwake) await syncPower(null);
+      throw error;
+    }
+    try {
+      await persistActivation(job);
+    } catch {
+      const message = t('无法保存任务；未启动自动发送。');
+      // A rejected local recovery write can leave the session snapshot enabled.
+      const observed = await getJob().catch(() => job);
+      if (observed?.id === job.id) {
+        try { await pauseLocked(job, message, 'scheduler-error'); }
+        catch {
+          revokedRuns.add(job.runId);
+          await syncAlarm(null).catch(() => undefined);
+          await syncPower(null);
+          await restoreDiscard(job);
+          throw fail(t('任务启动失败，且无法确认已保存暂停状态；请先检查扩展存储。'));
+        }
+      } else {
+        await restoreDiscard(job);
+        if (job.systemAwake) await syncPower(null);
+      }
+      throw fail(message);
+    }
     try { await syncAlarm(job); } catch { await pauseLocked(job, t('后台计时器不可用，未启动任务。'), 'scheduler-error'); throw fail(t('无法创建后台计时器。')); }
     await recordActivityEvent('started', t`开始任务，间隔 ${config.intervalMinutes} 分钟，${config.maxSends ? t`上限 ${config.maxSends} 次` : t('不限次数')}。`);
     if (awaitingApproval) await recordActivityEvent('busy', t('目标页面请求权限确认；请在页面中决定。'), { code: 'approval-required' });
+    if (autoAllowedOnStart) await recordActivityEvent('auto-allowed', t('已自动确认常规工具权限，继续等待运行。'), { code: 'auto-allowed-prompt' });
     await updateBadge(job);
     return { ok: true, job };
   });
-  if (config.startImmediately && result.diagnosticCode !== 'approval-required') return runRound(true, response.job.id);
+  if (config.startImmediately && !['approval-required', 'auto-allowed-prompt'].includes(result.diagnosticCode)) return runRound(true, response.job.id, version);
   return response;
 }
 async function resume(version) {
@@ -1216,7 +1322,7 @@ async function resume(version) {
     } catch { /* Wait for original page. */ }
     const job = { ...current, ...protection, enabled: true, runId: token(), runDeadline: null, phase: 'idle', manualSubmissionPending: false, nextAt: Date.now() + current.intervalMinutes * 60_000, needsAttention: false, statusText: t`已继续原任务；约 ${current.intervalMinutes} 分钟后检查。` };
     job.systemAwake = await syncPower(job);
-    try { await setJob(job); await syncAlarm(job); }
+    try { await persistActivation(job); await syncAlarm(job); }
     catch {
       await pauseLocked(job, t('后台计时器不可用，未启动任务。'), 'scheduler-error');
       throw fail(t('无法创建后台计时器。'));
@@ -1288,12 +1394,14 @@ async function commitRun(message, sender) {
     const version = intentVersion;
     // Persist before crossing worlds. An uncertain invocation is never replayed.
     await setJob({ ...job, editorCommitRunId: job.runId });
-    return { tabId: job.tabId, documentId: sender.documentId, version, args: {
+    const commitArgs = {
       expectedUrl: job.url, targetIdentity: job.targetIdentity,
       prompt: currentPrompt(job), sendMethod: job.sendMethod ?? 'auto', deadline: job.runDeadline,
       persistentDelivery: true,
       receiptBoundaryToken: message.receiptBoundaryToken,
-    } };
+    };
+    if (job.runKind === 'takeover-reply') commitArgs.prompt = resolvedTakeoverPrompt(job, getLanguage());
+    return { tabId: job.tabId, documentId: sender.documentId, version, args: commitArgs };
   });
   if (!permit) return { ok: false, code: 'cancelled' };
   if (permit.duplicate) return { ok: false, code: 'unknown' };
@@ -1514,22 +1622,20 @@ async function runStillCurrent(snapshot) {
 async function resolveTarget(snapshot) {
   let tab;
   try { tab = await chrome.tabs.get(snapshot.tabId); } catch { /* Re-resolve by exact URL below. */ }
-  const isDot = snapshot.url.includes('/dots/');
   if (!tab || normalizeUrl(tab.url) !== snapshot.url) {
     const allTabs = await chrome.tabs.query({ url: 'https://chatgpt.com/*' });
-    let matches = allTabs.filter(item => normalizeUrl(item.url) === snapshot.url);
+    const matches = allTabs.filter(item => normalizeUrl(item.url) === snapshot.url);
     if (matches.length !== 1) return { status: 'busy', message: matches.length ? t('找到多个相同目标页，等待只保留一个或重新绑定。') : t('等待原目标页面重新打开；任务仍保持启用。') };
     tab = matches[0];
   }
-  const nextUrl = normalizeUrl(tab.url);
-  if (snapshot.tabId !== tab.id || (isDot && snapshot.url !== nextUrl)) {
+  if (snapshot.tabId !== tab.id) {
     const changed = await transact(async () => {
       const current = await getJob();
       if (!current?.enabled || current.runId !== snapshot.runId) return false;
       await restoreDiscard(current);
       const protection = await protectFromDiscard(tab, current.preventDiscard);
-      Object.assign(snapshot, protection, { tabId: tab.id, url: nextUrl });
-      await setJob({ ...current, ...protection, tabId: tab.id, url: nextUrl });
+      Object.assign(snapshot, protection, { tabId: tab.id });
+      await setJob({ ...current, ...protection, tabId: tab.id });
       return true;
     });
     if (!changed) return { status: 'cancelled', message: t('本次检查已取消。') };
@@ -1551,7 +1657,7 @@ async function finishRoundLocked(snapshot, result, delivery = null) {
     if (ambiguous()) return pauseAmbiguous();
     const now = Date.now();
     const manualUnconfirmed = (current.manualSubmissionPending || result.manualSubmission) && result.status !== 'manual-sent';
-    const job = { ...current, phase: 'idle', runKind: null, runDeadline: null, needsAttention: false };
+    const job = { ...current, phase: 'idle', runKind: null, preDispatch: undefined, pendingTakeoverToken: undefined, runDeadline: null, needsAttention: false };
     if (result.identity && !job.targetIdentity) job.targetIdentity = result.identity;
     if (manualUnconfirmed) {
       job.unknownCount = (job.unknownCount || 0) + 1;
@@ -1587,10 +1693,20 @@ async function finishRoundLocked(snapshot, result, delivery = null) {
       return { ok: true, job: await pauseLocked(job, message, 'unconfirmed',
         { code: result.diagnosticCode, durationMs: now - snapshot.lastRunAt, ...result.executionDiagnostic }) };
     }
-    if (['sent', 'manual-sent'].includes(result.status)) {
+    if (['sent', 'manual-sent'].includes(result.status) && current.runKind === 'takeover-reply') {
+      job.lastTakeoverToken = current.pendingTakeoverToken ?? result.assistantToken ?? job.lastTakeoverToken ?? null;
+      job.consecutiveTakeoverReplies = (job.consecutiveTakeoverReplies || 0) + 1;
+      job.assistantToken = result.assistantToken ?? job.assistantToken;
+      job.assistantCount = result.assistantCount ?? job.assistantCount;
+      job.nextAt = now + RETRY_MS;
+      job.statusText = t('已自动发送接管与登录授权回复，等待 Dot 继续执行。');
+      await recordActivityEvent('takeover-replied', t('已自动发送接管与登录授权回复，等待 Dot 继续执行。'),
+        { code: 'takeover-replied', durationMs: now - snapshot.lastRunAt, ...result.executionDiagnostic });
+    } else if (['sent', 'manual-sent'].includes(result.status)) {
       if (result.status === 'sent') job.sentCount += 1;
       else job.manualSentCount = (job.manualSentCount || 0) + 1;
       job.promptDelivery = null;
+      job.consecutiveTakeoverReplies = 0;
       if (job.mode !== 'repeat') job.queueIndex += 1;
       if (job.maxSends > 0 && job.sentCount + (job.manualSentCount || 0) >= job.maxSends) {
         const paused = await pauseLocked(job, t`已确认发送 ${job.sentCount + (job.manualSentCount || 0)} 次，达到你设置的上限。`, 'limit-reached');
@@ -1614,6 +1730,37 @@ async function finishRoundLocked(snapshot, result, delivery = null) {
       job.nextAt = now + job.intervalMinutes * 60_000;
       job.statusText = t`检测到新的回复已结束；约 ${job.intervalMinutes} 分钟后发送下一条。`;
       await recordActivityEvent('reply-complete', t('新的回复已结束，开始下一发送间隔。'));
+    } else if (result.status === 'blocked' && result.diagnosticCode === 'oauth-required') {
+      job.lastResult = result.status;
+      job.lastDiagnosticCode = result.diagnosticCode;
+      return { ok: true, job: await pauseLocked(job, t('检测到需要手动登录或 OAuth 授权的弹窗；已暂停，请手动完成后再继续。'), 'paused',
+        { code: 'oauth-required', durationMs: now - snapshot.lastRunAt, ...result.executionDiagnostic }) };
+    } else if (result.status === 'blocked' && result.diagnosticCode === 'captcha-required') {
+      job.lastResult = result.status;
+      job.lastDiagnosticCode = result.diagnosticCode;
+      return { ok: true, job: await pauseLocked(job, t('检测到需要人工完成人机验证或密码/验证码；已暂停，请手动完成后再继续。'), 'paused',
+        { code: 'captcha-required', durationMs: now - snapshot.lastRunAt, ...result.executionDiagnostic }) };
+    } else if (result.status === 'busy' && result.diagnosticCode === 'auto-allowed-prompt') {
+      job.nextAt = now + RETRY_MS;
+      job.statusText = t('已自动确认常规工具权限，等待 Agent 继续执行。');
+      await recordActivityEvent('auto-allowed', t('已自动确认常规工具权限，等待 Agent 继续执行。'),
+        { code: 'auto-allowed-prompt', durationMs: now - snapshot.lastRunAt, ...result.executionDiagnostic });
+    } else if (result.status === 'busy' && result.diagnosticCode === 'takeover-needed') {
+      if ((job.consecutiveTakeoverReplies || 0) >= 3) {
+        job.lastResult = 'blocked';
+        job.lastDiagnosticCode = 'takeover-needed';
+        return { ok: true, job: await pauseLocked(job, t('已连续自动发送 3 次接管授权回复，请手动检查页面后再继续。'), 'paused',
+          { code: 'takeover-needed', durationMs: now - snapshot.lastRunAt, ...result.executionDiagnostic }) };
+      }
+      job.nextAt = now + RETRY_MS;
+      job.statusText = t('检测到 Dot 请求接管或登录授权，准备自动发送授权回复。');
+      if (current.lastDiagnosticCode !== 'takeover-needed') {
+        await recordActivityEvent('busy', t('检测到 Dot 请求接管或登录授权，准备自动发送授权回复。'),
+          { code: 'takeover-needed', durationMs: now - snapshot.lastRunAt, ...result.executionDiagnostic });
+      }
+    } else if (result.status === 'cancelled') {
+      job.nextAt = now + RETRY_MS;
+      job.statusText = t('本轮检查已取消，一分钟后再试，任务仍保持启用。');
     } else if (result.status === 'busy' && result.diagnosticCode === 'approval-required') {
       job.nextAt = now + RETRY_MS;
       job.needsAttention = true;
@@ -1652,6 +1799,169 @@ async function finishRoundLocked(snapshot, result, delivery = null) {
     if (ambiguous()) return pauseAmbiguous();
     return { ok: true, job };
 }
+const TRACE_BUSY_REASONS = ['approval-required', 'auto-allowed-prompt', 'takeover-needed', 'agent-paused', 'agent-busy'];
+const TRACE_BLOCKED_REASONS = ['composer-unavailable', 'oauth-required', 'captcha-required', 'pre-dispatch-storage', 'composer-slow-write', 'chunk-unconfirmed', 'chunk-attachment', 'chunk-mismatch'];
+const TRACE_UNKNOWN_REASONS = ['paste-unconfirmed', 'paste-attachment-unconfirmed', 'receipt-ambiguous', 'receipt-mismatch', 'composer-slow-write', 'document-replaced'];
+async function executeActiveSendLifecycle(initialSnapshot, version, delivery, trace, traceEpoch, buildStep) {
+  let snapshot = initialSnapshot;
+  let result;
+  let sendAttemptCount = 0;
+  const MAX_PRE_SUBMISSION_RETRIES = 3;
+  for (;;) {
+    try {
+      const resolved = await resolveTarget(snapshot);
+      if (!resolved.tab) result = resolved;
+      else if (!await runStillCurrent(snapshot) || !deliveryIntentCurrent(delivery) || hasDeliveryEvidence(delivery)) result = { status: 'cancelled' };
+      else if (resolved.tab.frozen || resolved.tab.discarded) {
+        try {
+          await chrome.tabs.reload(resolved.tab.id);
+          result = { status: 'busy', message: t('目标标签已休眠，正在自动唤醒刷新，一分钟后再检查。') };
+        } catch {
+          result = { status: 'busy', message: t('目标标签已冻结或休眠，请设置网站始终保持活动。') };
+        }
+      } else {
+        result = await buildStep(resolved.tab, snapshot);
+      }
+    } catch {
+      result = snapshot.runKind === 'reply-check'
+        ? { status: 'error', message: t('回复检查暂不可用，继续等待新回复。') }
+        : { status: 'unknown', message: t('后台页面操作未确认。'), diagnosticCode: 'execution-exception' };
+    }
+    if (!['send', 'takeover-reply'].includes(snapshot.runKind) || result?.retryable !== true || !await runStillCurrent(snapshot)) break;
+    if ((result.status === 'blocked' && ['composer-unavailable', 'oauth-required', 'captcha-required'].includes(result.diagnosticCode))
+        || (result.status === 'busy' && ['agent-paused', 'agent-busy', 'approval-required', 'auto-allowed-prompt', 'takeover-needed'].includes(result.diagnosticCode))) break;
+    sendAttemptCount++;
+    if (sendAttemptCount >= MAX_PRE_SUBMISSION_RETRIES) break;
+    // Explicit no-dispatch may recover a same-document attachment. Authority
+    // remains pinned even if the page is replaced after this readback.
+    if (delivery.mainCommitAdmitted) {
+      let sameDocument = false;
+      if (delivery.mainCommitNoDispatch && typeof delivery.commitDocumentId === 'string') {
+        try {
+          const frames = await chrome.scripting.executeScript({ target: { tabId: snapshot.tabId },
+            world: 'ISOLATED', func: pageInvocationState, args: [{ runId: snapshot.runId }] });
+          sameDocument = frames?.find(frame => frame.frameId === 0)?.documentId === delivery.commitDocumentId;
+        } catch { }
+      }
+      if (!sameDocument) {
+        result = { status: 'unknown', diagnosticCode: 'commit-not-dispatched' };
+        break;
+      }
+    }
+    // Only an explicit pre-submission result can start a fresh admission. Retire
+    // the old run/commit reservation; uncertain or attempted sends never enter here.
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    const renewed = await transact(async () => {
+      const current = await getJob();
+      if (!deliveryIntentCurrent(delivery) || hasDeliveryEvidence(delivery) || !current?.enabled || current.phase !== 'sending'
+        || current.manualSubmissionPending || current.id !== snapshot.id || current.runId !== snapshot.runId
+        || current.url !== snapshot.url || current.tabId !== snapshot.tabId) return null;
+      const next = { ...current, runId: token(), preDispatch: !delivery.mainCommitAdmitted, editorCommitRunId: null, runDeadline: Date.now() + EXECUTION_MS,
+        statusText: t('仍在等待目标页面或发送回执；无固定等待时限，可随时暂停。') };
+      // Receipt/manual handlers record evidence before entering this queue. Link
+      // their accounting to the successor before storage can yield to them.
+      delivery.runId = next.runId;
+      try { await setJob(next); await updateBadge(next); }
+      catch {
+        revokedRuns.add(next.runId);
+        revokedRuns.add(current.runId);
+        const observed = await getJob().catch(() => null);
+        const written = observed?.runId === next.runId ? next : current;
+        delivery.runId = written.runId;
+        return { job: written, admitted: false };
+      }
+      return { job: next, admitted: deliveryIntentCurrent(delivery) && !hasDeliveryEvidence(delivery) };
+    });
+    if (renewed) snapshot = renewed.job;
+    if (!renewed?.admitted) {
+      result = { status: 'unknown', diagnosticCode: 'commit-not-dispatched',
+        manualSubmission: delivery.retired.some(item => item.manualSubmission) };
+      break;
+    }
+  }
+  if (trace) void persistDeliveryTrace(updateDeliveryTrace(trace, {
+    state: ['sent', 'manual-sent', 'cancelled', 'unknown', 'blocked', 'error'].includes(result?.status) ? result.status : 'blocked',
+    reason: result?.status === 'sent' ? (snapshot.runKind === 'takeover-reply' ? 'takeover-replied' : 'receipt-confirmed')
+      : result?.status === 'manual-sent' ? (snapshot.runKind === 'takeover-reply' ? 'takeover-replied' : 'manual-receipt-confirmed')
+      : result?.status === 'cancelled' ? 'cancelled'
+      : result?.status === 'busy' && TRACE_BUSY_REASONS.includes(result?.diagnosticCode) ? result.diagnosticCode
+      : result?.status === 'blocked' && TRACE_BLOCKED_REASONS.includes(result?.diagnosticCode) ? result.diagnosticCode
+      : result?.status === 'unknown' && TRACE_UNKNOWN_REASONS.includes(result?.diagnosticCode) ? result.diagnosticCode : undefined,
+  }, Date.now()), traceEpoch);
+  try {
+    const finished = await finishRound(snapshot, result, delivery);
+    return { finished, result, version };
+  } finally {
+    for (const [key, pending] of pendingPageResults) {
+      if (pending.runId === snapshot.runId || pending.delivery === delivery && pending.retiredForReplacement) {
+        clearTimeout(pending.receiptRetryTimer);
+        clearTimeout(pending.traceTimer);
+        pendingPageResults.delete(key);
+      }
+    }
+  }
+}
+async function runTakeoverReplyRound(assistantToken, expectedJobId = null, expectedIntentVersion = null) {
+  const claim = await transact(async () => {
+    const job = await getJob();
+    if (pendingStopIntents > 0 || failedStopVersion === intentVersion || expectedIntentVersion !== null && expectedIntentVersion !== intentVersion) return { job, claimed: false };
+    if (revokedRuns.has(job?.runId)) return { job, claimed: false };
+    if (expectedJobId && job?.id !== expectedJobId) return { job, claimed: false };
+    if (!job?.enabled || job.phase !== 'idle' || job.autoAuthorizeTakeover !== true) return { job, claimed: false };
+    if ((job.consecutiveTakeoverReplies || 0) >= 3) {
+      return { job: await pauseLocked(job, t('已连续自动发送 3 次接管授权回复，请手动检查页面后再继续。'), 'paused', { code: 'takeover-needed' }), claimed: false };
+    }
+    if (assistantToken && job.lastTakeoverToken === assistantToken) return { job, claimed: false };
+    const text = resolvedTakeoverPrompt(job, getLanguage());
+    if (typeof text === 'string' && (text.includes('\u0000') || !text.isWellFormed())) {
+      return { job: await pauseLocked(job, t('接管回复提示词含 NUL 或无效 Unicode 代理项，已暂停，请先修正。'), 'blocked'), claimed: false };
+    }
+    const version = intentVersion;
+    const snapshot = {
+      ...job,
+      phase: 'sending',
+      runKind: 'takeover-reply',
+      preDispatch: true,
+      pendingTakeoverToken: assistantToken ?? null,
+      runId: token(),
+      runDeadline: Date.now() + EXECUTION_MS,
+      lastRunAt: Date.now(),
+      statusText: t('正在发送接管与登录授权回复…'),
+    };
+    try { await setJob(snapshot); }
+    catch (error) { revokedRuns.add(snapshot.runId); throw error; }
+    await updateBadge(snapshot);
+    return { job: snapshot, claimed: true, version };
+  });
+  if (!claim.claimed) return { ok: true, job: claim.job };
+  const snapshot = claim.job;
+  const delivery = { version: claim.version, runId: snapshot.runId, retired: [] };
+  const traceEpoch = diagnosticEpoch;
+  const trace = await newDeliveryTrace();
+  const { finished } = await executeActiveSendLifecycle(snapshot, claim.version, delivery, trace, traceEpoch, (tab, activeSnapshot) =>
+    executePage({
+      mode: 'send',
+      isTakeoverReply: true,
+      expectedUrl: activeSnapshot.url,
+      prompt: resolvedTakeoverPrompt(activeSnapshot, getLanguage()),
+      runId: activeSnapshot.runId,
+      runDeadline: activeSnapshot.runDeadline,
+      stopMarkers: activeSnapshot.stopMarkers ?? [],
+      waitForIdle: false,
+      autoAllow: activeSnapshot.autoAllow === true,
+      autoAuthorizeTakeover: true,
+      lastTakeoverToken: activeSnapshot.lastTakeoverToken ?? null,
+      extensionPriority: true,
+      extensionClock: true,
+      modelCommit: true,
+      unlimitedReadiness: true,
+      persistentDelivery: true,
+      sendMethod: activeSnapshot.sendMethod ?? 'auto',
+      targetIdentity: activeSnapshot.targetIdentity,
+      deferTraceFlush: true,
+    }, activeSnapshot.tabId, activeSnapshot.runDeadline, trace, traceEpoch, delivery));
+  return finished;
+}
 async function runRound(force = false, expectedJobId = null, expectedIntentVersion = null) {
   const claim = await transact(async () => {
     const job = await getJob();
@@ -1682,111 +1992,56 @@ async function runRound(force = false, expectedJobId = null, expectedIntentVersi
         || !Number.isSafeInteger(promptDelivery?.ordinal) || promptDelivery.ordinal !== ordinal
         || !Number.isSafeInteger(promptDelivery?.issuedAt) || promptDelivery.issuedAt < 0)) throw fail(t('操作未完成，请重试。'));
     const version = intentVersion;
-    const snapshot = { ...job, promptDelivery, phase: 'sending', runKind, runId: token(), runDeadline: Date.now() + EXECUTION_MS, lastRunAt: Date.now(), statusText: t('正在后台检查目标页面…') };
+    const snapshot = { ...job, promptDelivery, phase: 'sending', runKind, preDispatch: runKind === 'send', runId: token(), runDeadline: Date.now() + EXECUTION_MS, lastRunAt: Date.now(), statusText: t('正在后台检查目标页面…') };
     try { await setJob(snapshot); }
     catch (error) { revokedRuns.add(snapshot.runId); throw error; }
     await updateBadge(snapshot); return { job: snapshot, claimed: true, version };
   });
   if (!claim.claimed) return { ok: true, job: claim.job };
-  let snapshot = claim.job;
+  const snapshot = claim.job;
   const delivery = { version: claim.version, runId: snapshot.runId, retired: [] };
   const traceEpoch = diagnosticEpoch;
   const trace = snapshot.runKind === 'send' ? await newDeliveryTrace() : null;
-  let result;
-  let sendAttemptCount = 0;
-  const MAX_PRE_SUBMISSION_RETRIES = 3;
-  for (;;) {
-  try {
-    const resolved = await resolveTarget(snapshot);
-    if (!resolved.tab) result = resolved;
-    else if (!await runStillCurrent(snapshot) || !deliveryIntentCurrent(delivery) || hasDeliveryEvidence(delivery)) result = { status: 'cancelled' };
-    else if (resolved.tab.frozen || resolved.tab.discarded) {
-      try {
-        await chrome.tabs.reload(resolved.tab.id);
-        result = { status: 'busy', message: t('目标标签已休眠，正在自动唤醒刷新，一分钟后再检查。') };
-      } catch {
-        result = { status: 'busy', message: t('目标标签已冻结或休眠，请设置网站始终保持活动。') };
-      }
+  const checkReplyTurn = async (tab, activeSnapshot) => {
+    let probeResult = await probe(tab, { ...activeSnapshot, waitForIdle: true }, activeSnapshot.targetIdentity,
+      activeSnapshot.autoAllow === true, activeSnapshot.autoAuthorizeTakeover === true, activeSnapshot.autoAuthorizeTakeover === true);
+    if (['blocked', 'busy'].includes(probeResult.status) && ['approval-required', 'auto-allowed-prompt', 'oauth-required', 'captcha-required', 'takeover-needed'].includes(probeResult.diagnosticCode)) {
+      return probeResult;
     }
-    else if (snapshot.awaitingReply && !force) {
-      result = await probe(resolved.tab, { ...snapshot, waitForIdle: true }, snapshot.targetIdentity);
-      if (['unknown', 'cancelled'].includes(result.status)) result = { status: 'error', message: t('回复检查暂不可用，继续等待新回复。') };
-      const changed = result.assistantToken ? result.assistantToken !== snapshot.assistantToken : result.assistantCount > snapshot.assistantCount;
-      if (result.status === 'ready') result = changed ? { status: 'reply-complete' } : { status: 'busy', message: t('等待新的 Agent 回复完成。') };
-    } else {
-      result = await executePage({ mode: 'send', expectedUrl: snapshot.url, prompt: currentPrompt(snapshot), promptDelivery: snapshot.promptDelivery, runId: snapshot.runId, runDeadline: snapshot.runDeadline, stopMarkers: snapshot.stopMarkers ?? [], waitForIdle: snapshot.waitForIdle ?? false, extensionPriority: true, extensionClock: true, modelCommit: true, unlimitedReadiness: true, persistentDelivery: true, sendMethod: snapshot.sendMethod ?? 'auto', targetIdentity: snapshot.targetIdentity }, snapshot.tabId, snapshot.runDeadline, trace, traceEpoch, delivery);
-    }
-  } catch { result = snapshot.runKind === 'reply-check' ? { status: 'error', message: t('回复检查暂不可用，继续等待新回复。') } : { status: 'unknown', message: t('后台页面操作未确认。'), diagnosticCode: 'execution-exception' }; }
-  if (snapshot.runKind !== 'send' || result?.retryable !== true || !await runStillCurrent(snapshot)) break;
-  if ((result.status === 'blocked' && result.diagnosticCode === 'composer-unavailable')
-      || (result.status === 'busy' && ['agent-paused', 'agent-busy'].includes(result.diagnosticCode))) break;
-  sendAttemptCount++;
-  if (sendAttemptCount >= MAX_PRE_SUBMISSION_RETRIES) break;
-  // Explicit no-dispatch may recover a same-document attachment. Authority
-  // remains pinned even if the page is replaced after this readback.
-  if (delivery.mainCommitAdmitted) {
-    let sameDocument = false;
-    if (delivery.mainCommitNoDispatch && typeof delivery.commitDocumentId === 'string') {
-      try {
-        const frames = await chrome.scripting.executeScript({ target: { tabId: snapshot.tabId },
-          world: 'ISOLATED', func: pageInvocationState, args: [{ runId: snapshot.runId }] });
-        sameDocument = frames?.find(frame => frame.frameId === 0)?.documentId === delivery.commitDocumentId;
-      } catch { }
-    }
-    if (!sameDocument) {
-      result = { status: 'unknown', diagnosticCode: 'commit-not-dispatched' };
-      break;
-    }
-  }
-  // Only an explicit pre-submission result can start a fresh admission. Retire
-  // the old run/commit reservation; uncertain or attempted sends never enter here.
-  await new Promise(resolve => setTimeout(resolve, 1000));
-  const renewed = await transact(async () => {
-    const current = await getJob();
-    if (!deliveryIntentCurrent(delivery) || hasDeliveryEvidence(delivery) || !current?.enabled || current.phase !== 'sending'
-      || current.manualSubmissionPending || current.id !== snapshot.id || current.runId !== snapshot.runId
-      || current.url !== snapshot.url || current.tabId !== snapshot.tabId) return null;
-    const next = { ...current, runId: token(), editorCommitRunId: null, runDeadline: Date.now() + EXECUTION_MS,
-      statusText: t('仍在等待目标页面或发送回执；无固定等待时限，可随时暂停。') };
-    // Receipt/manual handlers record evidence before entering this queue. Link
-    // their accounting to the successor before storage can yield to them.
-    delivery.runId = next.runId;
-    try { await setJob(next); await updateBadge(next); }
-    catch {
-      revokedRuns.add(next.runId);
-      revokedRuns.add(current.runId);
-      const observed = await getJob().catch(() => null);
-      const written = observed?.runId === next.runId ? next : current;
-      delivery.runId = written.runId;
-      return { job: written, admitted: false };
-    }
-    return { job: next, admitted: deliveryIntentCurrent(delivery) && !hasDeliveryEvidence(delivery) };
+    if (['unknown', 'cancelled'].includes(probeResult.status)) probeResult = { status: 'error', message: t('回复检查暂不可用，继续等待新回复。') };
+    const changed = probeResult.assistantToken ? probeResult.assistantToken !== activeSnapshot.assistantToken : probeResult.assistantCount > activeSnapshot.assistantCount;
+    if (probeResult.status === 'ready') return changed ? { status: 'reply-complete' } : { status: 'busy', message: t('等待新的 Agent 回复完成。') };
+    return probeResult;
+  };
+  const { finished, result } = await executeActiveSendLifecycle(snapshot, claim.version, delivery, trace, traceEpoch, (tab, activeSnapshot) => {
+    if (activeSnapshot.awaitingReply && !force) return checkReplyTurn(tab, activeSnapshot);
+    return executePage({
+      mode: 'send',
+      expectedUrl: activeSnapshot.url,
+      prompt: currentPrompt(activeSnapshot),
+      promptDelivery: activeSnapshot.promptDelivery,
+      runId: activeSnapshot.runId,
+      runDeadline: activeSnapshot.runDeadline,
+      stopMarkers: activeSnapshot.stopMarkers ?? [],
+      waitForIdle: activeSnapshot.waitForIdle ?? false,
+      autoAllow: activeSnapshot.autoAllow === true,
+      autoAuthorizeTakeover: activeSnapshot.autoAuthorizeTakeover === true,
+      lastTakeoverToken: activeSnapshot.lastTakeoverToken ?? null,
+      extensionPriority: true,
+      extensionClock: true,
+      modelCommit: true,
+      unlimitedReadiness: true,
+      persistentDelivery: true,
+      sendMethod: activeSnapshot.sendMethod ?? 'auto',
+      targetIdentity: activeSnapshot.targetIdentity,
+      deferTraceFlush: true,
+    }, activeSnapshot.tabId, activeSnapshot.runDeadline, trace, traceEpoch, delivery);
   });
-  if (renewed) snapshot = renewed.job;
-  if (!renewed?.admitted) {
-    result = { status: 'unknown', diagnosticCode: 'commit-not-dispatched',
-      manualSubmission: delivery.retired.some(item => item.manualSubmission) };
-    break;
+  if (result?.status === 'busy' && result?.diagnosticCode === 'takeover-needed' && finished?.job?.enabled
+      && (finished.job.consecutiveTakeoverReplies || 0) < 3 && claim.version === intentVersion) {
+    return runTakeoverReplyRound(result.takeoverAssistantToken, finished.job.id, claim.version);
   }
-  }
-  if (trace) void persistDeliveryTrace(updateDeliveryTrace(trace, {
-    state: ['sent', 'manual-sent', 'cancelled', 'unknown', 'blocked', 'error'].includes(result?.status) ? result.status : 'blocked',
-    reason: result?.status === 'sent' ? 'receipt-confirmed' : result?.status === 'manual-sent' ? 'manual-receipt-confirmed'
-      : result?.status === 'cancelled' ? 'cancelled'
-      : result?.status === 'busy' && ['approval-required', 'agent-paused', 'agent-busy'].includes(result?.diagnosticCode) ? result.diagnosticCode
-      : result?.status === 'blocked' && ['composer-unavailable', 'composer-slow-write', 'chunk-unconfirmed', 'chunk-attachment', 'chunk-mismatch'].includes(result?.diagnosticCode) ? result.diagnosticCode
-      : result?.status === 'unknown' && ['paste-unconfirmed', 'paste-attachment-unconfirmed', 'receipt-ambiguous', 'receipt-mismatch', 'composer-slow-write', 'document-replaced'].includes(result?.diagnosticCode) ? result.diagnosticCode : undefined,
-  }, Date.now()), traceEpoch);
-  try { return await finishRound(snapshot, result, delivery); }
-  finally {
-    for (const [key, pending] of pendingPageResults) {
-      if (pending.runId === snapshot.runId || pending.delivery === delivery && pending.retiredForReplacement) {
-        clearTimeout(pending.receiptRetryTimer);
-        clearTimeout(pending.traceTimer);
-        pendingPageResults.delete(key);
-      }
-    }
-  }
+  return finished;
 }
 async function initializePrivatePreset() {
   if (!BUNDLED_PROMPT) return;
@@ -1808,6 +2063,7 @@ async function initializePrivatePreset() {
 }
 async function initialize() {
   await initializeLanguage();
+  await initializeDraftVersion();
   try { await chrome.storage.local.setAccessLevel?.({ accessLevel: 'TRUSTED_CONTEXTS' }); } catch { /* Old browser. */ }
   try { draftClearFailed = (await chrome.storage.local.get(DRAFT_CLEAR_MARKER))[DRAFT_CLEAR_MARKER] === true; }
   catch { draftClearFailed = true; }
@@ -1823,7 +2079,14 @@ async function initialize() {
     const updates = {};
     if (recovery !== saved) updates.resumeJob = recovery;
     if (Object.keys(updates).length) await chrome.storage.local.set(updates);
-    let job = retireDraftNotice(migrateDelivery(await getJob()));
+    const existingSessionJob = await getJob();
+    const hadSessionJob = Boolean(existingSessionJob);
+    let job = retireDraftNotice(migrateDelivery(existingSessionJob));
+    const restoredFromLocal = !hadSessionJob && Boolean(recovery);
+    const activationRun = (await chrome.storage.session.get(ACTIVATION_MARKER))[ACTIVATION_MARKER];
+    const pauseRun = (await chrome.storage.local.get(PAUSE_MARKER))[PAUSE_MARKER];
+    const originalJob = job || recovery;
+    const recoverPause = typeof pauseRun === 'string' && originalJob?.enabled && originalJob.runId === pauseRun;
     if (!job) {
       if (recovery) {
         // Rebind only to an exact URL; additionally require the dot conversation
@@ -1847,27 +2110,47 @@ async function initialize() {
           statusText: t('提交结果未确认；已暂停，请检查会话后再继续。') } : {}) };
       if (unresolved) await recordActivityEvent('unconfirmed', t('提交结果未确认；已暂停，请检查会话后再继续。'));
     }
-    if (job && !job.tabId && recovery) {
-      if (job.enabled && (!job.nextAt || job.nextAt <= Date.now())) {
-        job.nextAt = Date.now() + 3000;
-        job.statusText = t('已从重启中恢复；正在连接目标页面并继续推进…');
-      }
-      await recordActivityEvent('browser-restored', t('已恢复任务设置；等待唯一匹配的原目标页面。'));
-    }
     if (job?.phase === 'sending') {
-      const readOnly = job.runKind === 'reply-check';
-      const manualUnconfirmed = job.manualSubmissionPending === true;
-      const deadline = job.runDeadline;
-      const submissionFenceUntil = !readOnly && Number.isFinite(deadline) && deadline > Date.now()
-        ? Math.max(Number.isFinite(job.submissionFenceUntil) ? job.submissionFenceUntil : 0, deadline) : job.submissionFenceUntil;
-      job = { ...job, phase: 'idle', runKind: null, runId: token(), runDeadline: null, submissionFenceUntil, awaitingReply: readOnly ? job.awaitingReply : false, unknownCount: (job.unknownCount || 0) + (readOnly ? 0 : 1), nextAt: readOnly ? Date.now() + RETRY_MS : null, enabled: readOnly ? job.enabled : false, manualSubmissionPending: false, statusText: manualUnconfirmed ? t('手动提交结果未确认；已暂停，请检查会话后再继续。') : readOnly ? t('回复检查被中断；恢复后继续等待新回复。') : t('发送期间后台中断；已暂停，请检查会话后再继续。'), needsAttention: !readOnly };
-      await recordActivityEvent('interrupted', readOnly ? t('只读回复检查被中断；仍等待新回复。') : t('发送期间后台中断；已暂停，请检查会话后再继续。'));
+      if (job.runKind === 'approval-check') {
+        job = { ...job, phase: 'idle', runKind: null, preDispatch: undefined, pendingTakeoverToken: undefined, runId: token(), runDeadline: null,
+          nextAt: job.enabled ? Math.max(job.nextAt || 0, Date.now() + RETRY_MS) : null };
+      } else if (job.preDispatch === true && ['send', 'takeover-reply'].includes(job.runKind)) {
+        job = { ...job, phase: 'idle', runKind: null, preDispatch: undefined, pendingTakeoverToken: undefined, runId: token(), runDeadline: null,
+          needsAttention: false, nextAt: job.enabled ? Math.max(job.nextAt || 0, Date.now() + 3000) : null,
+          statusText: job.enabled ? t('发送启动前后台中断；任务保持启用并自动恢复。') : job.statusText };
+        await recordActivityEvent('interrupted', t('发送启动前后台中断；任务保持启用并自动恢复。'));
+      } else {
+        const readOnly = job.runKind === 'reply-check';
+        const manualUnconfirmed = job.manualSubmissionPending === true;
+        const deadline = job.runDeadline;
+        const submissionFenceUntil = !readOnly && Number.isFinite(deadline) && deadline > Date.now()
+          ? Math.max(Number.isFinite(job.submissionFenceUntil) ? job.submissionFenceUntil : 0, deadline) : job.submissionFenceUntil;
+        job = { ...job, phase: 'idle', runKind: null, preDispatch: undefined, pendingTakeoverToken: undefined, runId: token(), runDeadline: null, submissionFenceUntil, awaitingReply: readOnly ? job.awaitingReply : false, unknownCount: (job.unknownCount || 0) + (readOnly ? 0 : 1), nextAt: readOnly ? Date.now() + RETRY_MS : null, enabled: readOnly ? job.enabled : false, manualSubmissionPending: false, statusText: manualUnconfirmed ? t('手动提交结果未确认；已暂停，请检查会话后再继续。') : readOnly ? t('回复检查被中断；恢复后继续等待新回复。') : t('发送期间后台中断；已暂停，请检查会话后再继续。'), needsAttention: !readOnly };
+        await recordActivityEvent('interrupted', readOnly ? t('只读回复检查被中断；仍等待新回复。') : t('发送期间后台中断；已暂停，请检查会话后再继续。'));
+      }
+    }
+    if (restoredFromLocal && job && !job.tabId && !recoverPause && job.enabled && (!job.nextAt || job.nextAt <= Date.now())) {
+      job.nextAt = Date.now() + 3000;
+      job.statusText = t('已从重启中恢复；正在连接目标页面并继续推进…');
     }
     if (job) {
       const deadlines = [job.submissionFenceUntil, saved?.submissionFenceUntil,
-        saved?.phase === 'sending' && saved.runKind !== 'reply-check' ? saved.runDeadline : null]
+        saved?.phase === 'sending' && !['reply-check', 'approval-check'].includes(saved.runKind) && saved.preDispatch !== true ? saved.runDeadline : null]
         .filter(value => Number.isFinite(value) && value > Date.now());
       if (deadlines.length) job = { ...job, submissionFenceUntil: Math.max(...deadlines) };
+    }
+    if (typeof activationRun === 'string') {
+      if (job?.enabled && job.runId === activationRun &&
+          !(saved?.enabled && saved.id === job.id && saved.runId === activationRun)) {
+        await pauseLocked(job, t('启动尚未保存时后台中断；任务已暂停，未发送消息。'), 'scheduler-error');
+        await chrome.storage.session.remove(ACTIVATION_MARKER).catch(() => undefined);
+        return;
+      }
+      await chrome.storage.session.remove(ACTIVATION_MARKER).catch(() => undefined);
+    }
+    if (job?.enabled && recoverPause) {
+      await pauseLocked(job, t('已恢复上次的暂停操作；不会继续定时发送。'), 'interrupted');
+      return;
     }
     if (job) { job.systemAwake = await syncPower(job); await setJob(job); if (job.enabled && Number.isInteger(job.tabId)) pingDialogObserver(job.tabId); }
     else await syncPower(null);
@@ -1875,6 +2158,13 @@ async function initialize() {
     catch {
       await pauseLocked(job, t('后台计时器不可用，未启动任务。'), 'scheduler-error');
       return;
+    }
+    if (restoredFromLocal && job && !recoverPause) {
+      const logged = (await chrome.storage.session.get('browserRestoredLoggedJobId').catch(() => ({}))).browserRestoredLoggedJobId;
+      if (logged !== job.id) {
+        await recordActivityEvent('browser-restored', t('已恢复任务设置；等待唯一匹配的原目标页面。'));
+        await chrome.storage.session.set({ browserRestoredLoggedJobId: job.id }).catch(() => undefined);
+      }
     }
     await updateBadge(job);
   });
@@ -1947,6 +2237,113 @@ async function handleDialogException(message, sender) {
   });
 }
 
+async function handlePagePromptObserved(sender, mode) {
+  if (sender.id !== chrome.runtime.id || sender.frameId !== 0 || !Number.isInteger(sender.tab?.id)
+      || typeof sender.url !== 'string') return { ok: false };
+  const claim = await transact(async () => {
+    const job = await getJob();
+    if (!job?.enabled || job.phase !== 'idle' || job.tabId !== sender.tab.id
+        || normalizeUrl(sender.url) !== job.url || normalizeUrl(sender.tab.url ?? '') !== job.url) return null;
+    if (mode === 'approval' && job.autoAllow !== true) return null;
+    if (mode === 'takeover' && (job.autoAuthorizeTakeover !== true || (job.consecutiveTakeoverReplies || 0) >= 3)) return null;
+    const claimed = { ...job, phase: 'sending', runKind: 'approval-check', runId: token(), runDeadline: Date.now() + EXECUTION_MS };
+    await setJob(claimed);
+    return { claimed, version: intentVersion };
+  });
+  if (!claim) return { ok: false };
+  let res = null;
+  try {
+    const tab = await chrome.tabs.get(claim.claimed.tabId);
+    res = await probe(tab, claim.claimed, claim.claimed.targetIdentity, claim.claimed.autoAllow === true,
+      claim.claimed.autoAuthorizeTakeover === true, mode === 'takeover');
+  } catch {
+    res = null;
+  }
+  const settlement = await transact(async () => {
+    const current = await getJob();
+    if (!current || current.id !== claim.claimed.id || current.runId !== claim.claimed.runId
+        || !current.enabled || current.phase !== 'sending') return { ok: false };
+    const cleared = { ...current, phase: 'idle', runKind: null, preDispatch: undefined, runDeadline: null };
+    if (res?.status === 'blocked' && res.diagnosticCode === 'oauth-required') {
+      cleared.lastResult = res.status;
+      cleared.lastDiagnosticCode = 'oauth-required';
+      await pauseLocked(cleared, t('检测到需要手动登录或 OAuth 授权的弹窗；已暂停，请手动完成后再继续。'), 'paused', { code: 'oauth-required' });
+      return { ok: true };
+    }
+    if (res?.status === 'blocked' && res.diagnosticCode === 'captcha-required') {
+      cleared.lastResult = res.status;
+      cleared.lastDiagnosticCode = 'captcha-required';
+      await pauseLocked(cleared, t('检测到需要人工完成人机验证或密码/验证码；已暂停，请手动完成后再继续。'), 'paused', { code: 'captcha-required' });
+      return { ok: true };
+    }
+    if (res?.status === 'busy' && res.diagnosticCode === 'auto-allowed-prompt') {
+      const next = { ...cleared, nextAt: Date.now() + RETRY_MS, needsAttention: false, lastResult: 'busy', lastDiagnosticCode: 'auto-allowed-prompt',
+        statusText: t('已自动确认常规工具权限，等待 Agent 继续执行。') };
+      await setJob(next);
+      await syncAlarm(next);
+      await recordActivityEvent('auto-allowed', next.statusText, { code: 'auto-allowed-prompt' });
+      await updateBadge(next);
+      return { ok: true };
+    }
+    if (mode === 'takeover' && res?.status === 'busy' && res.diagnosticCode === 'takeover-needed'
+        && res.takeoverAssistantToken && res.takeoverAssistantToken !== cleared.lastTakeoverToken) {
+      const next = { ...cleared, nextAt: Date.now() + RETRY_MS, lastResult: 'busy', lastDiagnosticCode: 'takeover-needed',
+        statusText: t('检测到 Dot 请求接管或登录授权，准备自动发送授权回复。') };
+      await setJob(next);
+      await syncAlarm(next);
+      if (current.lastDiagnosticCode !== 'takeover-needed') {
+        await recordActivityEvent('busy', next.statusText, { code: 'takeover-needed' });
+      }
+      await updateBadge(next);
+      return { ok: true, triggerTakeover: true, token: res.takeoverAssistantToken, jobId: next.id, version: claim.version };
+    }
+    if (res?.status === 'busy' && res.diagnosticCode === 'approval-required') {
+      const next = { ...cleared, nextAt: Date.now() + RETRY_MS, needsAttention: true, lastResult: 'busy', lastDiagnosticCode: 'approval-required',
+        statusText: t('目标页面请求权限确认；请在页面中决定。一分钟后再检查。') };
+      await setJob(next);
+      await syncAlarm(next);
+      await updateBadge(next);
+      return { ok: true };
+    }
+    await setJob(cleared);
+    await updateBadge(cleared);
+    return { ok: true };
+  });
+  if (settlement?.triggerTakeover && settlement.version === intentVersion) {
+    await runTakeoverReplyRound(settlement.token, settlement.jobId, settlement.version);
+  }
+  return { ok: Boolean(settlement?.ok) };
+}
+
+async function rebindOrphanedJobIfUnique(version, expectedTabId = null) {
+  if (version !== intentVersion) return false;
+  const precheck = await getJob();
+  if (!precheck?.enabled || precheck.tabId !== null || precheck.phase !== 'idle') return false;
+  const allTabs = await chrome.tabs.query({ url: 'https://chatgpt.com/*' }).catch(() => []);
+  const sameUrlTabs = allTabs.filter(item => validateTarget(item.url) && normalizeUrl(item.url) === precheck.url);
+  if (sameUrlTabs.length !== 1) return false;
+  const candidate = sameUrlTabs[0];
+  if (!Number.isInteger(candidate?.id) || candidate.status !== 'complete' || candidate.discarded || candidate.frozen) return false;
+  if (expectedTabId !== null && candidate.id !== expectedTabId) return false;
+  return transact(async () => {
+    if (version !== intentVersion) return false;
+    const job = await getJob();
+    if (!job?.enabled || job.id !== precheck.id || job.tabId !== null || job.phase !== 'idle') return false;
+    let tab;
+    try { tab = await chrome.tabs.get(candidate.id); } catch { return false; }
+    if (!tab || normalizeUrl(tab.url) !== job.url || tab.status !== 'complete' || tab.discarded || tab.frozen) return false;
+    const protection = await protectFromDiscard(tab, job.preventDiscard);
+    const dueNow = !job.nextAt || job.nextAt <= Date.now();
+    const rebound = { ...job, ...protection, tabId: tab.id, nextAt: dueNow ? Date.now() + 500 : job.nextAt,
+      statusText: t('已重新连接原目标页面；准备继续定时检查。') };
+    await setJob(rebound);
+    await syncAlarm(rebound);
+    await updateBadge(rebound);
+    pingDialogObserver(tab.id);
+    return true;
+  });
+}
+
 async function dispatch(message, sender, version) {
   if (SETUP_MESSAGES.includes(message?.type)) return setupInstallation?.handleMessage(message, sender) ?? null;
   if (message?.type === BROWSER_DEVICE_MESSAGE) return browserWake?.handleMessage(message, sender) ?? null;
@@ -1958,8 +2355,8 @@ async function dispatch(message, sender, version) {
   await ensureInitialized();
   if (!message || typeof message.type !== 'string') throw fail(t('无效请求。'));
   const ownExtensionPage = chrome.runtime.id && sender.id === chrome.runtime.id && typeof sender.url === 'string' && sender.url.startsWith(chrome.runtime.getURL(''));
-  if (['PREPARE_START', 'START', 'PAUSE', 'RESUME', 'CLEAR_DATA', 'SAVE_DRAFT', 'SAVE_TEMPLATES'].includes(message.type) && !ownExtensionPage) throw fail(t('此操作只能从扩展控制面板发起。'));
-  if (!['CHECK_RUN', 'WAIT_RUN', 'COMMIT_RUN', 'PAGE_RESULT', 'MANUAL_SUBMISSION', 'DIALOG_EXCEPTION'].includes(message.type) && sender.tab && !ownExtensionPage) throw fail(t('此操作只能从扩展控制面板发起。'));
+  if (['PREPARE_START', 'CANCEL_START', 'START', 'PAUSE', 'RESUME', 'CLEAR_DATA', 'SAVE_DRAFT', 'SAVE_TEMPLATES'].includes(message.type) && !ownExtensionPage) throw fail(t('此操作只能从扩展控制面板发起。'));
+  if (!['CHECK_RUN', 'WAIT_RUN', 'COMMIT_RUN', 'PAGE_RESULT', 'MANUAL_SUBMISSION', 'DIALOG_EXCEPTION', 'ROUTINE_APPROVAL_OBSERVED', 'TAKEOVER_PROMPT_OBSERVED'].includes(message.type) && sender.tab && !ownExtensionPage) throw fail(t('此操作只能从扩展控制面板发起。'));
   if (['PREPARE_START', 'START', 'RESUME'].includes(message.type) && (draftClearPending || draftClearFailed))
     throw fail(t('配置暂时无法读取；暂停仍可使用，重试前不会覆盖本地配置。'));
   switch (message.type) {
@@ -1988,7 +2385,7 @@ async function dispatch(message, sender, version) {
       return { ok: true, job: state.job, availableTargets: state.availableTargets,
         ...(state.configCurrent ? { ...config, draftGeneration: observedDraftGeneration, draftRevision: observedDraftRevision } : { configAvailable: false }), ...diagnostics };
     }
-    case 'CHECK_PAGE': return checkPage(message.tabId);
+    case 'CHECK_PAGE': return checkPage(message.tabId, message.targetUrl);
     case 'CHECK_TIMING': return timingDiagnostics();
     case 'CHECK_RUN': return checkRun(message.runId, sender);
     case 'WAIT_RUN': return waitRun(message, sender);
@@ -1996,11 +2393,20 @@ async function dispatch(message, sender, version) {
     case 'PAGE_RESULT': return receivePageResult(message, sender);
     case 'MANUAL_SUBMISSION': return receiveManualSubmission(message, sender);
     case 'DIALOG_EXCEPTION': return handleDialogException(message, sender);
+    case 'ROUTINE_APPROVAL_OBSERVED': return handlePagePromptObserved(sender, 'approval');
+    case 'TAKEOVER_PROMPT_OBSERVED': return handlePagePromptObserved(sender, 'takeover');
     case 'PREPARE_START':
       assertIntent(version);
       if (pendingStartReservation?.version !== version) throw fail(t('此操作已被较新的开始或暂停操作取消。'));
       return { ok: true, startToken: pendingStartReservation.token };
-    case 'START': return start(message.config, version, message.tabId);
+    case 'CANCEL_START':
+      if (pendingStartReservation && pendingStartReservation.version === intentVersion &&
+          pendingStartReservation.token === message.startToken) {
+        pendingStartReservation = null;
+        pendingActivationVersion = null;
+      }
+      return { ok: true };
+    case 'START': return start(message.config, version, message.tabId, message.targetUrl);
     case 'PAUSE': return pause();
     case 'RESUME': return resume(version);
     case 'SEND_NOW': return runRound(true);
@@ -2034,7 +2440,7 @@ async function dispatch(message, sender, version) {
         await setJob(null);
         clearing = clearDeliveryDiagnostics();
         activityClearing = clearActivityLog();
-        for (const key of ['uiTheme', ADMIN_BROWSER_RESTORE]) await chrome.storage.local.remove(key);
+        for (const key of ['uiTheme', ADMIN_BROWSER_RESTORE, PAUSE_MARKER]) await chrome.storage.local.remove(key);
         if (BUNDLED_PROMPT) await chrome.storage.local.set({ privatePresetImported: true });
       });
       draftClearing = draftQueue.then(async () => {
@@ -2042,6 +2448,8 @@ async function dispatch(message, sender, version) {
         await chrome.storage.local.set({ [DRAFT_CLEAR_MARKER]: true });
         markerWritten = true;
         const history = Promise.allSettled([clearing, activityClearing]);
+        // Rotate durably before removing config; an old empty draft has the same base.
+        await writeDraftVersion(clearedGeneration, 0);
         await chrome.storage.local.remove('templates');
         await chrome.storage.local.remove('config');
         if ((await history).every(result => result.status === 'fulfilled'))
@@ -2116,40 +2524,47 @@ chrome.tabs.onRemoved.addListener(tabId => {
   ensureInitialized().then(() => transact(async () => {
     const job = await getJob();
     if (job?.tabId !== tabId) return;
-    const interrupted = job.phase === 'sending' && job.runKind !== 'reply-check';
+    const interrupted = job.phase === 'sending' && !['reply-check', 'approval-check'].includes(job.runKind) && job.preDispatch !== true;
     if (interrupted) {
       const paused = await pauseLocked(job, t('发送期间目标关闭，结果未确认；已暂停，请检查会话后再继续。'), 'unconfirmed', null, true);
-      await setJob({ ...paused, tabId: null, runKind: null, autoDiscardableChanged: false, discardProtection: 'pending' });
+      await setJob({ ...paused, tabId: null, runKind: null, preDispatch: undefined, autoDiscardableChanged: false, discardProtection: 'pending' });
       return;
     }
-    const waiting = { ...job, tabId: null, runId: token(), runDeadline: null, phase: 'idle', runKind: null, nextAt: job.enabled ? Math.max(job.nextAt || 0, Date.now() + RETRY_MS) : null, autoDiscardableChanged: false, discardProtection: 'pending', statusText: t('目标标签已关闭；任务保持原启用状态，等待原页面重新打开。') };
+    const waiting = { ...job, tabId: null, runId: token(), runDeadline: null, phase: 'idle', runKind: null, preDispatch: undefined, nextAt: job.enabled ? Math.max(job.nextAt || 0, Date.now() + RETRY_MS) : null, autoDiscardableChanged: false, discardProtection: 'pending', statusText: t('目标标签已关闭；任务保持原启用状态，等待原页面重新打开。') };
     await setJob(waiting); await updateBadge(waiting);
   })).catch(() => undefined);
 });
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (!changeInfo.url) return;
-  ensureInitialized().then(() => transact(async () => {
-    const job = await getJob();
-    if (!job?.enabled || job.tabId !== tabId) return;
-    let tab;
-    try { tab = await chrome.tabs.get(tabId); } catch { return; }
-    if (normalizeUrl(tab.url) === job.url) return;
-    const isDot = job.url.includes('/dots/');
-    if (isDot && tab.url && tab.url.includes('/dots/')) {
-      const updatedUrl = normalizeUrl(tab.url);
-      await setJob({ ...job, url: updatedUrl });
-      return;
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (!changeInfo.url && changeInfo.status !== 'complete') return;
+  const candidateUrl = changeInfo.url || tab?.url || '';
+  if (candidateUrl && !candidateUrl.startsWith('https://chatgpt.com/')) return;
+  const version = intentVersion;
+  ensureInitialized().then(async () => {
+    if (changeInfo.url) {
+      const leftTarget = await transact(async () => {
+        const job = await getJob();
+        if (!job?.enabled || job.tabId !== tabId) return false;
+        let currentTab;
+        try { currentTab = await chrome.tabs.get(tabId); } catch { return true; }
+        if (normalizeUrl(currentTab.url) === job.url) return false;
+        const interrupted = job.phase === 'sending' && !['reply-check', 'approval-check'].includes(job.runKind) && job.preDispatch !== true;
+        if (interrupted) {
+          const paused = await pauseLocked(job, t('发送期间页面改变，结果未确认；已暂停，请检查原会话后再继续。'), 'unconfirmed', null, true);
+          await setJob({ ...paused, tabId: null, runKind: null, preDispatch: undefined, discardProtection: 'pending' });
+          return true;
+        }
+        await restoreDiscard(job);
+        const waiting = { ...job, tabId: null, runId: token(), runDeadline: null, phase: 'idle', runKind: null, preDispatch: undefined, nextAt: Math.max(job.nextAt || 0, Date.now() + RETRY_MS), autoDiscardableChanged: false, discardProtection: 'pending', statusText: t('原目标页面已离开；等待原地址重新打开，不会给其他会话发送。') };
+        await setJob(waiting); await updateBadge(waiting);
+        return true;
+      });
+      if (leftTarget) return;
     }
-    const interrupted = job.phase === 'sending' && job.runKind !== 'reply-check';
-    if (interrupted) {
-      const paused = await pauseLocked(job, t('发送期间页面改变，结果未确认；已暂停，请检查原会话后再继续。'), 'unconfirmed', null, true);
-      await setJob({ ...paused, tabId: null, runKind: null, discardProtection: 'pending' });
-      return;
+    if (changeInfo.status === 'complete') {
+      const rebound = await rebindOrphanedJobIfUnique(version, tabId);
+      if (rebound && version === intentVersion) setTimeout(() => runRound(false, null, version).catch(() => undefined), 500);
     }
-    await restoreDiscard(job);
-    const waiting = { ...job, tabId: null, runId: token(), runDeadline: null, phase: 'idle', runKind: null, nextAt: Math.max(job.nextAt || 0, Date.now() + RETRY_MS), autoDiscardableChanged: false, discardProtection: 'pending', statusText: t('原目标页面已离开；等待原地址重新打开，不会给其他会话发送。') };
-    await setJob(waiting); await updateBadge(waiting);
-  })).catch(() => undefined);
+  }).catch(() => undefined);
 });
 chrome.runtime.onStartup?.addListener?.(() => {
   const version = intentVersion;
@@ -2167,7 +2582,9 @@ chrome.runtime.onStartup?.addListener?.(() => {
       await updateBadge(job);
       return version === intentVersion;
     });
-    if (running && version === intentVersion) setTimeout(() => runRound(false, null, version).catch(() => undefined), 2500);
+    if (!running || version !== intentVersion) return;
+    if (observed.tabId === null) await rebindOrphanedJobIfUnique(version);
+    if (version === intentVersion) setTimeout(() => runRound(false, null, version).catch(() => undefined), 2500);
   }).catch(() => undefined);
 });
 chrome.commands.onCommand.addListener(command => {
