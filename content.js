@@ -47,8 +47,11 @@
   const closedSignInCardPattern = /\bsign[\s-]?in\s+request\s+(?:closed|completed|canceled|cancelled|dismissed|done)\b|登录请求\s*(?:已关闭|已完成|已取消|已结束)/i;
   const stripClosedSignInLines = value => String(value ?? '').split(/\r?\n/).filter(line => !closedSignInCardPattern.test(line)).join('\n');
   const takeoverRequestPattern = /把控制权交回|交回控制权|归还控制权|请.*完成(?:GitHub|OAuth|页面|登录|授权).*交回|请.*手动登录|请.*接管.*登录|完成授权并|请回复.*授权|接管浏览器|请求接管|需要(?:你|您)?接管|请(?:你|您)?(?:先)?(?:接管|登录|授权)|登录请求(?!\s*(?:已关闭|已完成|已取消|已结束))|请先完成.{0,12}(?:登录|授权)|需要(?:你|您)?手动完成.{0,12}(?:登录|授权)|\b(?:give|hand)\s+(?:me\s+)?control\s+back\b|\bhand\s+back\s+control\b|\breturn\s+(?:browser\s+)?control\b|\btake\s+over\s+(?:the\s+)?browser\b|\btake\s+over\s+and\s+(?:sign\s+in|log\s+in|authenticate)\b|\bplease\s+(?:take\s+over|sign\s+in|log\s+in)\b|\b(?:sign\s+in|log\s+in)\s+to\s+[a-z0-9.-]+\b|\bsign[\s-]?in\s+request\b(?!\s*(?:closed|completed|canceled|cancelled|dismissed|done))|\byour\s+dot\s+(?:needs|wants)\s+you\s+to\s+(?:sign\s+in|log\s+in|take\s+over)\b|\bcomplete\s+(?:the\s+)?(?:sign[\s-]?in|log[\s-]?in|login|authentication|authorization).*(?:control|continue|proceed)\b/i;
+  const signInCardTextPattern = /\b(?:sign\s*in|log\s*in)\s+to\s+[a-z0-9.-]+\b|\bsign[\s-]?in\s+request\b(?!\s*(?:closed|completed|canceled|cancelled|dismissed|done))|\b(?:accounts\.google\.com|login\.microsoftonline\.com|github\.com|appleid\.apple\.com)\b|登录请求(?!\s*(?:已关闭|已完成|已取消|已结束))|接管浏览器|请求接管/i;
+  const signInButtonPattern = /^(?:sign\s*in|log\s*in|login|authorize|re-?authorize|connect\s+account|take\s+over|give\s+control\s+back|hand\s+(?:control\s+)?back|return\s+control|登录|去登录|授权登录|同意并登录|接管|交回控制权|归还控制权)$/i;
   const captchaPattern = /\b(?:captcha|recaptcha|hcaptcha|turnstile|verify\s+you\s+are\s+human|one-time\s+(?:code|password)|2fa\s+code|verification\s+code|enter\s+(?:your\s+)?password)\b|人机验证|图形验证码|短信验证码|邮箱验证码|输入密码|动态口令/i;
   const busyControlSelector = 'button[data-testid="stop-button"], button[aria-label*="Stop" i], button[aria-label*="停止" i], .typing-indicator';
+  const cardTokens = new WeakMap();
 
   function hasUnansweredRoutineToolCard() {
     if (!document.body) return false;
@@ -94,24 +97,60 @@
     return false;
   }
 
-  function observeIdleTakeoverPrompt() {
-    if (!document.body || document.querySelector(busyControlSelector)) return null;
-    const dialogs = [...document.querySelectorAll('[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]')];
+  function findDotSignInCardToken() {
+    if (!document.body) return null;
+    const dialogs = document.querySelectorAll('[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]');
     for (const dlg of dialogs) {
       if (!dlg?.isConnected || dlg.hasAttribute('hidden') || dlg.getAttribute('aria-hidden') === 'true') continue;
       const dlgText = stripClosedSignInLines(dlg.textContent || '');
       if (dlgText && dlgText.length <= 2000 && takeoverRequestPattern.test(dlgText) && !captchaPattern.test(dlgText)) {
-        return 'dialog:' + dlgText.replace(/\s+/g, ' ').trim().slice(0, 120);
+        let token = cardTokens.get(dlg);
+        if (!token) {
+          token = 'dialog:' + dlgText.replace(/\s+/g, ' ').trim().slice(0, 120);
+          cardTokens.set(dlg, token);
+        }
+        return token;
       }
     }
-    const controlBtns = [...document.querySelectorAll('button, [role="button"]')];
-    for (const btn of controlBtns) {
-      if (!btn?.isConnected || btn.disabled || btn.getAttribute('aria-disabled') === 'true') continue;
-      const txt = (btn.textContent || '').trim();
+    const userTurns = document.querySelectorAll('article.message-row.self, [data-message-author-role="user"]');
+    const lastUserTurn = userTurns.length ? userTurns[userTurns.length - 1] : null;
+    const userCount = userTurns.length;
+    const controlBtns = document.querySelectorAll('button, [role="button"]');
+    for (let i = 0; i < controlBtns.length; i++) {
+      const btn = controlBtns[i];
+      if (!btn?.isConnected || btn.disabled || btn.getAttribute('aria-disabled') === 'true' || btn.childElementCount > 4) continue;
+      const txt = (btn.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!txt || txt.length > 48) continue;
       if (/^(?:give\s+control\s+back|hand\s+(?:control\s+)?back|return\s+control|交回控制权|归还控制权)$/i.test(txt)) {
         return 'handover:' + txt;
       }
+      if (!signInButtonPattern.test(txt)) continue;
+      let curr = btn.parentElement;
+      for (let depth = 0; depth < 8 && curr && curr !== document.body && curr !== document.documentElement; depth++, curr = curr.parentElement) {
+        if (curr.hasAttribute('hidden') || curr.getAttribute('aria-hidden') === 'true') break;
+        const cardText = stripClosedSignInLines(curr.textContent || '');
+        if (!cardText || cardText.length > 1500) break;
+        if (curr.querySelectorAll('article.message-row, [data-message-author-role], [role="textbox"]').length > 1) break;
+        if (closedSignInCardPattern.test(curr.textContent || '')) break;
+        if (signInCardTextPattern.test(cardText) && !captchaPattern.test(cardText)) {
+          if (lastUserTurn && (curr.compareDocumentPosition(lastUserTurn) & Node.DOCUMENT_POSITION_FOLLOWING)) break;
+          let token = cardTokens.get(curr);
+          if (!token) {
+            token = `card:${userCount}:` + cardText.replace(/\s+/g, ' ').trim().slice(0, 120);
+            cardTokens.set(curr, token);
+          }
+          return token;
+        }
+      }
     }
+    return null;
+  }
+
+  function observeIdleTakeoverPrompt() {
+    if (!document.body) return null;
+    const cardToken = findDotSignInCardToken();
+    if (cardToken) return cardToken;
+    if (document.querySelector(busyControlSelector)) return null;
     const turns = document.querySelectorAll('article.message-row:not(.self), [data-message-author-role="assistant"], [data-chatgpt-search-unit-key$=":assistant"]');
     if (!turns.length) return null;
     const last = turns[turns.length - 1];
@@ -161,7 +200,7 @@
           lastRoutineApprovalAt = Date.now();
           try { Promise.resolve(chrome.runtime.sendMessage({ type: 'ROUTINE_APPROVAL_OBSERVED' })).catch(() => {}); }
           catch { /* Extension reloaded or context invalidated. */ }
-        } else if (context.safe && Date.now() - lastTakeoverAt >= 5000) {
+        } else if (context.safe && Date.now() - lastTakeoverAt >= 2500) {
           const takeoverToken = observeIdleTakeoverPrompt();
           if (takeoverToken && takeoverToken !== lastTakeoverToken) {
             lastTakeoverToken = takeoverToken;

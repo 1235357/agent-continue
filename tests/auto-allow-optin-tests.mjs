@@ -235,6 +235,78 @@ test('adapter handles opt-in routine allow, OAuth pause, Dot handover/takeover, 
       });
       const closedCheck = await page.evaluate(pageAction, { ...baseArgs, mode: 'check', detectTakeover: true, autoAuthorizeTakeover: true });
       assert.equal(closedCheck.status, 'ready');
+
+      // 6. Inline Dot "Sign in to accounts.google.com" [Sign in] card while "Dot Thinking" (.typing-indicator) is shown
+      await page.evaluate(() => {
+        document.querySelector('#conversation').replaceChildren();
+        const uRow = document.createElement('article');
+        uRow.className = 'message-row self';
+        uRow.dataset.messageId = 'acct~dot~Msg~u-inline';
+        const uBody = document.createElement('div');
+        uBody.className = 'message-body';
+        uBody.dataset.messageId = 'acct~dot~Msg~u-inline';
+        uBody.textContent = 'Use browser Google sign in!';
+        uRow.append(uBody);
+        const card = document.createElement('div');
+        card.className = 'inline-oauth-card';
+        const label = document.createElement('p');
+        label.textContent = 'Sign in to accounts.google.com\naccounts.google.com';
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = 'Sign in';
+        card.append(label, btn);
+        const typing = document.createElement('div');
+        typing.className = 'typing-indicator';
+        typing.textContent = 'Thinking';
+        document.querySelector('#conversation').append(uRow, card);
+        document.body.append(typing);
+      });
+      const inlineCheck = await page.evaluate(pageAction, { ...baseArgs, mode: 'check', detectTakeover: true, autoAuthorizeTakeover: true });
+      assert.equal(inlineCheck.status, 'busy');
+      assert.equal(inlineCheck.diagnosticCode, 'takeover-needed');
+      assert.ok(inlineCheck.takeoverAssistantToken?.startsWith('card:'), JSON.stringify(inlineCheck));
+
+      const inlineReply = await page.evaluate(pageAction, {
+        ...baseArgs, mode: 'send', isTakeoverReply: true, autoAuthorizeTakeover: true,
+        prompt: 'Authorized Google login via built-in browser',
+      });
+      assert.equal(inlineReply.status, 'sent', JSON.stringify(inlineReply));
+      assert.equal(await page.evaluate(() => window.__sentReplies.at(-1)), 'Authorized Google login via built-in browser');
+
+      const afterReplyCheck = await page.evaluate(pageAction, {
+        ...baseArgs, mode: 'check', detectTakeover: true, autoAuthorizeTakeover: true,
+        lastTakeoverToken: inlineCheck.takeoverAssistantToken,
+      });
+      assert.notEqual(afterReplyCheck.diagnosticCode, 'takeover-needed');
+
+      // Also verify content.js observer emits TAKEOVER_PROMPT_OBSERVED when a fresh inline card appears alongside .typing-indicator
+      await page.evaluate(() => {
+        const inlineCard = document.querySelector('.inline-oauth-card');
+        inlineCard.remove();
+        const freshCard = document.createElement('div');
+        freshCard.className = 'inline-oauth-card-2';
+        freshCard.innerHTML = '<p>Sign in to accounts.google.com</p><button type="button">Sign in</button>';
+        document.querySelector('#conversation').append(freshCard);
+      });
+      const contentSrc = fs.readFileSync(path.join(root, 'content.js'), 'utf8');
+      const observedTakeovers = await page.evaluate(async src => {
+        const sent = [];
+        window.chrome = {
+          runtime: {
+            id: 'ext-test-id',
+            connect: () => ({ onDisconnect: { addListener() {} } }),
+            onMessage: { addListener() {} },
+            sendMessage: async msg => { sent.push(msg); return { ok: true }; },
+          },
+        };
+        delete globalThis.__agentContinueContentRuntimeId;
+        new Function(src)();
+        await new Promise(r => setTimeout(r, 750));
+        return sent.filter(m => m?.type === 'TAKEOVER_PROMPT_OBSERVED');
+      }, contentSrc);
+      assert.equal(observedTakeovers.length, 1, JSON.stringify(observedTakeovers));
+      assert.ok(observedTakeovers[0].assistantToken?.startsWith('card:'), JSON.stringify(observedTakeovers));
+
       await ctx.close();
     }
   } finally {

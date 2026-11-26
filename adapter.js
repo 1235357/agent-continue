@@ -130,9 +130,36 @@ export async function pageAction(args) {
   // Rich-text paragraph boundaries can expose two newlines in innerText for
   // one logical line break. Normalize only comparisons; insertion uses the
   // original prompt verbatim.
+  const stripMarkdown = str => String(str ?? '')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/_([^_]+)_/g, '$1')
+    .replace(/~~([^~]+)~~/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/^[\s]*[-*+]\s+/gm, '')
+    .replace(/^[\s]*\d+\.\s+/gm, '')
+    .replace(/^[\s]*>\s*/gm, '');
+
   const clean = value => String(value ?? '').replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' ').replace(/\n{2,}/g, '\n').trim();
   const textOf = element => element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
     ? element.value : (element.innerText ?? element.textContent ?? '');
+  const yieldFrame = () => {
+    if (document.visibilityState !== 'visible' || typeof requestAnimationFrame !== 'function') return Promise.resolve();
+    return new Promise(resolve => {
+      let settled = false;
+      const done = () => { if (!settled) { settled = true; resolve(); } };
+      const timer = setTimeout(done, 32);
+      try {
+        requestAnimationFrame(() => { clearTimeout(timer); done(); });
+      } catch {
+        clearTimeout(timer);
+        done();
+      }
+    });
+  };
 
   // In background tabs or minimized windows on Windows, getClientRects() may return empty rects
   // even though the element is connected and visible. Check display/visibility and visibilityState.
@@ -199,7 +226,7 @@ export async function pageAction(args) {
 
   const identity = () => {
     if (!isDot) return null;
-    const rows = [...document.querySelectorAll('article.message-row, [data-message-author-role], article[data-testid^="conversation-turn-"]')];
+    const rows = document.querySelectorAll('article.message-row, [data-message-author-role], article[data-testid^="conversation-turn-"]');
     let fallbackIdentity = null;
     // Prefer trailing structured '~' Dot IDs so unhydrated optimistic turn nodes
     // appended right after Send do not mask the bound conversation identity, while
@@ -254,8 +281,10 @@ export async function pageAction(args) {
   const busy = () => {
     const paused = isDotPaused();
     const streaming = visibleMatches(busySelector).length > 0;
+    const activeStop = visibleMatches(stopSelector).length > 0;
     const anyPauseControl = visibleMatches(pauseSelector).length > 0;
     metrics.observations.busy = paused || streaming || anyPauseControl;
+    if (args.isTakeoverReply === true && isDot && !activeStop) return false;
     if (args.isTakeoverReply === true && paused && !streaming) return false;
     return paused || (!forceInterrupt && metrics.observations.busy);
   };
@@ -319,6 +348,9 @@ export async function pageAction(args) {
   const stripClosedSignInLines = value => String(value ?? '').split(/\r?\n/).filter(line => !closedSignInCardPattern.test(line)).join('\n');
   const takeoverRequestPattern = /把控制权交回|交回控制权|归还控制权|请.*完成(?:GitHub|OAuth|页面|登录|授权).*交回|请.*手动登录|请.*接管.*登录|完成授权并|请回复.*授权|接管浏览器|请求接管|需要(?:你|您)?接管|请(?:你|您)?(?:先)?(?:接管|登录|授权)|登录请求(?!\s*(?:已关闭|已完成|已取消|已结束))|请先完成.{0,12}(?:登录|授权)|需要(?:你|您)?手动完成.{0,12}(?:登录|授权)|\b(?:give|hand)\s+(?:me\s+)?control\s+back\b|\bhand\s+back\s+control\b|\breturn\s+(?:browser\s+)?control\b|\btake\s+over\s+(?:the\s+)?browser\b|\btake\s+over\s+and\s+(?:sign\s+in|log\s+in|authenticate)\b|\bplease\s+(?:take\s+over|sign\s+in|log\s+in)\b|\b(?:sign\s+in|log\s+in)\s+to\s+[a-z0-9.-]+\b|\bsign[\s-]?in\s+request\b(?!\s*(?:closed|completed|canceled|cancelled|dismissed|done))|\byour\s+dot\s+(?:needs|wants)\s+you\s+to\s+(?:sign\s+in|log\s+in|take\s+over)\b|\bcomplete\s+(?:the\s+)?(?:sign[\s-]?in|log[\s-]?in|login|authentication|authorization).*(?:control|continue|proceed)\b/i;
   const dotSignInModalPattern = /\bsign[\s-]?in\s+request\b(?!\s*(?:closed|completed|canceled|cancelled|dismissed|done))|\btake\s+over\s+(?:the\s+)?browser\b|登录请求(?!\s*(?:已关闭|已完成|已取消|已结束))|接管浏览器|请求接管/i;
+  const dotInlineCardTextPattern = /\b(?:sign\s*in|log\s*in)\s+to\s+[a-z0-9.-]+\b|\bsign[\s-]?in\s+request\b(?!\s*(?:closed|completed|canceled|cancelled|dismissed|done))|\b(?:accounts\.google\.com|login\.microsoftonline\.com|github\.com|appleid\.apple\.com)\b|登录请求(?!\s*(?:已关闭|已完成|已取消|已结束))|接管浏览器|请求接管/i;
+  const dotInlineAuthButtonPattern = /^(?:sign\s*in|log\s*in|login|authorize|re-?authorize|connect\s+account|take\s+over|登录|去登录|授权登录|同意并登录|接管)$/i;
+  const dotCardTokenMap = (globalThis.__agentContinueCardTokens ??= new WeakMap());
   const captchaOr2FAPattern = /\b(?:captcha|recaptcha|hcaptcha|turnstile|verify\s+you\s+are\s+human|one-time\s+(?:code|password)|2fa\s+code|verification\s+code|enter\s+(?:your\s+)?password)\b|人机验证|图形验证码|短信验证码|邮箱验证码|输入密码|动态口令/i;
 
   const detectCaptchaOr2FABlock = () => {
@@ -380,15 +412,65 @@ export async function pageAction(args) {
     try { el.click(); } catch {}
   };
 
+  const findDotSignInCard = () => {
+    if (!isDot) return null;
+    const dialogs = document.querySelectorAll('[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]');
+    for (const dlg of dialogs) {
+      if (!visible(dlg)) continue;
+      const raw = (dlg.innerText ?? dlg.textContent ?? '').trim();
+      const dlgText = stripClosedSignInLines(raw);
+      if (!dlgText || !dotSignInModalPattern.test(dlgText) || captchaOr2FAPattern.test(dlgText)) continue;
+      let token = dotCardTokenMap.get(dlg);
+      if (!token) {
+        token = 'card:' + clean(dlgText).slice(0, 120);
+        dotCardTokenMap.set(dlg, token);
+      }
+      return { el: dlg, text: dlgText, token };
+    }
+    const userTurns = document.querySelectorAll(userSelector);
+    const lastUserTurn = userTurns.length ? userTurns[userTurns.length - 1] : null;
+    const userCount = userTurns.length;
+    const btns = document.querySelectorAll('button, [role="button"]');
+    for (let i = 0; i < btns.length; i++) {
+      const btn = btns[i];
+      if (!btn?.isConnected || btn.disabled || btn.getAttribute('aria-disabled') === 'true') continue;
+      const txt = (btn.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!txt || txt.length > 48 || !dotInlineAuthButtonPattern.test(txt) || !visible(btn)) continue;
+      let curr = btn.parentElement;
+      for (let depth = 0; depth < 8 && curr && curr !== document.body && curr !== document.documentElement; depth++, curr = curr.parentElement) {
+        if (!visible(curr)) break;
+        const raw = (curr.innerText ?? curr.textContent ?? '').trim();
+        const cardText = stripClosedSignInLines(raw);
+        if (!cardText || cardText.length > 1500) break;
+        if (curr.querySelectorAll('article.message-row, [data-message-author-role], [role="textbox"]').length > 1) break;
+        if (closedSignInCardPattern.test(raw)) break;
+        if (dotInlineCardTextPattern.test(cardText) && !captchaOr2FAPattern.test(cardText)) {
+          if (lastUserTurn && (curr.compareDocumentPosition(lastUserTurn) & Node.DOCUMENT_POSITION_FOLLOWING)) break;
+          let token = dotCardTokenMap.get(curr);
+          if (!token) {
+            token = `card:${userCount}:` + clean(cardText).slice(0, 120);
+            dotCardTokenMap.set(curr, token);
+          }
+          return { el: curr, text: cardText, token };
+        }
+      }
+    }
+    return null;
+  };
+
   const tryReturnBrowserControl = () => {
     if (args.autoAuthorizeTakeover !== true) return null;
     if (detectCaptchaOr2FABlock()) {
       metrics.observations.busy = true;
       return result('blocked', '检测到需要人工完成人机验证或密码/验证码，已暂停等待处理。', 'captcha-required');
     }
-    const controlButtons = [...document.querySelectorAll('button, [role="button"]')]
-      .filter(el => visible(el) && !el.disabled && el.getAttribute('aria-disabled') !== 'true'
-        && /^(?:give\s+control\s+back|hand\s+(?:control\s+)?back|return\s+control|交回控制权|归还控制权)$/i.test((el.textContent || '').trim()));
+    const handbackPattern = /^(?:give\s+control\s+back|hand\s+(?:control\s+)?back|return\s+control|交回控制权|归还控制权)$/i;
+    const controlButtons = [];
+    for (const el of document.querySelectorAll('button, [role="button"]')) {
+      const txt = (el.textContent || '').trim();
+      if (!txt || txt.length > 48 || !handbackPattern.test(txt)) continue;
+      if (visible(el) && !el.disabled && el.getAttribute('aria-disabled') !== 'true') controlButtons.push(el);
+    }
     if (controlButtons.length === 1) {
       const btn = controlButtons[0];
       const nowMs = Date.now();
@@ -442,8 +524,17 @@ export async function pageAction(args) {
       metrics.observations.busy = true;
       return result('blocked', '检测到需要人工完成人机验证或密码/验证码，已暂停等待处理。', 'captcha-required');
     }
+    const card = findDotSignInCard();
+    if (card && card.token && card.token !== args.lastTakeoverToken) {
+      metrics.observations.busy = true;
+      return {
+        ...result('busy', '检测到 Dot 请求接管或登录授权确认，准备自动发送授权回复。', 'takeover-needed'),
+        takeoverAssistantToken: card.token,
+      };
+    }
+    const activeStop = visibleMatches(stopSelector).length > 0;
     const streamingBusy = visibleMatches(busySelector).length > 0;
-    if (allowWhenPaused ? streamingBusy : busy()) return null;
+    if (allowWhenPaused ? (isDot ? activeStop : streamingBusy) : busy()) return null;
     const last = [...document.querySelectorAll(assistantSelector)].at(-1);
     if (last) {
       const bodyText = stripClosedSignInLines(textOf(last));
@@ -458,36 +549,17 @@ export async function pageAction(args) {
         }
       }
     }
-    if (isDot) {
-      const dialogs = [...document.querySelectorAll('[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]')];
-      for (const dlg of dialogs) {
-        if (!visible(dlg)) continue;
-        const raw = (dlg.innerText ?? dlg.textContent ?? '').trim();
-        const dlgText = stripClosedSignInLines(raw);
-        if (!dlgText || !dotSignInModalPattern.test(dlgText)) continue;
-        const cardToken = 'card:' + clean(dlgText).slice(0, 120);
-        if (cardToken && cardToken !== args.lastTakeoverToken) {
-          metrics.observations.busy = true;
-          return {
-            ...result('busy', '检测到 Dot 请求接管或登录授权确认，准备自动发送授权回复。', 'takeover-needed'),
-            takeoverAssistantToken: cardToken,
-          };
-        }
-      }
-    }
     return null;
   }
 
   const pausedResult = () => result('busy', 'Agent 处于暂停状态，等待继续或完成后发送。', 'agent-paused');
-  if (isDotPaused()) {
+  if (isDotPaused() && args.isTakeoverReply !== true) {
     const handover = tryReturnBrowserControl();
     if (handover) return handover;
     const takeover = checkTakeoverConversationPrompt(true);
     if (takeover) return takeover;
-    if (args.isTakeoverReply !== true) {
-      metrics.observations.busy = true;
-      return pausedResult();
-    }
+    metrics.observations.busy = true;
+    return pausedResult();
   }
   const initial = findComposer();
   if (!initial) {
@@ -545,6 +617,7 @@ export async function pageAction(args) {
       return text;
     }
     if (node.tagName === 'BR') return '\n';
+    if (allowFormatting && node.tagName === 'HR') return '---';
     if (node !== root && !['DIV', 'P', 'SPAN'].includes(node.tagName) && !(allowFormatting && (inlineFormatting.has(node.tagName) || markdownBlocks.has(node.tagName)))) return null;
     const children = [...node.childNodes];
     if (node === root && children.length === 1 && children[0].nodeName === 'BR') return '';
@@ -553,7 +626,7 @@ export async function pageAction(args) {
     let previousBlock = false;
     for (let index = 0; index < children.length; index++) {
       const child = children[index];
-      const block = ['DIV', 'P'].includes(child.nodeName) || (allowFormatting && markdownBlocks.has(child.nodeName) && !['UL', 'OL'].includes(child.nodeName));
+      const block = ['DIV', 'P'].includes(child.nodeName) || (allowFormatting && (child.nodeName === 'HR' || (markdownBlocks.has(child.nodeName) && !['UL', 'OL'].includes(child.nodeName))));
       const part = serializeDraft(child, allowFormatting, root);
       if (part === null) return null;
       if (index > 0 && (block || previousBlock)) value += '\n';
@@ -830,6 +903,13 @@ export async function pageAction(args) {
   };
 
   const checkAndHandleApprovalPrompt = () => {
+    if (args.isTakeoverReply === true) {
+      if (detectCaptchaOr2FABlock()) {
+        metrics.observations.busy = true;
+        return result('blocked', '检测到需要人工完成人机验证或密码/验证码，已暂停等待处理。', 'captcha-required');
+      }
+      return null;
+    }
     if (args.autoAllow !== true) {
       const handover = tryReturnBrowserControl();
       if (handover) return handover;
@@ -851,7 +931,7 @@ export async function pageAction(args) {
         if (!isAuthOption) {
           // Non-auth routine Allow button inside a Dot card mentioning login/account context.
         } else {
-          return tryReturnBrowserControl() || checkTakeoverConversationPrompt(isDotPaused());
+          return tryReturnBrowserControl() || checkTakeoverConversationPrompt(true);
         }
       } else {
         metrics.observations.busy = true;
@@ -1076,6 +1156,7 @@ export async function pageAction(args) {
     mutable();
     if (value && payloadWriteAttempts >= 2 && !finiteLegacyTextarea()) {
       if (args.persistentDelivery !== true || args.unlimitedReadiness !== true) throw unstableComposer;
+      progress('readiness', 'composer-unstable');
       await wait(10_000);
       mutable();
       if (!await stillAllowed() || !samePage() || !keepComposer() || !editable() || hasAttachment() || busy()) return false;
@@ -1292,9 +1373,12 @@ export async function pageAction(args) {
         if (chunkElapsed >= 2000) {
           metrics.counters.slowChunks++;
           chunkSize = Math.min(chunkSize, Math.max(64, Math.floor(chunkSize / 4)));
+        } else if (chunkElapsed >= 500) {
+          chunkSize = Math.min(chunkSize, Math.max(128, Math.floor(chunkSize / 2)));
         }
         if (offset < logicalValue.length) {
           await wait(50);
+          await yieldFrame();
           mutable();
           let settled = readChunkDraft();
           if (settled === null) {
@@ -1474,7 +1558,7 @@ export async function pageAction(args) {
     selectContents();
     const logicalValue = normalizeLineEndings(value);
     const manyLines = (logicalValue.match(/\n/g) || []).length >= 100;
-    if (value && editor.classList.contains('ProseMirror') && (value.length > 1000 || manyLines)) {
+    if (value && (editor.classList.contains('ProseMirror') || isDot) && (value.length > 1000 || manyLines)) {
       return insertChunkedText().then(chunked => {
         if (chunked === 'mismatch') {
           if (args.persistentDelivery === true) {
@@ -1508,7 +1592,17 @@ export async function pageAction(args) {
         } });
         if (!inputObserved) editor.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType, data: value || null }));
       } finally { editor.removeEventListener('input', observeInput, { capture: true }); }
-      return forceReplacement || clean(textOf(editor)) === clean(value);
+      if (forceReplacement || clean(textOf(editor)) === clean(value)) return true;
+      if (args.persistentDelivery === true && value && inputObserved) {
+        const rendered = plainDraft(editor, true) ?? textOf(editor);
+        const strippedRendered = rendered ? clean(stripMarkdown(normalizeLineEndings(rendered))) : '';
+        const strippedExpected = clean(stripMarkdown(normalizeLineEndings(value)));
+        if (strippedRendered && strippedRendered === strippedExpected) {
+          preparedText = normalizeLineEndings(rendered);
+          return true;
+        }
+      }
+      return false;
     });
   };
 
@@ -1552,19 +1646,6 @@ export async function pageAction(args) {
     }
     return result('blocked', '已请求停止，输入框尚未恢复发送状态；稍后重试。');
   };
-
-  const stripMarkdown = str => String(str ?? '')
-    .replace(/^#{1,6}\s+/gm, '')
-    .replace(/\*\*([^*]+)\*\*/g, '$1')
-    .replace(/__([^_]+)__/g, '$1')
-    .replace(/\*([^*]+)\*/g, '$1')
-    .replace(/_([^_]+)_/g, '$1')
-    .replace(/~~([^~]+)~~/g, '$1')
-    .replace(/`([^`]+)`/g, '$1')
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    .replace(/^[\s]*[-*+]\s+/gm, '')
-    .replace(/^[\s]*\d+\.\s+/gm, '')
-    .replace(/^[\s]*>\s*/gm, '');
 
   const coreNormalized = str => String(str ?? '').replace(/[\s\r\n\t\u00a0#*_`~\[\]()\-+=>【】]/g, '');
 

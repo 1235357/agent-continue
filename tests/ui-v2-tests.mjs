@@ -1794,5 +1794,32 @@ try {
     pass('Settings UI binds #autoAllow, #autoAuthorizeTakeover, and secret-gated #takeoverReply.');
     await uiAuto.context.close();
   }
+  {
+    const desync = await createPage({ full: true });
+    const { page } = desync;
+    try {
+      await page.evaluate(() => {
+        const nativeSend = chrome.runtime.sendMessage;
+        chrome.runtime.sendMessage = message => {
+          if (message.type === 'START') return new Promise(() => {});
+          return nativeSend(message);
+        };
+      });
+      await page.locator('#start').click();
+      await page.waitForFunction(() => document.querySelector('#pause').hidden === false);
+      await page.evaluate(() => {
+        const oldJob = { id: 'job-desync', enabled: true, runId: 'run-1', intervalMinutes: 10, prompt: 'Test' };
+        const pausedJob = {
+          ...oldJob, enabled: false, runId: 'run-2', nextAt: null, phase: 'idle',
+          statusText: 'Manually paused; future scheduled sends have stopped.',
+        };
+        for (const listener of __uiMock.listeners) listener({ job: { oldValue: oldJob, newValue: pausedJob } }, 'session');
+      });
+      await page.waitForFunction(() => document.querySelector('#pause').hidden === true);
+      assert.equal(await page.locator('#start').isVisible(), true);
+      assert.equal(await page.locator('#feedback').textContent(), 'Manually paused; future scheduled sends have stopped.');
+      pass('Popup clears stuck activating Pause button & Working text if an external pause lands in storage.');
+    } finally { await desync.context.close(); }
+  }
   console.log(`\n${checks.length}/${checks.length} UI v2 scenarios passed.`);
 } finally { await browser.close(); }

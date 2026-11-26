@@ -1547,6 +1547,50 @@ try {
     assert.equal(outcome.status, 'blocked');
     assert.deepEqual(await page.evaluate(() => [fixture.inputs, fixture.sends]), [0, 0]);
   });
+  await scenario('Long Dot WYSIWYG markdown prompts with HR rules and links chunk without stalling', async ({ page, args }) => {
+    const longMarkdownPrompt = Array.from({ length: 14 }, (_, i) =>
+      `Paragraph ${i + 1}: Inspect [repo ${i + 1}](https://example.invalid/${i + 1}) carefully.\n----`
+    ).join('\n');
+    assert.ok(longMarkdownPrompt.length > 1000);
+    await page.evaluate(() => {
+      fixture.acknowledgement = 'new';
+      const input = document.querySelector('[data-composer-markdown]');
+      const send = document.querySelector('button[aria-label="Send"]');
+      input.addEventListener('beforeinput', event => {
+        if (event.inputType !== 'insertText' || !event.data) return;
+        event.preventDefault();
+        const lines = event.data.split(/\r?\n/);
+        for (const line of lines) {
+          if (/^----+$/.test(line.trim())) {
+            input.append(document.createElement('hr'));
+          } else {
+            const p = document.createElement('p');
+            const m = line.match(/^(.*)\[([^\]]+)\]\((https?:\/\/[^)]+)\)(.*)$/);
+            if (m) {
+              if (m[1]) p.append(document.createTextNode(m[1]));
+              const a = document.createElement('a');
+              a.href = m[3];
+              a.textContent = m[2];
+              p.append(a);
+              if (m[4]) p.append(document.createTextNode(m[4]));
+            } else if (line) {
+              p.textContent = line;
+            } else {
+              p.append(document.createElement('br'));
+            }
+            input.append(p);
+          }
+        }
+        send.disabled = false;
+        input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: event.data }));
+      });
+    });
+    const outcome = await page.evaluate(pageAction, { ...args, prompt: longMarkdownPrompt });
+    assert.equal(outcome.status, 'sent', JSON.stringify(outcome));
+    assert.ok(outcome.diagnosticProgress.counters.textChunks > 1, JSON.stringify(outcome.diagnosticProgress));
+    assert.equal(outcome.diagnosticProgress.counters.chunkUnserializableChecks, 0, JSON.stringify(outcome.diagnosticProgress));
+    assert.equal(await page.evaluate(() => fixture.sends), 1);
+  });
 } finally { await browser.close(); }
 console.log(`RESULT ${passed}/${passed + failed} Dot adapter scenarios passed`);
 process.exitCode = failed ? 1 : 0;

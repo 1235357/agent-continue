@@ -1008,7 +1008,21 @@ chrome.storage.onChanged.addListener((changes, area) => {
       typeof item?.id === 'string' && typeof item.name === 'string' && typeof item.prompt === 'string' && Array.isArray(item.queue)).slice(0, 30) : [];
     renderTemplates();
   }
-  if ((area === 'session' || area === 'local') && changes.job) { jobRevision++; paint(changes.job.newValue || null); }
+  if ((area === 'session' || area === 'local') && changes.job) {
+    jobRevision++;
+    const nextJob = changes.job.newValue || null;
+    const prevJob = changes.job.oldValue || null;
+    if ((pendingAction === 'START' || pendingAction === 'RESUME') && prevJob?.enabled === true
+        && nextJob?.enabled === false && nextJob?.runId !== prevJob?.runId
+        && typeof nextJob?.statusText === 'string' && /手动暂停|Manually paused/.test(nextJob.statusText)) {
+      pendingAction = null;
+      startPreparation = null;
+      actionSequence += 1;
+      lastTranslation = null;
+      tell(nextJob.statusText);
+    }
+    paint(nextJob);
+  }
   if (area === 'local' && changes.logs) { logRevision++; logs = Array.isArray(changes.logs.newValue) ? changes.logs.newValue : []; renderLogs(); }
   if (area === 'local' && changes.deliveryDiagnostics) {
     diagnosticListRevision++;
