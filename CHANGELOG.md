@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## [3.3.5] - 2026-11-26
+
+- Fix inline Dot routine tool-approval detection (`Always allow`, `Allow once`, `Allow this tool for this conversation`, `Deny`) when cards render directly in `<main>` outside `[data-message-author-role="assistant"]` and `[role="dialog"]` (`adapter.js`, `content.js`, `dialog-classifier.js`).
+- Broaden conservative assistant confirmation detection (`"请确认我可以在..."`, `"Please confirm I can..."`, `"should I..."`) in `takeoverRequestPattern` and strengthen standing full-proxy pre-authorization defaults (`DEFAULT_TAKEOVER_REPLY_ZH/EN`) so Dot accepts designated GitHub collaborator invitations, clones, branches, commits/pushes, opens PRs, installs dependencies, uploads, and deploys with `/elephant-goldfish` without asking for manual takeover (`config.js`, `adapter.js`, `content.js`).
+- Expand repository development onboarding and IDE sync for seamless team handoff: add `.editorconfig`, `.vscode/*`, `scripts/bootstrap-dev.ps1`, `scripts/bootstrap-dev.sh`, `docs/DEVELOPMENT-SETUP.md`, `docs/prompts/FULL-DELEGATION-DOT-PROMPT.md`, and `docs/handoffs/2026-11-26-v3.3.5-HANDOFF.md`.
+
+## [3.3.4] - 2026-11-26
+
+- Upgrade `DEFAULT_TAKEOVER_REPLY_ZH` and `DEFAULT_TAKEOVER_REPLY_EN` to invoke `/elephant-goldfish` and delegate logins, OAuth, sessions, and 2FA/verification code lookups autonomously with zero human-takeover escape clauses (`config.js`, `popup.html`, `i18n-html.js`).
+- Separate strict human anti-CAPTCHA widgets/challenges from 2FA/verification text under opt-in `autoAuthorizeTakeover: true` on Dot so 2FA steps route to automatic delegation instead of false `captcha-required` pauses (`adapter.js`, `content.js`).
+
+## [3.3.3] - 2026-11-26
+
+- Eliminate 10+ second Dot UI send freezes on long multi-paragraph Markdown prompts (`adapter.js`): enable chunked insertion on `isDot`, add `HR` (`---`) support in `serializeDraft`, adopt rich-Markdown normalized renders without redundant `wait(10_000)` retries, insert `requestAnimationFrame` paint yields between chunks, optimize `identity()` / `tryReturnBrowserControl()`, and log `composer-unstable` before retry backoff waits.
+- Detect inline Dot `Sign in to <host>` + `Sign in` cards even while `Dot Thinking` (`.typing-indicator`) is visible and allow `isTakeoverReply: true` to submit directly to the chatbox (`content.js`, `adapter.js`).
+- Clear stuck `Working...` / `Pause scheduled sending` popup state when an in-flight activation transitions externally to manually paused in `chrome.storage.onChanged` (`popup.js`).
+
 ## [3.3.2] - 2026-11-26
 
 - Eliminate false `"Sign-in dialog detected"` pauses and 60-second `exception-detected` log floods on Dot conversations (`dialog-classifier.js`, `content.js`, `background.js`, `adapter.js`):

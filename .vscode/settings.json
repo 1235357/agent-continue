@@ -1,0 +1,24 @@
+{
+  "editor.formatOnSave": false,
+  "files.eol": "\n",
+  "files.encoding": "utf8",
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true,
+    ".artifacts": true,
+    "native/bootstrap/payload": true,
+    "native/bootstrap/windows-release": true,
+    "native/desktop-commander/node_modules": true,
+    "node_modules": true
+  },
+  "search.exclude": {
+    ".artifacts": true,
+    "dist": true,
+    "native/bootstrap/payload": true,
+    "native/bootstrap/windows-release": true,
+    "native/desktop-commander/node_modules": true,
+    "node_modules": true,
+    "vendor/pdfjs": true
+  },
+  "javascript.validate.enable": true
+}

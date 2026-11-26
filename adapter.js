@@ -346,7 +346,7 @@ export async function pageAction(args) {
 
   const closedSignInCardPattern = /\bsign[\s-]?in\s+request\s+(?:closed|completed|canceled|cancelled|dismissed|done)\b|登录请求\s*(?:已关闭|已完成|已取消|已结束)/i;
   const stripClosedSignInLines = value => String(value ?? '').split(/\r?\n/).filter(line => !closedSignInCardPattern.test(line)).join('\n');
-  const takeoverRequestPattern = /把控制权交回|交回控制权|归还控制权|请.*完成(?:GitHub|OAuth|页面|登录|授权|两步验证|2FA|验证).*交回|请.*手动登录|请.*接管.*登录|完成授权并|请回复.*授权|接管浏览器|请求接管|需要(?:你|您)?接管|请(?:你|您)?(?:先|帮忙)?(?:接管|登录|授权)|请.{0,12}(?:提供|输入|完成).{0,12}(?:两步验证|2FA|验证码|口令)|需要(?:你|您)?.{0,12}(?:提供|输入|完成|确认).{0,12}(?:两步验证|2FA|验证码|口令)|登录请求(?!\s*(?:已关闭|已完成|已取消|已结束))|请先完成.{0,16}(?:登录|授权|验证|2FA)|需要(?:你|您)?手动完成.{0,16}(?:登录|授权|验证|2FA)|\b(?:give|hand)\s+(?:me\s+)?control\s+back\b|\bhand\s+back\s+control\b|\breturn\s+(?:browser\s+)?control\b|\btake\s+over\s+(?:the\s+)?browser\b|\btake\s+over\s+and\s+(?:sign\s+in|log\s+in|authenticate|verify)\b|\b(?:please|could\s+you|need\s+you\s+to)\s+(?:[\w'-]+\s+){0,4}(?:take\s+over|sign\s+in|log\s+in|2fa|two-factor|verification\s+code|one-time\s+code)\b|\b(?:sign\s+in|log\s+in)\s+to\s+[a-z0-9.-]+\b|\bsign[\s-]?in\s+request\b(?!\s*(?:closed|completed|canceled|cancelled|dismissed|done))|\byour\s+dot\s+(?:needs|wants)\s+you\s+to\s+(?:sign\s+in|log\s+in|take\s+over|verify)\b|\bcomplete\s+(?:the\s+)?(?:sign[\s-]?in|log[\s-]?in|login|authentication|authorization|2fa|two-factor).*(?:control|continue|proceed)\b/i;
+  const takeoverRequestPattern = /把控制权交回|交回控制权|归还控制权|请.*完成(?:GitHub|OAuth|页面|登录|授权|两步验证|2FA|验证).*交回|请.*手动登录|请.*接管.*登录|完成授权并|请回复.*授权|接管浏览器|请求接管|需要(?:你|您)?接管|请(?:你|您)?(?:先|帮忙)?(?:接管|登录|授权)|请确认我(?:可以|是否|能否)|请确认(?:后|能否|是否可)|请确认.*(?:接受|继续|执行|提交|推送|安装|配置|运行|操作|处理|clone|PR)|需要(?:你|您)?确认(?:我)?(?:可以|是否|能否)|是否(?:允许|同意|需要)我|请.{0,12}(?:提供|输入|完成).{0,12}(?:两步验证|2FA|验证码|口令)|需要(?:你|您)?.{0,12}(?:提供|输入|完成|确认).{0,12}(?:两步验证|2FA|验证码|口令)|登录请求(?!\s*(?:已关闭|已完成|已取消|已结束))|请先完成.{0,16}(?:登录|授权|验证|2FA)|需要(?:你|您)?手动完成.{0,16}(?:登录|授权|验证|2FA)|\b(?:give|hand)\s+(?:me\s+)?control\s+back\b|\bhand\s+back\s+control\b|\breturn\s+(?:browser\s+)?control\b|\btake\s+over\s+(?:the\s+)?browser\b|\btake\s+over\s+and\s+(?:sign\s+in|log\s+in|authenticate|verify)\b|\b(?:please\s+confirm|confirm)\s+(?:that\s+)?(?:I\s+can|I\s+may|I\s+should|whether\s+I|if\s+I|before\s+I|to\s+proceed)\b|\b(?:should|shall|may)\s+I\s+(?:proceed|continue|accept|push|open|create|submit|install|run|clone|merge)\b|\bawaiting\s+your\s+(?:confirmation|approval|go-ahead)\b|\b(?:please|could\s+you|need\s+you\s+to)\s+(?:[\w'-]+\s+){0,4}(?:take\s+over|sign\s+in|log\s+in|2fa|two-factor|verification\s+code|one-time\s+code)\b|\b(?:sign\s+in|log\s+in)\s+to\s+[a-z0-9.-]+\b|\bsign[\s-]?in\s+request\b(?!\s*(?:closed|completed|canceled|cancelled|dismissed|done))|\byour\s+dot\s+(?:needs|wants)\s+you\s+to\s+(?:sign\s+in|log\s+in|take\s+over|verify)\b|\bcomplete\s+(?:the\s+)?(?:sign[\s-]?in|log[\s-]?in|login|authentication|authorization|2fa|two-factor).*(?:control|continue|proceed)\b/i;
   const dotSignInModalPattern = /\bsign[\s-]?in\s+request\b(?!\s*(?:closed|completed|canceled|cancelled|dismissed|done))|\btake\s+over\s+(?:the\s+)?browser\b|登录请求(?!\s*(?:已关闭|已完成|已取消|已结束))|接管浏览器|请求接管/i;
   const dotInlineCardTextPattern = /\b(?:sign\s*in|log\s*in)\s+to\s+[a-z0-9.-]+\b|\bsign[\s-]?in\s+request\b(?!\s*(?:closed|completed|canceled|cancelled|dismissed|done))|\b(?:accounts\.google\.com|login\.microsoftonline\.com|github\.com|appleid\.apple\.com)\b|登录请求(?!\s*(?:已关闭|已完成|已取消|已结束))|接管浏览器|请求接管/i;
   const dotInlineAuthButtonPattern = /^(?:sign\s*in|log\s*in|login|authorize|re-?authorize|connect\s+account|take\s+over|登录|去登录|授权登录|同意并登录|接管)$/i;
@@ -705,6 +705,12 @@ export async function pageAction(args) {
       return { kind: 'always-allow', priority: 3, raw, core, hasBadge, hasLetterBadge, highConfidence: true };
     }
     if ([
+      'allow this tool for this conversation', 'allow for this conversation', 'allow tool for this conversation', 'allow for conversation',
+      '本会话允许此工具', '此对话允许此工具',
+    ].includes(core) || /^allow\s+(?:this\s+tool\s+)?for\s+(?:this\s+)?conversation\b/i.test(core)) {
+      return { kind: 'always-allow', priority: 2, raw, core, hasBadge, hasLetterBadge, highConfidence: true };
+    }
+    if ([
       'allow once', 'allow this time', 'approve once', 'just once', 'only this time', 'permit once',
       '允许一次', '仅允许一次', '本次允许', '仅此一次', '这次允许',
     ].includes(core) || /^(?:allow\s+once|allow\s+this\s+time|approve\s+once|允许一次|仅允许一次|本次允许)\b/i.test(core)) {
@@ -763,7 +769,34 @@ export async function pageAction(args) {
     };
     const dialogs = [...document.querySelectorAll('[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]')];
     const recentAssistantTurns = [...document.querySelectorAll('article.message-row:not(.self), [data-message-author-role="assistant"], [data-chatgpt-search-unit-key$=":assistant"]')].slice(-2);
-    for (const root of [...dialogs, ...recentAssistantTurns]) scanRoot(root);
+    const roots = [...dialogs, ...recentAssistantTurns];
+    if (isDot) {
+      const feedNode = recentAssistantTurns.at(-1)?.parentElement?.closest?.('main')
+        || recentAssistantTurns.at(-1)?.parentElement
+        || null;
+      const candidateButtons = feedNode
+        ? feedNode.querySelectorAll('button, [role="button"], [role="option"], [role="radio"]')
+        : (args.autoAllow === true || args.autoAuthorizeTakeover === true
+          ? document.querySelectorAll('button, [role="button"], [role="option"], [role="radio"]')
+          : []);
+      for (const el of candidateButtons) {
+        if (!el?.isConnected || el.childElementCount > 4) continue;
+        const txt = el.textContent?.trim();
+        if (!txt || txt.length > 40 || !/^(?:deny|decline|reject|don't allow|do not allow|never allow|拒绝|不允许|驳回)$/i.test(txt)) continue;
+        if (el.closest?.(excludedSelector) || !visible(el)) continue;
+        let curr = el.parentElement;
+        for (let depth = 0; depth < 6 && curr && curr !== document.body && curr !== document.documentElement; depth++, curr = curr.parentElement) {
+          if (curr.closest?.(excludedSelector)) break;
+          if ((curr.textContent || '').length > 1500) break;
+          if (curr.querySelectorAll('article.message-row, [data-message-author-role]').length > 1) break;
+          if (!roots.includes(curr) && !roots.some(r => r.contains(curr)) && curr.querySelectorAll('button, [role="button"], [role="option"], [role="radio"]').length >= 2) {
+            roots.push(curr);
+            break;
+          }
+        }
+      }
+    }
+    for (const root of roots) scanRoot(root);
     if (!rawMatched.length) return returnDetails ? null : false;
 
     // Collapse nested parent-child chains that represent a single option pill/button.
@@ -890,7 +923,11 @@ export async function pageAction(args) {
       );
 
       if (groupAll.some(isOptionDisabledOrBusy) || hasAsymmetricSvgCheckmark) continue;
-      if (groupContainer.closest?.(assistantOrDialogSelector)) {
+      const standaloneDotPair = isDot && Boolean(pairedDeny)
+        && !groupContainer.closest?.(excludedSelector)
+        && groupContainer.querySelectorAll('article.message-row, [data-message-author-role]').length <= 1
+        && extractOptionText(groupContainer).length <= 1200;
+      if (groupContainer.closest?.(assistantOrDialogSelector) || standaloneDotPair) {
         if (!returnDetails) return true;
         return { groupAllows, groupDenies, groupContainer };
       }

@@ -1,0 +1,9 @@
+{
+  "recommendations": [
+    "dbaeumer.vscode-eslint",
+    "ms-python.python",
+    "ms-vscode.powershell",
+    "ms-playwright.playwright",
+    "editorconfig.editorconfig"
+  ]
+}

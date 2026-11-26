@@ -29,6 +29,7 @@ test('opt-in autonomy defaults stay false and validate strict bounds', () => {
     assert.doesNotMatch(prompt, /only if|stop and report|仅当必须|才明确停下|take over manually/i);
   }
   assert.ok(DEFAULT_TAKEOVER_REPLY_ZH.includes('两步验证') && DEFAULT_TAKEOVER_REPLY_EN.includes('2FA'));
+  assert.ok(DEFAULT_TAKEOVER_REPLY_ZH.includes('协作邀请') && DEFAULT_TAKEOVER_REPLY_EN.includes('collaborator'));
   for (const badBool of ['true', 1, null, {}]) {
     if (badBool === null) continue;
     assert.throws(() => readConfig({ prompt: 'SYNTHETIC', autoAllow: badBool }));
@@ -325,6 +326,66 @@ test('adapter handles opt-in routine allow, OAuth pause, Dot handover/takeover, 
       }, contentSrc);
       assert.equal(observedTakeovers.length, 1, JSON.stringify(observedTakeovers));
       assert.ok(observedTakeovers[0].assistantToken?.startsWith('card:'), JSON.stringify(observedTakeovers));
+
+      // 7. Standalone inline tool approval card ("Allow upload to ...") outside assistant message-row
+      // and conservative GitHub confirmation question ("请确认我可以在 GitHub 上接受...")
+      await page.evaluate(() => {
+        for (const el of [...document.querySelectorAll('.inline-oauth-card-2, .typing-indicator')]) el.remove();
+        window.__uploadToolClicks = [];
+        const assistant = document.createElement('article');
+        assistant.className = 'message-row';
+        assistant.dataset.messageId = 'acct~dot~Msg~cs310-invite';
+        const body = document.createElement('div');
+        body.className = 'message-body';
+        body.dataset.messageId = 'acct~dot~Msg~cs310-invite';
+        body.textContent = 'CS310 确认收到 hhhhaa19/newspulse 的协作邀请。请确认我可以在 GitHub 上接受这项指定仓库的协作者邀请；接受后就能按分工开 PR。';
+        assistant.append(body);
+
+        const uploadCard = document.createElement('div');
+        uploadCard.className = 'standalone-tool-card';
+        const q = document.createElement('p');
+        q.textContent = 'Allow upload to https://scopecheck-zye.app.space/workspace?';
+        const btns = ['Always allow', 'Allow once', 'Allow this tool for this conversation', 'Deny'].map(label => {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.textContent = label;
+          b.addEventListener('click', () => {
+            window.__uploadToolClicks.push(label);
+            uploadCard.remove();
+          });
+          return b;
+        });
+        uploadCard.append(q, ...btns);
+        document.querySelector('#conversation').append(assistant, uploadCard);
+      });
+      const contentSrc2 = fs.readFileSync(path.join(root, 'content.js'), 'utf8');
+      const observedApprovals = await page.evaluate(async src => {
+        const sent = [];
+        window.chrome = {
+          runtime: {
+            id: 'ext-test-id',
+            connect: () => ({ onDisconnect: { addListener() {} } }),
+            onMessage: { addListener() {} },
+            sendMessage: async msg => { sent.push(msg); return { ok: true }; },
+          },
+        };
+        delete globalThis.__agentContinueContentRuntimeId;
+        new Function(src)();
+        await new Promise(r => setTimeout(r, 750));
+        return sent.filter(m => m?.type === 'ROUTINE_APPROVAL_OBSERVED');
+      }, contentSrc2);
+      assert.equal(observedApprovals.length, 1, JSON.stringify(observedApprovals));
+      const allowStandalone = await page.evaluate(pageAction, { ...baseArgs, autoAllow: true, autoAuthorizeTakeover: true });
+      assert.equal(allowStandalone.status, 'busy', JSON.stringify(allowStandalone));
+      assert.equal(allowStandalone.diagnosticCode, 'auto-allowed-prompt', JSON.stringify(allowStandalone));
+      assert.deepEqual(await page.evaluate(() => window.__uploadToolClicks), ['Always allow']);
+
+      const confirmInvite = await page.evaluate(pageAction, {
+        ...baseArgs, mode: 'check', detectTakeover: true, autoAllow: true, autoAuthorizeTakeover: true,
+      });
+      assert.equal(confirmInvite.status, 'busy', JSON.stringify(confirmInvite));
+      assert.equal(confirmInvite.diagnosticCode, 'takeover-needed', JSON.stringify(confirmInvite));
+      assert.equal(confirmInvite.takeoverAssistantToken, 'acct~dot~Msg~cs310-invite');
 
       await ctx.close();
     }

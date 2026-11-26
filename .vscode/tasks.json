@@ -1,0 +1,43 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Bootstrap Dev Environment (Windows)",
+      "type": "shell",
+      "command": "powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap-dev.ps1",
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Syntax & Fast Unit Check",
+      "type": "shell",
+      "command": "npm run check",
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Run Dot & Opt-In Browser Suites",
+      "type": "shell",
+      "command": "node --test tests/auto-allow-optin-tests.mjs tests/approval-boundary-tests.mjs tests/dialog-classifier-tests.mjs tests/delivery-diagnostics-tests.mjs && node tests/dot-adapter-tests.mjs && node tests/ui-v2-tests.mjs && node tests/mv3-integration-tests.mjs",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run Full Test Suite (npm test)",
+      "type": "shell",
+      "command": "npm test",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Package Windows Preview Extension ZIP",
+      "type": "shell",
+      "command": "python -B scripts/package.py --windows-preview",
+      "group": "build",
+      "problemMatcher": []
+    }
+  ]
+}

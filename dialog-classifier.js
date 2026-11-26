@@ -30,8 +30,9 @@
     if ([
       'always allow', 'allow always', 'always approve', 'always permit', 'allow all',
       'always accept', 'trust always', 'always continue',
-      '始终允许', '总是允许', '一直允许', '全部允许', '始终同意', '始终批准', '始终授权',
-    ].includes(core) || /^(?:always\s+(?:allow|approve|permit|accept|continue)|始终允许|总是允许|一直允许)\b/i.test(core)) {
+      'allow this tool for this conversation', 'allow for this conversation', 'allow tool for this conversation', 'allow for conversation',
+      '始终允许', '总是允许', '一直允许', '全部允许', '始终同意', '始终批准', '始终授权', '本会话允许此工具', '此对话允许此工具',
+    ].includes(core) || /^(?:always\s+(?:allow|approve|permit|accept|continue)|allow\s+(?:this\s+tool\s+)?for\s+(?:this\s+)?conversation|始终允许|总是允许|一直允许)\b/i.test(core)) {
       return { kind: 'always-allow' };
     }
     if ([

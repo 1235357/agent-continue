@@ -43,10 +43,10 @@
   } catch {}
 
   const authOrLoginCardPattern = /\b(?:sign\s*in|log\s*in|login|oauth|re-?authorize|authorize\s+(?:app|with)|connect\s+(?:account|your)|link\s+account|password|2fa)\b|登录|授权登录|同意登录|连接账号|关联账号|绑定账号|密码/i;
-  const toolPromptPattern = /\b(?:always\s+allow|allow\s+once|allow|allow\s+this\s+time|approve|always\s+approve)\b|始终允许|总是允许|允许一次|允许/i;
+  const toolPromptPattern = /\b(?:always\s+allow|allow\s+once|allow\s+(?:this\s+tool\s+)?for\s+(?:this\s+)?conversation|allow\s+upload|allow|allow\s+this\s+time|approve|always\s+approve)\b|始终允许|总是允许|允许一次|允许|本会话允许此工具|此对话允许此工具/i;
   const closedSignInCardPattern = /\bsign[\s-]?in\s+request\s+(?:closed|completed|canceled|cancelled|dismissed|done)\b|登录请求\s*(?:已关闭|已完成|已取消|已结束)/i;
   const stripClosedSignInLines = value => String(value ?? '').split(/\r?\n/).filter(line => !closedSignInCardPattern.test(line)).join('\n');
-  const takeoverRequestPattern = /把控制权交回|交回控制权|归还控制权|请.*完成(?:GitHub|OAuth|页面|登录|授权|两步验证|2FA|验证).*交回|请.*手动登录|请.*接管.*登录|完成授权并|请回复.*授权|接管浏览器|请求接管|需要(?:你|您)?接管|请(?:你|您)?(?:先|帮忙)?(?:接管|登录|授权)|请.{0,12}(?:提供|输入|完成).{0,12}(?:两步验证|2FA|验证码|口令)|需要(?:你|您)?.{0,12}(?:提供|输入|完成|确认).{0,12}(?:两步验证|2FA|验证码|口令)|登录请求(?!\s*(?:已关闭|已完成|已取消|已结束))|请先完成.{0,16}(?:登录|授权|验证|2FA)|需要(?:你|您)?手动完成.{0,16}(?:登录|授权|验证|2FA)|\b(?:give|hand)\s+(?:me\s+)?control\s+back\b|\bhand\s+back\s+control\b|\breturn\s+(?:browser\s+)?control\b|\btake\s+over\s+(?:the\s+)?browser\b|\btake\s+over\s+and\s+(?:sign\s+in|log\s+in|authenticate|verify)\b|\b(?:please|could\s+you|need\s+you\s+to)\s+(?:[\w'-]+\s+){0,4}(?:take\s+over|sign\s+in|log\s+in|2fa|two-factor|verification\s+code|one-time\s+code)\b|\b(?:sign\s+in|log\s+in)\s+to\s+[a-z0-9.-]+\b|\bsign[\s-]?in\s+request\b(?!\s*(?:closed|completed|canceled|cancelled|dismissed|done))|\byour\s+dot\s+(?:needs|wants)\s+you\s+to\s+(?:sign\s+in|log\s+in|take\s+over|verify)\b|\bcomplete\s+(?:the\s+)?(?:sign[\s-]?in|log[\s-]?in|login|authentication|authorization|2fa|two-factor).*(?:control|continue|proceed)\b/i;
+  const takeoverRequestPattern = /把控制权交回|交回控制权|归还控制权|请.*完成(?:GitHub|OAuth|页面|登录|授权|两步验证|2FA|验证).*交回|请.*手动登录|请.*接管.*登录|完成授权并|请回复.*授权|接管浏览器|请求接管|需要(?:你|您)?接管|请(?:你|您)?(?:先|帮忙)?(?:接管|登录|授权)|请确认我(?:可以|是否|能否)|请确认(?:后|能否|是否可)|请确认.*(?:接受|继续|执行|提交|推送|安装|配置|运行|操作|处理|clone|PR)|需要(?:你|您)?确认(?:我)?(?:可以|是否|能否)|是否(?:允许|同意|需要)我|请.{0,12}(?:提供|输入|完成).{0,12}(?:两步验证|2FA|验证码|口令)|需要(?:你|您)?.{0,12}(?:提供|输入|完成|确认).{0,12}(?:两步验证|2FA|验证码|口令)|登录请求(?!\s*(?:已关闭|已完成|已取消|已结束))|请先完成.{0,16}(?:登录|授权|验证|2FA)|需要(?:你|您)?手动完成.{0,16}(?:登录|授权|验证|2FA)|\b(?:give|hand)\s+(?:me\s+)?control\s+back\b|\bhand\s+back\s+control\b|\breturn\s+(?:browser\s+)?control\b|\btake\s+over\s+(?:the\s+)?browser\b|\btake\s+over\s+and\s+(?:sign\s+in|log\s+in|authenticate|verify)\b|\b(?:please\s+confirm|confirm)\s+(?:that\s+)?(?:I\s+can|I\s+may|I\s+should|whether\s+I|if\s+I|before\s+I|to\s+proceed)\b|\b(?:should|shall|may)\s+I\s+(?:proceed|continue|accept|push|open|create|submit|install|run|clone|merge)\b|\bawaiting\s+your\s+(?:confirmation|approval|go-ahead)\b|\b(?:please|could\s+you|need\s+you\s+to)\s+(?:[\w'-]+\s+){0,4}(?:take\s+over|sign\s+in|log\s+in|2fa|two-factor|verification\s+code|one-time\s+code)\b|\b(?:sign\s+in|log\s+in)\s+to\s+[a-z0-9.-]+\b|\bsign[\s-]?in\s+request\b(?!\s*(?:closed|completed|canceled|cancelled|dismissed|done))|\byour\s+dot\s+(?:needs|wants)\s+you\s+to\s+(?:sign\s+in|log\s+in|take\s+over|verify)\b|\bcomplete\s+(?:the\s+)?(?:sign[\s-]?in|log[\s-]?in|login|authentication|authorization|2fa|two-factor).*(?:control|continue|proceed)\b/i;
   const signInCardTextPattern = /\b(?:sign\s*in|log\s*in)\s+to\s+[a-z0-9.-]+\b|\bsign[\s-]?in\s+request\b(?!\s*(?:closed|completed|canceled|cancelled|dismissed|done))|\b(?:accounts\.google\.com|login\.microsoftonline\.com|github\.com|appleid\.apple\.com)\b|登录请求(?!\s*(?:已关闭|已完成|已取消|已结束))|接管浏览器|请求接管/i;
   const signInButtonPattern = /^(?:sign\s*in|log\s*in|login|authorize|re-?authorize|connect\s+account|take\s+over|give\s+control\s+back|hand\s+(?:control\s+)?back|return\s+control|登录|去登录|授权登录|同意并登录|接管|交回控制权|归还控制权)$/i;
   const captchaPattern = /\b(?:captcha|recaptcha|hcaptcha|turnstile|altcha|verify\s+you\s+are\s+human)\b|人机验证|图形验证码/i;
@@ -57,8 +57,29 @@
     if (!document.body) return false;
     const dialogs = [...document.querySelectorAll('[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]')];
     const recentTurns = [...document.querySelectorAll('article.message-row:not(.self), [data-message-author-role="assistant"], [data-chatgpt-search-unit-key$=":assistant"]')].slice(-2);
-    const roots = [...dialogs, ...recentTurns];
+    const inlineRoots = [];
     const controlSel = 'button, [role="button"], [role="option"], [role="radio"]';
+    const excludedRoot = '[data-message-author-role="user"], article.message-row.self, article.self, pre, code, nav, header, aside, footer, [role="navigation"], [role="banner"], [data-testid*="sidebar"]';
+    const allButtons = document.querySelectorAll(controlSel);
+    for (let i = 0; i < allButtons.length; i++) {
+      const btn = allButtons[i];
+      if (!btn?.isConnected || btn.disabled || btn.getAttribute('aria-disabled') === 'true' || btn.childElementCount > 4) continue;
+      const t = btn.textContent?.trim();
+      if (!t || t.length > 40 || !/^(?:deny|decline|reject|don't allow|do not allow|never allow|拒绝|不允许|驳回)$/i.test(t)) continue;
+      if (btn.closest?.(excludedRoot)) continue;
+      let curr = btn.parentElement;
+      for (let depth = 0; depth < 6 && curr && curr !== document.body && curr !== document.documentElement; depth++, curr = curr.parentElement) {
+        if (curr.hasAttribute('hidden') || curr.getAttribute('aria-hidden') === 'true' || curr.closest?.(excludedRoot)) break;
+        const len = (curr.textContent || '').length;
+        if (len > 1500) break;
+        if (curr.querySelectorAll('article.message-row, [data-message-author-role]').length > 1) break;
+        if (toolPromptPattern.test(curr.textContent?.slice(0, 800) || '')) {
+          inlineRoots.push(curr);
+          break;
+        }
+      }
+    }
+    const roots = [...dialogs, ...recentTurns, ...inlineRoots];
     for (let r = 0; r < roots.length; r++) {
       const root = roots[r];
       if (!root?.isConnected || root.hasAttribute('hidden') || root.getAttribute('aria-hidden') === 'true') continue;
@@ -86,7 +107,7 @@
         if (authOrLoginCardPattern.test(core)) { sawAuth = true; break; }
         if (/^(?:deny|decline|reject|don't allow|do not allow|never allow|cancel|拒绝|不允许|取消|驳回)$/i.test(core)) {
           sawDeny = true;
-        } else if (/^(?:always\s+(?:allow|approve|permit|accept)|allow\s+(?:once|this\s+time)|allow|approve|始终允许|总是允许|允许一次|本次允许|允许|批准)$/i.test(core)) {
+        } else if (/^(?:always\s+(?:allow|approve|permit|accept)|allow\s+(?:once|this\s+time)|allow\s+(?:this\s+tool\s+)?for\s+(?:this\s+)?conversation|allow|approve|始终允许|总是允许|允许一次|本次允许|允许|批准|本会话允许此工具|此对话允许此工具)$/i.test(core)) {
           sawAllow = true;
         }
       }

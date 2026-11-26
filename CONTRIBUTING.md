@@ -6,7 +6,7 @@ Agent Continue 的项目代码采用 MIT 许可证。离线 PDF.js、字体和 C
 
 ## 从源码运行
 
-需要 **Node.js 22.13.0+、npm、Python 3**。
+需要 **Node.js 22.13.0+、npm、Python 3**。推荐使用仓库自带的一键开发环境初始化脚本与 VS Code 任务（完整开发指南与交接文档见 GitHub 仓库 `docs/DEVELOPMENT-SETUP.md`、`docs/handoffs/COLLEAGUE-PROMPT.zh-CN.md`、`docs/prompts/FULL-DELEGATION-DOT-PROMPT.md`，PowerShell 可执行 `scripts/bootstrap-dev.ps1`，macOS/Linux 可执行 `scripts/bootstrap-dev.sh`）。
 
 ```bash
 git clone https://github.com/1235357/agent-continue.git
