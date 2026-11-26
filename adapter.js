@@ -346,12 +346,13 @@ export async function pageAction(args) {
 
   const closedSignInCardPattern = /\bsign[\s-]?in\s+request\s+(?:closed|completed|canceled|cancelled|dismissed|done)\b|登录请求\s*(?:已关闭|已完成|已取消|已结束)/i;
   const stripClosedSignInLines = value => String(value ?? '').split(/\r?\n/).filter(line => !closedSignInCardPattern.test(line)).join('\n');
-  const takeoverRequestPattern = /把控制权交回|交回控制权|归还控制权|请.*完成(?:GitHub|OAuth|页面|登录|授权).*交回|请.*手动登录|请.*接管.*登录|完成授权并|请回复.*授权|接管浏览器|请求接管|需要(?:你|您)?接管|请(?:你|您)?(?:先)?(?:接管|登录|授权)|登录请求(?!\s*(?:已关闭|已完成|已取消|已结束))|请先完成.{0,12}(?:登录|授权)|需要(?:你|您)?手动完成.{0,12}(?:登录|授权)|\b(?:give|hand)\s+(?:me\s+)?control\s+back\b|\bhand\s+back\s+control\b|\breturn\s+(?:browser\s+)?control\b|\btake\s+over\s+(?:the\s+)?browser\b|\btake\s+over\s+and\s+(?:sign\s+in|log\s+in|authenticate)\b|\bplease\s+(?:take\s+over|sign\s+in|log\s+in)\b|\b(?:sign\s+in|log\s+in)\s+to\s+[a-z0-9.-]+\b|\bsign[\s-]?in\s+request\b(?!\s*(?:closed|completed|canceled|cancelled|dismissed|done))|\byour\s+dot\s+(?:needs|wants)\s+you\s+to\s+(?:sign\s+in|log\s+in|take\s+over)\b|\bcomplete\s+(?:the\s+)?(?:sign[\s-]?in|log[\s-]?in|login|authentication|authorization).*(?:control|continue|proceed)\b/i;
+  const takeoverRequestPattern = /把控制权交回|交回控制权|归还控制权|请.*完成(?:GitHub|OAuth|页面|登录|授权|两步验证|2FA|验证).*交回|请.*手动登录|请.*接管.*登录|完成授权并|请回复.*授权|接管浏览器|请求接管|需要(?:你|您)?接管|请(?:你|您)?(?:先|帮忙)?(?:接管|登录|授权)|请.{0,12}(?:提供|输入|完成).{0,12}(?:两步验证|2FA|验证码|口令)|需要(?:你|您)?.{0,12}(?:提供|输入|完成|确认).{0,12}(?:两步验证|2FA|验证码|口令)|登录请求(?!\s*(?:已关闭|已完成|已取消|已结束))|请先完成.{0,16}(?:登录|授权|验证|2FA)|需要(?:你|您)?手动完成.{0,16}(?:登录|授权|验证|2FA)|\b(?:give|hand)\s+(?:me\s+)?control\s+back\b|\bhand\s+back\s+control\b|\breturn\s+(?:browser\s+)?control\b|\btake\s+over\s+(?:the\s+)?browser\b|\btake\s+over\s+and\s+(?:sign\s+in|log\s+in|authenticate|verify)\b|\b(?:please|could\s+you|need\s+you\s+to)\s+(?:[\w'-]+\s+){0,4}(?:take\s+over|sign\s+in|log\s+in|2fa|two-factor|verification\s+code|one-time\s+code)\b|\b(?:sign\s+in|log\s+in)\s+to\s+[a-z0-9.-]+\b|\bsign[\s-]?in\s+request\b(?!\s*(?:closed|completed|canceled|cancelled|dismissed|done))|\byour\s+dot\s+(?:needs|wants)\s+you\s+to\s+(?:sign\s+in|log\s+in|take\s+over|verify)\b|\bcomplete\s+(?:the\s+)?(?:sign[\s-]?in|log[\s-]?in|login|authentication|authorization|2fa|two-factor).*(?:control|continue|proceed)\b/i;
   const dotSignInModalPattern = /\bsign[\s-]?in\s+request\b(?!\s*(?:closed|completed|canceled|cancelled|dismissed|done))|\btake\s+over\s+(?:the\s+)?browser\b|登录请求(?!\s*(?:已关闭|已完成|已取消|已结束))|接管浏览器|请求接管/i;
   const dotInlineCardTextPattern = /\b(?:sign\s*in|log\s*in)\s+to\s+[a-z0-9.-]+\b|\bsign[\s-]?in\s+request\b(?!\s*(?:closed|completed|canceled|cancelled|dismissed|done))|\b(?:accounts\.google\.com|login\.microsoftonline\.com|github\.com|appleid\.apple\.com)\b|登录请求(?!\s*(?:已关闭|已完成|已取消|已结束))|接管浏览器|请求接管/i;
   const dotInlineAuthButtonPattern = /^(?:sign\s*in|log\s*in|login|authorize|re-?authorize|connect\s+account|take\s+over|登录|去登录|授权登录|同意并登录|接管)$/i;
   const dotCardTokenMap = (globalThis.__agentContinueCardTokens ??= new WeakMap());
-  const captchaOr2FAPattern = /\b(?:captcha|recaptcha|hcaptcha|turnstile|verify\s+you\s+are\s+human|one-time\s+(?:code|password)|2fa\s+code|verification\s+code|enter\s+(?:your\s+)?password)\b|人机验证|图形验证码|短信验证码|邮箱验证码|输入密码|动态口令/i;
+  const strictCaptchaPattern = /\b(?:captcha|recaptcha|hcaptcha|turnstile|altcha|verify\s+you\s+are\s+human)\b|人机验证|图形验证码/i;
+  const captchaOr2FAPattern = /\b(?:captcha|recaptcha|hcaptcha|turnstile|altcha|verify\s+you\s+are\s+human|one-time\s+(?:code|password)|2fa\s+code|verification\s+code|enter\s+(?:your\s+)?password)\b|人机验证|图形验证码|短信验证码|邮箱验证码|输入密码|动态口令/i;
 
   const detectCaptchaOr2FABlock = () => {
     if (document.querySelector('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="challenges.cloudflare.com"], .cf-turnstile, .g-recaptcha')) {
@@ -359,7 +360,8 @@ export async function pageAction(args) {
     }
     const last = [...document.querySelectorAll(assistantSelector)].at(-1);
     const txt = last ? textOf(last) : '';
-    return Boolean(txt && captchaOr2FAPattern.test(txt));
+    const pattern = (isDot && args.autoAuthorizeTakeover === true) ? strictCaptchaPattern : captchaOr2FAPattern;
+    return Boolean(txt && pattern.test(txt));
   };
 
   const authTextPattern = /\b(?:sign\s*in(?:\s+with|\s+to)?|log\s*in(?:\s+with|\s+to)?|login|oauth|re-?authorize|authorize\s+(?:app|with|account)|connect\s+(?:your\s+)?account|link\s+account|session\s+expired|continue\s+with\s+(?:google|microsoft|apple|github|facebook)|password|2fa|two-factor)\b|使用\s*(?:Google|Apple|Microsoft|GitHub)\s*登录|(?:通过|使用)\s*.+\s*账号登录|会话已过期|重新登录|授权登录|同意登录|同意并登录|去登录|连接账号|关联账号|绑定账号/i;

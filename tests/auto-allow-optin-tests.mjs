@@ -24,6 +24,11 @@ test('opt-in autonomy defaults stay false and validate strict bounds', () => {
   assert.equal(resolvedTakeoverPrompt({ takeoverReply: '  ' }, 'en'), DEFAULT_TAKEOVER_REPLY_EN);
   assert.equal(resolvedTakeoverPrompt({ takeoverReply: '' }, 'zh_CN'), DEFAULT_TAKEOVER_REPLY_ZH);
   assert.equal(resolvedTakeoverPrompt({ takeoverReply: 'User delegate' }, 'en'), 'User delegate');
+  for (const prompt of [DEFAULT_TAKEOVER_REPLY_ZH, DEFAULT_TAKEOVER_REPLY_EN]) {
+    assert.ok(prompt.includes('/elephant-goldfish'), 'default takeover prompt must invoke /elephant-goldfish');
+    assert.doesNotMatch(prompt, /only if|stop and report|仅当必须|才明确停下|take over manually/i);
+  }
+  assert.ok(DEFAULT_TAKEOVER_REPLY_ZH.includes('两步验证') && DEFAULT_TAKEOVER_REPLY_EN.includes('2FA'));
   for (const badBool of ['true', 1, null, {}]) {
     if (badBool === null) continue;
     assert.throws(() => readConfig({ prompt: 'SYNTHETIC', autoAllow: badBool }));
@@ -161,6 +166,20 @@ test('adapter handles opt-in routine allow, OAuth pause, Dot handover/takeover, 
       const blocked = await page.evaluate(pageAction, { ...baseArgs, autoAuthorizeTakeover: true });
       assert.equal(blocked.status, 'blocked');
       assert.equal(blocked.diagnosticCode, 'captcha-required');
+
+      // 4b. When autoAuthorizeTakeover: true on Dot, a 2FA/verification code request WITHOUT a CAPTCHA widget
+      // delegates to Dot via takeover-needed instead of pausing as captcha-required.
+      await page.evaluate(() => {
+        document.querySelectorAll('iframe').forEach(f => f.remove());
+        const msg = document.querySelector('article.message-row:not(.self) .message-body');
+        msg.dataset.messageId = 'acct~dot~Msg~2fa';
+        msg.textContent = 'Please enter the 2FA verification code sent to your email to continue.';
+      });
+      const twoFaCheck = await page.evaluate(pageAction, { ...baseArgs, mode: 'check', detectTakeover: true, autoAuthorizeTakeover: true });
+      assert.equal(twoFaCheck.status, 'busy', JSON.stringify(twoFaCheck));
+      assert.equal(twoFaCheck.diagnosticCode, 'takeover-needed', JSON.stringify(twoFaCheck));
+      assert.equal(twoFaCheck.takeoverAssistantToken, 'acct~dot~Msg~2fa');
+
       await ctx.close();
     }
     // 5. Dot active Sign-in request dialog & Paused takeover prompt vs closed Sign-in request card

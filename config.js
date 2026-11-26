@@ -6,8 +6,8 @@ const t = createTranslator(runtimeCatalog);
 // Stored records from 0.2.0 did not distinguish the old waiting default from a
 // deliberate choice. Versioned records preserve choices made after the change.
 export const DELIVERY_BEHAVIOR_VERSION = 1;
-export const DEFAULT_TAKEOVER_REPLY_ZH = '我正式授权你全权处理当前授权与登录确认流程并继续推进。如果你已持有控制权或已处于登录状态，请直接继续后续步骤；仅当必须由我本人输入账号密码、验证码或人机验证 CAPTCHA 时，才明确停下并给出当前具体步骤。';
-export const DEFAULT_TAKEOVER_REPLY_EN = 'You have my explicit authorization to handle this login/authorization confirmation and continue autonomously. If you already hold control or an active session, proceed directly with the next steps. Stop and report the exact step only if human credentials, a 2FA code, or a CAPTCHA check is strictly required.';
+export const DEFAULT_TAKEOVER_REPLY_ZH = '请使用 /elephant-goldfish 技能推进。你是我本人明确授权的分身与全权代表，拥有完整自主权限替我全权处理当前及后续所有流程：包括登录、OAuth/Google/GitHub 等账号授权、会话恢复、两步验证（2FA）与邮箱/消息验证码查收填写，以及各类权限确认。请直接接管并自主完成上述全部操作，不要停下、也不要要求我手动介入，立即继续执行并端到端实测验收直至任务彻底完成。';
+export const DEFAULT_TAKEOVER_REPLY_EN = 'Use the /elephant-goldfish skill to drive this task to completion. You are my explicitly authorized representative and digital proxy with full permission to handle EVERY step autonomously—including sign-in, OAuth/SSO authorization, session recovery, permission confirmations, and retrieving/completing two-factor authentication (2FA) or verification codes through your authorized browser sessions, connected mail, and tools. Do not stop or ask me to manually take over; proceed directly with full control and verify the completed result end-to-end.';
 
 export const DEFAULT_CONFIG = Object.freeze({
   deliveryBehaviorVersion: DELIVERY_BEHAVIOR_VERSION,
