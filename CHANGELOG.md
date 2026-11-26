@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## [3.3.1] - 2026-11-26
+
+- Raise the Linux `release` job `timeout-minutes` budget in `.github/workflows/release.yml` from `15` to `40` so the full `xvfb-run -a env TEST_HEADED=1 npm test` browser suite, store/extension packaging, SHA-256 verification, and GitHub draft release creation complete without hitting the 15-minute job cancellation timeout observed on `v3.3.0`.
+- Includes all `3.3.0` fixes and features below (restart unique-tab auto-rebind, `preDispatch` safe recovery, Dot `'~'` turn-identity stabilization, opt-in routine approval automation with OAuth/login pause, opt-in Dot takeover / delegation auto-reply with CAPTCHA/2FA pause, and read-only `ssh-preflight`).
+
 ## [3.3.0] - 2026-11-26
 
 - Fix browser/service-worker recovery and eliminate 34-second `browser-restored` activity log spam (`background.js`):

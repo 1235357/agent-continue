@@ -2325,6 +2325,15 @@ async function rebindOrphanedJobIfUnique(version, expectedTabId = null) {
   const candidate = sameUrlTabs[0];
   if (!Number.isInteger(candidate?.id) || candidate.status !== 'complete' || candidate.discarded || candidate.frozen) return false;
   if (expectedTabId !== null && candidate.id !== expectedTabId) return false;
+  // Verify the candidate page is hydrated and matches targetIdentity before
+  // rebinding (avoids binding offline/error startup-restored tabs).
+  let verified;
+  try { verified = await probe(candidate, precheck, precheck.targetIdentity); }
+  catch { return false; }
+  if (!verified || verified.status === 'blocked'
+      || (precheck.targetIdentity && verified.identity && verified.identity !== precheck.targetIdentity)) {
+    return false;
+  }
   return transact(async () => {
     if (version !== intentVersion) return false;
     const job = await getJob();
@@ -2583,7 +2592,6 @@ chrome.runtime.onStartup?.addListener?.(() => {
       return version === intentVersion;
     });
     if (!running || version !== intentVersion) return;
-    if (observed.tabId === null) await rebindOrphanedJobIfUnique(version);
     if (version === intentVersion) setTimeout(() => runRound(false, null, version).catch(() => undefined), 2500);
   }).catch(() => undefined);
 });
