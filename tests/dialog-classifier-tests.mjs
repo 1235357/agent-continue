@@ -281,3 +281,33 @@ test('TC-08: Performance — 100 rapid calls average < 2ms', () => {
 
   assert.ok(avg < 2, `Average time per call ${avg.toFixed(3)}ms should be < 2ms`);
 });
+
+test('TC-09: Classifier outputs structured flags and ignores benign Dot handover modal on /dots/', () => {
+  doc.title = 'Your dot';
+  doc.body = new FakeElement('body');
+  const textarea = new FakeElement('textarea', { id: 'prompt-textarea' });
+  doc.body.appendChild(textarea);
+  doc.elementsById.set('prompt-textarea', textarea);
+  window.location.pathname = '/dots/home';
+
+  const handoverDlg = new FakeElement('div', { role: 'dialog', 'aria-modal': 'true' }, 'Sign-in request github.com');
+  handoverDlg.appendChild(new FakeElement('button', {}, 'Take over'));
+  doc.body.appendChild(handoverDlg);
+  globalThis.__agentContinueFirstSeenMap.set(handoverDlg, performance.now() - 8000);
+
+  const dotSafe = classifyDialogContext();
+  assert.equal(dotSafe.safe, true);
+  assert.equal(dotSafe.kind, 'none');
+
+  const otherDlg = new FakeElement('div', { role: 'dialog', 'aria-modal': 'true' }, 'Unrecognized notice');
+  otherDlg.appendChild(new FakeElement('button', {}, 'Got it'));
+  doc.body.appendChild(otherDlg);
+  globalThis.__agentContinueFirstSeenMap.set(otherDlg, performance.now() - 8000);
+
+  const flagged = classifyDialogContext();
+  assert.equal(flagged.safe, false);
+  assert.equal(flagged.kind, 'unknown-modal');
+  assert.equal(flagged.surface, 'modal');
+  assert.equal(flagged.composerPresent, true);
+  assert.deepEqual(flagged.evidenceFlags, ['role-dialog', 'aria-modal', 'composer-present']);
+});

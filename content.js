@@ -213,15 +213,22 @@
         if (kind !== lastKind) {
           lastKind = kind;
           if (kind) {
-            try { Promise.resolve(chrome.runtime.sendMessage({ type: 'DIALOG_EXCEPTION', kind })).catch(() => {}); }
+            try { Promise.resolve(chrome.runtime.sendMessage({
+            type: 'DIALOG_EXCEPTION',
+            kind,
+            ...(typeof context?.surface === 'string' ? { surface: context.surface } : {}),
+            ...(Array.isArray(context?.evidenceFlags) ? { evidence: context.evidenceFlags } : {}),
+            ...(typeof context?.composerPresent === 'boolean' ? { composerPresent: context.composerPresent } : {}),
+          })).catch(() => {}); }
             catch { /* Extension reloaded or context invalidated. */ }
           }
         }
-        if (context.safe && Date.now() - lastRoutineApprovalAt >= 2500 && hasUnansweredRoutineToolCard()) {
+        const notBlockedByAuth = !['session-expired', 'oauth-popup'].includes(context.kind);
+        if (notBlockedByAuth && Date.now() - lastRoutineApprovalAt >= 1500 && hasUnansweredRoutineToolCard()) {
           lastRoutineApprovalAt = Date.now();
           try { Promise.resolve(chrome.runtime.sendMessage({ type: 'ROUTINE_APPROVAL_OBSERVED' })).catch(() => {}); }
           catch { /* Extension reloaded or context invalidated. */ }
-        } else if (context.safe && Date.now() - lastTakeoverAt >= 2500) {
+        } else if (notBlockedByAuth && Date.now() - lastTakeoverAt >= 1500) {
           const takeoverToken = observeIdleTakeoverPrompt();
           if (takeoverToken && takeoverToken !== lastTakeoverToken) {
             lastTakeoverToken = takeoverToken;

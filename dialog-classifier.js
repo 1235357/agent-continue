@@ -85,19 +85,26 @@
       ? document.querySelector?.('[data-testid="login-button"], form[action*="login"]')
       : null;
     const composerEl = typeof document !== 'undefined'
-      ? document.getElementById?.('prompt-textarea')
+      ? (document.getElementById?.('prompt-textarea')
+        || document.querySelector?.('[data-composer-markdown], [role="textbox"][contenteditable="true"]'))
       : null;
+    const hasComposer = Boolean(composerEl);
 
     if (loginEl && !composerEl) {
       evidence.push('login-form-without-composer');
     }
 
+    const flags = [];
+    if (evidence.some(item => item.startsWith('title-matches-'))) flags.push('session-expired-title');
+    if (loginEl) flags.push('auth-form');
+    flags.push(hasComposer ? 'composer-present' : 'no-composer');
+
     if (evidence.length >= 2) {
-      return { safe: false, kind: 'session-expired', evidence, confidence: 0.9 };
+      return { safe: false, kind: 'session-expired', evidence, evidenceFlags: flags, surface: 'page', composerPresent: hasComposer, confidence: 0.9 };
     }
     if (evidence.length === 1) {
       // Fail-low rule: 1 weak signal downgrades to unknown-modal level to avoid false pauses
-      return { safe: false, kind: 'unknown-modal', evidence, confidence: 0.6 };
+      return { safe: false, kind: 'unknown-modal', evidence, evidenceFlags: flags, surface: 'page', composerPresent: hasComposer, confidence: 0.6 };
     }
     return null;
   }
@@ -105,10 +112,15 @@
   function detectOAuthPopup() {
     const evidence = [];
     const hostname = typeof window !== 'undefined' && window.location ? window.location.hostname || '' : '';
+    const composerEl = typeof document !== 'undefined'
+      ? (document.getElementById?.('prompt-textarea')
+        || document.querySelector?.('[data-composer-markdown], [role="textbox"][contenteditable="true"]'))
+      : null;
+    const hasComposer = Boolean(composerEl);
 
     if (/(?:accounts\.google\.com|login\.microsoftonline\.com|github\.com|appleid\.apple\.com)$/i.test(hostname)) {
       evidence.push(`navigated-to-oauth-host:${hostname}`);
-      return { safe: false, kind: 'oauth-popup', evidence, confidence: 0.95 };
+      return { safe: false, kind: 'oauth-popup', evidence, evidenceFlags: ['popup-oauth', hasComposer ? 'composer-present' : 'no-composer'], surface: 'page', composerPresent: hasComposer, confidence: 0.95 };
     }
 
     if (typeof document === 'undefined' || !document.querySelectorAll) return null;
@@ -125,12 +137,17 @@
         if (st.display === 'none' || st.visibility === 'hidden') continue;
       } catch {}
 
+      const dialogFlags = [
+        dialog.getAttribute('role') === 'alertdialog' ? 'role-alertdialog' : dialog.getAttribute('role') === 'dialog' ? 'role-dialog' : 'aria-modal',
+        ...(dialog.getAttribute('aria-modal') === 'true' ? ['aria-modal'] : []),
+        hasComposer ? 'composer-present' : 'no-composer',
+      ];
       const text = dialog.textContent || '';
       if (/sign\s*in\s+with\s+(?:google|microsoft|apple|github|facebook)/i.test(text)
           || /使用\s*(?:Google|Apple|Microsoft|GitHub)\s*登录/i.test(text)
           || /(?:通过|使用)\s*.+\s*账号登录/i.test(text)) {
         evidence.push('dialog-contains-oauth-provider-text');
-        return { safe: false, kind: 'oauth-popup', evidence, confidence: 0.85 };
+        return { safe: false, kind: 'oauth-popup', evidence, evidenceFlags: [...new Set([...dialogFlags, 'oauth-text'])], surface: 'modal', composerPresent: hasComposer, confidence: 0.85 };
       }
 
       const oauthLink = dialog.querySelector?.(
@@ -139,7 +156,7 @@
       );
       if (oauthLink) {
         evidence.push('dialog-contains-oauth-link');
-        return { safe: false, kind: 'oauth-popup', evidence, confidence: 0.9 };
+        return { safe: false, kind: 'oauth-popup', evidence, evidenceFlags: [...new Set([...dialogFlags, 'external-oauth-link'])], surface: 'modal', composerPresent: hasComposer, confidence: 0.9 };
       }
     }
 
@@ -149,6 +166,10 @@
   function detectUnknownModal() {
     if (typeof document === 'undefined' || !document.querySelectorAll) return null;
 
+    const composerEl = document.getElementById?.('prompt-textarea')
+      || document.querySelector?.('[data-composer-markdown], [role="textbox"][contenteditable="true"]');
+    const hasComposer = Boolean(composerEl);
+    const isDot = typeof window !== 'undefined' && typeof window.location?.pathname === 'string' && window.location.pathname.includes('/dots/');
     const dialogs = [
       ...document.querySelectorAll('[role="dialog"], [role="alertdialog"]')
     ];
@@ -178,14 +199,30 @@
       }
       if (hasAllowButton) continue;
 
+      if (isDot) {
+        const dlgText = dialog.textContent || '';
+        if (/(?:sign-in request|take over browser|your dot has control|give control back|return control|接管浏览器|登录请求|归还控制权|交回控制权)/i.test(dlgText)
+            && !/(?:recaptcha|hcaptcha|turnstile|captcha|verify you are human|人机验证|图形验证码)/i.test(dlgText)) {
+          continue;
+        }
+      }
+
       const firstSeen = firstSeenMap.get(dialog) ?? now;
       firstSeenMap.set(dialog, firstSeen);
       const remaining = Math.ceil(5000 - (now - firstSeen));
       if (remaining <= 0) {
+        const flags = [
+          dialog.getAttribute('role') === 'alertdialog' ? 'role-alertdialog' : 'role-dialog',
+          ...(dialog.getAttribute('aria-modal') === 'true' ? ['aria-modal'] : []),
+          hasComposer ? 'composer-present' : 'no-composer',
+        ];
         return {
           safe: false,
           kind: 'unknown-modal',
           evidence: ['unrecognized-modal-persisted-over-5s'],
+          evidenceFlags: [...new Set(flags)],
+          surface: 'modal',
+          composerPresent: hasComposer,
           confidence: 0.7,
         };
       }

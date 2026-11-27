@@ -342,8 +342,17 @@ function renderLogs() {
       diag.style.display = 'block';
       const parts = [];
       if (log.diagnostic.code) parts.push(log.diagnostic.code);
+      if (log.diagnostic.trigger) parts.push(log.diagnostic.trigger);
+      if (log.diagnostic.targetKind) parts.push(log.diagnostic.targetKind);
+      if (log.diagnostic.surface) parts.push(log.diagnostic.surface);
+      if (log.diagnostic.optionKind) parts.push(log.diagnostic.optionKind);
       if (Number.isFinite(log.diagnostic.durationMs)) parts.push(`${Math.round(log.diagnostic.durationMs / 100) / 10}s`);
-      if (log.diagnostic.sentCount) parts.push(t`第 ${log.diagnostic.sentCount} 次`);
+      if (Number.isSafeInteger(log.diagnostic.sentCount) && log.diagnostic.sentCount > 0) parts.push(t`第 ${log.diagnostic.sentCount} 次`);
+      if (Number.isSafeInteger(log.diagnostic.sequence) && log.diagnostic.sequence > 0) parts.push(`#${log.diagnostic.sequence}`);
+      if (Number.isSafeInteger(log.diagnostic.domWrites) && log.diagnostic.domWrites > 0) parts.push(`dw:${log.diagnostic.domWrites}`);
+      if (Number.isFinite(log.diagnostic.maxDomWriteMs) && log.diagnostic.maxDomWriteMs > 0) parts.push(`max:${Math.round(log.diagnostic.maxDomWriteMs)}ms`);
+      if (Number.isSafeInteger(log.diagnostic.suppressedCount) && log.diagnostic.suppressedCount > 0) parts.push(`sup:${log.diagnostic.suppressedCount}`);
+      if (Array.isArray(log.diagnostic.evidence) && log.diagnostic.evidence.length > 0) parts.push(log.diagnostic.evidence.join(','));
       if (parts.length > 0) {
         diag.textContent = `[${parts.join(' · ')}]`;
         row.append(diag);
@@ -940,9 +949,10 @@ $('clearLogs').addEventListener('click', () => act('CLEAR_LOGS'));
 $('exportLogs').addEventListener('click', async () => {
   try {
     const extensionVersion = chrome.runtime.getManifest?.()?.version;
-    const stored = await chrome.storage.local.get(['logs', 'deliveryDiagnostics', 'diagnosticsHealth']);
+    const stored = await chrome.storage.local.get(['logs', 'deliveryDiagnostics', 'incidentLogs', 'incidentDeliveries', 'activityStats', 'diagnosticsHealth']);
     const health = (await chrome.storage.session.get('diagnosticsHealth')).diagnosticsHealth || stored.diagnosticsHealth;
     downloadJson('agent-continue-activity.json', buildActivityExport({ logs: stored.logs, deliveries: stored.deliveryDiagnostics,
+      incidentLogs: stored.incidentLogs, incidentDeliveries: stored.incidentDeliveries, activityStats: stored.activityStats,
       diagnosticsHealth: health, extensionVersion }));
     tell(t('已请求下载诊断日志。分享前请检查文件。'));
   } catch { tell(t('未能导出诊断日志。没有上传文件。'), true); }

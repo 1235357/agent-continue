@@ -441,3 +441,76 @@ test('health is strictly typed and legacy logs remain usable without delivery in
   assert.deepEqual(legacy.coverage.logs, { retained: 1, omitted: 0 });
   assert.equal(exportActivity({ logs: [{ at: now, event: 'manual-sent' }] }).logs[0].event, 'manual-sent');
 });
+
+test('structured lifecycle diagnostics and incident/summary collections export safely without private strings', async () => {
+  const trace = updateDeliveryTrace(createDeliveryTrace(9, now - 4000), { state: 'blocked', reason: 'oauth-required', counters: { domWrites: 3 } }, now - 2000);
+  const report = exportActivity({
+    logs: [{
+      at: now - 1000,
+      event: 'paused',
+      message: secret,
+      diagnostic: {
+        code: 'oauth-required',
+        targetKind: 'dot',
+        runKind: 'approval-check',
+        trigger: 'observer',
+        surface: 'modal',
+        optionKind: 'close',
+        evidence: ['role-dialog', secret, 'oauth-text', 'composer-present'],
+        sequence: 9,
+        sentCount: 20,
+        domWrites: 3,
+        textChunks: 2,
+        maxDomWriteMs: 540.6,
+        suppressedCount: 4,
+        enabled: false,
+        autoAllow: true,
+        autoAuthorizeTakeover: true,
+        tabBound: true,
+        composerPresent: true,
+        extra: secret,
+      },
+    }],
+    deliveries: [createDeliveryTrace(10, now)],
+    incidentLogs: [{ at: now - 5000, event: 'exception-detected', message: secret, diagnostic: { code: 'unknown-modal', surface: 'modal', suppressedCount: 2, evidence: ['role-dialog', secret] } }],
+    incidentDeliveries: [{ ...trace, prompt: secret }],
+    activityStats: { totalLogged: 42, firstEventAt: now - 5000, lastEventAt: now, countsByEvent: { paused: 1, [secret]: 9 }, countsByCode: { 'oauth-required': 1 }, pauseByCode: { 'oauth-required': 1 }, exceptionByKind: { 'unknown-modal': 1 } },
+  });
+  assert.equal(JSON.stringify(report).includes(secret), false);
+  assert.deepEqual(report.logs[0].diagnostic, {
+    code: 'oauth-required',
+    targetKind: 'dot',
+    runKind: 'approval-check',
+    trigger: 'observer',
+    surface: 'modal',
+    optionKind: 'close',
+    evidence: ['role-dialog', 'oauth-text', 'composer-present'],
+    sequence: 9,
+    sentCount: 20,
+    domWrites: 3,
+    textChunks: 2,
+    maxDomWriteMs: 541,
+    suppressedCount: 4,
+    enabled: false,
+    autoAllow: true,
+    autoAuthorizeTakeover: true,
+    tabBound: true,
+    composerPresent: true,
+  });
+  assert.equal(report.incidents.logs.length, 1);
+  assert.equal(report.incidents.logs[0].elapsedMs, 0);
+  assert.deepEqual(report.incidents.logs[0].diagnostic, { code: 'unknown-modal', surface: 'modal', evidence: ['role-dialog'], suppressedCount: 2 });
+  assert.equal(report.incidents.deliveries.length, 1);
+  assert.equal(report.incidents.deliveries[0].sequence, 9);
+  assert.equal(report.incidents.deliveries[0].startedElapsedMs, 1000);
+  assert.deepEqual(report.summary, {
+    totalLogged: 42,
+    countsByEvent: { paused: 1 },
+    countsByCode: { 'oauth-required': 1 },
+    pauseByCode: { 'oauth-required': 1 },
+    exceptionByKind: { 'unknown-modal': 1 },
+    spanMs: 5000,
+    firstEventElapsedMs: 0,
+    lastEventElapsedMs: 5000,
+  });
+});

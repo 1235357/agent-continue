@@ -257,14 +257,16 @@ export async function pageAction(args) {
   };
 
   let beforeAssistant = null;
-  const result = (status, message, diagnosticCode) => {
+  const result = (status, message, diagnosticCode, meta = null) => {
     metrics.reason = ['approval-required', 'auto-allowed-prompt', 'oauth-required', 'captcha-required', 'takeover-needed', 'agent-paused', 'agent-busy'].includes(diagnosticCode)
       ? diagnosticCode : resultReason(status);
     return { status, message,
     ...(args.persistentDelivery === true && !submitted && !manualPending && ['blocked', 'draft', 'busy', 'error'].includes(status)
       && !['approval-required', 'auto-allowed-prompt', 'oauth-required', 'captcha-required', 'takeover-needed'].includes(diagnosticCode)
       ? { retryable: true } : {}),
-    ...(diagnosticCode ? { diagnosticCode } : {}), identity: identity(),
+    ...(diagnosticCode ? { diagnosticCode } : {}),
+    ...(meta && typeof meta === 'object' ? meta : {}),
+    identity: identity(),
     ...(['sent', 'manual-sent'].includes(status) ? beforeAssistant : assistantState()) };
   };
   const samePage = () => {
@@ -427,7 +429,7 @@ export async function pageAction(args) {
         token = 'card:' + clean(dlgText).slice(0, 120);
         dotCardTokenMap.set(dlg, token);
       }
-      return { el: dlg, text: dlgText, token };
+      return { el: dlg, text: dlgText, token, surface: 'modal' };
     }
     const userTurns = document.querySelectorAll(userSelector);
     const lastUserTurn = userTurns.length ? userTurns[userTurns.length - 1] : null;
@@ -453,7 +455,7 @@ export async function pageAction(args) {
             token = `card:${userCount}:` + clean(cardText).slice(0, 120);
             dotCardTokenMap.set(curr, token);
           }
-          return { el: curr, text: cardText, token };
+          return { el: curr, text: cardText, token, surface: 'inline-card' };
         }
       }
     }
@@ -464,7 +466,7 @@ export async function pageAction(args) {
     if (args.autoAuthorizeTakeover !== true) return null;
     if (detectCaptchaOr2FABlock()) {
       metrics.observations.busy = true;
-      return result('blocked', '检测到需要人工完成人机验证或密码/验证码，已暂停等待处理。', 'captcha-required');
+      return result('blocked', '检测到需要人工完成人机验证或密码/验证码，已暂停等待处理。', 'captcha-required', { surface: 'modal', evidenceFlags: ['captcha-widget'] });
     }
     const handbackPattern = /^(?:give\s+control\s+back|hand\s+(?:control\s+)?back|return\s+control|交回控制权|归还控制权)$/i;
     const controlButtons = [];
@@ -475,18 +477,20 @@ export async function pageAction(args) {
     }
     if (controlButtons.length === 1) {
       const btn = controlButtons[0];
+      const btnTxt = (btn.textContent || '').trim();
+      const optionKind = /return|归还/i.test(btnTxt) ? 'return-control' : 'give-control-back';
       const nowMs = Date.now();
       const cardMap = (globalThis.__agentContinueAllowedCards ??= new WeakMap());
       const lastClickedAt = Math.max(cardMap.get(btn) || 0, Number(btn.getAttribute('data-agent-continue-allowed') || 0));
       if (lastClickedAt > 0 && nowMs - lastClickedAt < 4000) {
         metrics.observations.busy = true;
-        return result('busy', '已自动归还控制权并继续等待 Dot 推进。', 'auto-allowed-prompt');
+        return result('busy', '已自动归还控制权并继续等待 Dot 推进。', 'auto-allowed-prompt', { surface: 'page', optionKind });
       }
       cardMap.set(btn, nowMs);
       try { btn.setAttribute('data-agent-continue-allowed', String(nowMs)); } catch {}
       clickTargetDom(btn);
       metrics.observations.busy = true;
-      return result('busy', '已自动归还控制权并继续等待 Dot 推进。', 'auto-allowed-prompt');
+      return result('busy', '已自动归还控制权并继续等待 Dot 推进。', 'auto-allowed-prompt', { surface: 'page', optionKind });
     }
     if (!isDot) return null;
     const dialogs = [...document.querySelectorAll('[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]')];
@@ -509,13 +513,13 @@ export async function pageAction(args) {
       const lastClickedAt = Math.max(cardMap.get(dlg) || 0, Number(dlg.getAttribute('data-agent-continue-allowed') || 0));
       if (lastClickedAt > 0 && nowMs - lastClickedAt < 4000) {
         metrics.observations.busy = true;
-        return result('busy', '已自动处理 Dot 登录接管请求，继续等待推进。', 'auto-allowed-prompt');
+        return result('busy', '已自动处理 Dot 登录接管请求，继续等待推进。', 'auto-allowed-prompt', { surface: 'modal', optionKind: 'close', evidenceFlags: ['role-dialog', 'sign-in-card', 'close-button'] });
       }
       cardMap.set(dlg, nowMs);
       try { dlg.setAttribute('data-agent-continue-allowed', String(nowMs)); } catch {}
       clickTargetDom(btn);
       metrics.observations.busy = true;
-      return result('busy', '已自动处理 Dot 登录接管请求，继续等待推进。', 'auto-allowed-prompt');
+      return result('busy', '已自动处理 Dot 登录接管请求，继续等待推进。', 'auto-allowed-prompt', { surface: 'modal', optionKind: 'close', evidenceFlags: ['role-dialog', 'sign-in-card', 'close-button'] });
     }
     return null;
   };
@@ -524,13 +528,16 @@ export async function pageAction(args) {
     if (args.autoAuthorizeTakeover !== true || (args.mode !== 'send' && args.detectTakeover !== true) || args.isTakeoverReply === true) return null;
     if (detectCaptchaOr2FABlock()) {
       metrics.observations.busy = true;
-      return result('blocked', '检测到需要人工完成人机验证或密码/验证码，已暂停等待处理。', 'captcha-required');
+      return result('blocked', '检测到需要人工完成人机验证或密码/验证码，已暂停等待处理。', 'captcha-required', { surface: 'modal', evidenceFlags: ['captcha-widget'] });
     }
     const card = findDotSignInCard();
     if (card && card.token && card.token !== args.lastTakeoverToken) {
       metrics.observations.busy = true;
       return {
-        ...result('busy', '检测到 Dot 请求接管或登录授权确认，准备自动发送授权回复。', 'takeover-needed'),
+        ...result('busy', '检测到 Dot 请求接管或登录授权确认，准备自动发送授权回复。', 'takeover-needed', {
+          surface: card.surface || 'inline-card',
+          evidenceFlags: card.surface === 'modal' ? ['role-dialog', 'sign-in-card'] : ['sign-in-card'],
+        }),
         takeoverAssistantToken: card.token,
       };
     }
@@ -545,7 +552,10 @@ export async function pageAction(args) {
         if (assistantToken && assistantToken !== args.lastTakeoverToken) {
           metrics.observations.busy = true;
           return {
-            ...result('busy', '检测到 Dot 请求接管或登录授权确认，准备自动发送授权回复。', 'takeover-needed'),
+            ...result('busy', '检测到 Dot 请求接管或登录授权确认，准备自动发送授权回复。', 'takeover-needed', {
+              surface: 'assistant-turn',
+              evidenceFlags: ['takeover-phrase'],
+            }),
             takeoverAssistantToken: assistantToken,
           };
         }
@@ -554,7 +564,7 @@ export async function pageAction(args) {
     return null;
   }
 
-  const pausedResult = () => result('busy', 'Agent 处于暂停状态，等待继续或完成后发送。', 'agent-paused');
+  const pausedResult = () => result('busy', 'Agent 处于暂停状态，等待继续或完成后发送。', 'agent-paused', { surface: 'page', evidenceFlags: ['dot-paused-badge'] });
   if (isDotPaused() && args.isTakeoverReply !== true) {
     const handover = tryReturnBrowserControl();
     if (handover) return handover;
@@ -573,13 +583,13 @@ export async function pageAction(args) {
     }
     if (args.autoAllow === true && detectAuthOrLoginBlock()) {
       metrics.observations.busy = true;
-      return result('blocked', '检测到需要手动登录或 OAuth 授权的弹窗，已暂停等待处理。', 'oauth-required');
+      return result('blocked', '检测到需要手动登录或 OAuth 授权的弹窗，已暂停等待处理。', 'oauth-required', { surface: 'modal', evidenceFlags: ['oauth-text', 'no-composer'] });
     }
     if (visibleMatches(busySelector).length > 0 || visibleMatches(pauseSelector).length > 0) {
       metrics.observations.busy = true;
-      return result('busy', 'Agent 仍在运行，稍后再次检查。', 'agent-busy');
+      return result('busy', 'Agent 仍在运行，稍后再次检查。', 'agent-busy', { surface: 'page', evidenceFlags: ['assistant-busy'] });
     }
-    return result('blocked', '未识别到唯一输入框。页面可能尚未加载、已退出登录，或界面结构已变化。', 'composer-unavailable');
+    return result('blocked', '未识别到唯一输入框。页面可能尚未加载、已退出登录，或界面结构已变化。', 'composer-unavailable', { surface: 'page', evidenceFlags: ['no-composer'] });
   }
   let { editor, composer } = initial;
   metrics.observations.composerPresent = true;
@@ -590,8 +600,14 @@ export async function pageAction(args) {
     return current?.editor === editor && current.composer === composer;
   };
   if (args.autoAllow === true && detectAuthOrLoginBlock()) {
+    if (isDot && args.autoAuthorizeTakeover === true && detectSessionExpiredOrOffSite() !== 'session-expired') {
+      const handover = tryReturnBrowserControl();
+      if (handover) return handover;
+      const takeover = checkTakeoverConversationPrompt(true);
+      if (takeover) return takeover;
+    }
     metrics.observations.busy = true;
-    return result('blocked', '检测到需要手动登录或 OAuth 授权的弹窗，已暂停等待处理。', 'oauth-required');
+    return result('blocked', '检测到需要手动登录或 OAuth 授权的弹窗，已暂停等待处理。', 'oauth-required', { surface: 'modal', evidenceFlags: ['oauth-text', 'composer-present'] });
   }
   if (isDot && !identity()) return result('blocked', '等待 dot 会话历史加载，暂时无法核对目标身份。');
 
@@ -936,16 +952,20 @@ export async function pageAction(args) {
   };
 
   const approvalWait = () => {
-    if (!findApprovalPrompt()) return null;
+    const details = findApprovalPrompt(true);
+    if (!details) return null;
+    const container = details.groupContainer;
+    const surface = container?.matches?.('[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog') ? 'modal'
+      : container?.matches?.('article, [data-message-author-role]') ? 'assistant-turn' : 'inline-card';
     metrics.observations.busy = true;
-    return result('busy', '目标页面请求权限确认；请在页面中决定。', 'approval-required');
+    return result('busy', '目标页面请求权限确认；请在页面中决定。', 'approval-required', { surface, evidenceFlags: ['approval-card'] });
   };
 
   const checkAndHandleApprovalPrompt = () => {
     if (args.isTakeoverReply === true) {
       if (detectCaptchaOr2FABlock()) {
         metrics.observations.busy = true;
-        return result('blocked', '检测到需要人工完成人机验证或密码/验证码，已暂停等待处理。', 'captcha-required');
+        return result('blocked', '检测到需要人工完成人机验证或密码/验证码，已暂停等待处理。', 'captcha-required', { surface: 'modal', evidenceFlags: ['captcha-widget'] });
       }
       return null;
     }
@@ -956,7 +976,7 @@ export async function pageAction(args) {
     }
     if (detectAuthOrLoginBlock()) {
       metrics.observations.busy = true;
-      return result('blocked', '检测到需要手动登录或 OAuth 授权的弹窗，已暂停等待处理。', 'oauth-required');
+      return result('blocked', '检测到需要手动登录或 OAuth 授权的弹窗，已暂停等待处理。', 'oauth-required', { surface: 'modal', evidenceFlags: ['oauth-text'] });
     }
     const found = findApprovalPrompt(true);
     if (!found) return tryReturnBrowserControl();
@@ -974,14 +994,18 @@ export async function pageAction(args) {
         }
       } else {
         metrics.observations.busy = true;
-        return result('blocked', '检测到需要手动登录或 OAuth 授权的弹窗，已暂停等待处理。', 'oauth-required');
+        return result('blocked', '检测到需要手动登录或 OAuth 授权的弹窗，已暂停等待处理。', 'oauth-required', { surface: 'inline-card', evidenceFlags: ['oauth-text'] });
       }
     }
     const isRoutineKind = ['always-allow', 'allow-once'].includes(target.info.kind)
       || (target.info.kind === 'allow' && (target.info.highConfidence || groupDenies.length > 0));
+    const surface = groupContainer?.matches?.('[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog') ? 'modal'
+      : groupContainer?.matches?.('article, [data-message-author-role]') ? 'assistant-turn' : 'inline-card';
+    const optionKind = /^allow\s+(?:this\s+tool\s+)?for\s+(?:this\s+)?conversation\b|本会话允许此工具|此对话允许此工具/i.test(targetCore)
+      ? 'allow-conversation' : (['always-allow', 'allow-once', 'allow', 'authorize', 'confirm', 'sign-in'].includes(target.info.kind) ? target.info.kind : 'other');
     if (!isRoutineKind) {
       metrics.observations.busy = true;
-      return result('busy', '目标页面请求权限确认；请在页面中决定。', 'approval-required');
+      return result('busy', '目标页面请求权限确认；请在页面中决定。', 'approval-required', { surface, optionKind, evidenceFlags: ['approval-card'] });
     }
     const nowMs = Date.now();
     const cardMap = (globalThis.__agentContinueAllowedCards ??= new WeakMap());
@@ -992,7 +1016,7 @@ export async function pageAction(args) {
     );
     if (lastClickedAt > 0 && nowMs - lastClickedAt < 4000) {
       metrics.observations.busy = true;
-      return result('busy', '已自动确认常规工具权限，继续等待运行。', 'auto-allowed-prompt');
+      return result('busy', '已自动确认常规工具权限，继续等待运行。', 'auto-allowed-prompt', { surface, optionKind, evidenceFlags: ['approval-card', 'allow-options'] });
     }
     cardMap.set(groupContainer, nowMs);
     const nowStr = String(nowMs);
@@ -1005,7 +1029,7 @@ export async function pageAction(args) {
       try { target.leafEl.click(); } catch {}
     }
     metrics.observations.busy = true;
-    return result('busy', '已自动确认常规工具权限，继续等待运行。', 'auto-allowed-prompt');
+    return result('busy', '已自动确认常规工具权限，继续等待运行。', 'auto-allowed-prompt', { surface, optionKind, evidenceFlags: ['approval-card', 'allow-options'] });
   };
 
   const initialApprovalOutcome = checkAndHandleApprovalPrompt();

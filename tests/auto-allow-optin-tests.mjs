@@ -492,12 +492,27 @@ test('background handles ROUTINE_APPROVAL_OBSERVED and TAKEOVER_PROMPT_OBSERVED 
   assert.equal(state.session.job.lastDiagnosticCode, 'takeover-needed');
 
   // Re-start with autoAllow: true and verify OAuth pauses when probe explicitly reports oauth-required,
-  // while DIALOG_EXCEPTION oauth-popup delegates to takeover inspection and unknown-modal deduplicates logs.
+  // while DIALOG_EXCEPTION oauth-popup delegates to takeover inspection and unknown-modal deduplicates even across intervening sends.
   probeHandler = async () => ({ status: 'ready', identity: 'acct~dot', assistantToken: 'acct~dot~Msg~a1', assistantCount: 1 });
   assert.equal((await msg({ type: 'START', tabId: 7, targetUrl: url, config: { prompt: 'Test', autoAllow: true, autoAuthorizeTakeover: true } })).ok, true);
-  assert.equal((await msg({ type: 'DIALOG_EXCEPTION', kind: 'unknown-modal' }, pageSender)).ok, true);
-  assert.equal((await msg({ type: 'DIALOG_EXCEPTION', kind: 'unknown-modal' }, pageSender)).ok, true);
-  assert.equal(state.local.logs.filter(e => e.event === 'exception-detected').length, 1, 'consecutive unknown-modal logs must deduplicate');
+  assert.equal((await msg({
+    type: 'DIALOG_EXCEPTION',
+    kind: 'unknown-modal',
+    surface: 'modal',
+    evidence: ['role-dialog', 'private page text'],
+    composerPresent: true,
+  }, pageSender)).ok, true);
+  assert.equal((await msg({ type: 'DIALOG_EXCEPTION', kind: 'unknown-modal', surface: 'modal', evidence: ['role-dialog', 'private page text'], composerPresent: true }, pageSender)).ok, true);
+  await msg({ type: 'SEND_NOW' });
+  assert.equal((await msg({ type: 'DIALOG_EXCEPTION', kind: 'unknown-modal', surface: 'modal', evidence: ['role-dialog', 'private page text'], composerPresent: true }, pageSender)).ok, true);
+  assert.equal(state.local.logs.filter(e => e.event === 'exception-detected').length, 1, 'consecutive unknown-modal logs must deduplicate across sends');
+  const excDiag = state.local.logs.find(e => e.event === 'exception-detected').diagnostic;
+  assert.equal(excDiag.code, 'unknown-modal');
+  assert.equal(excDiag.surface, 'modal');
+  assert.equal(excDiag.composerPresent, true);
+  assert.deepEqual(excDiag.evidence, ['role-dialog']);
+  assert.ok(state.local.incidentLogs?.some(e => e.event === 'paused' || e.event === 'started'), 'incidentLogs retains lifecycle history');
+  assert.ok(state.local.activityStats?.countsByEvent?.['exception-detected'] === 1, 'activityStats tracks event counts');
 
   probeHandler = async () => ({ status: 'busy', diagnosticCode: 'auto-allowed-prompt', assistantToken: 'acct~dot~Msg~a1', assistantCount: 1 });
   assert.equal((await msg({ type: 'DIALOG_EXCEPTION', kind: 'oauth-popup' }, pageSender)).ok, true);

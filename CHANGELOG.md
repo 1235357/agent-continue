@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## [3.4.0] - 2026-11-26
+
+- Fix two real-time anti-interruption & latency bottlenecks uncovered in 8-hour `v3.3.5` live Dot session logs (`content.js`, `dialog-classifier.js`, `adapter.js`, `background.js`):
+  - Stop gating `ROUTINE_APPROVAL_OBSERVED` and `TAKEOVER_PROMPT_OBSERVED` on `context.safe === true` in `content.js`, blocking only on genuine `session-expired` / `oauth-popup` modals and tightening sequential approval cooldown to 1.5 s so persisting benign UI dialogs no longer delay multi-step tool approvals to 60–120 s alarm polling cycles.
+  - Skip Dot handover/sign-in modals (`Sign-in request`, `Take over`, `Return control`) in `dialog-classifier.js:detectUnknownModal()` when on `/dots/...` and check `tryReturnBrowserControl() || checkTakeoverConversationPrompt(true)` on `isDot && autoAuthorizeTakeover` before `detectAuthOrLoginBlock()` so Dot sign-in transitions delegate seamlessly instead of hitting avoidable pauses.
+  - Key `unknown-modal` deduplication across intervening `sent` / `busy` events via per-(job, tab, kind, surface, evidence) tracking in `background.js` with `suppressedCount` reporting instead of re-logging on every send.
+  - Avoid mislabeling restored paused tasks as waiting for tab rebind on browser/extension restart (`pause-restored`), and record `restored` (`rebound-tab`) when `rebindOrphanedJobIfUnique` reconnects the bound tab.
+- Deliver comprehensive, zero-blindspot privacy-safe observability across UI Logs & Schema 5 exports (`background.js`, `activity-export.js`, `adapter.js`, `dialog-classifier.js`, `popup.js`, `support.js`, `PRIVACY.md`, `docs/STORE-LISTING.en.md`):
+  - Enrich every lifecycle/interruption event (`paused`, `started`, `resumed`, `browser-restored`, `restored`, `interrupted`, `unconfirmed`, `blocked`, `sent`, `manual-sent`, `exception-detected`, `auto-allowed`, `takeover-replied`) with allowlisted `code` categories (`manual-pause`, `command-pause`, `user-clear-data`, `limit-reached`, `queue-complete`, `marker-reached`, `target-replaced`, `session-expired`, `activation-interrupted`, `pause-restored`, `alarm-unavailable`, `pause-unconfirmed`, `target-closed`, `target-changed`, `task-started`, `task-resumed`, `browser-session-restored`, `rebound-tab`, `worker-interrupted`, `reply-check-complete`, `unknown-modal`, `oauth-popup`), `targetKind`, `runKind`, `trigger`, `surface`, `optionKind`, allowlisted classifier `evidence` flags, linked `sequence`, `domWrites`/`textChunks`/`maxDomWriteMs`/`sentCount`/`suppressedCount`, and boolean state flags without ever exporting prompts, URLs, or DOM text.
+  - Persist durable `incidentLogs` (up to 200 non-routine events), `incidentDeliveries` (up to 20 non-routine/slow/takeover traces), and aggregated `activityStats` counters (`summary` in Schema 5 export) so earlier pauses and exceptions survive 20+ subsequent normal deliveries.
+
 ## [3.3.5] - 2026-11-26
 
 - Fix inline Dot routine tool-approval detection (`Always allow`, `Allow once`, `Allow this tool for this conversation`, `Deny`) when cards render directly in `<main>` outside `[data-message-author-role="assistant"]` and `[role="dialog"]` (`adapter.js`, `content.js`, `dialog-classifier.js`).
