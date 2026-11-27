@@ -860,3 +860,26 @@ test('outcome is content-free attempt evidence, not a send receipt', () => {
   assert.equal(result.method, 'button');
   assert.doesNotMatch(JSON.stringify(result), /configured|old unsent|fixture\.invalid|sent|confirmed/);
 });
+
+test('floating overlay editor inside role="dialog" is ignored so main composer dispatches cleanly', () => {
+  const h = fixture({ dot: true });
+  h.state.addEditor();
+  const overlayEditor = h.state.document.querySelectorAll('[data-composer-input]')[1];
+  overlayEditor.closest = selector => selector.includes('[role="dialog"]') ? {} : null;
+  const result = h.run();
+  assert.equal(result.dispatched, true);
+  assert.equal(result.code, 'dispatched');
+  assert.equal(h.state.metrics.clicks, 1);
+});
+
+test('sole visible overlay editor refuses to hijack when a non-overlay main editor exists behind it', () => {
+  const h = fixture({ dot: true });
+  h.state.editor.style.display = 'none';
+  h.state.addEditor();
+  const overlayEditor = h.state.document.querySelectorAll('[data-composer-input]')[1];
+  overlayEditor.closest = selector => selector.includes('[role="dialog"]') ? {} : null;
+  const result = h.run();
+  assert.equal(result.dispatched, false);
+  assert.equal(result.code, 'composer-unavailable');
+  noDispatch(h);
+});

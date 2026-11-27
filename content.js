@@ -172,7 +172,9 @@
     const cardToken = findDotSignInCardToken();
     if (cardToken) return cardToken;
     if (document.querySelector(busyControlSelector)) return null;
-    const turns = document.querySelectorAll('article.message-row:not(.self), [data-message-author-role="assistant"], [data-chatgpt-search-unit-key$=":assistant"]');
+    const overlaySelector = '[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]';
+    const turns = [...document.querySelectorAll('article.message-row:not(.self), [data-message-author-role="assistant"], [data-chatgpt-search-unit-key$=":assistant"]')]
+      .filter(el => !el.closest?.(overlaySelector));
     if (!turns.length) return null;
     const last = turns[turns.length - 1];
     const body = last.querySelector?.('.message-body') || last;

@@ -206,6 +206,10 @@
           continue;
         }
       }
+      if (dialog.querySelector?.('[data-composer-input], [data-composer-markdown], #prompt-textarea, [role="textbox"][contenteditable="true"]')
+          && !/(?:sign\s*in|log\s*in|session\s*expired|oauth|recaptcha|hcaptcha|turnstile|captcha|verify\s+you\s+are\s+human|登录|会话已过期|人机验证)/i.test(dialog.textContent || '')) {
+        continue;
+      }
 
       const firstSeen = firstSeenMap.get(dialog) ?? now;
       firstSeenMap.set(dialog, firstSeen);

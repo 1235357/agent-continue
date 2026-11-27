@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## [3.4.2] - 2026-11-27
+
+- Ignore floating Citation / quote-reply sub-dialog overlays and continue routing exclusively to the underlying main conversation (`adapter.js`, `editor-commit.js`, `dialog-classifier.js`, `content.js`):
+  - When a floating dialog (`[role="dialog"]`, `[role="alertdialog"]`, `[aria-modal="true"]`, `dialog[open]`, outside `<main>`, or inside a `position: fixed` floating wrapper) is open alongside the main conversation composer, `findComposer()` in both `adapter.js` and `editor-commit.js` excludes the overlay and resolves directly to the single underlying main composer while preserving strict ambiguity rejection for genuine peer multi-editor layouts.
+  - Scope `messageNodes()`, `identity()`, `busy()`/`stopSelector` streaming state, stop-marker checks, and idle takeover-phrase scans away from ignored overlays so quoted messages or spinner controls inside a Citation overlay never spoof receipts, conversation identity, or busy pauses.
+  - Skip benign composer-equipped Citation sub-dialogs in `dialog-classifier.js:detectUnknownModal()` so leaving a quote-reply overlay open no longer emits false `unknown-modal` alerts.
+
 ## [3.4.1] - 2026-11-27
 
 - Fix real-world field defects uncovered in 11.5-hour Dot session telemetry & live screenshots (`background.js`, `config.js`, `adapter.js`, `activity-export.js`, `i18n-runtime.js`):

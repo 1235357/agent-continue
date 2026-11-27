@@ -190,11 +190,71 @@ export async function pageAction(args) {
   const stopSelector = 'button[data-testid="stop-button"], button[aria-label="Stop streaming"], button[aria-label="Stop generating"], button[aria-label="Stop response"], button[aria-label="停止生成"], button[aria-label="停止输出"], button[aria-label="停止流式传输"], button[aria-label*="Stop" i], button[aria-label*="停止" i]';
   const pauseSelector = 'button[aria-label*="Resume" i], button[aria-label*="Pause" i], button[aria-label*="继续" i], button[aria-label*="暂停" i], [data-testid*="resume" i], [data-testid*="pause" i], [data-testid*="paused" i]';
   const busySelector = '.typing-indicator, ' + stopSelector;
+  const editorSelector = isDot
+    ? '[data-composer-input] [contenteditable="true"][role="textbox"][aria-label="Message"], [contenteditable="true"][role="textbox"][data-composer-markdown], [data-composer-input] [contenteditable="true"], [data-composer-markdown][contenteditable="true"]'
+    : '#prompt-textarea, form[data-chatgpt-composer] .ProseMirror[contenteditable="true"], .ProseMirror[contenteditable="true"]';
+  const overlaySelector = '[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]';
+  const hasFixedAncestor = element => {
+    for (let node = element?.parentElement; node && node !== document.body && node !== document.documentElement; node = node.parentElement) {
+      try {
+        if (getComputedStyle(node).position === 'fixed') return true;
+      } catch {}
+    }
+    return false;
+  };
+  const resolveMainEditor = () => {
+    const rawEditors = [...document.querySelectorAll(editorSelector)];
+    const editors = [...new Set(rawEditors.filter(visible))];
+    if (!editors.length) return { editor: null, allEditors: editors };
+    if (editors.length === 1) {
+      const only = editors[0];
+      if (only.closest?.(overlaySelector) && rawEditors.some(el => !el.closest?.(overlaySelector))) {
+        return { editor: null, allEditors: editors };
+      }
+      return { editor: only, allEditors: editors };
+    }
+    let pool = editors.filter(el => !el.closest?.(overlaySelector));
+    if (pool.length > 1) {
+      const inMain = pool.filter(el => el.closest?.('main'));
+      if (inMain.length === 1) pool = inMain;
+    }
+    if (pool.length > 1) {
+      const nonFixed = pool.filter(el => !hasFixedAncestor(el));
+      if (nonFixed.length === 1) pool = nonFixed;
+    }
+    if (pool.length !== 1) return { editor: null, allEditors: editors };
+    return { editor: pool[0], allEditors: editors };
+  };
+  const currentOverlayScope = () => {
+    const { editor: mainEditor, allEditors } = resolveMainEditor();
+    const roots = [];
+    if (mainEditor && allEditors.length > 1) {
+      for (const candidate of allEditors) {
+        if (candidate === mainEditor) continue;
+        let top = candidate;
+        let parent = top.parentElement;
+        while (parent && parent !== document.body && parent !== document.documentElement && !parent.contains(mainEditor)) {
+          top = parent;
+          parent = top.parentElement;
+        }
+        if (top && !top.contains(mainEditor) && !roots.includes(top)) roots.push(top);
+      }
+    }
+    return el => Boolean(el?.closest?.(overlaySelector) || roots.some(root => root.contains(el)));
+  };
+  const visibleMainMatches = (selector, root = document) => {
+    const matches = visibleMatches(selector, root);
+    if (!matches.length) return matches;
+    const isInOverlay = currentOverlayScope();
+    return matches.filter(el => !isInOverlay(el));
+  };
   const isDotPaused = () => {
     if (!isDot) return false;
     try {
+      const isInOverlay = currentOverlayScope();
       const pills = [...document.querySelectorAll('[data-testid*="pause" i], [data-testid*="resume" i], button[aria-label*="Resume" i], button[aria-label*="Pause" i]')];
       for (const el of pills) {
+        if (isInOverlay(el)) continue;
         const text = el.textContent?.trim();
         if ((text === '⏸ Paused' || text === 'Paused' || text === '暂停' || text === '已暂停' || (typeof text === 'string' && text.startsWith('⏸'))) && visible(el)) {
           return true;
@@ -215,17 +275,19 @@ export async function pageAction(args) {
   const modernMessageKey = element => element?.getAttribute('data-chatgpt-search-message-ids')?.trim().split(/\s+/)[0] || null;
   const messageKey = element => element?.getAttribute('data-message-id') || element?.closest('[data-message-id]')?.getAttribute('data-message-id') || modernMessageKey(element) || element?.getAttribute('data-testid') || element?.id || null;
   const messageNodes = role => {
+    const isInOverlay = currentOverlayScope();
     const raw = [...document.querySelectorAll(role === 'user' ? userSelector : assistantSelector)];
     const nodes = [];
     for (const el of raw) {
       const target = isDot ? (el.querySelector?.('.message-body') || el) : (el.closest?.(modernSelector(role)) || el);
-      if (!nodes.includes(target)) nodes.push(target);
+      if (!isInOverlay(target) && !nodes.includes(target)) nodes.push(target);
     }
     return nodes;
   };
 
   const identity = () => {
     if (!isDot) return null;
+    const isInOverlay = currentOverlayScope();
     const rows = document.querySelectorAll('article.message-row, [data-message-author-role], article[data-testid^="conversation-turn-"]');
     let fallbackIdentity = null;
     // Prefer trailing structured '~' Dot IDs so unhydrated optimistic turn nodes
@@ -233,6 +295,7 @@ export async function pageAction(args) {
     // genuine conversation switches ('acct~other~...') block immediately.
     for (let i = rows.length - 1; i >= 0; i--) {
       const row = rows[i];
+      if (isInOverlay(row)) continue;
       const target = row?.querySelector?.('.message-body') || row;
       const explicit = target?.getAttribute?.('data-message-id')
         || target?.closest?.('[data-message-id]')?.getAttribute?.('data-message-id')
@@ -282,9 +345,9 @@ export async function pageAction(args) {
   const forceInterrupt = args.waitForIdle !== true;
   const busy = () => {
     const paused = isDotPaused();
-    const streaming = visibleMatches(busySelector).length > 0;
-    const activeStop = visibleMatches(stopSelector).length > 0;
-    const anyPauseControl = visibleMatches(pauseSelector).length > 0;
+    const streaming = visibleMainMatches(busySelector).length > 0;
+    const activeStop = visibleMainMatches(stopSelector).length > 0;
+    const anyPauseControl = visibleMainMatches(pauseSelector).length > 0;
     metrics.observations.busy = paused || streaming || anyPauseControl;
     if (args.isTakeoverReply === true && isDot && !activeStop) return false;
     if (args.isTakeoverReply === true && paused && !streaming) return false;
@@ -332,14 +395,9 @@ export async function pageAction(args) {
   if (!samePage()) return result('blocked', '目标会话地址已改变，已停止发送。');
   if (!['ctrl-enter', 'button', 'auto'].includes(sendMethod)) return result('blocked', '发送方式无效，请重新选择。');
 
-  const editorSelector = isDot
-    ? '[data-composer-input] [contenteditable="true"][role="textbox"][aria-label="Message"], [contenteditable="true"][role="textbox"][data-composer-markdown], [data-composer-input] [contenteditable="true"], [data-composer-markdown][contenteditable="true"]'
-    : '#prompt-textarea, form[data-chatgpt-composer] .ProseMirror[contenteditable="true"], .ProseMirror[contenteditable="true"]';
-
   const findComposer = () => {
-    const editors = [...new Set(visibleMatches(editorSelector))];
-    if (editors.length !== 1) return null;
-    const editor = editors[0];
+    const { editor } = resolveMainEditor();
+    if (!editor) return null;
     return {
       editor,
       composer: editor.closest('[data-composer-root]') || editor.closest('form') || editor.closest('[data-composer-body]') || editor.closest('[data-composer-footer-responsive]') || editor.parentElement
@@ -360,7 +418,7 @@ export async function pageAction(args) {
     if (document.querySelector('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="challenges.cloudflare.com"], .cf-turnstile, .g-recaptcha')) {
       return true;
     }
-    const last = [...document.querySelectorAll(assistantSelector)].at(-1);
+    const last = messageNodes('assistant').at(-1);
     const txt = last ? textOf(last) : '';
     const pattern = (isDot && args.autoAuthorizeTakeover === true) ? strictCaptchaPattern : captchaOr2FAPattern;
     return Boolean(txt && pattern.test(txt));
@@ -544,10 +602,10 @@ export async function pageAction(args) {
         takeoverLanguage: detectTakeoverLang(card.text),
       };
     }
-    const activeStop = visibleMatches(stopSelector).length > 0;
-    const streamingBusy = visibleMatches(busySelector).length > 0;
+    const activeStop = visibleMainMatches(stopSelector).length > 0;
+    const streamingBusy = visibleMainMatches(busySelector).length > 0;
     if (allowWhenPaused ? (isDot ? activeStop : streamingBusy) : busy()) return null;
-    const last = [...document.querySelectorAll(assistantSelector)].at(-1);
+    const last = messageNodes('assistant').at(-1);
     if (last) {
       const bodyText = stripClosedSignInLines(textOf(last));
       if (bodyText && takeoverRequestPattern.test(bodyText)) {
@@ -589,7 +647,7 @@ export async function pageAction(args) {
       metrics.observations.busy = true;
       return result('blocked', '检测到需要手动登录或 OAuth 授权的弹窗，已暂停等待处理。', 'oauth-required', { surface: 'modal', evidenceFlags: ['oauth-text', 'no-composer'] });
     }
-    if (visibleMatches(busySelector).length > 0 || visibleMatches(pauseSelector).length > 0) {
+    if (visibleMainMatches(busySelector).length > 0 || visibleMainMatches(pauseSelector).length > 0) {
       metrics.observations.busy = true;
       return result('busy', 'Agent 仍在运行，稍后再次检查。', 'agent-busy', { surface: 'page', evidenceFlags: ['assistant-busy'] });
     }
@@ -1051,7 +1109,7 @@ export async function pageAction(args) {
   }
   if (hasAttachment() && (args.persistentDelivery !== true || args.mode !== 'send')) return protectedDraft('输入框有附件，本次不提交。');
 
-  const lastAssistant = [...document.querySelectorAll(assistantSelector)].at(-1);
+  const lastAssistant = messageNodes('assistant').at(-1);
   if (lastAssistant && args.stopMarkers?.length) {
     const lines = textOf(lastAssistant).split(/\r?\n/).map(line => line.trim());
     const terminal = (args.stopMarkers || []).find(marker => lines.includes(marker));

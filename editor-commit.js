@@ -111,10 +111,36 @@ export function editorCommit(args) {
     const editorSelector = isDot
       ? '[data-composer-input] [contenteditable="true"][role="textbox"][aria-label="Message"], [contenteditable="true"][role="textbox"][data-composer-markdown], [data-composer-input] [contenteditable="true"], [data-composer-markdown][contenteditable="true"]'
       : '#prompt-textarea, form[data-chatgpt-composer] .ProseMirror[contenteditable="true"], .ProseMirror[contenteditable="true"]';
+    const overlaySelector = '[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]';
+    const hasFixedAncestor = element => {
+      for (let node = element?.parentElement; node && node !== document.body && node !== document.documentElement; node = node.parentElement) {
+        try {
+          if (getComputedStyle(node).position === 'fixed') return true;
+        } catch {}
+      }
+      return false;
+    };
     const findComposer = () => {
-      const editors = [...new Set([...document.querySelectorAll(editorSelector)].filter(visible))];
-      if (editors.length !== 1) return null;
-      const editor = editors[0];
+      const rawEditors = [...document.querySelectorAll(editorSelector)];
+      const editors = [...new Set(rawEditors.filter(visible))];
+      if (!editors.length) return null;
+      let editor = null;
+      if (editors.length === 1) {
+        if (editors[0].closest?.(overlaySelector) && rawEditors.some(el => !el.closest?.(overlaySelector))) return null;
+        editor = editors[0];
+      } else {
+        let pool = editors.filter(el => !el.closest?.(overlaySelector));
+        if (pool.length > 1) {
+          const inMain = pool.filter(el => el.closest?.('main'));
+          if (inMain.length === 1) pool = inMain;
+        }
+        if (pool.length > 1) {
+          const nonFixed = pool.filter(el => !hasFixedAncestor(el));
+          if (nonFixed.length === 1) pool = nonFixed;
+        }
+        if (pool.length !== 1) return null;
+        editor = pool[0];
+      }
       const composer = editor.closest('[data-composer-root]') || editor.closest('form')
         || editor.closest('[data-composer-body]') || editor.closest('[data-composer-footer-responsive]')
         || editor.parentElement;

@@ -414,6 +414,100 @@ test('adapter handles opt-in routine allow, OAuth pause, Dot handover/takeover, 
 
       await ctx.close();
     }
+    // 9. Citation / quote-reply floating overlay (both role="dialog" and position:fixed portals)
+    // must be completely ignored so main conversation receives the prompt and confirms receipt cleanly.
+    {
+      const ctx = await browser.newContext();
+      await ctx.route('**/*', route => route.fulfill({ status: 200, contentType: 'text/html', body: baseHtml }));
+      const page = await ctx.newPage();
+      await page.goto(url);
+      await page.evaluate(() => {
+        window.chrome = { runtime: { sendMessage: async () => ({ ok: true, allowed: true, runDeadline: Date.now() + 20000 }) } };
+        window.__mainSends = [];
+        window.__overlaySends = [];
+        const mainEditor = document.querySelector('[data-composer-root] [data-composer-markdown]');
+        const mainBtn = document.querySelector('[data-composer-root] button[aria-label="Send"]');
+        mainBtn.addEventListener('click', () => {
+          const text = mainEditor.innerText;
+          window.__mainSends.push(text);
+          mainEditor.replaceChildren();
+          const row = document.createElement('article');
+          row.className = 'message-row self';
+          row.dataset.messageId = 'acct~dot~Msg~u-main-sent-' + window.__mainSends.length;
+          const body = document.createElement('div');
+          body.className = 'message-body';
+          body.textContent = text;
+          row.append(body);
+          document.querySelector('#conversation').append(row);
+        });
+
+        const wrap = document.createElement('div');
+        wrap.id = 'citation-dialog-portal';
+        wrap.setAttribute('role', 'dialog');
+        wrap.setAttribute('aria-modal', 'true');
+        const quotedUser = document.createElement('article');
+        quotedUser.className = 'message-row self';
+        quotedUser.dataset.messageId = 'acct~other-citation~Msg~u-quoted';
+        quotedUser.innerHTML = '<div class="message-body">Old quoted user turn inside citation</div>';
+        const quotedAssistant = document.createElement('article');
+        quotedAssistant.className = 'message-row';
+        quotedAssistant.dataset.messageId = 'acct~other-citation~Msg~a-quoted';
+        quotedAssistant.innerHTML = '<div class="message-body">Please confirm whether I should stop here?</div>';
+        const stopInOverlay = document.createElement('button');
+        stopInOverlay.dataset.testid = 'stop-button';
+        stopInOverlay.textContent = 'Stop';
+        const ovComposerRoot = document.createElement('div');
+        ovComposerRoot.setAttribute('data-composer-root', '');
+        const ovInput = document.createElement('div');
+        ovInput.setAttribute('data-composer-input', '');
+        const ovEditor = document.createElement('div');
+        ovEditor.setAttribute('data-composer-markdown', '');
+        ovEditor.setAttribute('contenteditable', 'true');
+        ovEditor.setAttribute('role', 'textbox');
+        ovEditor.setAttribute('aria-label', 'Message');
+        ovEditor.getClientRects = () => [{}];
+        const ovBtn = document.createElement('button');
+        ovBtn.type = 'button';
+        ovBtn.setAttribute('aria-label', 'Send');
+        ovBtn.textContent = 'Send';
+        ovBtn.addEventListener('click', () => window.__overlaySends.push(ovEditor.innerText));
+        ovInput.append(ovEditor);
+        ovComposerRoot.append(ovInput, ovBtn);
+        wrap.append(quotedUser, quotedAssistant, stopInOverlay, ovComposerRoot);
+        document.body.append(wrap);
+      });
+      const freshArgs = { ...baseArgs, runDeadline: Date.now() + 12000 };
+      const sendOverDialog = await page.evaluate(pageAction, { ...freshArgs, mode: 'send', autoAuthorizeTakeover: true, prompt: 'Main thread keeps moving forward' });
+      assert.equal(sendOverDialog.status, 'sent', JSON.stringify(sendOverDialog));
+      assert.equal(sendOverDialog.identity, 'acct~dot', 'overlay turns must never corrupt conversation identity');
+      assert.deepEqual(await page.evaluate(() => window.__mainSends), ['Main thread keeps moving forward']);
+      assert.deepEqual(await page.evaluate(() => window.__overlaySends), []);
+
+      // Repeat with a non-dialog position:fixed portal overlay
+      await page.evaluate(() => {
+        document.querySelector('#citation-dialog-portal')?.remove();
+        const wrap = document.createElement('div');
+        wrap.id = 'citation-fixed-portal';
+        wrap.style.position = 'fixed';
+        wrap.style.inset = '0';
+        const quotedUser = document.createElement('article');
+        quotedUser.className = 'message-row self';
+        quotedUser.dataset.messageId = 'acct~other-citation~Msg~u-fixed';
+        quotedUser.innerHTML = '<div class="message-body">Fixed overlay turn</div>';
+        const ovRoot = document.createElement('div');
+        ovRoot.setAttribute('data-composer-root', '');
+        ovRoot.innerHTML = '<div data-composer-input><div data-composer-markdown contenteditable="true" role="textbox" aria-label="Message"></div></div><button type="button" aria-label="Send">Send</button>';
+        ovRoot.querySelector('button').addEventListener('click', () => window.__overlaySends.push('WRONG_OVERLAY'));
+        wrap.append(quotedUser, ovRoot);
+        document.body.append(wrap);
+      });
+      const sendOverFixed = await page.evaluate(pageAction, { ...freshArgs, mode: 'send', prompt: 'Second main thread turn' });
+      assert.equal(sendOverFixed.status, 'sent', JSON.stringify(sendOverFixed));
+      assert.deepEqual(await page.evaluate(() => window.__mainSends), ['Main thread keeps moving forward', 'Second main thread turn']);
+      assert.deepEqual(await page.evaluate(() => window.__overlaySends), []);
+
+      await ctx.close();
+    }
   } finally {
     await browser.close();
   }

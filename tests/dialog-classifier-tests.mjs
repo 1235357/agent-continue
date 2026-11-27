@@ -311,3 +311,20 @@ test('TC-09: Classifier outputs structured flags and ignores benign Dot handover
   assert.equal(flagged.composerPresent, true);
   assert.deepEqual(flagged.evidenceFlags, ['role-dialog', 'aria-modal', 'composer-present']);
 });
+
+test('TC-10: Citation/quote-reply dialog containing a composer is ignored by detectUnknownModal', () => {
+  doc.title = 'Your dot';
+  doc.body = new FakeElement('body');
+  window.location.pathname = '/dots/home';
+
+  const citationDlg = new FakeElement('div', { role: 'dialog', 'aria-modal': 'true' }, 'Quoted thread reply');
+  const citationEditor = new FakeElement('div', { 'data-composer-markdown': '', role: 'textbox', contenteditable: 'true' });
+  citationDlg.querySelector = sel => sel.includes('[data-composer-markdown]') ? citationEditor : null;
+  citationDlg.appendChild(citationEditor);
+  doc.body.appendChild(citationDlg);
+  globalThis.__agentContinueFirstSeenMap.set(citationDlg, performance.now() - 8000);
+
+  const res = classifyDialogContext();
+  assert.equal(res.safe, true);
+  assert.equal(res.kind, 'none');
+});

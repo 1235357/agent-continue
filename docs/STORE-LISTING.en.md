@@ -1,6 +1,6 @@
 # Chrome Web Store Listing - English
 
-English listing source for Agent Continue (candidate **3.4.1**). Item `jgjoeiidbnpmgbbhhmphicehbcdgbhga` was submitted as version 3.0.22 on 2026-11-16 (America/Chicago), with automatic publication after review selected. The item was observed publicly listing 3.0.22 on 2026-11-20. Neither observation establishes submission or publication of 3.4.1. The original item `jpioilmpbolfokedaefmbfbjeaahfdkl` was not modified by that submission; a new item is not an update for its existing users.
+English listing source for Agent Continue (candidate **3.4.2**). Item `jgjoeiidbnpmgbbhhmphicehbcdgbhga` was submitted as version 3.0.22 on 2026-11-16 (America/Chicago), with automatic publication after review selected. The item was observed publicly listing 3.0.22 on 2026-11-20. Neither observation establishes submission or publication of 3.4.2. The original item `jpioilmpbolfokedaefmbfbjeaahfdkl` was not modified by that submission; a new item is not an update for its existing users.
 
 The copy uses plain-text URLs rather than relying on Markdown rendering. Do not withdraw an existing review merely to apply source copy. Detailed technical notes below are not consumer-facing Store description text and do not certify the current artifact.
 
