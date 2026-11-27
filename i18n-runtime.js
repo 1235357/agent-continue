@@ -155,6 +155,7 @@ export default {
   '目标会话地址已改变，已停止发送。': 'The target conversation URL changed; sending stopped.',
   '发送方式无效，请重新选择。': 'Invalid send method. Select it again.',
   '未识别到唯一输入框。页面可能尚未加载、已退出登录，或界面结构已变化。': 'No unique composer found. The page may still be loading, you may be signed out, or the interface may have changed.',
+  '检测到多个同时可见的输入框（如开启了引用或子对话浮层），暂不发送以免误发。': 'Multiple visible composers detected (for example, a quote or citation overlay is open); paused sending for this round to avoid misrouting.',
   '等待 dot 会话历史加载，暂时无法核对目标身份。': 'Waiting for dot conversation history to load; target identity cannot yet be verified.',
   'Agent 仍在运行，稍后再次检查。': 'The Agent is still running. Checking again later.',
   '输入框当前不可编辑。': 'The composer is not currently editable.',

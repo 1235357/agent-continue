@@ -95,10 +95,18 @@ export function readConfig(value = {}, { allowEmpty = false } = {}) {
   return { deliveryBehaviorVersion: DELIVERY_BEHAVIOR_VERSION, intervalMinutes, prompt, promptSource, takeoverReply, maxSends, stopMarkers, ...booleans, sendMethod, mode, scheduleMode, queue, quietHours: { enabled: quiet.enabled, start: quiet.start, end: quiet.end } };
 }
 
-export function resolvedTakeoverPrompt(config, lang = 'zh_CN') {
+export function inferPromptLanguage(text, fallbackLang = 'zh_CN') {
+  const sample = typeof text === 'string' ? text : '';
+  if (/[\u4e00-\u9fff\u3400-\u4dbf]/u.test(sample)) return 'zh_CN';
+  if (/[A-Za-z]{2,}\s+[A-Za-z]{2,}/.test(sample)) return 'en';
+  return fallbackLang;
+}
+
+export function resolvedTakeoverPrompt(config, lang = 'zh_CN', contextText = '') {
   const custom = typeof config?.takeoverReply === 'string' ? config.takeoverReply.trim() : '';
   if (custom) return config.takeoverReply;
-  return lang === 'en' ? DEFAULT_TAKEOVER_REPLY_EN : DEFAULT_TAKEOVER_REPLY_ZH;
+  const effectiveLang = contextText ? inferPromptLanguage(contextText, lang) : lang;
+  return effectiveLang === 'en' ? DEFAULT_TAKEOVER_REPLY_EN : DEFAULT_TAKEOVER_REPLY_ZH;
 }
 
 export function currentPrompt(job) {

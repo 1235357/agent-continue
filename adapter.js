@@ -530,6 +530,8 @@ export async function pageAction(args) {
       metrics.observations.busy = true;
       return result('blocked', '检测到需要人工完成人机验证或密码/验证码，已暂停等待处理。', 'captcha-required', { surface: 'modal', evidenceFlags: ['captcha-widget'] });
     }
+    const detectTakeoverLang = text => (/[\u4e00-\u9fff\u3400-\u4dbf]/u.test(String(text ?? '')) ? 'zh_CN'
+      : /[A-Za-z]{2,}\s+[A-Za-z]{2,}/.test(String(text ?? '')) ? 'en' : null);
     const card = findDotSignInCard();
     if (card && card.token && card.token !== args.lastTakeoverToken) {
       metrics.observations.busy = true;
@@ -539,6 +541,7 @@ export async function pageAction(args) {
           evidenceFlags: card.surface === 'modal' ? ['role-dialog', 'sign-in-card'] : ['sign-in-card'],
         }),
         takeoverAssistantToken: card.token,
+        takeoverLanguage: detectTakeoverLang(card.text),
       };
     }
     const activeStop = visibleMatches(stopSelector).length > 0;
@@ -557,6 +560,7 @@ export async function pageAction(args) {
               evidenceFlags: ['takeover-phrase'],
             }),
             takeoverAssistantToken: assistantToken,
+            takeoverLanguage: detectTakeoverLang(bodyText),
           };
         }
       }
@@ -588,6 +592,10 @@ export async function pageAction(args) {
     if (visibleMatches(busySelector).length > 0 || visibleMatches(pauseSelector).length > 0) {
       metrics.observations.busy = true;
       return result('busy', 'Agent 仍在运行，稍后再次检查。', 'agent-busy', { surface: 'page', evidenceFlags: ['assistant-busy'] });
+    }
+    const visibleEditorsCount = [...new Set(visibleMatches(editorSelector))].length;
+    if (visibleEditorsCount > 1) {
+      return result('blocked', '检测到多个同时可见的输入框（如开启了引用或子对话浮层），暂不发送以免误发。', 'composer-unavailable', { surface: 'page', evidenceFlags: ['multiple-composers'] });
     }
     return result('blocked', '未识别到唯一输入框。页面可能尚未加载、已退出登录，或界面结构已变化。', 'composer-unavailable', { surface: 'page', evidenceFlags: ['no-composer'] });
   }

@@ -1501,6 +1501,48 @@ await scenario('An explicitly expired unattempted MAIN phase is refreshed inside
   assert.equal(h.state.session.job.editorCommitRunId,job.runId);
   await h.message({type:'PAUSE'});
 });
+await scenario('Alarm phase syncs to interval nextAt without 1-minute slip and resets on short retries', async () => {
+  const realNow = Date.now;
+  let clock = realNow();
+  Date.now = () => clock;
+  try {
+    const h = await harness();
+    h.pageResult = async args => ({ status: args.mode === 'check' ? 'ready' : 'sent', identity: 'fixture~conversation', assistantToken: 'msg-1', assistantCount: 1 });
+    const startedJob = await h.start({ prompt: 'SYNTHETIC', intervalMinutes: 10, startImmediately: true });
+    const alarmAfterSend = h.state.alarms.get('agent-continue-heartbeat');
+    assert.equal(alarmAfterSend.periodInMinutes, 1);
+    assert.equal(alarmAfterSend.when, startedJob.nextAt, 'initial long interval should align alarm directly to nextAt');
+
+    // Simulate Chrome advancing periodic scheduledTime by 10 min minus 2.5 s so a 1-min tick would fire early and stall 57.5 s at 00:00
+    h.state.alarms.set('agent-continue-heartbeat', {
+      name: 'agent-continue-heartbeat',
+      periodInMinutes: 1,
+      scheduledTime: clock + 60_000 - 2_500,
+    });
+    clock += 600_000;
+    const secondRun = await h.message({ type: 'SEND_NOW' });
+    assert.equal(secondRun.ok, true);
+    const realigned = h.state.alarms.get('agent-continue-heartbeat');
+    assert.equal(realigned.when, secondRun.job.nextAt, 'misaligned periodic alarm should realign to exact nextAt');
+
+    // If next check becomes short (1-min retry / busy), pull future 10-min alarm back to 1-min delay
+    h.state.alarms.set('agent-continue-heartbeat', {
+      name: 'agent-continue-heartbeat',
+      periodInMinutes: 1,
+      scheduledTime: clock + 600_000,
+    });
+    h.pageResult = async args => (args.mode === 'check'
+      ? { status: 'ready' }
+      : { status: 'busy', diagnosticCode: 'agent-busy', retryable: true, diagnosticProgress: { counters: { dispatchAttempts: 0, manualIntents: 0 } } });
+    const busyRun = await h.message({ type: 'SEND_NOW' });
+    assert.equal(busyRun.ok, true);
+    const pulledBack = h.state.alarms.get('agent-continue-heartbeat');
+    assert.equal(pulledBack.delayInMinutes, 1, 'short retry must pull back a far-future alarm to 1 minute');
+    await h.message({ type: 'PAUSE' });
+  } finally {
+    Date.now = realNow;
+  }
+});
 const failed=results.filter(x=>x.status==='FAIL').length;
 console.log(`RESULT ${results.length-failed}/${results.length} passed`);
 process.exitCode=failed?1:0;

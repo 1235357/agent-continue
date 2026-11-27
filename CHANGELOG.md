@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## [3.4.1] - 2026-11-27
+
+- Fix real-world field defects uncovered in 11.5-hour Dot session telemetry & live screenshots (`background.js`, `config.js`, `adapter.js`, `activity-export.js`, `i18n-runtime.js`):
+  - Align Chrome MV3 periodic alarm scheduling (`syncAlarm`) to `job.nextAt` (`when`) instead of locking onto a drifting 1-minute phase offset, eliminating the consistent +1-minute interval slip (`10 min` -> `11 min`) and up-to-59 s `Next check: 00:00` stall.
+  - Reset `nextAt` after a successful `takeover-reply` using the user's configured schedule (`intervalMinutes * 60_000`, or `awaitingReply` under `after-reply`) instead of `RETRY_MS = 60_000`, preventing regular prompts from interrupting Dot ~120 s after `/elephant-goldfish` handover authorization.
+  - Infer takeover delegation reply language (`DEFAULT_TAKEOVER_REPLY_ZH` / `DEFAULT_TAKEOVER_REPLY_EN`) from the configured prompt and triggering assistant turn (`inferPromptLanguage` / `takeoverLanguage`) when no custom `takeoverReply` is set, instead of sending English boilerplate into Chinese conversations whenever the extension UI is set to English.
+  - Distinguish multiple simultaneous visible composers (`multiple-composers`, such as an open Citation/quote-reply sub-dialog) from missing composers (`no-composer`) in `composer-unavailable` diagnostics, UI status text, and Schema 5 `evidence` flags.
+
 ## [3.4.0] - 2026-11-26
 
 - Fix two real-time anti-interruption & latency bottlenecks uncovered in 8-hour `v3.3.5` live Dot session logs (`content.js`, `dialog-classifier.js`, `adapter.js`, `background.js`):

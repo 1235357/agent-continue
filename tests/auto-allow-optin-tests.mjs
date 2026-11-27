@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { DEFAULT_CONFIG, readConfig, resolvedTakeoverPrompt, DEFAULT_TAKEOVER_REPLY_EN, DEFAULT_TAKEOVER_REPLY_ZH } from '../config.js';
+import { DEFAULT_CONFIG, readConfig, inferPromptLanguage, resolvedTakeoverPrompt, DEFAULT_TAKEOVER_REPLY_EN, DEFAULT_TAKEOVER_REPLY_ZH } from '../config.js';
 import { pageAction } from '../adapter.js';
 import { setLanguage } from '../i18n.js';
 
@@ -23,6 +23,11 @@ test('opt-in autonomy defaults stay false and validate strict bounds', () => {
   assert.equal(parsed.takeoverReply, 'Custom ok');
   assert.equal(resolvedTakeoverPrompt({ takeoverReply: '  ' }, 'en'), DEFAULT_TAKEOVER_REPLY_EN);
   assert.equal(resolvedTakeoverPrompt({ takeoverReply: '' }, 'zh_CN'), DEFAULT_TAKEOVER_REPLY_ZH);
+  assert.equal(resolvedTakeoverPrompt({ takeoverReply: '' }, 'en', '继续推进 Zebra PR #42'), DEFAULT_TAKEOVER_REPLY_ZH);
+  assert.equal(resolvedTakeoverPrompt({ takeoverReply: '' }, 'zh_CN', 'Continue pushing Zebra PR #42 cleanly'), DEFAULT_TAKEOVER_REPLY_EN);
+  assert.equal(resolvedTakeoverPrompt({ takeoverReply: '' }, 'zh_CN', '/goal'), DEFAULT_TAKEOVER_REPLY_ZH);
+  assert.equal(inferPromptLanguage('请继续推进', 'en'), 'zh_CN');
+  assert.equal(inferPromptLanguage('Continue end to end verification', 'zh_CN'), 'en');
   assert.equal(resolvedTakeoverPrompt({ takeoverReply: 'User delegate' }, 'en'), 'User delegate');
   for (const prompt of [DEFAULT_TAKEOVER_REPLY_ZH, DEFAULT_TAKEOVER_REPLY_EN]) {
     assert.ok(prompt.includes('/elephant-goldfish'), 'default takeover prompt must invoke /elephant-goldfish');
@@ -386,6 +391,26 @@ test('adapter handles opt-in routine allow, OAuth pause, Dot handover/takeover, 
       assert.equal(confirmInvite.status, 'busy', JSON.stringify(confirmInvite));
       assert.equal(confirmInvite.diagnosticCode, 'takeover-needed', JSON.stringify(confirmInvite));
       assert.equal(confirmInvite.takeoverAssistantToken, 'acct~dot~Msg~cs310-invite');
+      assert.equal(confirmInvite.takeoverLanguage, 'zh_CN');
+
+      // 8. Multiple simultaneous visible composers (e.g. Citation / quote-reply overlay) distinguish multiple-composers from no-composer
+      await page.evaluate(() => {
+        document.querySelector('article:last-of-type')?.remove();
+        const extraOverlay = document.createElement('div');
+        extraOverlay.dataset.composerInput = '';
+        const extraBox = document.createElement('div');
+        extraBox.setAttribute('contenteditable', 'true');
+        extraBox.setAttribute('role', 'textbox');
+        extraBox.setAttribute('aria-label', 'Message');
+        extraBox.setAttribute('data-composer-markdown', '');
+        extraBox.getClientRects = () => [{}];
+        extraOverlay.append(extraBox);
+        document.body.append(extraOverlay);
+      });
+      const multiCheck = await page.evaluate(pageAction, { ...baseArgs, mode: 'check' });
+      assert.equal(multiCheck.status, 'blocked');
+      assert.equal(multiCheck.diagnosticCode, 'composer-unavailable');
+      assert.deepEqual(multiCheck.evidenceFlags, ['multiple-composers']);
 
       await ctx.close();
     }
@@ -478,6 +503,7 @@ test('background handles ROUTINE_APPROVAL_OBSERVED and TAKEOVER_PROMPT_OBSERVED 
   assert.equal(state.session.job.queueIndex, 0, 'takeover reply must preserve queueIndex');
   assert.equal(state.session.job.lastTakeoverToken, 'acct~dot~Msg~tk1');
   assert.equal(state.session.job.consecutiveTakeoverReplies, 1);
+  assert.ok(state.session.job.nextAt >= Date.now() + 19 * 60_000, 'takeover-replied must honor configured interval cooldown instead of colliding after 60s');
 
   // 2nd and 3rd distinct tokens succeed; 4th is capped and pauses task
   probeHandler = async () => ({ status: 'busy', diagnosticCode: 'takeover-needed', takeoverAssistantToken: 'acct~dot~Msg~tk2', assistantCount: 3 });
@@ -524,4 +550,24 @@ test('background handles ROUTINE_APPROVAL_OBSERVED and TAKEOVER_PROMPT_OBSERVED 
   assert.equal(state.session.job.lastDiagnosticCode, 'oauth-required');
   assert.equal((await msg({ type: 'RESUME' })).ok, true);
   assert.equal(state.session.job.consecutiveTakeoverReplies, 0, 'explicit RESUME resets takeover cap');
+
+  // Even when UI language defaults to English, a Chinese prompt or Chinese Dot confirmation picks DEFAULT_TAKEOVER_REPLY_ZH
+  probeHandler = async () => ({ status: 'ready', identity: 'acct~dot', assistantToken: 'acct~dot~Msg~a1', assistantCount: 1 });
+  sendHandler = async args => {
+    takeoverArgs.push(args);
+    return { status: 'sent', assistantToken: args.lastTakeoverToken || 'acct~dot~Msg~zh', assistantCount: 6, identity: 'acct~dot' };
+  };
+  assert.equal((await msg({ type: 'START', tabId: 7, targetUrl: url, config: { prompt: '继续推进 PR #42 验收', autoAllow: true, autoAuthorizeTakeover: true } })).ok, true);
+  probeHandler = async () => ({ status: 'busy', diagnosticCode: 'takeover-needed', takeoverAssistantToken: 'acct~dot~Msg~zh', takeoverLanguage: 'zh_CN', assistantCount: 6 });
+  await msg({ type: 'TAKEOVER_PROMPT_OBSERVED' }, pageSender);
+  assert.equal(takeoverArgs.length, 4);
+  assert.equal(takeoverArgs.at(-1).prompt, DEFAULT_TAKEOVER_REPLY_ZH);
+
+  // Even when the prompt is a short ASCII slash command (/goal) under English UI, triggering Chinese Dot turn picks DEFAULT_TAKEOVER_REPLY_ZH via executePage forwarding
+  probeHandler = async () => ({ status: 'ready', identity: 'acct~dot', assistantToken: 'acct~dot~Msg~a1', assistantCount: 1 });
+  assert.equal((await msg({ type: 'START', tabId: 7, targetUrl: url, config: { prompt: '/goal', autoAllow: true, autoAuthorizeTakeover: true } })).ok, true);
+  probeHandler = async () => ({ status: 'busy', diagnosticCode: 'takeover-needed', takeoverAssistantToken: 'acct~dot~Msg~zh-cmd', takeoverLanguage: 'zh_CN', assistantCount: 7 });
+  await msg({ type: 'TAKEOVER_PROMPT_OBSERVED' }, pageSender);
+  assert.equal(takeoverArgs.length, 5);
+  assert.equal(takeoverArgs.at(-1).prompt, DEFAULT_TAKEOVER_REPLY_ZH);
 });

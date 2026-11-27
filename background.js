@@ -3,7 +3,7 @@ import runtimeCatalog from './i18n-runtime.js';
 
 const t = createTranslator(runtimeCatalog);
 
-import { DEFAULT_CONFIG, DELIVERY_BEHAVIOR_VERSION, normalizeUrl, validateTarget, readConfig, resolvedTakeoverPrompt, currentPrompt, inQuietHours } from './config.js';
+import { DEFAULT_CONFIG, DELIVERY_BEHAVIOR_VERSION, normalizeUrl, validateTarget, readConfig, inferPromptLanguage, resolvedTakeoverPrompt, currentPrompt, inQuietHours } from './config.js';
 import { pageAction, pageInvocationState, translatePageResult } from './adapter.js';
 import { editorCommit } from './editor-commit.js';
 import { createDeliveryTrace, updateDeliveryTrace, sanitizeDeliveryDiagnostics } from './delivery-diagnostics.js';
@@ -167,6 +167,13 @@ function targetKindFromUrl(url) {
   if (url.includes('/dots/')) return 'dot';
   if (url.startsWith('https://chatgpt.com/')) return 'chatgpt';
   return undefined;
+}
+function effectiveTakeoverLanguage(job) {
+  const uiLang = getLanguage();
+  const promptLang = inferPromptLanguage(currentPrompt(job), '');
+  if (promptLang) return promptLang;
+  if (job?.pendingTakeoverLanguage === 'zh_CN' || job?.pendingTakeoverLanguage === 'en') return job.pendingTakeoverLanguage;
+  return uiLang;
 }
 function jobLogContext(job, trace = null, extra = {}) {
   const ctx = {};
@@ -653,8 +660,23 @@ async function updateBadge(job) {
 async function syncAlarm(job) {
   if (!job?.enabled) { await chrome.alarms.clear(ALARM_NAME); return; }
   const periodic = alarm => Number.isFinite(alarm?.periodInMinutes) && alarm.periodInMinutes > 0;
-  if (!periodic(await chrome.alarms.get(ALARM_NAME))) {
-    await chrome.alarms.create(ALARM_NAME, { delayInMinutes: 1, periodInMinutes: 1 });
+  const existing = await chrome.alarms.get(ALARM_NAME);
+  const now = Date.now();
+  const desiredWhen = Number.isFinite(job.nextAt) ? Math.max(now + RETRY_MS, job.nextAt) : null;
+  const desiredIsLong = Boolean(desiredWhen && desiredWhen > now + RETRY_MS + 500);
+  const knownScheduled = Number.isFinite(existing?.scheduledTime) ? existing.scheduledTime
+    : Number.isFinite(existing?.when) ? existing.when : null;
+  const phaseLag = Number.isFinite(knownScheduled) && desiredIsLong
+    ? ((desiredWhen - knownScheduled) % RETRY_MS + RETRY_MS) % RETRY_MS
+    : 0;
+  const misaligned = Number.isFinite(knownScheduled) && desiredWhen
+    ? (knownScheduled > desiredWhen + 5000 || (desiredIsLong && phaseLag > 0 && phaseLag < RETRY_MS - 500))
+    : Boolean(desiredIsLong && existing?.delayInMinutes === 1);
+  if (!periodic(existing) || misaligned) {
+    const schedule = desiredIsLong
+      ? { when: desiredWhen, periodInMinutes: 1 }
+      : { delayInMinutes: 1, periodInMinutes: 1 };
+    await chrome.alarms.create(ALARM_NAME, schedule);
     if (!periodic(await chrome.alarms.get(ALARM_NAME))) throw fail(t('无法创建后台计时器。'));
   }
 }
@@ -1108,7 +1130,7 @@ async function executePage(args, tabId, deadline = Date.now() + EXECUTION_MS, tr
       || (value.status === 'unknown' && ['paste-unconfirmed', 'paste-attachment-unconfirmed', 'receipt-ambiguous', 'receipt-mismatch', 'document-replaced'].includes(value.diagnosticCode)) ? value.diagnosticCode : null;
     const dispatchAttempts = value.diagnosticProgress?.counters?.dispatchAttempts;
     terminalRetryable = !manualSubmission && value.retryable === true && ['blocked', 'draft', 'busy', 'error'].includes(value.status);
-    return { status: value.status, message: String(value.message || '').slice(0, 300), identity: typeof value.identity === 'string' ? value.identity.slice(0, 500) : null, assistantToken: typeof value.assistantToken === 'string' ? value.assistantToken.slice(0, 500) : null, assistantCount: Number(value.assistantCount) || 0, ...(typeof value.takeoverAssistantToken === 'string' ? { takeoverAssistantToken: value.takeoverAssistantToken.slice(0, 500) } : {}), ...(typeof value.surface === 'string' ? { surface: value.surface } : {}), ...(typeof value.optionKind === 'string' ? { optionKind: value.optionKind } : {}), ...(Array.isArray(value.evidenceFlags) ? { evidenceFlags: value.evidenceFlags } : {}), diagnosticCode, executionDiagnostic: executionDiagnostic(), manualSubmission,
+    return { status: value.status, message: String(value.message || '').slice(0, 300), identity: typeof value.identity === 'string' ? value.identity.slice(0, 500) : null, assistantToken: typeof value.assistantToken === 'string' ? value.assistantToken.slice(0, 500) : null, assistantCount: Number(value.assistantCount) || 0, ...(typeof value.takeoverAssistantToken === 'string' ? { takeoverAssistantToken: value.takeoverAssistantToken.slice(0, 500) } : {}), ...(value.takeoverLanguage === 'zh_CN' || value.takeoverLanguage === 'en' ? { takeoverLanguage: value.takeoverLanguage } : {}), ...(typeof value.surface === 'string' ? { surface: value.surface } : {}), ...(typeof value.optionKind === 'string' ? { optionKind: value.optionKind } : {}), ...(Array.isArray(value.evidenceFlags) ? { evidenceFlags: value.evidenceFlags } : {}), diagnosticCode, executionDiagnostic: executionDiagnostic(), manualSubmission,
       dispatched: pending?.dispatched === true || pending?.commitUncertain === true || Number.isSafeInteger(dispatchAttempts) && dispatchAttempts > 0,
       retryable: terminalRetryable };
   } catch (error) {
@@ -1447,7 +1469,7 @@ async function start(configInput, version, tabId, expectedUrl) {
   });
   if (result?.status === 'busy' && result?.diagnosticCode === 'takeover-needed' && response?.job?.enabled
       && response.job.autoAuthorizeTakeover === true && version === intentVersion) {
-    await runTakeoverReplyRound(result.takeoverAssistantToken, response.job.id, version);
+    await runTakeoverReplyRound(result.takeoverAssistantToken, response.job.id, version, result.takeoverLanguage ?? null);
   } else if (config.startImmediately && !['approval-required', 'auto-allowed-prompt', 'takeover-needed'].includes(result.diagnosticCode)) {
     return runRound(true, response.job.id, version);
   }
@@ -1578,7 +1600,7 @@ async function commitRun(message, sender) {
       persistentDelivery: true,
       receiptBoundaryToken: message.receiptBoundaryToken,
     };
-    if (job.runKind === 'takeover-reply') commitArgs.prompt = resolvedTakeoverPrompt(job, getLanguage());
+    if (job.runKind === 'takeover-reply') commitArgs.prompt = resolvedTakeoverPrompt(job, effectiveTakeoverLanguage(job));
     return { tabId: job.tabId, documentId: sender.documentId, version, args: commitArgs };
   });
   if (!permit) return { ok: false, code: 'cancelled' };
@@ -1836,7 +1858,7 @@ async function finishRoundLocked(snapshot, result, delivery = null) {
     const now = Date.now();
     const roundDurationMs = Number.isFinite(snapshot.lastRunAt) ? Math.max(0, now - snapshot.lastRunAt) : undefined;
     const manualUnconfirmed = (current.manualSubmissionPending || result.manualSubmission) && result.status !== 'manual-sent';
-    const job = { ...current, phase: 'idle', runKind: null, preDispatch: undefined, pendingTakeoverToken: undefined, runDeadline: null, needsAttention: false };
+    const job = { ...current, phase: 'idle', runKind: null, preDispatch: undefined, pendingTakeoverToken: undefined, pendingTakeoverLanguage: undefined, runDeadline: null, needsAttention: false };
     const traceInfo = delivery?.traceSummary ?? null;
     const buildRoundDiag = (code, targetJob = job, extra = {}) => ({
       ...jobLogContext({ ...targetJob, runKind: current.runKind ?? targetJob.runKind }, traceInfo, extra),
@@ -1881,9 +1903,10 @@ async function finishRoundLocked(snapshot, result, delivery = null) {
     if (['sent', 'manual-sent'].includes(result.status) && current.runKind === 'takeover-reply') {
       job.lastTakeoverToken = current.pendingTakeoverToken ?? result.assistantToken ?? job.lastTakeoverToken ?? null;
       job.consecutiveTakeoverReplies = (job.consecutiveTakeoverReplies || 0) + 1;
+      job.awaitingReply = job.scheduleMode === 'after-reply';
       job.assistantToken = result.assistantToken ?? job.assistantToken;
       job.assistantCount = result.assistantCount ?? job.assistantCount;
-      job.nextAt = now + RETRY_MS;
+      job.nextAt = now + (job.awaitingReply ? RETRY_MS : job.intervalMinutes * 60_000);
       job.statusText = t('已自动发送接管与登录授权回复，等待 Dot 继续执行。');
       await recordActivityEvent('takeover-replied', t('已自动发送接管与登录授权回复，等待 Dot 继续执行。'),
         buildRoundDiag('takeover-replied', job, { trigger: 'round' }));
@@ -2100,7 +2123,7 @@ async function executeActiveSendLifecycle(initialSnapshot, version, delivery, tr
     }
   }
 }
-async function runTakeoverReplyRound(assistantToken, expectedJobId = null, expectedIntentVersion = null) {
+async function runTakeoverReplyRound(assistantToken, expectedJobId = null, expectedIntentVersion = null, assistantLang = null) {
   const claim = await transact(async () => {
     const job = await getJob();
     if (pendingStopIntents > 0 || failedStopVersion === intentVersion || expectedIntentVersion !== null && expectedIntentVersion !== intentVersion) return { job, claimed: false };
@@ -2111,7 +2134,7 @@ async function runTakeoverReplyRound(assistantToken, expectedJobId = null, expec
       return { job: await pauseLocked(job, t('已连续自动发送 3 次接管授权回复，请手动检查页面后再继续。'), 'paused', { code: 'takeover-needed' }), claimed: false };
     }
     if (assistantToken && job.lastTakeoverToken === assistantToken) return { job, claimed: false };
-    const text = resolvedTakeoverPrompt(job, getLanguage());
+    const text = resolvedTakeoverPrompt({ ...job, pendingTakeoverLanguage: assistantLang ?? null }, effectiveTakeoverLanguage({ ...job, pendingTakeoverLanguage: assistantLang ?? null }));
     if (typeof text === 'string' && (text.includes('\u0000') || !text.isWellFormed())) {
       return { job: await pauseLocked(job, t('接管回复提示词含 NUL 或无效 Unicode 代理项，已暂停，请先修正。'), 'blocked'), claimed: false };
     }
@@ -2122,6 +2145,7 @@ async function runTakeoverReplyRound(assistantToken, expectedJobId = null, expec
       runKind: 'takeover-reply',
       preDispatch: true,
       pendingTakeoverToken: assistantToken ?? null,
+      pendingTakeoverLanguage: assistantLang ?? null,
       runId: token(),
       runDeadline: Date.now() + EXECUTION_MS,
       lastRunAt: Date.now(),
@@ -2142,7 +2166,7 @@ async function runTakeoverReplyRound(assistantToken, expectedJobId = null, expec
       mode: 'send',
       isTakeoverReply: true,
       expectedUrl: activeSnapshot.url,
-      prompt: resolvedTakeoverPrompt(activeSnapshot, getLanguage()),
+      prompt: resolvedTakeoverPrompt(activeSnapshot, effectiveTakeoverLanguage(activeSnapshot)),
       runId: activeSnapshot.runId,
       runDeadline: activeSnapshot.runDeadline,
       stopMarkers: activeSnapshot.stopMarkers ?? [],
@@ -2238,7 +2262,7 @@ async function runRound(force = false, expectedJobId = null, expectedIntentVersi
   });
   if (result?.status === 'busy' && result?.diagnosticCode === 'takeover-needed' && finished?.job?.enabled
       && (finished.job.consecutiveTakeoverReplies || 0) < 3 && claim.version === intentVersion) {
-    return runTakeoverReplyRound(result.takeoverAssistantToken, finished.job.id, claim.version);
+    return runTakeoverReplyRound(result.takeoverAssistantToken, finished.job.id, claim.version, result.takeoverLanguage ?? null);
   }
   return finished;
 }
@@ -2312,11 +2336,11 @@ async function initialize() {
     }
     if (job?.phase === 'sending') {
       if (job.runKind === 'approval-check') {
-        job = { ...job, phase: 'idle', runKind: null, preDispatch: undefined, pendingTakeoverToken: undefined, runId: token(), runDeadline: null,
+        job = { ...job, phase: 'idle', runKind: null, preDispatch: undefined, pendingTakeoverToken: undefined, pendingTakeoverLanguage: undefined, runId: token(), runDeadline: null,
           nextAt: job.enabled ? Math.max(job.nextAt || 0, Date.now() + RETRY_MS) : null };
       } else if (job.preDispatch === true && ['send', 'takeover-reply'].includes(job.runKind)) {
         const preDispatchRunKind = job.runKind;
-        job = { ...job, phase: 'idle', runKind: null, preDispatch: undefined, pendingTakeoverToken: undefined, runId: token(), runDeadline: null,
+        job = { ...job, phase: 'idle', runKind: null, preDispatch: undefined, pendingTakeoverToken: undefined, pendingTakeoverLanguage: undefined, runId: token(), runDeadline: null,
           needsAttention: false, nextAt: job.enabled ? Math.max(job.nextAt || 0, Date.now() + 3000) : null,
           statusText: job.enabled ? t('发送启动前后台中断；任务保持启用并自动恢复。') : job.statusText };
         await recordActivityEvent('interrupted', t('发送启动前后台中断；任务保持启用并自动恢复。'),
@@ -2328,7 +2352,7 @@ async function initialize() {
         const deadline = job.runDeadline;
         const submissionFenceUntil = !readOnly && Number.isFinite(deadline) && deadline > Date.now()
           ? Math.max(Number.isFinite(job.submissionFenceUntil) ? job.submissionFenceUntil : 0, deadline) : job.submissionFenceUntil;
-        job = { ...job, phase: 'idle', runKind: null, preDispatch: undefined, pendingTakeoverToken: undefined, runId: token(), runDeadline: null, submissionFenceUntil, awaitingReply: readOnly ? job.awaitingReply : false, unknownCount: (job.unknownCount || 0) + (readOnly ? 0 : 1), nextAt: readOnly ? Date.now() + RETRY_MS : null, enabled: readOnly ? job.enabled : false, manualSubmissionPending: false, statusText: manualUnconfirmed ? t('手动提交结果未确认；已暂停，请检查会话后再继续。') : readOnly ? t('回复检查被中断；恢复后继续等待新回复。') : t('发送期间后台中断；已暂停，请检查会话后再继续。'), needsAttention: !readOnly };
+        job = { ...job, phase: 'idle', runKind: null, preDispatch: undefined, pendingTakeoverToken: undefined, pendingTakeoverLanguage: undefined, runId: token(), runDeadline: null, submissionFenceUntil, awaitingReply: readOnly ? job.awaitingReply : false, unknownCount: (job.unknownCount || 0) + (readOnly ? 0 : 1), nextAt: readOnly ? Date.now() + RETRY_MS : null, enabled: readOnly ? job.enabled : false, manualSubmissionPending: false, statusText: manualUnconfirmed ? t('手动提交结果未确认；已暂停，请检查会话后再继续。') : readOnly ? t('回复检查被中断；恢复后继续等待新回复。') : t('发送期间后台中断；已暂停，请检查会话后再继续。'), needsAttention: !readOnly };
         await recordActivityEvent('interrupted', readOnly ? t('只读回复检查被中断；仍等待新回复。') : t('发送期间后台中断；已暂停，请检查会话后再继续。'),
           jobLogContext({ ...job, runKind: interruptedRunKind }, null, { code: 'worker-interrupted', trigger: 'initialize' }));
       }
@@ -2552,7 +2576,7 @@ async function handlePagePromptObserved(sender, mode) {
         await recordActivityEvent('busy', next.statusText, obsDiag('takeover-needed'));
       }
       await updateBadge(next);
-      return { ok: true, triggerTakeover: true, token: res.takeoverAssistantToken, jobId: next.id, version: claim.version };
+      return { ok: true, triggerTakeover: true, token: res.takeoverAssistantToken, language: res.takeoverLanguage ?? null, jobId: next.id, version: claim.version };
     }
     if (res?.status === 'busy' && res.diagnosticCode === 'approval-required') {
       const next = { ...cleared, nextAt: Date.now() + RETRY_MS, needsAttention: true, lastResult: 'busy', lastDiagnosticCode: 'approval-required',
@@ -2567,7 +2591,7 @@ async function handlePagePromptObserved(sender, mode) {
     return { ok: true };
   });
   if (settlement?.triggerTakeover && settlement.version === intentVersion) {
-    await runTakeoverReplyRound(settlement.token, settlement.jobId, settlement.version);
+    await runTakeoverReplyRound(settlement.token, settlement.jobId, settlement.version, settlement.language);
   }
   return { ok: Boolean(settlement?.ok) };
 }
