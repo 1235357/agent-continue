@@ -4,7 +4,7 @@ English | [简体中文](https://github.com/1235357/agent-continue/blob/main/REA
 
 Schedule your own prompts in one existing ChatGPT or Your dot conversation. The Windows-enabled version also offers separately installed, explicitly authorized file, shell and process tools.
 
-**3.3.2 Windows-enabled release candidate. Manifest V3. Free and MIT-licensed.**
+**3.5.0 Windows-enabled documentation and setup-guide release. Manifest V3. Free and MIT-licensed.**
 
 [Chrome Web Store](https://chromewebstore.google.com/detail/agent-continue-background/jgjoeiidbnpmgbbhhmphicehbcdgbhga) · [GitHub Releases](https://github.com/1235357/agent-continue/releases) · [Source](https://github.com/1235357/agent-continue) · [Changelog](https://github.com/1235357/agent-continue/blob/main/CHANGELOG.md) · [Privacy](https://github.com/1235357/agent-continue/blob/main/PRIVACY.md)
 
@@ -42,6 +42,18 @@ Device Pause is separate from scheduler Pause; ordinary Disconnect and pause doe
 The November 8 acceptance checkpoint records a real browser connection to the protected runtime matching the 3.0.4 native payload. Ordinary ChatGPT and Dot each executed an administrator command, a temporary-file write/read and start/stop of their own child process; the results were independently checked on the host. This installation's browser-managed Pause/Revoke and full-browser-reopen recovery are still separate, unverified gates. The later `main` fix for an unassociated legacy Pause record is not present in the immutable 3.0.4 release assets.
 
 Historical checkpoint97 records a different, r11 installation's actual full-app quit/reopen, saved-running recovery and matching Devices Pause/Revoke stop receipts; that installation was left revoked and not running. Do not reuse those receipts as current-installation proof. These bounded tests do not guarantee future recovery or establish current-account hosted operation, automatic adoption or Store approval. Matching release artifacts and review-submission receipts are tracked separately in [Runtime Acceptance](https://github.com/1235357/agent-continue/blob/main/docs/RUNTIME-ACCEPTANCE.md). Read current status before acting; this documentation does not reconnect anything. [Development handoff](https://github.com/1235357/agent-continue/blob/main/docs/DEVELOPMENT-HANDOFF.md) preserves dated results and their limits.
+
+## Private Plugin Archive
+
+ChatGPT can import a private plugin archive for one account. Build it from this checkout:
+
+```
+python scripts/package.py --chatgpt-app-id <asdk_app_...> --output-dir <existing directory outside the checkout>
+```
+
+The command writes `agent-continue-windows-private-chatgpt.zip` containing `.codex-plugin/plugin.json` and `.app.json`. The archive holds plugin manifests and the OpenAI platform app ID only; it contains no runtime key, tunnel binary, SSH credentials, or other secret. It is tied to the account whose `asdk_app_...` ID you supply, so build a fresh archive per account and do not share it.
+
+Import it in ChatGPT: open **Plugins** → **Add** → **Upload plugin archive** and select the ZIP. This is separate from Chrome Web Store publication and from public plugin-directory submission. Setup page step-by-step instructions live in the extension's own setup page, which opens after installation.
 
 ## Developer and Support
 

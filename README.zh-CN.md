@@ -4,7 +4,7 @@
 
 向一个已有的 ChatGPT 或 Your dot 会话定时发送自定义提示词。Windows 版本还提供需单独安装、明确授权的文件、Shell 与进程工具。
 
-**3.3.2 Windows 版发布候选 · Manifest V3 · 免费 · MIT 开源**
+**3.5.0 Windows 版文档与安装指引发布 · Manifest V3 · 免费 · MIT 开源**
 
 [Chrome 应用商店](https://chromewebstore.google.com/detail/agent-continue-background/jgjoeiidbnpmgbbhhmphicehbcdgbhga) · [GitHub Releases](https://github.com/1235357/agent-continue/releases) · [源码](https://github.com/1235357/agent-continue) · [更新记录](CHANGELOG.md) · [隐私说明（英文）](PRIVACY.md)
 
@@ -42,6 +42,18 @@
 11 月 8 日的验收记录包含浏览器真实连接至与 3.0.4 原生载荷匹配的受保护运行时。普通 ChatGPT 与 Dot 各实际执行了管理员命令、临时文件写读以及自有子进程启停，并在本机独立核对。这次安装的浏览器管理式 Pause／Revoke 和完整浏览器退出重开恢复仍是单独、尚未完成的验收项。其后 `main` 对来源不明的旧 Pause 记录所作修复，不包含在不可变的 3.0.4 发布资产内。
 
 历史 checkpoint97 记录的是另一份 r11 安装的真实完整应用退出、重开、运行意图恢复和匹配的 Devices Pause／Revoke 停止回执；该安装最终已撤销且未运行。不能把这些回执当成当前安装的证明。这些有范围的测试不保证未来每次恢复，也不证明当前账户托管操作、自动接管既有安装或商店审核通过。匹配发布资产及提交审核回执在[运行时验收](https://github.com/1235357/agent-continue/blob/main/docs/RUNTIME-ACCEPTANCE.md)中单独记录。操作前需读取当前状态；本文不重连或重放操作。[交接记录](https://github.com/1235357/agent-continue/blob/main/docs/DEVELOPMENT-HANDOFF.md)保留日期与验证范围。
+
+## 私有插件归档
+
+ChatGPT 可以导入与单个账户绑定的私有插件归档。在本仓库根目录运行：
+
+```
+python scripts/package.py --chatgpt-app-id <asdk_app_...> --output-dir <仓库外已存在的目录>
+```
+
+命令会生成 `agent-continue-windows-private-chatgpt.zip`，内含 `.codex-plugin/plugin.json` 与 `.app.json`。归档只包含插件清单和 OpenAI 平台 app ID，不含运行密钥、隧道程序、SSH 凭据或其他机密，因此**不要分享**；它与生成时提供的 `asdk_app_...` 账户绑定，每个账户需单独生成。
+
+导入方式：打开 ChatGPT 的 **Plugins** → **Add** → **Upload plugin archive**，选择该 ZIP。这条路径与 Chrome 应用商店发布、公开插件目录提交相互独立。扩展自身设置页会在首次安装后打开，并在其中逐步说明安装、连接与上传归档的流程。
 
 ## 开发者与支持
 

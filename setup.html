@@ -179,6 +179,10 @@ node .\bin.mjs manager-control --install-dir "$env:LOCALAPPDATA\AgentContinue" -
       <h2 id="chat-connection-title" data-i18n="连接 ChatGPT 和 Dot">Connect ChatGPT and Dot</h2>
       <ol>
         <li>
+          <strong data-i18n="安装扩展并打开本页。">Install the extension and open this page.</strong>
+          <span data-i18n="从 Chrome 应用商店安装，或从 GitHub Releases 下载扩展 ZIP 后在 chrome://extensions 开启开发者模式并选择“加载已解压的扩展程序”。本页位于扩展内，首次安装后会自动打开。">Install from the Chrome Web Store, or download the extension ZIP from GitHub Releases and load it at chrome://extensions with developer mode enabled. This page lives inside the extension and opens after the first install.</span>
+        </li>
+        <li>
           <strong id="hosted-prepare-title" data-i18n="准备专用隧道。">Prepare a dedicated tunnel.</strong>
           <span data-i18n="在 OpenAI Platform 中创建隧道，并关联将使用该插件的 ChatGPT 工作区。把受限运行密钥保存在目标设备上；终端只接收本机密钥文件的路径。不要把运行密钥粘贴到扩展、对话或配置请求。">Create a tunnel in OpenAI Platform and associate it with the ChatGPT workspace that will use the plugin. Keep the restricted runtime key on the target device and enter only the key-file path in the terminal. Do not paste the runtime key into the extension, a chat, or a setup request.</span>
         </li>
@@ -190,6 +194,10 @@ node .\bin.mjs manager-control --install-dir "$env:LOCALAPPDATA\AgentContinue" -
           <strong data-i18n="在正确的工作区创建私有插件。">Create a private plugin in the matching workspace.</strong>
           <a id="hostedPluginLink" href="https://chatgpt.com/plugins" target="_blank" rel="noopener noreferrer" data-i18n="打开 ChatGPT 插件">Open ChatGPT Plugins</a>.
           <span data-i18n="选择添加自定义 MCP 服务器，将连接类型设为 Tunnel，选中刚才的隧道，再审阅认证和权限设置。不要使用已有生产插件替代测试。">Add a custom MCP server, select Tunnel as the connection type, and choose your tunnel. Review the authentication and access settings. Do not substitute an existing production plugin for testing.</span>
+        </li>
+        <li>
+          <strong data-i18n="或上传插件归档。">Or upload a plugin archive.</strong>
+          <span data-i18n="在 ChatGPT 插件页的 Add 中选择上传插件归档，选用为该账户生成的 agent-continue-windows-private-chatgpt.zip。归档只含插件清单与平台 app ID，不含运行密钥、隧道程序或 SSH 凭据；生成方式见 README 的私有插件归档一节。">On the ChatGPT Plugins page, choose Upload plugin archive under Add and select the agent-continue-windows-private-chatgpt.zip built for that account. The archive contains plugin manifests and the platform app ID only; it has no runtime key, tunnel binary, or SSH credentials. See the Private plugin archive section in the README for the build command.</span>
         </li>
         <li>
           <strong data-i18n="分别验收两个入口。">Verify both chat surfaces.</strong>

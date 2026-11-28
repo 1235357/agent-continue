@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## [3.5.0] - 2026-11-28
+
+- Ship a plain-language install guide inside the extension's own setup page (`setup.html`, `setup.js`): install from the Chrome Web Store or load the unpacked extension, then create a private ChatGPT plugin or upload an account-specific plugin archive. Adds English translations for every new step while keeping the page free of inputs, textareas and iframes.
+- Document the private plugin archive in `README.md` and `README.zh-CN.md`: build with `python scripts/package.py --chatgpt-app-id <asdk_app_...> --output-dir <existing directory outside the checkout>`, import through ChatGPT → Plugins → Add → Upload plugin archive. The archive carries only plugin manifests and the platform app ID; it contains no runtime key, tunnel binary, or SSH credentials, and is bound to one account (`scripts/package.py`, `tests/test_package.py`).
+- Integrate the Windows device surface and browser wake registration (`device-control.js`, `devices.html`, `browser-wake.js`, `native/bootstrap/browser-wake-registration.mjs`) so the setup page and Devices view can initiate and inspect the protected runtime without a developer relay.
+- Harden the SSH preflight path (`native/bootstrap/ssh-preflight.mjs`) and record authenticated checks against both WKU research hosts in `docs/DEVELOPMENT-HANDOFF.md`.
+- Keep upstream Desktop Commander telemetry disabled by policy and validated at launch (`native/desktop-commander/host.mjs`, `lifecycle.mjs`), with dependency acquisition running npm lifecycle scripts disabled.
+- Add the Chinese tunnel bring-up case study `docs/TUNNEL-BRINGUP-CASE-STUDY.md`, covering the `mcp_initialization_required` gate fix (`stdio_send_initialized_notification`), stale tunnel processes, PowerShell encoding, the EasyConnect false-negative, and the acceptance evidence from Dot and ordinary ChatGPT tool calls.
+- This release is documentation and setup-UX work on top of 3.4.2. It does not include the observer/telemetry redesign reserved for v3.4.3, which remains blocked on B1–B3 in `docs/DESIGN-v3.4.3-OBSERVER-AND-TELEMETRY.md`, and does not establish signed-installer or Windows Store publication.
+
 ## [3.4.2] - 2026-11-27
 
 - Ignore floating Citation / quote-reply sub-dialog overlays and continue routing exclusively to the underlying main conversation (`adapter.js`, `editor-commit.js`, `dialog-classifier.js`, `content.js`):
