@@ -460,6 +460,13 @@ test('guided preflight accepts a verified adjacent ZIP instead of requiring extr
   assert.match(preflight, /Get-AdjacentSetupArchive/);
 });
 
+test('fresh guided browser setup checks bridge registration before asking for tunnel details', () => {
+  const consoleGuard = source.indexOf("if ($Host.Name -cne 'ConsoleHost'");
+  const firstPrompt = source.indexOf("$TunnelId = Read-GuidedValue 'OpenAI tunnel ID", consoleGuard);
+  assert.ok(consoleGuard >= 0 && firstPrompt > consoleGuard);
+  assert.match(source.slice(consoleGuard, firstPrompt), /if \(\$BrowserManaged\) \{ Assert-BrowserWakeRegistryAvailable \}/);
+});
+
 test('verified adjacent source ZIP resolves and passes read-only payload checks without executing source', windows, async t => {
   const result = await run(t);
   assert.equal(result.error, undefined, JSON.stringify(result));

@@ -67,6 +67,8 @@ async function browserControl(runtime, action, id, ownerId, timeoutMs) {
         request: { version: 1, id, action } })),
       new Promise(resolve => { timer = setTimeout(() => resolve(null), timeoutMs); }),
     ]);
+    if (action === 'status' && ownerId === null && exactKeys(reply, ['id', 'error']) &&
+        reply.id === id && reply.error === 'host-absent') return { kind: 'unavailable', reason: 'host-absent' };
     if (!exactKeys(reply, ['ownerId', 'response']) || !validID(reply.ownerId) ||
         (ownerId !== null && reply.ownerId !== ownerId)) return unavailable;
     try { return { ...decodeResponse(reply.response, id, action), ownerId: reply.ownerId }; }

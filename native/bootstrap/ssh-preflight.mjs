@@ -234,8 +234,28 @@ export function probeTcpPort(host, port, { timeoutMs = 1500, connect = net.creat
   });
 }
 
+function lookupWindowsRouteAlias(ipv4, runSync = spawnSync) {
+  const systemRoot = process.env.SystemRoot || 'C:\\Windows';
+  const powershell = path.win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  const script = `$ErrorActionPreference = 'Stop'; [Console]::OutputEncoding = [Text.Encoding]::UTF8; $routes = @(Find-NetRoute -RemoteIPAddress '${ipv4}' | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_NetRoute' }); if ($routes.Count -eq 1) { $routes[0].InterfaceAlias | ConvertTo-Json -Compress }`;
+  try {
+    const result = runSync(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], {
+      encoding: 'utf8', shell: false, windowsHide: true, timeout: 5000,
+    });
+    if (result?.error || result?.status !== 0 || typeof result.stdout !== 'string') return null;
+    const alias = JSON.parse(result.stdout.trim());
+    return typeof alias === 'string' && alias.trim() ? alias.trim().toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function runSshPreflight(options = {}) {
   const platform = options.platform ?? process.platform;
+  const requireEasyConnect = options.requireEasyConnect === true;
+  if (requireEasyConnect && (platform !== 'win32' || !net.isIPv4(options.targetHost))) {
+    throw new Error('invalid_arguments');
+  }
   const timeoutMs = options.timeoutMs ?? 1500;
   if (!Number.isInteger(timeoutMs) || timeoutMs < 200 || timeoutMs > 10000) {
     throw new Error('invalid_arguments');
@@ -298,7 +318,24 @@ export async function runSshPreflight(options = {}) {
     }
   }
 
-  const probes = await Promise.all(
+  let routeBlocker;
+  if (requireEasyConnect) {
+    if (!easyConnectVnic.inspectionAvailable) {
+      routeBlocker = 'easyconnect_route_unverified';
+    } else if (!easyConnectVnic.anyConnected) {
+      routeBlocker = 'easyconnect_vnic_disconnected';
+    } else {
+      const alias = lookupWindowsRouteAlias(options.targetHost, options.runRouteCommand);
+      if (alias === null) {
+        routeBlocker = 'easyconnect_route_unverified';
+      } else if (!easyConnectVnic.adapters.some(adapter =>
+        adapter.connected && adapter.netConnectionId?.trim().toLowerCase() === alias)) {
+        routeBlocker = 'easyconnect_route_mismatch';
+      }
+    }
+  }
+
+  const probes = routeBlocker ? [] : await Promise.all(
     directEndpoints.map(async endpoint => {
       const outcome = await probeFn(endpoint.host, endpoint.port, { timeoutMs });
       return { alias: endpoint.alias, ...outcome };
@@ -311,13 +348,23 @@ export async function runSshPreflight(options = {}) {
     blockers.push('ssh_executable_missing');
     recommendations.push('Install or enable the OpenSSH Client on Windows before running SSH commands.');
   }
-  if (easyConnectVnic.adapters.length > 0 && !easyConnectVnic.anyConnected) {
+  if (routeBlocker === 'easyconnect_vnic_disconnected' ||
+      (easyConnectVnic.adapters.length > 0 && !easyConnectVnic.anyConnected)) {
     blockers.push('easyconnect_vnic_disconnected');
     recommendations.push('Complete interactive EasyConnect sign-in so the Sangfor/EasyConnect VNIC reports NetConnectionStatus === 2 before connecting to private LAN targets.');
   }
-  if (directEndpoints.length === 0 && skippedHosts.length === 0) {
-    blockers.push('no_ssh_targets_configured');
-    recommendations.push('Add at least one Host stanza to ~/.ssh/config or pass --host and --port.');
+  if (routeBlocker && routeBlocker !== 'easyconnect_vnic_disconnected') {
+    blockers.push(routeBlocker);
+    recommendations.push('Confirm that Windows selects the connected EasyConnect adapter for this target before retrying; no TCP probe was sent.');
+  }
+  if (directEndpoints.length === 0) {
+    if (skippedHosts.length > 0) {
+      blockers.push('no_direct_ssh_targets');
+      recommendations.push('This preflight does not test SSH proxy or jump routes. Verify these targets through their configured SSH route.');
+    } else {
+      blockers.push('no_ssh_targets_configured');
+      recommendations.push('Add at least one Host stanza to ~/.ssh/config or pass --host and --port.');
+    }
   }
   const unreachable = probes.filter(probe => !probe.reachable);
   if (unreachable.length > 0) {
@@ -339,7 +386,9 @@ export async function runSshPreflight(options = {}) {
     probes,
     skippedHosts,
     summary: {
-      readyForDirectSsh: blockers.length === 0 && (probes.length > 0 || skippedHosts.length > 0),
+      readyForDirectSsh: blockers.length === 0 && probes.some(probe => probe.reachable === true),
+      hostIdentityVerified: false,
+      authenticationVerified: false,
       blockers,
       recommendations,
     },

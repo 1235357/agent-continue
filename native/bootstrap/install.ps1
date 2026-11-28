@@ -418,6 +418,25 @@ function Assert-BrowserWakeInstallPath([string]$Root) {
     }
 }
 
+function Assert-BrowserWakeRegistryAvailable {
+    $name = 'SOFTWARE\Google\Chrome\NativeMessagingHosts\com.agentcontinue.device_wake'
+    foreach ($hive in @([Microsoft.Win32.RegistryHive]::CurrentUser, [Microsoft.Win32.RegistryHive]::LocalMachine)) {
+        foreach ($view in @([Microsoft.Win32.RegistryView]::Registry32, [Microsoft.Win32.RegistryView]::Registry64)) {
+            $base = $entry = $null
+            try {
+                $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey($hive, $view)
+                $entry = $base.OpenSubKey($name, $false)
+                $occupied = $null -ne $entry
+            } catch { throw 'browser_wake_registry_unconfirmed' }
+            finally {
+                if ($null -ne $entry) { $entry.Dispose() }
+                if ($null -ne $base) { $base.Dispose() }
+            }
+            if ($occupied) { throw 'browser_wake_registry_conflict' }
+        }
+    }
+}
+
 function Assert-ExistingBrowserResult($Value,[string]$Extension,[string]$ManifestPin) {
     $keys = @('ok','action','mode','status','reason','extensionId','payloadManifestSha256','configuration',
         'registration','runtime','mutationPerformed','chatAuthorizationVerified','next','devicesUrl')
@@ -553,6 +572,7 @@ try {
             if (-not $InstallDir) { $InstallDir = Join-Path $env:LOCALAPPDATA 'AgentContinue' }
             if ($InstallDir -cnotmatch '\A[A-Za-z]:\\[^\\]' -or -not [IO.Path]::IsPathRooted($InstallDir)) { throw 'invalid_install_root' }
             if (Test-Path -LiteralPath $InstallDir) { throw 'destination_exists' }
+            if ($BrowserManaged) { Assert-BrowserWakeRegistryAvailable }
             Write-Host "Chrome extension ID: $ExtensionId"
             Write-Host 'Check that this ID matches the Agent Continue setup page before continuing.'
             $TunnelId = Read-GuidedValue 'OpenAI tunnel ID (blank cancels)'

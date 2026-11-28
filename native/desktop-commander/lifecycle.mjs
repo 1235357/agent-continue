@@ -103,14 +103,14 @@ function dependencies(options) {
   const defaults = { spawn: nodeSpawn, fetch: globalThis.fetch, observeCore, hasExited,
     launch: root => resolveTunnelLaunch(root),
     deferStartup: false,
-    readInteractiveLoginGeneration: () => null,
+    readInteractiveLoginGeneration: () => null, authorizeLoginRecovery: () => false,
     readyTimeoutMs: 10000, stopTimeoutMs: 5000, pollIntervalMs: 100,
     maxRestarts: 2, restartBackoffMs: 200, healthIntervalMs: 1000, healthFailureThreshold: 3 };
   if (!options || typeof options !== 'object' || Array.isArray(options) ||
       Object.keys(options).some(key => !Object.hasOwn(defaults, key))) fail('invalid_controller_options');
   const value = { ...defaults, ...options };
   if (typeof value.deferStartup !== 'boolean') fail('invalid_controller_options');
-  for (const key of ['spawn', 'fetch', 'observeCore', 'hasExited', 'launch', 'readInteractiveLoginGeneration']) {
+  for (const key of ['spawn', 'fetch', 'observeCore', 'hasExited', 'launch', 'readInteractiveLoginGeneration', 'authorizeLoginRecovery']) {
     if (typeof value[key] !== 'function') fail('invalid_controller_options');
   }
   for (const key of ['readyTimeoutMs', 'stopTimeoutMs', 'pollIntervalMs', 'restartBackoffMs', 'healthIntervalMs']) {
@@ -200,9 +200,14 @@ export function openController(root, options = {}) {
     } catch { return null; }
   }
 
+  function loginRecoveryAuthorized() {
+    try { return io.authorizeLoginRecovery() === true; }
+    catch { return false; }
+  }
+
   const snapshot = () => ({ paused, runtime: phase, ready,
     pauseMode: !paused ? 'running' : saved.resumeOnLogin === true ? 'until-next-login' : 'stay-disconnected',
-    loginRecoveryAvailable: loginGeneration() !== null,
+    loginRecoveryAvailable: loginRecoveryAuthorized() && loginGeneration() !== null,
     ...(restarts ? { restarts } : {}),
     ...(configured === false ? { configured: false } : {}),
     chatAuthorization: 'not-observed' });
@@ -282,7 +287,7 @@ export function openController(root, options = {}) {
   function mayResume(pausedAtLogin) {
     const observed = loginGeneration();
     return saved.resumeOnLogin === true && saved.loginGeneration === pausedAtLogin &&
-      observed !== null && observed > pausedAtLogin;
+      observed !== null && observed > pausedAtLogin && loginRecoveryAuthorized();
   }
 
   function resumeAfterInteractiveLogin(...args) {
@@ -425,7 +430,7 @@ export function openController(root, options = {}) {
     if (args.length) fail('invalid_login_recovery_arguments');
     owned();
     const observed = loginGeneration();
-    if (observed === null) fail('login_recovery_unavailable');
+    if (observed === null || !loginRecoveryAuthorized()) fail('login_recovery_unavailable');
     persist(temporaryIntent(observed));
     return stopRuntime();
   }

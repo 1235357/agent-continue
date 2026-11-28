@@ -234,6 +234,8 @@ const catalog = {
   '收到本机桥接的有限状态回执；不代表对话授权或远端访问成功。': 'Received bounded state from the local bridge; this does not establish chat grants or successful remote access.',
   '原生桥接拒绝了请求；未确认设备操作结果。': 'The native bridge rejected the request; no device action outcome is confirmed.',
   '原生主机未注册。浏览器权限与本机安装是独立步骤。': 'The native host is not registered. Browser permission and local installation are separate steps.',
+  '找不到桥接': 'Bridge not found',
+  'Chrome 找不到当前账户的本机桥接。重新安装前，请打开安装指南核对现有设置。': 'Chrome could not find the local bridge for the current account. Open the Installation guide to check the existing setup before reinstalling.',
   '请求超时。结果未知；不会自动重试或重新连接。': 'The request timed out. The outcome is unknown; there is no automatic retry or reconnect.',
   '响应未通过协议或关联校验。状态和操作结果仍未知。': 'The response failed protocol or correlation checks. State and action outcome remain unknown.',
   '无法联系原生控制桥。原因未知，不能据此判断已安装或已断开。': 'Cannot contact the native bridge. The cause is unknown; this does not establish installation or disconnection.',
@@ -1113,7 +1115,9 @@ function render() {
   if (validSelection && !target) $(browserManaged ? 'browser-mode' : 'standard-mode').setAttribute('aria-current', 'page');
   $('language').disabled = !s.initialized;
   text('permission', t({ granted: '已授权', absent: '未授权', unknown: '未知' }[adminPermissionUnverified ? 'unknown' : s.permission]));
-  text('registration', t({ unchecked: '尚未检查', absent: '未注册', reachable: '桥接可响应', unknown: '未知' }[s.registration]));
+  const browserBridgeAbsent = browserManaged && s.registration === 'absent';
+  text('registration', t(browserBridgeAbsent ? '找不到桥接' :
+    { unchecked: '尚未检查', absent: '未注册', reachable: '桥接可响应', unknown: '未知' }[s.registration]));
   text('connection', t(s.observation ? { ready: '已就绪', disconnected: '已断开', unknown: '未知' }[s.observation.connection] :
     s.registration === 'unchecked' ? '尚未检查' : '未知'));
   text('pause', t(s.observation?.paused == null ? '未知' : s.observation.paused ? '已暂停' : '未暂停'));
@@ -1122,7 +1126,10 @@ function render() {
     op ? operationKeys[op.status] : '尚无回执'));
   text('operation-id', pending?.id || op?.id || t('无'));
   text('observed', s.observedAt ? new Intl.DateTimeFormat(getLanguage() === 'zh_CN' ? 'zh-CN' : 'en', { dateStyle: 'medium', timeStyle: 'medium' }).format(s.observedAt) : t('尚无观测'));
-  text('feedback', t(languageError ? '语言设置保存失败。' : feedbackKeys[s.feedback]));
+  const deviceFeedback = browserBridgeAbsent && s.feedback === 'host-absent'
+    ? 'Chrome 找不到当前账户的本机桥接。重新安装前，请打开安装指南核对现有设置。'
+    : feedbackKeys[s.feedback];
+  text('feedback', t(languageError ? '语言设置保存失败。' : deviceFeedback));
   const lockKey = !s.journalHealthy ? '本机操作记录不可用。控制保持锁定，请在本机核实。' :
     pending ? (browserManaged && s.canPause ? '连接操作待确认。暂停仍可使用；不会重试连接或清除原操作记录。' :
       '设备操作待完成或结果未确认。只可检查状态；普通状态回执不会解除锁定。') :

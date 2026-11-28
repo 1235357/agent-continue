@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="device-workbench">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -8,7 +8,7 @@
 </head>
 <body>
   <a class="skip-link" href="#local-title" data-i18n="跳至设备状态">Skip to device status</a>
-  <header>
+  <header class="device-header">
     <div class="brand"><a href="popup.html?view=full">Agent Continue</a><h1 data-i18n="设备">Devices</h1></div>
     <div class="language-field">
       <label for="language" data-i18n="界面语言">Interface language</label>
@@ -26,9 +26,18 @@
         <a id="browser-mode" href="devices.html?mode=browser-managed" data-i18n="浏览器管理的 Windows">Browser-managed Windows</a>
       </nav>
       <p class="host-identity"><span data-i18n="当前设备">Selected device</span>: <code id="selected-target">This device</code> · <a href="devices.html" data-i18n="返回本机">Return to this device</a></p>
-      <dl class="status-grid">
+      <dl class="status-grid permission-summary">
         <dt data-i18n="浏览器权限">Browser permission</dt><dd id="permission" data-i18n="未知">Unknown</dd>
       </dl>
+      <div class="bridge-access" role="group" aria-labelledby="access-title">
+        <h2 id="access-title" data-i18n="可选的原生桥接">Optional native bridge</h2>
+        <p id="permission-feedback" class="feedback" role="status" aria-live="polite"></p>
+        <p id="permissionRisk" data-i18n="原生消息权限允许扩展联系单独安装的本机控制桥。重新连接会恢复 MCP 远程访问；断开并暂停会中断该访问。此权限不会安装控制桥，也不会授予任何对话工具权限。">Native messaging permission lets the extension contact a separately installed local bridge. Reconnecting restores MCP remote access; disconnecting and pausing interrupts that access. This permission neither installs the bridge nor grants tools to any chat.</p>
+        <label class="consent" for="riskConsent"><input id="riskConsent" type="checkbox" aria-describedby="permissionRisk"><span data-i18n="我理解本机控制及恢复远程访问的风险，并同意请求可选的原生消息权限。">I understand the risks of local control and restoring remote access, and consent to requesting optional native messaging permission.</span></label>
+        <div class="actions">
+          <button type="button" id="grantPermission" aria-describedby="permission-feedback" disabled>Allow local bridge access</button>
+        </div>
+      </div>
       <fieldset id="account-selector" class="account-selector" hidden>
         <legend data-i18n="账户">Account</legend>
         <div class="account-options">
@@ -71,15 +80,6 @@
         <span data-i18n="浏览器重开时恢复已授权的管理员连接">Restore the authorized administrator connection when Chrome reopens</span>
       </label>
       <p id="administrator-boundary" class="muted" data-i18n="此选项不安装或授权运行端，不启动首次连接，也不解除本机暂停。关闭此选项不会取消已受理的启动或暂停现有连接；需要停止时请使用断开并暂停。">This does not install or authorize the runtime, start a first connection, or clear a local pause. Turning it off does not cancel an accepted startup or pause an existing connection; use Disconnect and pause to stop.</p>
-    </section>
-    <section aria-labelledby="access-title">
-      <h2 id="access-title" data-i18n="可选的原生桥接">Optional native bridge</h2>
-      <p id="permissionRisk" data-i18n="原生消息权限允许扩展联系单独安装的本机控制桥。重新连接会恢复 MCP 远程访问；断开并暂停会中断该访问。此权限不会安装控制桥，也不会授予任何对话工具权限。">Native messaging permission lets the extension contact a separately installed local bridge. Reconnecting restores MCP remote access; disconnecting and pausing interrupts that access. This permission neither installs the bridge nor grants tools to any chat.</p>
-      <label class="consent" for="riskConsent"><input id="riskConsent" type="checkbox" aria-describedby="permissionRisk"><span data-i18n="我理解本机控制及恢复远程访问的风险，并同意请求可选的原生消息权限。">I understand the risks of local control and restoring remote access, and consent to requesting optional native messaging permission.</span></label>
-      <p id="permission-feedback" class="feedback" role="status" aria-live="polite"></p>
-      <div class="actions">
-        <button type="button" id="grantPermission" aria-describedby="permission-feedback" disabled>Allow local bridge access</button>
-      </div>
     </section>
     <details id="device-advanced" class="advanced">
       <summary data-i18n="高级设置与诊断">Advanced setup and diagnostics</summary>

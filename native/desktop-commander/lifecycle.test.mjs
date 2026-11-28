@@ -81,7 +81,12 @@ async function fixture(t, { health = true, stop = true } = {}) {
   });
   return { root, base, key, executable, launches, children, probes, pauseAtSignal, intentsAtSignal,
     allowUnknownCleanup() { expectedUnknownCleanup = true; },
-    open(overrides = {}) { controller = openController(root, { ...services, ...overrides }); return controller; },
+    open(overrides = {}, { grantLoginRecovery = true } = {}) {
+      controller = openController(root, {
+        ...services, ...(grantLoginRecovery ? { authorizeLoginRecovery: () => true } : {}), ...overrides,
+      });
+      return controller;
+    },
     openController, services };
 }
 
@@ -220,20 +225,58 @@ check('temporary pause survives owner replacement and only a later trusted login
   assert.equal(f.launches.length, 2);
 });
 
-check('login recovery is single-start and yields to newer intent, evidence loss, or disposal', async t => {
-  for (const change of ['unavailable', 'persistent', 'temporary', 'disposing']) {
+check('a newer trusted login cannot resume a manual pause even after owner replacement', async t => {
+  const f = await fixture(t);
+  let login = 18;
+  const options = { readInteractiveLoginGeneration: () => login };
+  const controller = f.open(options), file = path.join(f.root, 'lifecycle.json');
+  await controller.reconnect();
+  await controller.pauseUntilLogin();
+  const paused = await controller.pause();
+  assert.equal(paused.pauseMode, 'stay-disconnected');
+  const saved = fs.readFileSync(file);
+  await controller.dispose();
+
+  login = 19;
+  const reopened = f.open(options);
+  const recovered = await reopened.resumeAfterInteractiveLogin();
+  assert.equal(recovered.loginRecoveryAvailable, true);
+  assert.equal(recovered.pauseMode, 'stay-disconnected');
+  assert.equal(recovered.runtime, 'stopped');
+  assert.equal(f.launches.length, 1);
+  assert.deepEqual(fs.readFileSync(file), saved);
+});
+
+check('login recovery without current authorization never arms or clears a temporary pause', async t => {
+  const f = await fixture(t), file = path.join(f.root, 'lifecycle.json');
+  const c = f.open({ readInteractiveLoginGeneration: () => 9 }, { grantLoginRecovery: false });
+  assert.throws(() => c.pauseUntilLogin(), /login_recovery_unavailable/);
+  assert.equal(fs.existsSync(file), false);
+  fs.writeFileSync(file, JSON.stringify(temporaryPause(8)) + '\n');
+  const saved = fs.readFileSync(file);
+  const status = await c.resumeAfterInteractiveLogin();
+  assert.equal(status.loginRecoveryAvailable, false);
+  assert.equal(status.pauseMode, 'until-next-login');
+  assert.equal(f.launches.length, 0);
+  assert.deepEqual(fs.readFileSync(file), saved);
+});
+
+check('login recovery is single-start and yields to newer intent, evidence loss, authorization loss, or disposal', async t => {
+  for (const change of ['unavailable', 'revoked', 'persistent', 'temporary', 'disposing']) {
     const f = await fixture(t);
-    let login = 8;
+    let login = 8, authorized = true;
     const entered = Promise.withResolvers(), launch = Promise.withResolvers();
-    const c = f.open({ readInteractiveLoginGeneration: () => login,
+    const c = f.open({ readInteractiveLoginGeneration: () => login, authorizeLoginRecovery: () => authorized,
       launch: () => { entered.resolve(); return launch.promise; } });
     await c.pauseUntilLogin();
+    const before = fs.readFileSync(path.join(f.root, 'lifecycle.json'));
     login = 9;
     const recovery = c.resumeAfterInteractiveLogin();
     await entered.promise;
     await assert.rejects(c.resumeAfterInteractiveLogin(), /operation_busy/);
     let closing;
     if (change === 'unavailable') login = null;
+    if (change === 'revoked') authorized = false;
     if (change === 'persistent') await c.pause();
     if (change === 'temporary') await c.pauseUntilLogin();
     if (change === 'disposing') closing = c.dispose();
@@ -243,6 +286,10 @@ check('login recovery is single-start and yields to newer intent, evidence loss,
     assert.equal(result.paused, true);
     assert.equal(result.pauseMode, change === 'persistent' ? 'stay-disconnected' : 'until-next-login');
     assert.equal(f.launches.length, 0);
+    if (change === 'revoked') {
+      assert.equal(result.loginRecoveryAvailable, false);
+      assert.deepEqual(fs.readFileSync(path.join(f.root, 'lifecycle.json')), before);
+    }
     if (change === 'temporary') {
       assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.root, 'lifecycle.json'), 'utf8')), temporaryPause(9));
     }

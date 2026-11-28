@@ -264,8 +264,9 @@ export function bindBrowserWake(api, { host = BROWSER_WAKE_HOST, onResult = () =
       current = attempt;
       const unavailable = () => { end(attempt, true); onResult('unavailable'); };
       attempt.port.onDisconnect.addListener(() => {
-        void runtime.lastError;
+        const hostNotFound = runtime.lastError?.message === 'Specified native messaging host not found.';
         const owned = current === attempt;
+        attempt.hostAbsent = owned && !attempt.acknowledged && hostNotFound;
         const safeToWake = owned && attempt.acknowledged && !attempt.mutation && !attempt.priorityPause;
         end(attempt, false);
         if (!owned) return;
@@ -435,8 +436,17 @@ export function bindBrowserWake(api, { host = BROWSER_WAKE_HOST, onResult = () =
                 attachControl(message, records, requested, allowed, deadline) : null;
               if (message.ownerId !== null || current || expired) return null;
             }
+            const lookupRevision = revision;
             attempt = current ?? await wake('status', undefined, allowed);
-            if (!attempt || !await attempt.ready || expired) return null;
+            if (!attempt) return null;
+            if (!await attempt.ready) {
+              const stillCurrent = () => allowed() && lookupRevision === revision && !current;
+              if (attempt.hostAbsent && stillCurrent() && await permissions.contains(NATIVE_PERMISSION).catch(() => false) && stillCurrent()) {
+                return { id: message.request.id, error: 'host-absent' };
+              }
+              return null;
+            }
+            if (expired) return null;
             const status = statuses.then(() => dispatch(message, attempt, allowed));
             // Do not hold the storage queue while waiting for a native reply.
             statuses = Promise.race([status, deadline]).catch(() => null);

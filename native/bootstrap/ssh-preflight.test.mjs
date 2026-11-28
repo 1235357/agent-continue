@@ -143,6 +143,81 @@ Host cluster-node
   }
 });
 
+test('skipped proxy targets cannot establish direct SSH readiness', async () => {
+  const report = await runSshPreflight({
+    platform: 'win32',
+    existsSync: () => true,
+    readFileSync: () => 'Host via-jump\n  ProxyJump gateway\nHost via-proxy\n  ProxyCommand fixture\n',
+    checkSsh: () => ({ available: true }),
+    checkVnic: () => ({ inspectionAvailable: true, anyConnected: true, adapters: [] }),
+    probeTcp: async () => assert.fail('proxy targets must not be probed directly'),
+  });
+  assert.deepEqual(report.skippedHosts.map(({ reason }) => reason), ['uses-proxy-jump', 'uses-proxy-command']);
+  assert.deepEqual(report.probes, []);
+  assert.equal(report.summary.readyForDirectSsh, false);
+  assert.ok(report.summary.blockers.includes('no_direct_ssh_targets'));
+  assert.equal(report.summary.hostIdentityVerified, false);
+  assert.equal(report.summary.authenticationVerified, false);
+});
+
+const guardedPreflight = {
+  platform: 'win32', requireEasyConnect: true, targetHost: '192.0.2.15',
+  existsSync: () => false,
+  checkSsh: () => ({ available: true, path: 'ssh.exe' }),
+  checkVnic: () => ({
+    platform: 'win32', inspectionAvailable: true, anyConnected: true,
+    adapters: [{ name: 'Sangfor SSL VNIC', netConnectionId: 'Ethernet 6', netConnectionStatus: 2, connected: true }],
+  }),
+};
+
+for (const { label, routeResult, blocker, checkVnic } of [
+  { label: 'Wi-Fi is selected', routeResult: { status: 0, stdout: '"Wi-Fi"' }, blocker: 'easyconnect_route_mismatch' },
+  { label: 'route lookup is unconfirmed', routeResult: { status: 0, stdout: 'null' }, blocker: 'easyconnect_route_unverified' },
+  {
+    label: 'the VPN is disconnected', blocker: 'easyconnect_vnic_disconnected',
+    checkVnic: () => ({ platform: 'win32', inspectionAvailable: true, anyConnected: false, adapters: [] }),
+  },
+]) {
+  test(`VPN-required preflight does not probe when ${label}`, async () => {
+    let probes = 0;
+    const report = await runSshPreflight({
+      ...guardedPreflight,
+      ...(checkVnic ? { checkVnic } : {}),
+      runRouteCommand: () => routeResult,
+      probeTcp: async () => { probes++; return { reachable: true }; },
+    });
+    assert.equal(probes, 0);
+    assert.deepEqual(report.probes, []);
+    assert.equal(report.summary.readyForDirectSsh, false);
+    assert.deepEqual(report.summary.blockers, [blocker]);
+  });
+}
+
+test('VPN-required preflight probes only after the OS selects the connected VPN adapter', async () => {
+  const observed = [];
+  const report = await runSshPreflight({
+    ...guardedPreflight,
+    runRouteCommand: () => { observed.push('route'); return { status: 0, stdout: '"ethernet 6"' }; },
+    probeTcp: async (host, port) => {
+      observed.push(`${host}:${port}`);
+      return { reachable: true };
+    },
+  });
+  assert.deepEqual(observed, ['route', '192.0.2.15:22']);
+  assert.equal(report.summary.readyForDirectSsh, true);
+  assert.equal(report.summary.hostIdentityVerified, false);
+  assert.equal(report.summary.authenticationVerified, false);
+});
+
+test('VPN-required preflight rejects a hostname or implicit target before probing', async () => {
+  for (const targetHost of ['research.example.invalid', undefined]) {
+    await assert.rejects(runSshPreflight({
+      ...guardedPreflight, targetHost,
+      probeTcp: async () => ({ reachable: true }),
+    }), /invalid_arguments/);
+  }
+});
+
 test('bin main rejects invalid ssh-preflight arguments', async () => {
   await assert.rejects(main(['ssh-preflight', '--timeout-ms', '50']), /invalid_arguments/);
   await assert.rejects(main(['ssh-preflight', '--port', '22']), /invalid_arguments/);

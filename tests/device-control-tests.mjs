@@ -185,6 +185,26 @@ test('browser-managed mutations use the observed owner and never fall back to th
   assert.equal(f.calls.length, 0);
 });
 
+test('browser-managed status accepts only a correlated, bounded missing-bridge result', async () => {
+  for (const [makeReply, registration] of [
+    [id => ({ id, error: 'host-absent' }), 'absent'],
+    [() => ({ id: 'stale', error: 'host-absent' }), 'unknown'],
+    [id => ({ id, error: 'host-absent', details: 'private' }), 'unknown'],
+    [id => ({ id, error: 'transport' }), 'unknown'],
+  ]) {
+    const f = fixture();
+    const runtime = { sendMessage: async ({ request }) => makeReply(request.id) };
+    const controller = createDeviceController({ ...f.dependencies, runtime, browserManaged: true });
+    await controller.initialize();
+    await controller.run('status');
+    const state = controller.getState();
+    assert.equal(state.registration, registration);
+    assert.equal(state.observation, null);
+    assert.equal(state.canMutate, false);
+    assert.deepEqual(f.writes, []);
+  }
+});
+
 function fixture(options = {}) {
   const data = structuredClone(options.data || {});
   const calls = [], permissionRequests = [], writes = [];

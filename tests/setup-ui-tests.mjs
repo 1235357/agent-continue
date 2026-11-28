@@ -873,6 +873,25 @@ try {
       pass(`administrator automatic setup uses one document ID and one requested-not-ready Connect with permission ${granted ? 'already granted' : 'requested only by Copy'}`);
     });
   }
+  for (const [uiLanguage, shell, buttonId, expected] of [
+    ['en', 'PowerShell', 'copyWindowsBrowserPowerShell', /paste.*in PowerShell.*keep this page open/i],
+    ['zh_CN', 'CMD', 'copyWindowsBrowserCmd', /在 CMD 中粘贴.*保持本页打开/],
+  ]) {
+    await withFixture({ granted: true, clipboardMode: 'allowed', uiLanguage }, async ({ page }) => {
+      await page.locator('#installConsent').check();
+      if (shell === 'CMD') await openDetails(page, 'windowsBrowserCmdDetails');
+      await page.evaluate(() => { __setupMock.deferSetupObserve = true; });
+      await page.locator('#' + buttonId).click();
+      await page.waitForFunction(() => typeof __setupMock.finishSetupObserve === 'function');
+      assert.match(await page.locator('#installFeedback').innerText(), expected,
+        'the next required user action is visible while setup waits for the installer');
+      assert.equal(await page.locator('#windowsCommandDetails').evaluate(element => element.open), false);
+      assert.equal(await page.evaluate(() => __setupMock.setupMessages.some(message => message.type.endsWith('CONNECT_V1'))), false);
+      await page.locator('#installConsent').uncheck();
+      assert.doesNotMatch(await page.locator('#installFeedback').innerText(), expected, 'withdrawing consent removes the old action');
+      pass(`${uiLanguage}: ${shell} handoff is visible without opening command details or requesting a connection`);
+    });
+  }
   for (const uiLanguage of ['en', 'zh_CN']) {
     const installationVerified = uiLanguage === 'en' ? 'Verified in this setup' : '本次已验证';
     for (const connectState of ['submitted', 'unconfirmed', 'cancelled']) {

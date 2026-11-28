@@ -487,6 +487,37 @@ def stage_archive(output, files, cache, *, store):
         raise
 
 
+def package_private_chatgpt(app_id, output_directory):
+    if not re.fullmatch(r"asdk_app_[0-9a-f]{32}", app_id):
+        raise PackageError("Use a registered ChatGPT app ID (asdk_app_...), not a tunnel ID or credential.")
+    if output_directory is None:
+        raise PackageError("Use --output-dir to select an existing directory outside the checkout.")
+    output_directory = output_directory.resolve()
+    if output_directory.is_relative_to(ROOT.resolve()) or not output_directory.is_dir():
+        raise PackageError("The private ZIP requires an existing output directory outside the checkout.")
+    name = "agent-continue-windows-private"
+    manifests = {
+        ".codex-plugin/plugin.json": {
+            "name": name,
+            "version": "1.0.0",
+            "description": "Use an authorized Windows device through the private Agent Continue connection.",
+            "author": {"name": "Agent Continue"},
+            "interface": {"displayName": "Agent Continue Windows (Private)"},
+            "apps": "./.app.json",
+        },
+        ".app.json": {"apps": {name: {"id": app_id}}},
+    }
+    cache = {path: (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
+             for path, value in manifests.items()}
+    output = output_directory / f"{name}-chatgpt.zip"
+    temporary = stage_archive(output, cache, cache, store=True)
+    try:
+        os.replace(temporary, output)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return output
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", action="store_true", help="Add extension-scoped development files, not a full Windows source kit")
@@ -494,11 +525,22 @@ def main():
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--windows-preview", action="store_true", help="Build the unpacked Windows device preview (not a Store ZIP)")
     modes.add_argument("--windows-release", action="store_true", help="Build verified public Windows GitHub/Store ZIPs; requires both setup release inputs; does not publish")
+    modes.add_argument("--chatgpt-app-id", help="Build a separate private ZIP using a verified registered ChatGPT app ID; requires an external --output-dir")
     parser.add_argument("--source-revision", help="Reviewed full repository commit (40 lowercase hex characters); required for Windows --source")
     parser.add_argument("--setup-release-dir", type=Path, help="Completed combined Windows setup asset directory")
     parser.add_argument("--setup-release-receipt", type=Path, help="Matching completed combined build receipt")
     parser.add_argument("--output-dir", type=Path, help="Write to this directory instead of the project dist directory")
     args = parser.parse_args()
+    if args.chatgpt_app_id is not None:
+        if args.source or args.store or any(value is not None for value in (
+                args.source_revision, args.setup_release_dir, args.setup_release_receipt)):
+            parser.error("The private ChatGPT ZIP cannot be combined with public packaging options.")
+        try:
+            output = package_private_chatgpt(args.chatgpt_app_id, args.output_dir)
+        except (PackageError, OSError, RuntimeError) as error:
+            parser.exit(1, f"Private ChatGPT packaging failed: {error}\n")
+        print(output)
+        return
     try:
         output = package_release(ROOT, include_source=args.source, store=args.store, output_directory=args.output_dir,
                                  windows_preview=args.windows_preview, windows_release=args.windows_release,

@@ -69,6 +69,20 @@ function replacePayloadJSON(packaged, name, value) {
   fs.writeFileSync(file, JSON.stringify(manifest) + '\n');
 }
 
+check('the packaged runtime lock keeps the reviewed dependency versions', t => {
+  const { packaged } = fixture(t);
+  const { packages } = JSON.parse(fs.readFileSync(path.join(packaged, 'payload', 'package-lock.json')));
+  for (const [name, patched, superseded] of [
+    ['zod', '4.6.7', '3.25.76'], ['glob', '14.0.2', '10.5.0'],
+    ['minimatch', '11.0.1', '9.0.9'], ['uuid', '11.1.1', '8.3.2'],
+  ]) {
+    assert.equal(packages[`node_modules/${name}`]?.version, patched, name);
+    const versions = Object.entries(packages).filter(([key, record]) => key &&
+      (record.name ?? key.split('node_modules/').at(-1)) === name).map(([, record]) => record.version);
+    assert.ok(!versions.includes(superseded), `${name} still contains the superseded version`);
+  }
+});
+
 check('lock permits only the pinned parent-contained bundle, not arbitrary unverified sources', t => {
   for (const change of ['bundle-version', 'bundle-owner', 'bundle-source', 'missing-bundle', 'dangling-bundle', 'arbitrary-bundle', 'missing-integrity', 'file-source']) {
     const { packaged } = fixture(t), lock = JSON.parse(fs.readFileSync(path.join(packaged, 'payload', 'package-lock.json')));

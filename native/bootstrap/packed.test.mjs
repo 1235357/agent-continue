@@ -714,9 +714,16 @@ async function fileRoundtrip(t, f, runtime, app, preparedState) {
     assert.equal(initialized.serverInfo.version, '0.3.1');
     handle.child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`);
     const listed = await send('tools/list', {});
-    for (const name of ['write_file', 'read_file']) {
-      assert.ok(listed.tools.some(tool => tool.name === name), 'file_tool_not_listed');
+    for (const tool of listed.tools) {
+      assert.equal(tool.inputSchema?.type, 'object', `${tool.name} must advertise an object input schema`);
     }
+    const write = listed.tools.find(tool => tool.name === 'write_file');
+    const readTool = listed.tools.find(tool => tool.name === 'read_file');
+    assert.ok(write && readTool, 'file_tool_not_listed');
+    assert.deepEqual(write.inputSchema.required, ['path', 'content']);
+    assert.equal(write.inputSchema.properties.agent_continue_operation_id.type, 'string');
+    assert.deepEqual(readTool.inputSchema.required, ['path']);
+    assert.equal(Object.hasOwn(readTool.inputSchema.properties, 'agent_continue_operation_id'), false);
     const ownedFile = path.join(state, 'work', 'harmless \u6d4b\u8bd5.txt');
     const content = 'AGENT_CONTINUE_PACKED_FILE_OK';
     const written = await send('tools/call', { name: 'write_file',

@@ -106,6 +106,8 @@ async function createPage({ granted = false, uiLanguage, mode = 'ready', width =
           if (standardBrowser && args[0]?.type === 'BROWSER_DEVICE_CONTROL_V1') {
             const { request, ownerId } = args[0];
             mock.standardBrowserCalls.push({ request, ownerId });
+            if (mock.mode === 'absent') return { id: request.id, error: 'host-absent' };
+            if (mock.mode === 'transport') return null;
             const owner = 'standard-fixture-owner';
             if (request.action === 'disconnect-and-pause' && ownerId === owner) {
               mock.paused = true;
@@ -1325,6 +1327,23 @@ try {
   assert.equal(await page.locator('a[href^="http"],iframe,img,section section').count(), 0);
   pass('no scheduling writes, remote resources, invented download, private raw errors, or nested sections');
   await f.context.close();
+
+  for (const [mode, expected] of [['absent', 'Bridge not found'], ['transport', 'Unknown']]) {
+    const g = await createPage({ granted: true, mode, query: '?mode=browser-managed', standardBrowser: true, account: 'current' });
+    try {
+      await check(g.page);
+      assert.equal(await g.page.locator('#registration').textContent(), expected);
+      assert.equal(await g.page.locator('#connection').textContent(), 'Unknown');
+      assert.equal(await g.page.locator('[data-action="reconnect"]').isDisabled(), true);
+      if (mode === 'absent') {
+        assert.match(await g.page.locator('#feedback').textContent(), /Installation guide.*before reinstalling/);
+        assert.equal(await g.page.locator('#setup-entry').getAttribute('href'), 'setup.html');
+      }
+      assert.deepEqual(await g.page.evaluate(() => __deviceMock.standardBrowserCalls.map(call => call.request.action)), ['status']);
+      assert.deepEqual(await g.page.evaluate(() => __deviceMock.calls), []);
+    } finally { await g.context.close(); }
+  }
+  pass('current-account browser-managed status separates missing bridge from unknown and never reconnects');
 
   for (const mode of ['absent', 'transport', 'invalid']) {
     const g = await createPage({ granted: true, mode });

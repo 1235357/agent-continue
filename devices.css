@@ -72,6 +72,31 @@ dialog .actions { justify-content: flex-end; }
 :is(button, a, select, input, summary, [tabindex]):focus-visible { outline: 3px solid #187ba0; outline-offset: 3px; }
 .skip-link { position: absolute; top: -100px; left: 16px; z-index: 1; background: #fff; padding: 10px; }
 .skip-link:focus { top: 8px; }
+.device-workbench {
+  --bridge-panel: #eef6f2;
+  --bridge-border: #a3c3b4;
+  --bridge-title: #155b44;
+  min-width: 0;
+}
+.device-workbench body { min-width: 0; }
+.device-workbench .device-header { padding-block: 14px; gap: 12px 20px; }
+.device-workbench .device-header .language-field { width: min(154px, 100%); min-width: 0; flex-shrink: 1; }
+.device-workbench .connection-surface { padding-block-start: 18px; }
+.device-workbench .permission-summary { align-items: baseline; margin-block: 12px; }
+.device-workbench .bridge-access {
+  background: var(--bridge-panel);
+  border: 1px solid var(--bridge-border);
+  padding: clamp(12px, 3vw, 18px);
+}
+.device-workbench .bridge-access > h2 { color: var(--bridge-title); }
+.device-workbench .bridge-access .feedback { min-height: 0; margin-top: 7px; font-weight: 600; }
+.device-workbench .bridge-access .feedback:empty { margin-top: 0; }
+.device-workbench .bridge-access .actions { margin-top: 12px; }
+.device-workbench .bridge-access .consent { min-height: 44px; align-items: center; }
+.device-workbench .bridge-access .consent input { align-self: flex-start; margin-block-start: 3px; }
+@media (prefers-color-scheme: dark) {
+  .device-workbench { --bridge-panel: #202f2b; --bridge-border: #547a69; --bridge-title: #a4e5c2; }
+}
 @media (max-width: 520px) {
   header, main { padding-left: 16px; padding-right: 16px; }
   header { gap: 16px; flex-wrap: wrap; }

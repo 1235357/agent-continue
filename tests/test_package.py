@@ -1,9 +1,11 @@
 """Offline release archive regression tests; no browser or private inputs."""
+from contextlib import redirect_stderr, redirect_stdout
 import hashlib
 import importlib.util
 import io
 import json
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -23,6 +25,56 @@ PUBLIC_DOCS = (
     "docs/store-2.1.0-en-console.png",
     "docs/store-2.1.0-en-popup.png",
 )
+
+
+class PrivateChatGPTPackageTests(unittest.TestCase):
+    app_id = "asdk_app_" + "a1" * 16
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.output_dir = Path(temp.name)
+
+    def invoke(self, *args):
+        with patch.object(sys, "argv", ["package.py", *args]), redirect_stdout(io.StringIO()) as output:
+            package.main()
+        return Path(output.getvalue().strip())
+
+    def test_private_archive_contains_only_one_app_and_its_manifest(self):
+        args = ("--chatgpt-app-id", self.app_id, "--output-dir", str(self.output_dir))
+        output = self.invoke(*args)
+        self.assertEqual(output, self.output_dir / "agent-continue-windows-private-chatgpt.zip")
+        first = output.read_bytes()
+        self.assertEqual(self.invoke(*args).read_bytes(), first)
+        with zipfile.ZipFile(output) as archive:
+            self.assertEqual(set(archive.namelist()), {".codex-plugin/plugin.json", ".app.json"})
+            manifest = json.loads(archive.read(".codex-plugin/plugin.json"))
+            self.assertEqual(manifest["apps"], "./.app.json")
+            self.assertEqual(manifest["name"], "agent-continue-windows-private")
+            self.assertNotIn(self.app_id, archive.read(".codex-plugin/plugin.json").decode())
+            self.assertEqual(json.loads(archive.read(".app.json")),
+                             {"apps": {manifest["name"]: {"id": self.app_id}}})
+        self.assertEqual(list(self.output_dir.iterdir()), [output])
+
+    def test_rejects_bad_app_references_and_public_modes_without_writing(self):
+        for bad_id in ("tunnel_" + "1" * 32, "sk-example-not-a-key", "asdk_app_" + "1" * 31,
+                       self.app_id + "\n", ""):
+            with self.subTest(bad_id=bad_id), redirect_stderr(io.StringIO()) as errors, self.assertRaises(SystemExit):
+                self.invoke("--chatgpt-app-id", bad_id, "--output-dir", str(self.output_dir))
+            if bad_id:
+                self.assertNotIn(bad_id, errors.getvalue())
+            self.assertIn("registered ChatGPT app ID", errors.getvalue())
+        for flag in ("--source", "--store", "--windows-release", "--windows-preview"):
+            with self.subTest(flag=flag), redirect_stderr(io.StringIO()) as errors, self.assertRaises(SystemExit):
+                self.invoke("--chatgpt-app-id", self.app_id, "--output-dir", str(self.output_dir), flag)
+            self.assertNotIn("unrecognized arguments", errors.getvalue())
+        self.assertEqual(list(self.output_dir.iterdir()), [])
+
+    def test_requires_explicit_directory_outside_checkout(self):
+        for directory_args in ((), ("--output-dir", str(ROOT / "dist"))):
+            with self.subTest(directory_args=directory_args), redirect_stderr(io.StringIO()) as errors, self.assertRaises(SystemExit):
+                self.invoke("--chatgpt-app-id", self.app_id, *directory_args)
+            self.assertIn("outside the checkout", errors.getvalue())
 
 
 class PackageTests(unittest.TestCase):

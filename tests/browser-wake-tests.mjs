@@ -84,6 +84,29 @@ async function pendingReconnect(t, options = {}) {
   return { f, wake, request, primary, ownerId: f.messages[0].id };
 }
 
+for (const [message, permissionRemains, expected] of [
+  ['Specified native messaging host not found.', true, { id: 'check-bridge', error: 'host-absent' }],
+  ['Failed to start native messaging host. C:\\private', true, null],
+  ['Specified native messaging host not found.', false, null],
+]) {
+  test(`status only reports exact Chrome host absence while permission is current: ${JSON.stringify(expected)} / ${permissionRemains}`, async () => {
+    const f = extension({ granted: false });
+    const wake = bindBrowserWake(f.api);
+    await tick();
+    const request = statusMessage('check-bridge');
+    f.setGrant(true);
+    const check = wake.handleMessage(request, devicesSender(f));
+    await tick();
+    assert.equal(f.attempts.length, 1);
+    f.setGrant(permissionRemains);
+    f.api.runtime.lastError = { message };
+    try { f.native.onDisconnect.emit(); } finally { delete f.api.runtime.lastError; }
+    assert.deepEqual(await check, expected);
+    assert.deepEqual(f.requests.map(value => value.action), ['wake']);
+    assert.equal(f.alarms.size, 0);
+  });
+}
+
 const setupTuple={setupId:'a'.repeat(32),scope:'current-account',extensionId:'a'.repeat(32),bindingSha256:'b'.repeat(64)};
 const setupOperation='12345678-1234-4234-8234-123456789abc';
 

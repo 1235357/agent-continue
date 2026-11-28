@@ -191,6 +191,18 @@ test('permission consent and standard and administrator state remain separate an
   assert.doesNotMatch(html, /one[- ]click|automatically ready|connected and ready/i);
 });
 
+test('the device connection flow presents bridge permission before account diagnostics', () => {
+  const position = id => elements.indexOf(byId(id));
+  const permissionArea = byId('grantPermission').parents.find(parent => parent.attrs['aria-labelledby'] === 'access-title');
+  assert.ok(permissionArea?.parents.some(parent => parent.attrs['aria-labelledby'] === 'local-title'),
+    'the bridge permission is part of the device connection flow reached by the skip link');
+  assert.ok(position('permission') < position('permission-feedback'));
+  assert.ok(position('permission-feedback') < position('riskConsent'), 'show the blocking state before asking for consent');
+  assert.ok(position('permissionRisk') < position('riskConsent'), 'the risk explanation precedes the consent control');
+  assert.ok(position('grantPermission') < position('account-selector'));
+  assert.ok(position('grantPermission') < position('registration'), 'show the prerequisite before bridge diagnostics');
+});
+
 test('the existing informed-consent dialog is unchanged and remains outside Advanced', () => {
   const dialog = html.match(/  <dialog id="administrator-control-dialog"[\s\S]*?  <\/dialog>/)?.[0];
   assert.equal(dialog, "  <dialog id=\"administrator-control-dialog\" aria-labelledby=\"administrator-control-title\" aria-describedby=\"administrator-control-risk administrator-control-reference\">\n    <h2 id=\"administrator-control-title\"></h2>\n    <p id=\"administrator-control-risk\"></p>\n    <p id=\"administrator-control-reference\" class=\"host-identity\"><code id=\"administrator-control-review-reference\" dir=\"ltr\"></code></p>\n    <form method=\"dialog\" class=\"actions\">\n      <button value=\"cancel\" data-i18n=\"取消\" autofocus>Cancel</button>\n      <button id=\"administrator-control-confirm\" type=\"button\" data-i18n=\"确认管理员操作\">Confirm administrator action</button>\n    </form>\n  </dialog>");

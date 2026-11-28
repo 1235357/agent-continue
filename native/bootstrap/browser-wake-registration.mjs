@@ -75,9 +75,16 @@ function browserWakeLayout({ app, binding, node }) {
   return { directory, launcher, manifest, cmd, json, views };
 }
 
-export function preflightBrowserWake({ installDir, extensionId, node = process.execPath }) {
+export function preflightBrowserWake({ installDir, extensionId, node = process.execPath, registry = createWinRegistry() }) {
   if (!safeLocalPath(installDir)) fail('browser_wake_invalid_install');
-  browserWakeLayout({ app: path.join(installDir, 'app'), binding: { extensionId, assertCurrent() {} }, node });
+  const { views } = browserWakeLayout({ app: path.join(installDir, 'app'), binding: { extensionId, assertCurrent() {} }, node });
+  for (const view of views) {
+    let record;
+    try { record = registry.inspect(view); } catch { fail('browser_wake_registry_unconfirmed'); }
+    if (typeof record?.present !== 'boolean') fail('browser_wake_registry_unconfirmed');
+    // A fresh install never owns a pre-existing registration, even if the path matches.
+    if (record.present) fail('browser_wake_registry_conflict');
+  }
   return { ok: true };
 }
 

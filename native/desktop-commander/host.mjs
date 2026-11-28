@@ -67,7 +67,7 @@ const localControlCode = -32075;
 const localControlMessage = 'The device owner paused or revoked administrator access. This request did not execute.';
 
 export function fenceToolReplays(transport, root, prepared, validateProcessReference, receiptStore,
-  canAdmit, server, cancellationSchema) {
+  canAdmit, server, cancellationSchema, toolArgSchemas) {
   const pending = new Map();
   let flushing = 0;
   const { createOperationReceipts, providerResult, providerError } = receiptStore;
@@ -124,11 +124,19 @@ export function fenceToolReplays(transport, root, prepared, validateProcessRefer
         }
       }
       if (entry?.method === 'tools/list' && Array.isArray(message.result?.tools)) {
-        const tools = message.result.tools.map(tool => !mutationTools.has(tool.name) || tool.inputSchema?.type !== 'object' ? tool : {
-          ...tool, inputSchema: { ...tool.inputSchema, properties: { ...tool.inputSchema.properties,
+        const tools = message.result.tools.map(tool => {
+          let { inputSchema } = tool;
+          // The legacy converter emits only its draft marker for the pinned Zod 4 schemas.
+          if (inputSchema?.$schema === 'http://json-schema.org/draft-07/schema#' && Object.keys(inputSchema).length === 1 &&
+              toolArgSchemas && Object.hasOwn(toolArgSchemas, tool.name)) {
+            inputSchema = toolArgSchemas[tool.name].toJSONSchema({ io: 'input', target: 'draft-7' });
+            tool = { ...tool, inputSchema };
+          }
+          if (!mutationTools.has(tool.name) || inputSchema?.type !== 'object') return tool;
+          return { ...tool, inputSchema: { ...inputSchema, properties: { ...inputSchema.properties,
             [operationField]: { type: 'string', pattern: operationPattern,
               description: 'Optional fresh lowercase UUIDv4 for this operation. Reuse it only when checking or resending the same operation. If it was admitted, verify its effects instead of retrying with a new ID.' },
-          } },
+          } } };
         });
         if (tools.some(tool => tool.name === 'start_process') &&
             !tools.some(tool => tool.name === exactProcessTool)) tools.push(describeExactProcessTool());
@@ -309,13 +317,14 @@ async function main() {
     globalThis.mcpTransport = transport;
     // Load the server root first: upstream config/capture modules form an ESM cycle.
     const { server, flushDeferredMessages } = await import(new URL('server.js', upstream));
+    const { toolArgSchemas } = await import(new URL('tools/schemas.js', upstream));
     const { configManager } = await import(new URL('config-manager.js', upstream));
     await configManager.loadConfig();
     validateConfig(await configManager.getConfig());
     const stateRoot = readState(root).root;
     const { CancelledNotificationSchema } = await import('@modelcontextprotocol/sdk/types.js');
     fenceToolReplays(transport, stateRoot, openPreparedProcesses(stateRoot), validateProcessReference,
-      receiptStore, canAdmit, server, CancelledNotificationSchema);
+      receiptStore, canAdmit, server, CancelledNotificationSchema, toolArgSchemas);
     server.oninitialized = () => { transport.enableNotifications(); flushDeferredMessages(); };
     let closing = false;
     async function close(code) {

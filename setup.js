@@ -25,7 +25,8 @@ const catalog = {
   '兼容组件安装后，本页会请求一次连接；请求不代表就绪。若不支持自动继续，请在设备页手动连接。ChatGPT 和 Dot 仍需分别授权。': 'After compatible components are installed, this page requests one connection; a request does not mean ready. If automatic continuation is unsupported, connect manually in Devices. ChatGPT and Dot still require separate authorization.',
   '复制命令会申请浏览器本机通信权限并准备本页安装意图，不会运行安装。安装和连接可能分别请求 Windows 批准（UAC）。': 'Copy requests browser native-messaging permission and prepares setup intent for this page; it does not run the installer. Installation and connection may require separate Windows approvals (UAC).',
   '正在准备本页安装；尚未安装或连接。': 'Preparing setup for this page; nothing is installed or connected.',
-  '已复制安装命令。等待本页确认安装；尚未请求连接。': 'Install command copied. Waiting for this page to confirm installation; no connection requested yet.',
+  '命令已复制。请在 PowerShell 中粘贴并运行，按终端提示操作。保持本页打开，安装验证后将自动请求一次连接。': 'Command copied. Paste and run it in PowerShell, then follow the prompts. Keep this page open so setup can request one connection after verifying installation.',
+  '命令已复制。请在 CMD 中粘贴并运行，按终端提示操作。保持本页打开，安装验证后将自动请求一次连接。': 'Command copied. Paste and run it in Command Prompt, then follow the prompts. Keep this page open so setup can request one connection after verifying installation.',
   '正在请求连接；就绪尚未确认。': 'Requesting a connection; readiness is unconfirmed.',
   '已请求连接；就绪尚未确认。请在设备页查看状态。ChatGPT 和 Dot 仍需分别授权。': 'Connection requested; readiness is unconfirmed. Check status in Devices. ChatGPT and Dot still require separate authorization.',
   'Windows 设置状态': 'Windows setup status',
@@ -270,7 +271,6 @@ function cancelSetupClients() {
 }
 const ADMINISTRATOR_SETUP_FEEDBACK = Object.freeze({
   preparing: '正在准备本页安装；尚未安装或连接。',
-  waiting: '已复制安装命令。等待本页确认安装；尚未请求连接。',
   connecting: '正在请求连接；就绪尚未确认。',
   requested: '已请求连接；就绪尚未确认。请在设备页查看状态。ChatGPT 和 Dot 仍需分别授权。',
   manual: '已复制安装命令；此版本不支持本页自动连接。安装后请在设备页手动连接。',
@@ -539,9 +539,14 @@ function renderInstall(releaseEntryAvailable = hasWindowsReleaseEntry()) {
   $('windowsBrowserCmdDetails').hidden = !releaseEntryAvailable;
   const setupState = selectedSetupClient()?.getState();
   const installationVerified = setupState?.installationVerified === true;
-  const guidedFeedback = setupState?.state === 'not-requested' ? SETUP_CONNECT_BLOCKED_FEEDBACK[setupState.connectionBlocker]
-    : installationVerified && setupState.state === 'unconfirmed' ? '连接结果未确认；不会重试。请在设备页检查原操作。'
-      : ADMINISTRATOR_SETUP_FEEDBACK[setupState?.state];
+  const awaitingInstaller = setupState?.state === 'waiting';
+  const guidedFeedback = awaitingInstaller
+    ? (setupState.shell === 'browserCmd'
+      ? '命令已复制。请在 CMD 中粘贴并运行，按终端提示操作。保持本页打开，安装验证后将自动请求一次连接。'
+      : '命令已复制。请在 PowerShell 中粘贴并运行，按终端提示操作。保持本页打开，安装验证后将自动请求一次连接。')
+    : setupState?.state === 'not-requested' ? SETUP_CONNECT_BLOCKED_FEEDBACK[setupState.connectionBlocker]
+      : installationVerified && setupState.state === 'unconfirmed' ? '连接结果未确认；不会重试。请在设备页检查原操作。'
+        : ADMINISTRATOR_SETUP_FEEDBACK[setupState?.state];
   for (const [shell, [preview, copy, feedback]] of Object.entries(WINDOWS_GUIDED_ENTRIES)) {
     const command = windowsGuidedCommand(plan, shell);
     $(preview).textContent = command;

@@ -8,6 +8,7 @@ export default {
   '提示词': 'Prompts',
   '设置': 'Settings',
   '设备管理': 'Manage devices',
+  '设备': 'Devices',
   'Windows 设备': 'Windows device',
   '设置 Windows': 'Set up Windows',
   '打开设备控制': 'Open device controls',

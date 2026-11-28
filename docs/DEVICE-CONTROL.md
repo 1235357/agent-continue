@@ -474,15 +474,17 @@ OS-source requirement. No CLI, native message, webpage, setup export or SSH targ
 record accepts or creates this generation. No hook is installed by this slice.
 
 `pause()` preserves synchronous persist-before-signal, writing persistent V2.
-`pauseUntilLogin()` requires a currently valid trusted generation; unavailable
-source throws only `login_recovery_unavailable` before intent write or stop.
-Otherwise persist its generation before sharing the existing bounded stop.
+`pauseUntilLogin()` requires a valid trusted generation and current permission from
+`authorizeLoginRecovery`, a synchronous in-process check that defaults to denial.
+Only literal `true` grants permission; a missing or failed check cannot arm recovery.
+An unavailable source or denied permission throws `login_recovery_unavailable`
+before intent write or stop. Otherwise persist the generation before stopping.
 `resumeAfterInteractiveLogin()` takes no caller payload. It does nothing beyond
-status unless the current temporary record has a strictly older generation than
-the trusted source. Reserve through the existing single-start path; recheck owner,
-transition and exact logical intent after every old-core await before publishing
-running or spawning. A newer persistent/temporary pause or dispose wins. Same/old/
-missing/invalid source never starts; duplicate events do not start another child.
+status unless the temporary record is older than the trusted generation and recovery
+is still authorized. The single-start path rechecks authorization and intent after
+waiting for the old process and after resolving the launch, before publishing running
+intent or spawning. A newer pause, disposal, or authorization loss wins. Old, missing,
+or invalid evidence never starts; duplicate events do not start another child.
 Only trusted in-process callers may invoke these controller methods. No
 production owner, IPC or browser uses the temporary pause or recovery method yet.
 Future event orchestration must also respect unresolved operation journal entries;
@@ -491,8 +493,9 @@ this seam alone does not certify that integration or saved-running startup.
 Future transport changes must require closed native states
 `{paused,pauseMode,loginRecoveryAvailable,connection,operation?}`. Unknown observation
 has null/null/null; otherwise pauseMode must agree with paused, and capability is
-boolean. Capability means the controller currently reads a valid source, not that
-OS hooks are installed or end-to-end acceptance passed. Keep generation private.
+boolean. Capability means a valid source and current recovery authorization are
+both available, not that OS hooks or end-to-end acceptance are in place. Keep the
+generation private.
 The current public receipt remains unchanged.
 The operation owner requires the new controller method, durably admits the new
 mutation, dispatches it once and treats only its specific pre-effect unavailable

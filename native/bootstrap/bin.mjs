@@ -109,17 +109,24 @@ export async function main(args) {
   }
   if (args[0] === 'ssh-preflight') {
     const allowed = { '--timeout-ms': 'timeoutMs', '--ssh-config': 'sshConfigPath', '--host': 'targetHost', '--port': 'targetPort' };
-    if ((args.length - 1) % 2 !== 0 || args.length > 9) throw new Error('invalid_arguments');
+    if (args.length > 10) throw new Error('invalid_arguments');
     const options = {};
-    for (let index = 1; index < args.length; index += 2) {
-      const key = Object.hasOwn(allowed, args[index]) ? allowed[args[index]] : undefined;
-      const value = args[index + 1];
+    for (let index = 1; index < args.length;) {
+      const arg = args[index++];
+      if (arg === '--require-easyconnect' && !options.requireEasyConnect) {
+        options.requireEasyConnect = true;
+        continue;
+      }
+      const key = Object.hasOwn(allowed, arg) ? allowed[arg] : undefined;
+      const value = args[index++];
       if (!key || Object.hasOwn(options, key) || typeof value !== 'string' || !value || value.startsWith('--')) {
         throw new Error('invalid_arguments');
       }
       options[key] = value;
     }
-    if (options.targetPort !== undefined && options.targetHost === undefined) throw new Error('invalid_arguments');
+    if ((options.targetPort !== undefined || options.requireEasyConnect) && options.targetHost === undefined) {
+      throw new Error('invalid_arguments');
+    }
     if (options.timeoutMs !== undefined) {
       if (!/^[0-9]+$/.test(options.timeoutMs)) throw new Error('invalid_arguments');
       options.timeoutMs = Number(options.timeoutMs);
@@ -267,8 +274,8 @@ export async function main(args) {
     const { inspectExistingBrowserWake, preflightBrowserWake } = await import('./browser-wake-registration.mjs');
     const existing = await inspectExistingBrowserWake({ installDir: options.get('--install-dir'), extensionId });
     if (existing.status !== 'existing-absent') return existing;
-    preflightBrowserWake({ installDir: options.get('--install-dir'), extensionId });
     if (!hasTunnel) throw new Error('invalid_arguments');
+    preflightBrowserWake({ installDir: options.get('--install-dir'), extensionId });
   }
   const controller = new AbortController(), cancel = () => controller.abort();
   process.once('SIGINT', cancel); process.once('SIGTERM', cancel);

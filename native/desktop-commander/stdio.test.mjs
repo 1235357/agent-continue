@@ -131,9 +131,17 @@ test('real pinned core initializes, lists tools, writes/reads an owned file and 
     const listed = await send('tools/list', {});
     const names = listed.tools.map(tool => tool.name);
     for (const name of ['write_file', 'read_file', 'start_process', 'read_process_output', 'list_sessions', 'force_terminate']) assert.ok(names.includes(name), name);
-    assert.equal(listed.tools.find(tool => tool.name === 'write_file').inputSchema.properties.agent_continue_operation_id.type, 'string');
-    assert.equal(Object.hasOwn(listed.tools.find(tool => tool.name === 'read_file').inputSchema.properties,
-      'agent_continue_operation_id'), false);
+    for (const tool of listed.tools) {
+      assert.equal(tool.inputSchema?.type, 'object', `${tool.name} must advertise an object input schema`);
+    }
+    const writeSchema = listed.tools.find(tool => tool.name === 'write_file').inputSchema;
+    assert.equal(writeSchema.properties.path.type, 'string');
+    assert.equal(writeSchema.properties.content.type, 'string');
+    assert.deepEqual(writeSchema.required, ['path', 'content']);
+    assert.equal(writeSchema.properties.agent_continue_operation_id.type, 'string');
+    const readSchema = listed.tools.find(tool => tool.name === 'read_file').inputSchema;
+    assert.deepEqual(readSchema.required, ['path']);
+    assert.equal(Object.hasOwn(readSchema.properties, 'agent_continue_operation_id'), false);
     const receiptTool = 'agent_continue_operation_status';
     assert.equal(listed.tools.find(tool => tool.name === receiptTool)?.annotations?.readOnlyHint, true);
     const exactProcess = 'agent_continue_start_process_exact';

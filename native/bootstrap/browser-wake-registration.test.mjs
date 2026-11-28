@@ -69,12 +69,42 @@ function withoutFilesystemMutations(body) {
   finally { for (const [name, original] of saved) fs[name] = original; }
 }
 
+test('fresh browser wake preflight rejects occupied and unverifiable registry views without writes',
+  { skip: process.platform !== 'win32' }, t => {
+    const f = fixture(t), node = fixtureNode(f);
+    const installDir = path.join(f.root, 'fresh');
+    const input = { installDir, extensionId, node };
+    const views = [];
+    withoutFilesystemMutations(() => {
+      for (const slot of ['32:HKCU', '32:HKLM', '64:HKCU', '64:HKLM']) {
+        // A path match is not ownership when the destination does not exist.
+        f.values.set(slot, path.join(installDir, 'app', 'browser-wake', 'host.json'));
+        assert.throws(() => browserWake.preflightBrowserWake({ ...input, registry: f.registry }),
+          /^Error: browser_wake_registry_conflict$/, slot);
+        f.values.clear();
+      }
+      f.values.set('64:HKCU', null);
+      assert.throws(() => browserWake.preflightBrowserWake({ ...input, registry: f.registry }),
+        /^Error: browser_wake_registry_conflict$/);
+      f.values.clear();
+      for (const inspect of [() => null, () => { throw new Error('private registry error'); }]) {
+        assert.throws(() => browserWake.preflightBrowserWake({ ...input, registry: { inspect } }),
+          /^Error: browser_wake_registry_unconfirmed$/);
+      }
+      const registry = { inspect(view) { views.push(`${view.view}:${view.hive}`); return f.registry.inspect(view); } };
+      assert.deepEqual(browserWake.preflightBrowserWake({ ...input, registry }), { ok: true });
+    });
+    assert.deepEqual(views, ['32:HKCU', '32:HKLM', '64:HKCU', '64:HKLM']);
+    assert.equal(f.calls.length, 0);
+    assert.equal(fs.existsSync(installDir), false);
+  });
+
 test('Unicode app paths retain exact legacy ASCII absolute Node launcher bytes, including cross-drive Node',
   { skip: process.platform !== 'win32' }, t => {
     for (const unicode of [false, true]) {
       for (const drive of ['C', 'D']) {
         const f = fixture(t, { unicode }), node = drive + ':\\Portable Node\\node.exe';
-        assert.deepEqual(browserWake.preflightBrowserWake({ installDir: f.root, extensionId, node }), { ok: true });
+        assert.deepEqual(browserWake.preflightBrowserWake({ installDir: f.root, extensionId, node, registry: f.registry }), { ok: true });
         publishBrowserWake({ app: f.app, binding: f.binding, node, registry: f.registry });
         const manifest = JSON.parse(fs.readFileSync(f.calls[0].regSzValue, 'utf8'));
         assert.equal(manifest.path, path.join(f.app, 'browser-wake', 'wake.cmd'));
@@ -92,7 +122,7 @@ test('Unicode app paths retain exact legacy ASCII absolute Node launcher bytes, 
 test('same-profile Unicode Node uses only an exact ASCII suffix relative to the launcher directory',
   { skip: process.platform !== 'win32' }, t => {
     const f = fixture(t, { unicode: true }), node = fixtureNode(f);
-    assert.deepEqual(browserWake.preflightBrowserWake({ installDir: f.root, extensionId, node }), { ok: true });
+    assert.deepEqual(browserWake.preflightBrowserWake({ installDir: f.root, extensionId, node, registry: f.registry }), { ok: true });
     publishBrowserWake({ app: f.app, binding: f.binding, node, registry: f.registry });
     const launcher = path.join(f.app, 'browser-wake', 'wake.cmd');
     const bytes = fs.readFileSync(launcher);
@@ -994,7 +1024,9 @@ export async function setupDevice(input){
 }`,
       'browser-wake-registration.mjs': `export const calls=[];
 export async function inspectExistingBrowserWake(){calls.push('inspect');return {status:'existing-absent'};}
-export function preflightBrowserWake(){calls.push('preflight');}
+let occupied = false;
+export const setOccupied = () => { occupied = true; };
+export function preflightBrowserWake(){calls.push('preflight');if(occupied)throw Error('browser_wake_registry_conflict');}
 export async function registerBrowserWake(input){
   if(input.consent!=="accept-browser-wake" || input.extensionId!==${JSON.stringify(extensionId)}) throw Error("wrong registration consent or origin");
   calls.push('register');
@@ -1010,6 +1042,11 @@ export async function registerBrowserWake(input){
     assert.deepEqual(receipt, { ok: true, action: 'install-local', mode: 'browser-managed', configured: true,
       registered: true, connected: false, browserLaunchVerified: false, chatAuthorizationVerified: false,
       registration: { registered: true, activated: false } });
-    assert.deepEqual((await import(pathToFileURL(path.join(f.root, 'browser-wake-registration.mjs')).href)).calls,
-      ['inspect', 'preflight', 'setup', 'register']);
+    const registry = await import(pathToFileURL(path.join(f.root, 'browser-wake-registration.mjs')).href);
+    assert.deepEqual(registry.calls, ['inspect', 'preflight', 'setup', 'register']);
+    registry.calls.length = 0;
+    registry.setOccupied();
+    await assert.rejects(main([...options, '--tunnel-id', 'fixture-tunnel', '--runtime-key-file', 'fixture-key']),
+      /^Error: browser_wake_registry_conflict$/);
+    assert.deepEqual(registry.calls, ['inspect', 'preflight']);
   });

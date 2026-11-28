@@ -18,11 +18,11 @@ test('device access is optional and does not expose a website-to-native API', ()
 test('local device page is linked without changing the four scheduler panels', () => {
   const html = read('popup.html');
   assert.match(html, /<button[^>]+id="setupWindows"[^>]*>/);
-  assert.match(html, /<button[^>]+id="manageDevices"[^>]*>/);
+  assert.match(html, /<header\b[^>]*>[\s\S]*?<button[^>]+id="manageDevices"[^>]*>[\s\S]*?<\/header>/);
   const popup = read('popup.js');
   assert.match(popup, /\['setupWindows', 'setup\.html'\]/);
   assert.match(popup, /\['manageDevices', 'devices\.html\?mode=browser-managed'\]/);
-  assert.match(popup, /await persistDraftNow\(\);\s*if \(fullView\) await openExtensionPage\(chrome\.runtime\.getURL\(resource\)\);\s*else location\.assign\(chrome\.runtime\.getURL\(resource\)\);/);
+  assert.match(popup, /await persistDraftNow\(\);\s*if \(fullView \|\| id === 'manageDevices'\) await openExtensionPage\(chrome\.runtime\.getURL\(resource\)\);\s*else location\.assign\(chrome\.runtime\.getURL\(resource\)\);/);
   assert.equal((html.match(/role="tabpanel"/g) || []).length, 4);
   assert.match(read('i18n-html.js'), /'设备管理': 'Manage devices'/);
   assert.equal(read('devices.html').includes('https://chatgpt.com/'), false);
